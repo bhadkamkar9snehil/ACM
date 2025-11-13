@@ -79,7 +79,7 @@ def write_run_metadata(
         
         # Build insert statement
         insert_sql = """
-        INSERT INTO dbo.ACM_Runs (
+        INSERT INTO dbo.Runs (
             RunID, EquipID, EquipName, StartedAt, CompletedAt, DurationSeconds,
             ConfigSignature, TrainRowCount, ScoreRowCount, EpisodeCount,
             HealthStatus, AvgHealthIndex, MinHealthIndex, MaxFusedZ,

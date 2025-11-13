@@ -176,12 +176,12 @@ All tabular output hardening items are complete (see Completed Task Stats). No o
 ### Phase 1: Dual-Write Validation (IMMEDIATE)
 | ID      | Priority | Module                   | Task                                  | Completion Criteria                       | Status   |
 | ------- | -------- | ------------------------ | ------------------------------------- | ----------------------------------------- | -------- |
-| SQL-10  | CRITICAL | Config                   | Enable dual_mode flag                 | config.yaml updated                       | TODO     |
-|         |          |                          | → Set `output.dual_mode: true` in config | → File and SQL outputs both enabled       |          |
-|         |          |                          | → Verify config loads correctly       | → OutputManager sees dual_mode=True       |          |
-| SQL-11  | CRITICAL | Database                 | Register equipment records            | Equipment table populated                 | TODO     |
-|         |          |                          | → Insert FD_FAN into Equipment table  | → SELECT * FROM Equipment shows record    |          |
-|         |          |                          | → Insert GAS_TURBINE into Equipment   | → equip_id values ready for FK references |          |
+| ~~SQL-10~~  | ~~CRITICAL~~ | ~~Config~~                   | ~~Enable dual_mode flag~~                 | ~~config.yaml updated~~                       | **DONE** |
+|         |          |                          | ~~→ Set `output.dual_mode: true` in config~~ | ~~→ File and SQL outputs both enabled~~       |          |
+|         |          |                          | ~~→ Verify config loads correctly~~       | ~~→ OutputManager sees dual_mode=True~~       |          |
+| ~~SQL-11~~  | ~~CRITICAL~~ | ~~Database~~                 | ~~Register equipment records~~            | ~~Equipment table populated~~                 | **DONE** |
+|         |          |                          | ~~→ Insert FD_FAN into Equipment table~~  | ~~→ SELECT * FROM Equipment shows record~~    |          |
+|         |          |                          | ~~→ Insert GAS_TURBINE into Equipment~~   | ~~→ equip_id values ready for FK references~~ |          |
 | SQL-12  | CRITICAL | Pipeline                 | Run 10+ dual-write cycles             | Files + SQL both populated                | TODO     |
 |         |          |                          | → Execute: python -m core.acm_main --equip FD_FAN --enable-report | → artifacts/ folder has CSVs      |          |
 |         |          |                          | → Run for both FD_FAN and GAS_TURBINE | → SQL tables show matching row counts     |          |

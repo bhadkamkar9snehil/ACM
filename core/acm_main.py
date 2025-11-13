@@ -1467,12 +1467,12 @@ def main() -> None:
             nan_rate = np.isnan(mhal_scores).sum() / len(mhal_scores)
             
             if nan_rate > 0.01:  # > 1% NaN production
-                Console.warn(f"[ADAPTIVE] ⚠️ Mahalanobis producing {nan_rate:.1%} NaNs - model instability detected")
+                Console.warn(f"[ADAPTIVE] Mahalanobis producing {nan_rate:.1%} NaNs - model instability detected")
                 # Already flagged by condition number, just log
         
         # 3. Write parameter adjustments to config if needed
         if param_adjustments:
-            Console.info(f"[ADAPTIVE] 📝 Writing {len(param_adjustments)} parameter adjustment(s) to config...")
+            Console.info(f"[ADAPTIVE] Writing {len(param_adjustments)} parameter adjustment(s) to config...")
             config_table_path = Path("configs/config_table.csv")
             
             if config_table_path.exists():
