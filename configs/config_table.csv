@@ -36,7 +36,7 @@ EquipID,Category,ParamPath,ParamValue,ValueType,LastUpdated,UpdatedBy,ChangeReas
 0,models,gmm.tol,0.001,float,2025-10-27 00:00:00,SYSTEM,initial_config,
 0,models,gmm.eps_jitter,1e-06,float,2025-10-27 00:00:00,SYSTEM,initial_config,
 0,models,gmm.use_bayesian_if_slow,False,bool,2025-10-27 00:00:00,SYSTEM,initial_config,
-0,models,mahl.regularization,0.1,float,2025-11-10 12:30:00,ADAPTIVE_TUNING,Condition number 1.65e+30 exceeds 1e28 (critical instability),2025-11-13 13:33:00
+0,models,mahl.regularization,0.1,float,2025-11-10 12:30:00,ADAPTIVE_TUNING,Condition number 1.65e+30 exceeds 1e28 (critical instability),2025-11-13 13:34:04
 0,detectors,ar1.enabled,True,bool,2025-10-27 00:00:00,SYSTEM,initial_config,
 0,detectors,ar1.window,256,int,2025-10-27 00:00:00,SYSTEM,initial_config,
 0,detectors,ar1.alpha,0.05,float,2025-10-27 00:00:00,SYSTEM,initial_config,
