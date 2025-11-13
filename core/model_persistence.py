@@ -48,24 +48,29 @@ import tempfile
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime, timezone
+from io import BytesIO
 import pandas as pd
 import numpy as np
 from utils.logger import Console
 
 
 class ModelVersionManager:
-    """Manages model versioning, persistence, and loading."""
+    """Manages model versioning, persistence, and loading (filesystem + SQL)."""
     
-    def __init__(self, equip: str, artifact_root: Path):
+    def __init__(self, equip: str, artifact_root: Path, sql_client=None, equip_id: Optional[int] = None):
         """
         Initialize model version manager.
         
         Args:
             equip: Equipment name (e.g., "FD_FAN")
             artifact_root: Root artifacts directory (may or may not include equipment name)
+            sql_client: Optional SQLClient for SQL persistence (None = filesystem only)
+            equip_id: Equipment ID for SQL storage (required if sql_client provided)
         """
         self.equip = equip
         self.artifact_root = Path(artifact_root)
+        self.sql_client = sql_client
+        self.equip_id = equip_id
         
         # Check if artifact_root already includes equipment name to avoid duplication
         # (e.g., artifacts/COND_PUMP vs artifacts)
@@ -233,17 +238,131 @@ class ModelVersionManager:
         Console.info(f"[MODEL] Saved {len(saved_files)} models to v{version}")
         Console.info(f"[MODEL] Manifest: {manifest_path}")
         
+        # If SQL client available, also save to ModelRegistry
+        if self.sql_client and self.equip_id is not None:
+            try:
+                self._save_models_to_sql(models, metadata, version)
+            except Exception as e:
+                Console.warn(f"[MODEL-SQL] Failed to save models to SQL (continuing with filesystem): {e}")
+        
         return version
+    
+    def _save_models_to_sql(self, models: Dict[str, Any], metadata: Dict[str, Any], version: int):
+        """Save models to SQL ModelRegistry table."""
+        Console.info(f"[MODEL-SQL] Saving models to SQL ModelRegistry...")
+        
+        if not self.sql_client.conn:
+            Console.warn("[MODEL-SQL] SQL connection not available")
+            return
+        
+        cursor = self.sql_client.conn.cursor()
+        saved_count = 0
+        
+        for model_name, model_obj in models.items():
+            if model_obj is None:
+                continue
+            
+            try:
+                # Serialize model to bytes using joblib
+                buffer = BytesIO()
+                joblib.dump(model_obj, buffer)
+                model_bytes = buffer.getvalue()
+                
+                # Extract model-specific metadata
+                model_meta = metadata.get("models", {}).get(model_name, {})
+                params_json = json.dumps(model_meta) if model_meta else None
+                
+                # Get overall stats
+                stats_meta = {
+                    "train_rows": metadata.get("train_rows"),
+                    "config_signature": metadata.get("config_signature"),
+                    "created_at": metadata.get("created_at")
+                }
+                stats_json = json.dumps(stats_meta)
+                
+                # Insert into ModelRegistry
+                sql = """
+                INSERT INTO ModelRegistry 
+                (ModelType, EquipID, Version, EntryDateTime, ParamsJSON, StatsJSON, ModelBytes, RunID)
+                VALUES (?, ?, ?, SYSUTCDATETIME(), ?, ?, ?, NULL)
+                """
+                
+                cursor.execute(sql, (
+                    model_name,
+                    self.equip_id,
+                    version,
+                    params_json,
+                    stats_json,
+                    model_bytes
+                ))
+                
+                saved_count += 1
+                Console.info(f"[MODEL-SQL]   - Saved {model_name} ({len(model_bytes):,} bytes)")
+                
+            except Exception as e:
+                Console.warn(f"[MODEL-SQL]   - Failed to save {model_name} to SQL: {e}")
+        
+        self.sql_client.conn.commit()
+        Console.info(f"[MODEL-SQL] Saved {saved_count} models to SQL ModelRegistry v{version}")
+    
+    def _load_models_from_sql(self, version: int) -> Optional[Dict[str, Any]]:
+        """Load models from SQL ModelRegistry table."""
+        Console.info(f"[MODEL-SQL] Loading models from SQL ModelRegistry v{version}...")
+        
+        if not self.sql_client or not self.sql_client.conn:
+            Console.warn("[MODEL-SQL] SQL connection not available")
+            return None
+        
+        try:
+            cursor = self.sql_client.conn.cursor()
+            
+            sql = """
+            SELECT ModelType, ModelBytes 
+            FROM ModelRegistry 
+            WHERE EquipID = ? AND Version = ?
+            ORDER BY ModelType
+            """
+            
+            cursor.execute(sql, (self.equip_id, version))
+            rows = cursor.fetchall()
+            
+            if not rows:
+                Console.info(f"[MODEL-SQL] No models found for EquipID={self.equip_id} Version={version}")
+                return None
+            
+            models = {}
+            for row in rows:
+                model_type = row[0]
+                model_bytes = row[1]
+                
+                if model_bytes:
+                    try:
+                        # Deserialize from bytes
+                        buffer = BytesIO(model_bytes)
+                        model_obj = joblib.load(buffer)
+                        models[model_type] = model_obj
+                        Console.info(f"[MODEL-SQL]   - Loaded {model_type} ({len(model_bytes):,} bytes)")
+                    except Exception as e:
+                        Console.warn(f"[MODEL-SQL]   - Failed to deserialize {model_type}: {e}")
+            
+            Console.info(f"[MODEL-SQL] Loaded {len(models)} models from SQL")
+            return models if models else None
+            
+        except Exception as e:
+            Console.warn(f"[MODEL-SQL] Failed to load models from SQL: {e}")
+            return None
     
     def load_models(
         self,
-        version: Optional[int] = None
+        version: Optional[int] = None,
+        prefer_sql: bool = True
     ) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
         """
-        Load models from a specific version.
+        Load models from a specific version (SQL first, then filesystem fallback).
         
         Args:
             version: Version to load, or None to load latest
+            prefer_sql: If True and SQL client available, try SQL first
         
         Returns:
             Tuple of (models_dict, manifest_dict), or (None, None) if not found
@@ -255,12 +374,33 @@ class ModelVersionManager:
                 Console.info("[MODEL] No cached models found - will train from scratch")
                 return None, None
         
+        # Try SQL first if available and preferred
+        if prefer_sql and self.sql_client and self.equip_id is not None:
+            sql_models = self._load_models_from_sql(version)
+            if sql_models:
+                # Load manifest from filesystem for metadata
+                version_dir = self.get_version_path(version)
+                manifest_path = version_dir / "manifest.json"
+                manifest = None
+                if manifest_path.exists():
+                    try:
+                        with open(manifest_path, "r") as f:
+                            manifest = json.load(f)
+                    except Exception as e:
+                        Console.warn(f"[MODEL] Failed to load manifest: {e}")
+                
+                Console.info(f"[MODEL] Loaded from SQL successfully")
+                return sql_models, manifest
+            else:
+                Console.info(f"[MODEL] SQL load failed, falling back to filesystem")
+        
+        # Fallback to filesystem
         version_dir = self.get_version_path(version)
         if not version_dir.exists():
             Console.warn(f"[MODEL] Version v{version} not found")
             return None, None
         
-        Console.info(f"[MODEL] Loading models from version v{version}")
+        Console.info(f"[MODEL] Loading models from filesystem v{version}")
         
         # Load manifest
         manifest_path = version_dir / "manifest.json"
@@ -285,7 +425,7 @@ class ModelVersionManager:
             except Exception as e:
                 Console.warn(f"[MODEL]   - Failed to load {model_name}: {e}")
         
-        Console.info(f"[MODEL] Loaded {len(models)} models from v{version}")
+        Console.info(f"[MODEL] Loaded {len(models)} models from filesystem")
         
         return models, manifest
     

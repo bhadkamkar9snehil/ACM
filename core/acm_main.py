@@ -1211,7 +1211,12 @@ def main() -> None:
                 try:
                     from core.model_persistence import ModelVersionManager
                     
-                    model_manager = ModelVersionManager(equip=equip, artifact_root=Path(art_root))
+                    model_manager = ModelVersionManager(
+                        equip=equip, 
+                        artifact_root=Path(art_root),
+                        sql_client=sql_client if SQL_MODE or dual_mode else None,
+                        equip_id=equip_id if SQL_MODE or dual_mode else None
+                    )
                     cached_models, cached_manifest = model_manager.load_models()
                     
                     if cached_models and cached_manifest:
@@ -1680,7 +1685,12 @@ def main() -> None:
                 try:
                     from core.model_persistence import ModelVersionManager, create_model_metadata
                     
-                    model_manager = ModelVersionManager(equip=equip, artifact_root=Path(art_root))
+                    model_manager = ModelVersionManager(
+                        equip=equip, 
+                        artifact_root=Path(art_root),
+                        sql_client=sql_client if SQL_MODE or dual_mode else None,
+                        equip_id=equip_id if SQL_MODE or dual_mode else None
+                    )
                     
                     # Collect all models
                     models_to_save = {
