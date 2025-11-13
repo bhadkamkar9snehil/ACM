@@ -98,6 +98,7 @@ def get_equipment_mapping(client: SQLClient) -> dict[str, int]:
 def populate_config(csv_path: Path):
     """
     Load config from CSV and populate ACM_Config table.
+    CSV format: EquipID,Category,ParamPath,ParamValue,ValueType,LastUpdated,UpdatedBy,ChangeReason,UpdatedDateTime
     """
     Console.info(f"[CFG-MIGRATE] Loading config from {csv_path}")
     
@@ -108,70 +109,63 @@ def populate_config(csv_path: Path):
     df = pd.read_csv(csv_path)
     Console.info(f"[CFG-MIGRATE] Loaded {len(df)} rows from CSV")
     
+    # Validate required columns
+    required_cols = ['EquipID', 'ParamPath', 'ParamValue', 'ValueType']
+    missing_cols = [col for col in required_cols if col not in df.columns]
+    if missing_cols:
+        raise ValueError(f"Missing required columns: {missing_cols}")
+    
     # Connect to SQL
     Console.info("[CFG-MIGRATE] Connecting to ACM database...")
     client = SQLClient.from_ini('acm')
     client.connect()
     
-    # Get equipment mapping
-    equip_mapping = get_equipment_mapping(client)
-    Console.info(f"[CFG-MIGRATE] Found {len(equip_mapping)} equipment records")
-    
-    # Add global/default equipment with EquipID=0
-    equip_mapping['*'] = 0
-    
-    # Process each equipment
+    # Batch insert with MERGE (upsert)
     insert_count = 0
-    skipped_count = 0
+    update_count = 0
+    error_count = 0
     
-    for equip_code in df.columns:
-        if equip_code == 'parameter':
-            continue  # Skip parameter column itself
-        
-        # Get EquipID
-        if equip_code == '*':
-            equip_id = 0  # Global defaults
-        elif equip_code in equip_mapping:
-            equip_id = equip_mapping[equip_code]
-        else:
-            Console.warn(f"[CFG-MIGRATE] Skipping unknown equipment: {equip_code}")
-            skipped_count += len(df)
-            continue
-        
-        # Build config dict for this equipment
-        config_dict = ConfigDict.from_csv(csv_path).select_equipment(equip_code).to_dict()
-        
-        # Flatten to param paths
-        param_rows = flatten_config_to_param_paths(config_dict)
-        Console.info(f"[CFG-MIGRATE] Processing {len(param_rows)} params for {equip_code} (EquipID={equip_id})")
-        
-        # Batch insert
-        cursor = client.cursor()
-        try:
-            for param_path, param_value, value_type in param_rows:
-                try:
-                    cursor.execute("""
-                        MERGE INTO ACM_Config AS target
-                        USING (SELECT ? AS EquipID, ? AS ParamPath, ? AS ParamValue, ? AS ValueType) AS source
-                        ON target.EquipID = source.EquipID AND target.ParamPath = source.ParamPath
-                        WHEN MATCHED THEN
-                            UPDATE SET ParamValue = source.ParamValue, ValueType = source.ValueType, UpdatedAt = GETUTCDATE()
-                        WHEN NOT MATCHED THEN
-                            INSERT (EquipID, ParamPath, ParamValue, ValueType)
-                            VALUES (source.EquipID, source.ParamPath, source.ParamValue, source.ValueType);
-                    """, (equip_id, param_path, param_value, value_type))
-                    insert_count += 1
-                except Exception as e:
-                    Console.warn(f"[CFG-MIGRATE] Failed to insert {param_path}: {e}")
+    cursor = client.cursor()
+    try:
+        for _, row in df.iterrows():
+            equip_id = int(row['EquipID']) if pd.notna(row['EquipID']) else 0
+            param_path = str(row['ParamPath']).strip()
+            param_value = str(row['ParamValue']).strip() if pd.notna(row['ParamValue']) else ''
+            value_type = str(row['ValueType']).strip() if pd.notna(row['ValueType']) else 'string'
             
-            client.commit()
-            Console.info(f"[CFG-MIGRATE] Committed {len(param_rows)} params for {equip_code}")
-        finally:
-            cursor.close()
+            if not param_path:
+                Console.warn(f"[CFG-MIGRATE] Skipping empty ParamPath for EquipID={equip_id}")
+                error_count += 1
+                continue
+            
+            try:
+                # Use MERGE for upsert behavior
+                result = cursor.execute("""
+                    MERGE INTO ACM_Config AS target
+                    USING (SELECT ? AS EquipID, ? AS ParamPath, ? AS ParamValue, ? AS ValueType) AS source
+                    ON target.EquipID = source.EquipID AND target.ParamPath = source.ParamPath
+                    WHEN MATCHED THEN
+                        UPDATE SET ParamValue = source.ParamValue, ValueType = source.ValueType, UpdatedAt = GETUTCDATE()
+                    WHEN NOT MATCHED THEN
+                        INSERT (EquipID, ParamPath, ParamValue, ValueType)
+                        VALUES (source.EquipID, source.ParamPath, source.ParamValue, source.ValueType);
+                """, (equip_id, param_path, param_value, value_type))
+                
+                # Note: pyodbc doesn't return rowcount for MERGE, so we'll just count attempts
+                insert_count += 1
+                
+            except Exception as e:
+                Console.warn(f"[CFG-MIGRATE] Failed to insert {param_path} (EquipID={equip_id}): {e}")
+                error_count += 1
+        
+        client.conn.commit()
+        Console.info(f"[CFG-MIGRATE] Committed {insert_count} config parameters")
+    finally:
+        cursor.close()
     
     client.close()
     
-    Console.info(f"[CFG-MIGRATE] Migration complete: {insert_count} params inserted/updated, {skipped_count} skipped")
+    Console.info(f"[CFG-MIGRATE] Migration complete: {insert_count} processed, {error_count} errors")
 
 
 if __name__ == "__main__":
