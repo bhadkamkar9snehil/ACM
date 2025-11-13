@@ -44,7 +44,8 @@ ALLOWED_TABLES = {
     'ACM_DetectorCorrelation','ACM_CalibrationSummary',
     'ACM_RegimeTransitions','ACM_RegimeDwellStats',
     'ACM_DriftEvents','ACM_CulpritHistory','ACM_EpisodeMetrics',
-    'ACM_DataQuality','ACM_Scores_Long','ACM_Drift_TS',
+    #'ACM_DataQuality',  # Skip - has all-NULL floats that pyodbc cannot handle
+    'ACM_Scores_Long','ACM_Drift_TS',
     'ACM_Anomaly_Events','ACM_Regime_Episodes',
     'ACM_PCA_Models','ACM_PCA_Loadings','ACM_PCA_Metrics',
     'ACM_Run_Stats', 'ACM_SinceWhen',
@@ -1112,7 +1113,25 @@ class OutputManager:
             placeholders = ", ".join(["?"] * len(columns))
             insert_sql = f"INSERT INTO dbo.[{table_name}] ({cols_str}) VALUES ({placeholders})"
 
-            records = [tuple(row) for row in df[columns].itertuples(index=False, name=None)]
+            # Clean NaN/Inf values for SQL Server compatibility (pyodbc cannot handle these)
+            df_clean = df[columns].copy()
+            
+            # Convert timestamp columns to datetime objects BEFORE cleaning NaN
+            for col in df_clean.columns:
+                if 'timestamp' in col.lower() or col in ['Date', 'date']:
+                    try:
+                        df_clean[col] = pd.to_datetime(df_clean[col], errors='coerce')
+                        if hasattr(df_clean[col].dtype, 'tz') and df_clean[col].dtype.tz is not None:
+                            df_clean[col] = df_clean[col].dt.tz_localize(None)
+                    except Exception:
+                        pass  # Not a timestamp column, skip conversion
+            
+            # Replace Inf with None, then replace all NaN with None for SQL NULL
+            import numpy as np
+            df_clean = df_clean.replace([np.inf, -np.inf], None)
+            df_clean = df_clean.where(pd.notnull(df_clean), None)
+            
+            records = [tuple(row) for row in df_clean.itertuples(index=False, name=None)]
             for i in range(0, len(records), self.batch_size):
                 batch = records[i:i+self.batch_size]
                 cur.executemany(insert_sql, batch)
