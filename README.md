@@ -1,6 +1,4 @@
-# ACM V8 - Autonomous Asset Condition Monitoring# ACM V8 - Autonomous Asset Condition Monitoring# ACM V8 - Autonomous Asset Condition Monitoring
-
-
+# ACM V8 - Autonomous Asset Condition Monitoring
 
 ACM V8 is an autonomous condition monitoring pipeline for industrial equipment. It ingests
 
