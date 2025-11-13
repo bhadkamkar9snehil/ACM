@@ -1996,6 +1996,17 @@ class OutputManager:
                 except Exception as e:
                     Console.warn(f"[ANALYTICS] Failed to write fusion_quality_report.csv: {e}")
                 
+                # CHART-08: OMR diagnostics (model health tracking)
+                try:
+                    omr_diag_df = self._generate_omr_diagnostics(scores_df, sensor_context)
+                    result = self.write_dataframe(omr_diag_df, tables_dir / "omr_diagnostics.csv",
+                                                  sql_table=None,
+                                                  add_created_at=False)
+                    table_count += 1
+                    Console.info("[ANALYTICS] OMR diagnostics written successfully")
+                except Exception as e:
+                    Console.warn(f"[ANALYTICS] Failed to write omr_diagnostics.csv: {e}")
+                
                 # TIER-A: Regime tables (if available, no fused dependency)
                 if has_regimes:
                     Console.info("[ANALYTICS] Writing Tier-A regime tables...")
@@ -4743,6 +4754,63 @@ class OutputManager:
             if c not in [r['Detector'] for r in rows]:
                 rows.append({'Detector': c, 'Weight': 0.0, 'Present': True, **stats.get(c, {})})
         return pd.DataFrame(rows)
+
+    def _generate_omr_diagnostics(self, scores_df: pd.DataFrame, 
+                                   sensor_context: Optional[Dict[str, Any]]) -> pd.DataFrame:
+        """
+        CHART-08: Generate OMR diagnostics table tracking model health.
+        
+        Args:
+            scores_df: Scores dataframe (used to get omr_z if available)
+            sensor_context: Context dict containing omr_detector and omr_calibrator
+            
+        Returns:
+            DataFrame with columns:
+            - model_type: Model architecture (pls/linear/pca/not_fitted)
+            - n_features: Number of sensor features
+            - n_components: Number of latent components
+            - train_residual_std: Training residual standard deviation
+            - saturation_rate: % of scores at or above clip threshold
+            - calibration_status: Status (OK/WARNING/CRITICAL/NOT_FITTED)
+            - action: Recommended action
+        """
+        # Default empty result
+        default_row = {
+            "model_type": "not_fitted",
+            "n_features": 0,
+            "n_components": 0,
+            "train_residual_std": 0.0,
+            "saturation_rate": 0.0,
+            "calibration_status": "NOT_FITTED",
+            "action": "Train OMR model on healthy baseline data"
+        }
+        
+        if not sensor_context:
+            return pd.DataFrame([default_row])
+        
+        omr_detector = sensor_context.get("omr_detector")
+        omr_calibrator = sensor_context.get("omr_calibrator")
+        
+        if not omr_detector:
+            return pd.DataFrame([default_row])
+        
+        # Get OMR z-scores if available
+        omr_scores = None
+        calibration_clip_z = None
+        if "omr_z" in scores_df.columns:
+            omr_scores = pd.to_numeric(scores_df["omr_z"], errors="coerce").dropna().values
+        
+        # Get clip_z from calibrator if available
+        if omr_calibrator and hasattr(omr_calibrator, 'clip_z'):
+            calibration_clip_z = omr_calibrator.clip_z
+        
+        # Get diagnostics from OMR detector
+        diagnostics = omr_detector.get_diagnostics(
+            omr_scores=omr_scores,
+            calibration_clip_z=calibration_clip_z
+        )
+        
+        return pd.DataFrame([diagnostics])
 
     def _generate_health_distribution_over_time(self, scores_df: pd.DataFrame) -> pd.DataFrame:
         """Hourly health distribution percentiles to align with heatmaps.

@@ -2630,7 +2630,9 @@ def main() -> None:
                                 "train_p95": train_baseline[valid_cols].quantile(0.95),
                                 "train_p05": train_baseline[valid_cols].quantile(0.05),
                                 "omr_contributions": omr_contributions_data,  # Add OMR contributions for visualization
-                                "regime_meta": regime_model.meta if regime_model else {}  # Add regime model metadata for chart subtitles
+                                "regime_meta": regime_model.meta if regime_model else {},  # Add regime model metadata for chart subtitles
+                                "omr_detector": omr_detector if omr_enabled and omr_detector else None,  # CHART-08: OMR diagnostics
+                                "omr_calibrator": cal_omr if omr_enabled and "omr_raw" in frame.columns else None,  # CHART-08: OMR calibration info
                             }
             except Exception as sensor_ctx_err:
                 Console.warn(f"[SENSOR] Failed to build sensor analytics context: {sensor_ctx_err}")

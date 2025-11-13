@@ -411,3 +411,76 @@ class OMRDetector:
             )
             inst._is_fitted = True
         return inst
+    
+    def get_diagnostics(self, omr_scores: Optional[np.ndarray] = None, 
+                       calibration_clip_z: Optional[float] = None) -> Dict[str, Any]:
+        """
+        Generate diagnostic metrics for OMR model health.
+        
+        Args:
+            omr_scores: Optional array of OMR z-scores to compute saturation rate
+            calibration_clip_z: Optional clip_z value used for calibration
+            
+        Returns:
+            Dict with diagnostic metrics:
+            - model_type: Model architecture (pls/linear/pca)
+            - n_features: Number of sensor features
+            - n_components: Number of latent components
+            - train_residual_std: Training residual standard deviation
+            - saturation_rate: % of scores at or above clip threshold (if provided)
+            - calibration_status: Status message (OK/WARNING/CRITICAL)
+            - action: Recommended action
+        """
+        diagnostics = {
+            "model_type": "not_fitted",
+            "n_features": 0,
+            "n_components": 0,
+            "train_residual_std": 0.0,
+            "saturation_rate": 0.0,
+            "calibration_status": "NOT_FITTED",
+            "action": "Train OMR model on healthy baseline data"
+        }
+        
+        if not self._is_fitted or self.model is None:
+            return diagnostics
+        
+        # Basic model info
+        diagnostics["model_type"] = self.model.model_type
+        diagnostics["n_features"] = len(self.model.feature_names)
+        diagnostics["n_components"] = self.model.n_components
+        diagnostics["train_residual_std"] = self.model.train_residual_std
+        
+        # Compute saturation rate if scores provided
+        if omr_scores is not None and len(omr_scores) > 0 and calibration_clip_z is not None:
+            # Count samples at or above clip threshold
+            saturated = np.sum(np.abs(omr_scores) >= calibration_clip_z)
+            saturation_rate = 100.0 * saturated / len(omr_scores)
+            diagnostics["saturation_rate"] = saturation_rate
+            
+            # Determine status and action based on saturation
+            if saturation_rate > 30.0:
+                diagnostics["calibration_status"] = "CRITICAL"
+                diagnostics["action"] = f"High saturation ({saturation_rate:.1f}%) - Increase clip_z or retrain on healthier baseline"
+            elif saturation_rate > 10.0:
+                diagnostics["calibration_status"] = "WARNING"
+                diagnostics["action"] = f"Moderate saturation ({saturation_rate:.1f}%) - Monitor and consider retraining"
+            else:
+                diagnostics["calibration_status"] = "OK"
+                diagnostics["action"] = "Model performing within normal ranges"
+        else:
+            diagnostics["calibration_status"] = "OK"
+            diagnostics["action"] = "No saturation data available - model fitted successfully"
+        
+        # Additional health checks
+        if diagnostics["train_residual_std"] < 1e-4:
+            diagnostics["calibration_status"] = "WARNING"
+            diagnostics["action"] = "Very low residual variance - training data may be too uniform"
+        elif diagnostics["train_residual_std"] > 10.0:
+            diagnostics["calibration_status"] = "WARNING"  
+            diagnostics["action"] = "High residual variance - consider filtering noisy sensors"
+        
+        if diagnostics["n_features"] < 3:
+            diagnostics["calibration_status"] = "WARNING"
+            diagnostics["action"] = "Too few features - OMR requires at least 3 sensors for effective multivariate modeling"
+        
+        return diagnostics
