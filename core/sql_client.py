@@ -114,6 +114,7 @@ class SQLClient:
                         ("driver", "driver"),
                         ("encrypt", "encrypt"),
                         ("trust_server_certificate", "trust_server_certificate"),
+                        ("trusted_connection", "trusted_connection"),
                         ("timeout", "timeout"),
                         ("mars", "mars"),
                         ("autocommit", "autocommit"),
@@ -130,6 +131,7 @@ class SQLClient:
         database = self.cfg.get("database") or os.getenv("ACM_SQL_DATABASE", "ACM")
         user = self.cfg.get("user") or os.getenv("ACM_SQL_USER", "")
         password = self.cfg.get("password") or os.getenv("ACM_SQL_PASSWORD", "")
+        trusted_conn = str(self.cfg.get("trusted_connection", "no")).strip().lower() in ("1","true","yes","y")
         driver_cfg = self.cfg.get("driver") or os.getenv("ACM_SQL_DRIVER", "ODBC Driver 18 for SQL Server")
         # Choose an installed ODBC driver (fallback gracefully)
         try:
@@ -153,10 +155,17 @@ class SQLClient:
         parts = [
             "DRIVER={%s}" % driver,
             f"SERVER={server}",
-            f"UID={user}",
-            f"PWD={password}",
-            f"Connection Timeout={timeout}",
         ]
+        
+        # Windows Authentication vs SQL Server Authentication
+        if trusted_conn:
+            parts.append("Trusted_Connection=yes")
+        else:
+            parts.append(f"UID={user}")
+            parts.append(f"PWD={password}")
+        
+        parts.append(f"Connection Timeout={timeout}")
+        
         if include_database and database:
             parts.insert(2, f"DATABASE={database}")
         if trust:

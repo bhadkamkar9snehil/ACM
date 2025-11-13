@@ -16,7 +16,7 @@ tables = [
     'dbo.RegimeEpisodes','dbo.PCA_Model','dbo.PCA_Components','dbo.PCA_Metrics','dbo.RunStats','dbo.ConfigLog'
 ]
 
-c = SQLClient({}).connect()
+c = SQLClient.from_ini('acm').connect()
 cur = c.cursor()
 cur.execute('SELECT DB_NAME(), @@SERVERNAME')
 db, srv = cur.fetchone()
