@@ -21,14 +21,11 @@ venv/
 .env.local
 
 ## Project outputs (do not publish)
-ACM V6 SQL/artifacts/
-ACM V8 SQL/artifacts/
-ACM V8 SQL/backups/
+artifacts/
+backups/
 
 ## Local configs with credentials
-ACM V6 SQL/configs/sql_connection.ini
-ACM V8 SQL/configs/sql_connection.ini
-
+configs/sql_connection.ini
 
 # Also ignore nested artifact dirs and backups
 **/artifacts/
