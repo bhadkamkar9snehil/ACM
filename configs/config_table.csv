@@ -118,7 +118,7 @@ EquipID,Category,ParamPath,ParamValue,ValueType,LastUpdated,UpdatedBy,ChangeReas
 0,sql,tvp_chunk_rows,100000,int,2025-10-27 00:00:00,SYSTEM,initial_config,
 0,sql,deadlock_retry.attempts,3,int,2025-10-27 00:00:00,SYSTEM,initial_config,
 0,sql,deadlock_retry.backoff_seconds,2,int,2025-10-27 00:00:00,SYSTEM,initial_config,
-0,runtime,storage_backend,file,string,2025-11-10 00:00:00,COPILOT,local_testing,
+0,runtime,storage_backend,sql,string,2025-11-13 00:00:00,COPILOT,sql_only_mode_enabled,
 0,runtime,reuse_model_fit,False,bool,2025-10-27 00:00:00,SYSTEM,initial_config,
 0,runtime,tick_minutes,1,int,2025-10-27 00:00:00,SYSTEM,initial_config,
 0,runtime,equip_codes,"[""FD_FAN""]",list,2025-10-27 00:00:00,SYSTEM,initial_config,

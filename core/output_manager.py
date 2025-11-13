@@ -389,10 +389,12 @@ class OutputManager:
                  base_output_dir: Optional[Union[str, Path]] = None,
                  batch_flush_rows: int = 1000,
                  batch_flush_seconds: float = 30.0,
-                 max_in_flight_futures: int = 50):
+                 max_in_flight_futures: int = 50,
+                 sql_only_mode: bool = False):
         self.sql_client = sql_client
         self.run_id = run_id
         self.equip_id = equip_id
+        self.sql_only_mode = sql_only_mode
         self.batch_size = batch_size
         self._batched_transaction_active = False
         self.enable_batching = enable_batching
@@ -570,18 +572,33 @@ class OutputManager:
     
     # ==================== DATA LOADING METHOD ====================
     
-    def load_data(self, cfg: Dict[str, Any], start_utc: Optional[pd.Timestamp] = None, end_utc: Optional[pd.Timestamp] = None):
+    def load_data(self, cfg: Dict[str, Any], start_utc: Optional[pd.Timestamp] = None, end_utc: Optional[pd.Timestamp] = None, equipment_name: Optional[str] = None, sql_mode: bool = False):
         """
-        Load training and scoring data from CSV files.
+        Load training and scoring data from CSV files or SQL historian.
         
         Consolidates data loading into OutputManager since it's part of the I/O pipeline.
+        
+        Args:
+            cfg: Configuration dictionary
+            start_utc: Optional start time for SQL window queries
+            end_utc: Optional end time for SQL window queries
+            equipment_name: Equipment name for SQL historian queries (e.g., 'FD_FAN', 'GAS_TURBINE')
+            sql_mode: If True, load from SQL historian; if False, load from CSV files
         """
         # Use consistent config access with fallback
         data_cfg = cfg.get("data", {})
         train_path = data_cfg.get("train_csv")
         score_path = data_cfg.get("score_csv")
         
-        # Cold-start mode: If no training data, use first N% of score data for training
+        # SQL mode: Load from historian SP instead of CSV
+        if sql_mode:
+            if not self.sql_client:
+                raise ValueError("[DATA] SQL mode requested but no SQL client available")
+            if not equipment_name:
+                raise ValueError("[DATA] SQL mode requires equipment_name parameter")
+            return self._load_data_from_sql(cfg, equipment_name, start_utc, end_utc)
+        
+        # CSV mode: Cold-start mode: If no training data, use first N% of score data for training
         cold_start_mode = False
         if not train_path and score_path:
             Console.info("[DATA] Cold-start mode: No training data provided, will split score data")
@@ -727,6 +744,180 @@ class OutputManager:
             future_rows_dropped=future_rows_total,
             dup_timestamps_removed=0
         )
+        return train, score, meta
+    
+    def _load_data_from_sql(self, cfg: Dict[str, Any], equipment_name: str, start_utc: Optional[pd.Timestamp], end_utc: Optional[pd.Timestamp]):
+        """
+        Load training and scoring data from SQL historian using stored procedure.
+        
+        Args:
+            cfg: Configuration dictionary
+            equipment_name: Equipment name (e.g., 'FD_FAN', 'GAS_TURBINE')
+            start_utc: Start time for query window
+            end_utc: End time for query window
+        
+        Returns:
+            Tuple of (train_df, score_df, DataMeta)
+        """
+        data_cfg = cfg.get("data", {})
+        ts_col = _cfg_get(data_cfg, "timestamp_col", "EntryDateTime")
+        
+        # SQL mode requires explicit time windows
+        if not start_utc or not end_utc:
+            raise ValueError("[DATA] SQL mode requires start_utc and end_utc parameters")
+        
+        # COLD-02: Configurable cold-start split ratio (default 0.6 = 60% train, 40% score)
+        cold_start_split_ratio = float(_cfg_get(data_cfg, "cold_start_split_ratio", 0.6))
+        if not (0.1 <= cold_start_split_ratio <= 0.9):
+            Console.warn(f"[DATA] Invalid cold_start_split_ratio={cold_start_split_ratio}, using default 0.6")
+            cold_start_split_ratio = 0.6
+        
+        min_train_samples = int(_cfg_get(data_cfg, "min_train_samples", 500))
+        
+        Console.info(f"[DATA] Loading from SQL historian: {equipment_name}")
+        Console.info(f"[DATA] Time range: {start_utc} to {end_utc}")
+        
+        # Call stored procedure to get all data for time range
+        hb = Heartbeat("Calling usp_ACM_GetHistorianData_TEMP", next_hint="parse results", eta_hint=5).start()
+        try:
+            cur = self.sql_client.cursor()
+            cur.execute(
+                "EXEC dbo.usp_ACM_GetHistorianData_TEMP @StartTime=?, @EndTime=?, @EquipmentName=?",
+                (start_utc, end_utc, equipment_name)
+            )
+            
+            # Fetch all rows
+            rows = cur.fetchall()
+            if not rows:
+                raise ValueError(f"[DATA] No data returned from SQL historian for {equipment_name} in time range")
+            
+            # Get column names from cursor description
+            columns = [desc[0] for desc in cur.description]
+            
+            # Convert to DataFrame
+            df_all = pd.DataFrame.from_records(rows, columns=columns)
+            
+            Console.info(f"[DATA] Retrieved {len(df_all)} rows from SQL historian")
+            
+        except Exception as e:
+            Console.error(f"[DATA] Failed to load from SQL historian: {e}")
+            raise
+        finally:
+            try:
+                cur.close()
+            except:
+                pass
+            hb.stop()
+        
+        # Validate sufficient data
+        if len(df_all) < 10:
+            raise ValueError(f"[DATA] Insufficient data from SQL historian: {len(df_all)} rows (minimum 10 required)")
+        
+        # Split into train/score based on ratio
+        hb = Heartbeat("Splitting train/score data", next_hint="parse timestamps", eta_hint=3).start()
+        split_idx = int(len(df_all) * cold_start_split_ratio)
+        train_raw = df_all.iloc[:split_idx].copy()
+        score_raw = df_all.iloc[split_idx:].copy()
+        
+        # Warn if training samples below minimum
+        if len(train_raw) < min_train_samples:
+            Console.warn(f"[DATA] Training data ({len(train_raw)} rows) is below recommended minimum ({min_train_samples} rows)")
+            Console.warn(f"[DATA] Model quality may be degraded. Consider: wider time window, higher split_ratio (current: {cold_start_split_ratio:.2f})")
+        
+        Console.info(f"[DATA] Split ({cold_start_split_ratio:.1%}): {len(train_raw)} train rows, {len(score_raw)} score rows")
+        hb.stop()
+        
+        # Parse timestamps / index
+        hb = Heartbeat("Parsing timestamps & indexing", next_hint="numeric pruning", eta_hint=4).start()
+        train = _parse_ts_index(train_raw, ts_col)
+        score = _parse_ts_index(score_raw, ts_col)
+        hb.stop()
+        
+        # Filter future timestamps
+        now_cutoff = pd.Timestamp.now()
+        train, tz_stripped_train, future_train = _coerce_local_and_filter_future(train, "TRAIN", now_cutoff)
+        score, tz_stripped_score, future_score = _coerce_local_and_filter_future(score, "SCORE", now_cutoff)
+        tz_stripped_total = tz_stripped_train + tz_stripped_score
+        future_rows_total = future_train + future_score
+        
+        # Validate training sample count
+        if len(train) < min_train_samples:
+            Console.warn(f"[DATA] Training data ({len(train)} rows) is below recommended minimum ({min_train_samples} rows)")
+        
+        # Keep numeric only (same set across train/score)
+        hb = Heartbeat("Selecting numeric sensor columns", next_hint="cadence check", eta_hint=2).start()
+        train_num = _infer_numeric_cols(train)
+        score_num = _infer_numeric_cols(score)
+        kept = sorted(list(set(train_num).intersection(score_num)))
+        dropped = [c for c in train.columns if c not in kept]
+        train = train[kept]
+        score = score[kept]
+        train = train.astype(np.float32)
+        score = score.astype(np.float32)
+        hb.stop()
+        
+        Console.info(f"[DATA] Kept {len(kept)} numeric columns, dropped {len(dropped)} non-numeric")
+        
+        # Cadence check + resampling (same logic as CSV mode)
+        _sampling = data_cfg.get("sampling_secs", 1)
+        if _sampling in (None, "auto", "null"):
+            sampling_secs: Optional[int] = None
+        else:
+            sampling_secs = int(_sampling)
+        
+        allow_resample = bool(_cfg_get(data_cfg, "allow_resample", True))
+        resample_strict = bool(_cfg_get(data_cfg, "resample_strict", False))
+        interp_method = str(_cfg_get(data_cfg, "interp_method", "linear"))
+        max_fill_ratio = float(_cfg_get(data_cfg, "max_fill_ratio", _cfg_get(cfg, "runtime.max_fill_ratio", 0.20)))
+        
+        hb = Heartbeat("Cadence check / resample / fill small gaps", next_hint="finalize", eta_hint=8).start()
+        cad_ok_train = _check_cadence(train.index, sampling_secs)
+        cad_ok_score = _check_cadence(score.index, sampling_secs)
+        cadence_ok = bool(cad_ok_train and cad_ok_score)
+        
+        native_train = _native_cadence_secs(train.index)
+        if sampling_secs and math.isfinite(native_train) and sampling_secs < native_train:
+            Console.warn(f"[WARN] Requested resample ({sampling_secs}s) < native cadence ({native_train:.1f}s) — skipping to avoid upsample.")
+            sampling_secs = None
+        
+        if sampling_secs is not None:
+            base_secs = float(sampling_secs)
+        else:
+            base_secs = native_train if math.isfinite(native_train) else 1.0
+        max_gap_secs = int(_cfg_get(data_cfg, "max_gap_secs", base_secs * 3))
+        
+        explode_guard_factor = float(_cfg_get(data_cfg, "explode_guard_factor", 2.0))
+        will_resample = allow_resample and (not cadence_ok) and (sampling_secs is not None)
+        if will_resample:
+            span_secs = (train.index[-1].value - train.index[0].value) / 1e9 if len(train.index) else 0.0
+            approx_rows = int(span_secs / max(1.0, float(sampling_secs))) + 1
+            if len(train) and approx_rows > explode_guard_factor * len(train):
+                Console.warn(f"[WARN] Resample would expand rows from {len(train)} -> ~{approx_rows} (>x{explode_guard_factor:.1f}). Skipping resample.")
+                will_resample = False
+        
+        if will_resample:
+            train = _resample(train, int(sampling_secs), interp_method, resample_strict, max_gap_secs, max_fill_ratio)
+            score = _resample(score, int(sampling_secs), interp_method, resample_strict, max_gap_secs, max_fill_ratio)
+            train = train.astype(np.float32)
+            score = score.astype(np.float32)
+            cadence_ok = True
+        hb.stop()
+        
+        meta = DataMeta(
+            timestamp_col=ts_col,
+            cadence_ok=cadence_ok,
+            kept_cols=kept,
+            dropped_cols=dropped,
+            start_ts=train.index.min() if len(train) else pd.Timestamp.now(),
+            end_ts=score.index.max() if len(score) else pd.Timestamp.now(),
+            n_rows=len(train) + len(score),
+            sampling_seconds=sampling_secs or native_train,
+            tz_stripped=tz_stripped_total,
+            future_rows_dropped=future_rows_total,
+            dup_timestamps_removed=0
+        )
+        
+        Console.info(f"[DATA] SQL historian load complete: {len(train)} train + {len(score)} score = {len(train) + len(score)} total rows")
         return train, score, meta
     
     def _check_sql_health(self) -> bool:
@@ -922,9 +1113,13 @@ class OutputManager:
                 if mask_e.any():
                     df_out.loc[mask_e, "EquipID"] = equip_id_val
 
-            # Always write file first (guaranteed fallback)
-            self._write_csv_optimized(df_out, file_path, **csv_kwargs)
-            result['file_written'] = True
+            # SQL-45: Skip CSV writes when in SQL-only mode
+            if not self.sql_only_mode:
+                # Write file (guaranteed fallback in dual-write mode)
+                self._write_csv_optimized(df_out, file_path, **csv_kwargs)
+                result['file_written'] = True
+            else:
+                Console.info(f"[OUTPUT] SQL-only mode: Skipping CSV write for {file_path.name}")
             
             # OUT-18: Update batch row tracking
             with self._batch_lock:

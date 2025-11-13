@@ -110,7 +110,7 @@ def populate_config(csv_path: Path):
     Console.info(f"[CFG-MIGRATE] Loaded {len(df)} rows from CSV")
     
     # Validate required columns
-    required_cols = ['EquipID', 'ParamPath', 'ParamValue', 'ValueType']
+    required_cols = ['EquipID', 'Category', 'ParamPath', 'ParamValue', 'ValueType']
     missing_cols = [col for col in required_cols if col not in df.columns]
     if missing_cols:
         raise ValueError(f"Missing required columns: {missing_cols}")
@@ -129,6 +129,7 @@ def populate_config(csv_path: Path):
     try:
         for _, row in df.iterrows():
             equip_id = int(row['EquipID']) if pd.notna(row['EquipID']) else 0
+            category = str(row['Category']).strip() if pd.notna(row['Category']) else ''
             param_path = str(row['ParamPath']).strip()
             param_value = str(row['ParamValue']).strip() if pd.notna(row['ParamValue']) else ''
             value_type = str(row['ValueType']).strip() if pd.notna(row['ValueType']) else 'string'
@@ -137,6 +138,9 @@ def populate_config(csv_path: Path):
                 Console.warn(f"[CFG-MIGRATE] Skipping empty ParamPath for EquipID={equip_id}")
                 error_count += 1
                 continue
+            
+            # Combine Category.ParamPath for nested structure (e.g., "data.train_csv")
+            full_param_path = f"{category}.{param_path}" if category else param_path
             
             try:
                 # Use MERGE for upsert behavior
@@ -149,13 +153,13 @@ def populate_config(csv_path: Path):
                     WHEN NOT MATCHED THEN
                         INSERT (EquipID, ParamPath, ParamValue, ValueType)
                         VALUES (source.EquipID, source.ParamPath, source.ParamValue, source.ValueType);
-                """, (equip_id, param_path, param_value, value_type))
+                """, (equip_id, full_param_path, param_value, value_type))
                 
                 # Note: pyodbc doesn't return rowcount for MERGE, so we'll just count attempts
                 insert_count += 1
                 
             except Exception as e:
-                Console.warn(f"[CFG-MIGRATE] Failed to insert {param_path} (EquipID={equip_id}): {e}")
+                Console.warn(f"[CFG-MIGRATE] Failed to insert {full_param_path} (EquipID={equip_id}): {e}")
                 error_count += 1
         
         client.conn.commit()

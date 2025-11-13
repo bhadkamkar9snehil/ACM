@@ -145,53 +145,58 @@ class ModelVersionManager:
         
         Console.info(f"[MODEL] Saving models to version v{version}")
         
-        # Save each model artifact with atomic writes to prevent corruption
+        # SQL-46: Skip filesystem writes when in SQL-only mode
         saved_files = []
-        for model_name, model_obj in models.items():
-            if model_obj is None:
-                Console.warn(f"[MODEL] Skipping None model: {model_name}")
-                continue
-            
-            filepath = version_dir / f"{model_name}.joblib"
-            temp_fd = None
-            temp_path = None
-            try:
-                # Use atomic write pattern: write to temp file, then replace
-                temp_fd, temp_path = tempfile.mkstemp(
-                    dir=version_dir,
-                    prefix=f".{model_name}_",
-                    suffix=".tmp"
-                )
-                # Close the file descriptor and write using joblib
-                os.close(temp_fd)
+        if not self.sql_only_mode:
+            # Save each model artifact with atomic writes to prevent corruption
+            for model_name, model_obj in models.items():
+                if model_obj is None:
+                    Console.warn(f"[MODEL] Skipping None model: {model_name}")
+                    continue
+                
+                filepath = version_dir / f"{model_name}.joblib"
                 temp_fd = None
-                
-                # Write to temporary file
-                joblib.dump(model_obj, temp_path)
-                
-                # Atomic replace (works on Windows & POSIX)
-                os.replace(temp_path, filepath)
-                temp_path = None  # Prevent cleanup since replace succeeded
-                
-                saved_files.append(model_name)
-                Console.info(f"[MODEL]   - Saved {model_name}.joblib")
-            except Exception as e:
-                Console.warn(f"[MODEL]   - Failed to save {model_name}: {e}")
-                # Clean up temp file if it still exists
-                if temp_path and os.path.exists(temp_path):
-                    try:
-                        os.unlink(temp_path)
-                    except Exception:
-                        pass
-            finally:
-                # Ensure file descriptor is closed if still open
-                if temp_fd is not None:
-                    try:
-                        os.close(temp_fd)
-                    except Exception:
-                        pass
+                temp_path = None
+                try:
+                    # Use atomic write pattern: write to temp file, then replace
+                    temp_fd, temp_path = tempfile.mkstemp(
+                        dir=version_dir,
+                        prefix=f".{model_name}_",
+                        suffix=".tmp"
+                    )
+                    # Close the file descriptor and write using joblib
+                    os.close(temp_fd)
+                    temp_fd = None
+                    
+                    # Write to temporary file
+                    joblib.dump(model_obj, temp_path)
+                    
+                    # Atomic replace (works on Windows & POSIX)
+                    os.replace(temp_path, filepath)
+                    temp_path = None  # Prevent cleanup since replace succeeded
+                    
+                    saved_files.append(model_name)
+                    Console.info(f"[MODEL]   - Saved {model_name}.joblib")
+                except Exception as e:
+                    Console.warn(f"[MODEL]   - Failed to save {model_name}: {e}")
+                    # Clean up temp file if it still exists
+                    if temp_path and os.path.exists(temp_path):
+                        try:
+                            os.unlink(temp_path)
+                        except Exception:
+                            pass
+                finally:
+                    # Ensure file descriptor is closed if still open
+                    if temp_fd is not None:
+                        try:
+                            os.close(temp_fd)
+                        except Exception:
+                            pass
+        else:
+            Console.info(f"[MODEL] SQL-only mode: Skipping filesystem .joblib writes")
+            saved_files = list(models.keys())  # Track what we have for manifest
         
-        # Create manifest with atomic write
+        # Create manifest with atomic write (skip in SQL-only mode)
         manifest = {
             "version": version,
             "created_at": datetime.now().isoformat(),
@@ -200,43 +205,46 @@ class ModelVersionManager:
             **metadata
         }
         
-        manifest_path = version_dir / "manifest.json"
-        temp_fd = None
-        temp_path = None
-        try:
-            # Atomic write for manifest
-            temp_fd, temp_path = tempfile.mkstemp(
-                dir=version_dir,
-                prefix=".manifest_",
-                suffix=".tmp"
-            )
-            # Write JSON to temp file
-            with os.fdopen(temp_fd, 'w') as f:
-                json.dump(manifest, f, indent=2)
-            temp_fd = None  # Already closed by fdopen context manager
+        if not self.sql_only_mode:
+            manifest_path = version_dir / "manifest.json"
+            temp_fd = None
+            temp_path = None
+            try:
+                # Atomic write for manifest
+                temp_fd, temp_path = tempfile.mkstemp(
+                    dir=version_dir,
+                    prefix=".manifest_",
+                    suffix=".tmp"
+                )
+                # Write JSON to temp file
+                with os.fdopen(temp_fd, 'w') as f:
+                    json.dump(manifest, f, indent=2)
+                temp_fd = None  # Already closed by fdopen context manager
+                
+                # Atomic replace
+                os.replace(temp_path, manifest_path)
+                temp_path = None  # Prevent cleanup since replace succeeded
+            except Exception as e:
+                Console.warn(f"[MODEL] Failed to save manifest: {e}")
+                # Clean up temp file if it still exists
+                if temp_path and os.path.exists(temp_path):
+                    try:
+                        os.unlink(temp_path)
+                    except Exception:
+                        pass
+                raise
+            finally:
+                # Ensure file descriptor is closed if still open
+                if temp_fd is not None:
+                    try:
+                        os.close(temp_fd)
+                    except Exception:
+                        pass
             
-            # Atomic replace
-            os.replace(temp_path, manifest_path)
-            temp_path = None  # Prevent cleanup since replace succeeded
-        except Exception as e:
-            Console.warn(f"[MODEL] Failed to save manifest: {e}")
-            # Clean up temp file if it still exists
-            if temp_path and os.path.exists(temp_path):
-                try:
-                    os.unlink(temp_path)
-                except Exception:
-                    pass
-            raise
-        finally:
-            # Ensure file descriptor is closed if still open
-            if temp_fd is not None:
-                try:
-                    os.close(temp_fd)
-                except Exception:
-                    pass
-        
-        Console.info(f"[MODEL] Saved {len(saved_files)} models to v{version}")
-        Console.info(f"[MODEL] Manifest: {manifest_path}")
+            Console.info(f"[MODEL] Saved {len(saved_files)} models to v{version}")
+            Console.info(f"[MODEL] Manifest: {manifest_path}")
+        else:
+            Console.info(f"[MODEL] SQL-only mode: Manifest not written to filesystem")
         
         # If SQL client available, also save to ModelRegistry
         if self.sql_client and self.equip_id is not None:
@@ -374,7 +382,23 @@ class ModelVersionManager:
                 Console.info("[MODEL] No cached models found - will train from scratch")
                 return None, None
         
-        # Try SQL first if available and preferred
+        # SQL-46: In SQL-only mode, only try SQL (no filesystem fallback)
+        if self.sql_only_mode:
+            if self.sql_client and self.equip_id is not None:
+                sql_models = self._load_models_from_sql(version)
+                if sql_models:
+                    Console.info(f"[MODEL] Loaded from SQL successfully (SQL-only mode)")
+                    # Create minimal manifest from SQL metadata
+                    manifest = {"version": version, "source": "sql", "equip": self.equip}
+                    return sql_models, manifest
+                else:
+                    Console.warn(f"[MODEL] SQL-only mode: Failed to load from SQL, no fallback available")
+                    return None, None
+            else:
+                Console.warn(f"[MODEL] SQL-only mode: No SQL client available")
+                return None, None
+        
+        # Try SQL first if available and preferred (dual-write mode)
         if prefer_sql and self.sql_client and self.equip_id is not None:
             sql_models = self._load_models_from_sql(version)
             if sql_models:

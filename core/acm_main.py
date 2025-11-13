@@ -502,13 +502,14 @@ def _sql_start_run(cli: Any, cfg: Dict[str, Any], equip_code: str) -> Tuple[str,
     Calls dbo.usp_ACM_StartRun and returns (run_id, window_start, window_end, equip_id).
     Uses a T-SQL block with OUTPUT parameters and a SELECT for capture.
     """
-    # Get EquipID from equipment name
-    equip_id = _get_equipment_id(equip_code)
+    # Get EquipID from equipment name (but let SP do the lookup)
+    equip_id = _get_equipment_id(equip_code)  # Keep for return value
     
     stage = cfg.get("runtime", {}).get("stage", "score")
     version = cfg.get("runtime", {}).get("version", "v5.0.0")
     config_hash = cfg.get("hash", "")
     trigger = "timer"
+    tick_minutes = cfg.get("runtime", {}).get("tick_minutes", 30)  # Default 30-minute intervals
     
     # For now, use NULL for the datetime parameters since the procedure will calculate them
     window_start = None
@@ -517,8 +518,8 @@ def _sql_start_run(cli: Any, cfg: Dict[str, Any], equip_code: str) -> Tuple[str,
     tsql = """
     DECLARE @RunID UNIQUEIDENTIFIER, @WS DATETIME2(3), @WE DATETIME2(3);
     EXEC dbo.usp_ACM_StartRun
-        @EquipID = ?, @ConfigHash = ?, @WindowStartEntryDateTime = ?, @WindowEndEntryDateTime = ?,
-        @Stage = ?, @Version = ?, @TriggerReason = ?,
+        @EquipCode = ?, @EquipID = NULL, @Stage = ?, @TickMinutes = ?,
+        @DefaultStartUtc = ?, @Version = ?, @ConfigHash = ?, @TriggerReason = ?,
         @RunID = @RunID OUTPUT,
         @WindowStartEntryDateTime = @WS OUTPUT,
         @WindowEndEntryDateTime = @WE OUTPUT;
@@ -534,7 +535,8 @@ def _sql_start_run(cli: Any, cfg: Dict[str, Any], equip_code: str) -> Tuple[str,
     """
     cur = cli.cursor()
     try:
-        cur.execute(tsql, (equip_id, config_hash, window_start, window_end, stage, version, trigger))
+        Console.info(f"[DEBUG] Calling usp_ACM_StartRun with params: EquipCode={equip_code}, Stage={stage}, TickMinutes={tick_minutes}")
+        cur.execute(tsql, (equip_code, stage, tick_minutes, window_start, version, config_hash, trigger))
         row = cur.fetchone()
         if not row or row[0] is None:
             raise RuntimeError("usp_ACM_StartRun did not return a RunID.")
@@ -566,8 +568,8 @@ def _sql_finalize_run(cli: Any, run_id: str, outcome: str, rows_read: int, rows_
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--equip", required=True)
-    ap.add_argument("--artifact-root", required=True, 
-                    help="Base artifact path (equipment subdirectory always added: {base}/{EQUIP}/run_xxx/)")
+    ap.add_argument("--artifact-root", default="artifacts", 
+                    help="Base artifact path for charts/reports (equipment subdirectory always added: {base}/{EQUIP}/run_xxx/). Default: ./artifacts")
     ap.add_argument("--config", default=None, help="Config file path (auto-discovers configs/ directory if not specified)")
     ap.add_argument("--train-csv", help="Path to baseline CSV (historical normal data), overrides config.")
     ap.add_argument("--baseline-csv", dest="train_csv", help="Alias for --train-csv (baseline data)")
@@ -575,7 +577,6 @@ def main() -> None:
     ap.add_argument("--batch-csv", dest="score_csv", help="Alias for --score-csv (batch data)")
     ap.add_argument("--mode", choices=["batch"], default="batch")
     ap.add_argument("--clear-cache", action="store_true", help="Force re-training by deleting the cached model for this equipment.")
-    ap.add_argument("--enable-report", action="store_true")
     args = ap.parse_args()
 
     T = Timer(enable=True)
@@ -677,7 +678,9 @@ def main() -> None:
             sql_client = _sql_connect(cfg)
             # Prefer EquipCode from config if set; else use CLI --equip
             equip_codes = cfg.get("runtime", {}).get("equip_codes") or [equip]
-            equip_code = str(equip_codes[0] or equip)
+            Console.info(f"[DEBUG] equip_codes type={type(equip_codes)}, value={equip_codes}")
+            equip_code = str(equip_codes[0] if isinstance(equip_codes, list) else equip)
+            Console.info(f"[DEBUG] Final equip_code={equip_code}")
             run_id, win_start, win_end, equip_id = _sql_start_run(sql_client, cfg, equip_code)
         except Exception as e:
             Console.error(f"[RUN] Failed to start SQL run: {e}")
@@ -702,7 +705,8 @@ def main() -> None:
     output_manager = OutputManager(
         sql_client=sql_client,
         run_id=run_id,
-        equip_id=equip_id
+        equip_id=equip_id,
+        sql_only_mode=SQL_MODE
     )
 
     # ---------- Robust finalize context ----------
@@ -739,8 +743,16 @@ def main() -> None:
             Console.info(f"[DATA] Using batch (score_csv): {cfg.get('data', {}).get('score_csv', 'N/A')}")
 
             if SQL_MODE:
-                train, score, meta = output_manager.load_data(cfg, start_utc=win_start, end_utc=win_end)
+                # SQL mode: Load from historian using stored procedure
+                train, score, meta = output_manager.load_data(
+                    cfg, 
+                    start_utc=win_start, 
+                    end_utc=win_end,
+                    equipment_name=equip,
+                    sql_mode=True
+                )
             else:
+                # File mode: Load from CSV files
                 train, score, meta = output_manager.load_data(cfg)
             train = _ensure_local_index(train)
             score = _ensure_local_index(score)
@@ -1215,7 +1227,8 @@ def main() -> None:
                         equip=equip, 
                         artifact_root=Path(art_root),
                         sql_client=sql_client if SQL_MODE or dual_mode else None,
-                        equip_id=equip_id if SQL_MODE or dual_mode else None
+                        equip_id=equip_id if SQL_MODE or dual_mode else None,
+                        sql_only_mode=SQL_MODE
                     )
                     cached_models, cached_manifest = model_manager.load_models()
                     
@@ -1689,7 +1702,8 @@ def main() -> None:
                         equip=equip, 
                         artifact_root=Path(art_root),
                         sql_client=sql_client if SQL_MODE or dual_mode else None,
-                        equip_id=equip_id if SQL_MODE or dual_mode else None
+                        equip_id=equip_id if SQL_MODE or dual_mode else None,
+                        sql_only_mode=SQL_MODE
                     )
                     
                     # Collect all models
