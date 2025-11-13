@@ -1,6 +1,563 @@
+# ACM V8 - Autonomous Asset Condition Monitoring# ACM V8 - Autonomous Asset Condition Monitoring# ACM V8 - Autonomous Asset Condition Monitoring
+
+
+
+ACM V8 is an autonomous condition monitoring pipeline for industrial equipment. It ingests
+
+historian exports (CSV) or SQL Server data, self-tunes detectors, and publishes operator-ready
+
+outputs under `artifacts/{EQUIP}/run_*`.ACM V8 is an autonomous condition monitoring pipeline for industrial equipment. It ingests historian exports (CSV) or SQL Server data, self-tunes detectors, and publishes operator-ready tables and charts under `artifacts/{EQUIP}/run_*`.ACM V8 is an autonomous condition monitoring pipeline for industrial equipment. It ingests historian exports (CSV) or SQL Server data, self-tunes detectors, and publishes operator-ready tables and charts under `artifacts/{EQUIP}/run_*`.
+
+
+
+## System Overview
+
+- `python -m core.acm_main` orchestrates ingestion, feature engineering, detector fitting, scoring,
+
+  and reporting.------
+
+- `core/fast_features.py` delivers vectorized feature engineering with optional Polars acceleration.
+
+- Detector implementations live under `core/` (Mahalanobis, PCA SPE/T2, Isolation Forest,
+
+  Gaussian Mixture, AR1 residual, Overall Model Residual).
+
+- Fusion (`core/fuse.py`) combines detector scores; `core/episode_culprits_writer.py` highlights## System Overview## System Overview
+
+  culprit sensors with drift-aware hysteresis from `core/drift.py`.
+
+- Adaptive tuning (`core/analytics.AdaptiveTuning`) adjusts thresholds and fusion weights, logging
+
+  changes with `core/config_history_writer.log_auto_tune_changes`.
+
+- `core/output_manager.OutputManager` governs all CSV/PNG/SQL writes and enforces the local time- **Entry point**: `python -m core.acm_main` orchestrates ingestion, feature engineering, detector fitting, scoring, and reporting.- **Entry point**: `python -m core.acm_main` orchestrates ingestion, feature engineering, detector fitting, scoring, and reporting.
+
+  policy.
+
+- `core/model_persistence.py` caches detector bundles under `artifacts/{equip}/models` by- **Feature engineering**: `core/fast_features.py` delivers vectorized pandas transforms with optional Polars acceleration.- **Feature engineering**: `core/fast_features.py` delivers vectorized pandas transforms with optional Polars acceleration.
+
+  configuration signature.
+
+- **Detectors**: Mahalanobis, PCA (SPE/T2), Isolation Forest, GMM, AR1 residuals, and the Overall Model Residual live under `core/`.- **Detectors**: Mahalanobis, PCA (SPE/T2), Isolation Forest, GMM, AR1 residuals, and the Overall Model Residual live under `core/`.
+
+## Quick Start (File Mode)
+
+1. Place training and scoring CSV files in `data/` (datetime index plus sensor columns).- **Fusion and episodes**: `core/fuse.py` combines detector scores; `core/episode_culprits_writer.py` highlights culprit sensors with drift-aware hysteresis from `core/drift.py`.- **Fusion and episodes**: `core/fuse.py` combines detector scores; `core/episode_culprits_writer.py` highlights culprit sensors with drift-aware hysteresis from `core/drift.py`.
+
+2. (Optional) Add equipment-specific overrides to `configs/config_table.csv`.
+
+3. Create a virtual environment and install dependencies:- **Adaptive tuning**: `core/analytics.AdaptiveTuning` adjusts thresholds and fusion weights, logging every change via `core/config_history_writer.log_auto_tune_changes`.- **Adaptive tuning**: `core/analytics.AdaptiveTuning` adjusts thresholds and fusion weights, logging every change via `core/config_history_writer.log_auto_tune_changes`.
+
+
+
+   ```powershell- **Outputs**: `core/output_manager.OutputManager` governs all CSV/PNG/SQL writes and enforces the local-time policy.- **Outputs**: `core/output_manager.OutputManager` governs all CSV/PNG/SQL writes and enforces the local-time policy.
+
+   python -m venv .venv
+
+   .venv\Scripts\activate- **Caching**: `core/model_persistence.py` stores detector bundles under `artifacts/{equip}/models` keyed by configuration signatures.- **Caching**: `core/model_persistence.py` stores detector bundles under `artifacts/{equip}/models` keyed by configuration signatures.
+
+   pip install -e ".[dev]"
+
+   ```
+
+
+
+4. Run the pipeline:------
+
+
+
+   ```powershell
+
+   python -m core.acm_main --equip FD_FAN --artifact-root artifacts --enable-report
+
+   ```## Quick Start (File Mode)## Quick Start (File Mode)
+
+
+
+5. Review outputs in `artifacts/FD_FAN/run_{timestamp}/`.
+
+
+
+Common CLI flags:1. Place training and scoring CSVs in `data/` (datetime index + sensor columns).1. Place training and scoring CSVs in `data/` (datetime index + sensor columns).
+
+- `--mode {file,sql}` switches between historian files and SQL ingestion.
+
+- `--score-start` and `--score-end` constrain scoring windows for backfills.2. (Optional) Add equipment overrides to `configs/config_table.csv`.2. (Optional) Add equipment overrides to `configs/config_table.csv`.
+
+- `--enable-report` produces the full chart and table bundle.
+
+- `--no-cache` or `--clear-cache` disable cached models.3. Create a virtual environment and install dependencies:3. Create a virtual environment and install dependencies:
+
+- `--artifact-root` chooses where artifacts are written (default `artifacts`).
+
+
+
+## SQL Mode Checklist
+
+1. Provision the ACM schema using helpers in `scripts/sql/` (see `docs/SQL_SCHEMA_DESIGN.md`).   ```powershell   ```powershell
+
+2. Populate `configs/sql_connection.ini` or equivalent environment variables (credentials stay local).
+
+3. Smoke test connectivity:   python -m venv .venv   python -m venv .venv
+
+
+
+   ```powershell   .venv\Scripts\activate   .venv\Scripts\activate
+
+   python scripts/sql/verify_acm_connection.py
+
+   ```   pip install -e ".[dev]"   pip install -e ".[dev]"
+
+
+
+4. Execute the pipeline with `--mode sql --enable-report`. SQL writes are restricted to   ```   ```
+
+   `core/output_manager.ALLOWED_TABLES` and are batched for transactional safety.
+
+
+
+## Configuration Model
+
+Configuration lives in `configs/config_table.csv` and is loaded with `utils/config_dict.ConfigDict`.4. Run the pipeline:4. Run the pipeline:
+
+Rows cascade by priority: global defaults (`*`) are overridden by equipment hashes (for example the
+
+hash for `FD_FAN`). Access values with dot paths such as `cfg["fusion"]["weights"]["omr_z"]`.
+
+When introducing new parameters:
+
+- Document the change in `docs/CHANGELOG.md` and the backlog (`# To Do.md`).   ```powershell   ```powershell
+
+- Update dependent design notes (for example `docs/Analytics Backbone.md`).
+
+- Expect cached models to invalidate automatically on the next run.   python -m core.acm_main --equip FD_FAN --artifact-root artifacts --enable-report   python -m core.acm_main --equip FD_FAN --artifact-root artifacts --enable-report
+
+
+
+## Pipeline Stages   ```   ```
+
+1. **Ingestion** - File mode reads `data/*.csv`; SQL mode streams from `core/sql_client.SQLClient`.
+
+2. **Cleaning** - `core/clean.py` standardizes timestamps, fixes gaps, and enforces sensor schema.
+
+3. **Feature Engineering** - `core/fast_features.py` builds rolling stats, regressors, and deltas.
+
+4. **Detector Training** - Models in `core/` consume engineered features and persist through5. Inspect outputs under `artifacts/FD_FAN/run_{timestamp}/`.5. Inspect outputs under `artifacts/FD_FAN/run_{timestamp}/`.
+
+   `core/model_persistence.py`.
+
+5. **Scoring and Fusion** - Detector outputs feed `core/fuse.py`, producing fused z-scores that drive
+
+   episodes.
+
+6. **Reporting** - `core/output_manager.OutputManager` writes tables, charts, and metadata; optionalCommon CLI flags:Common CLI flags:
+
+   report bundles mirror the contract in `docs/CHART_TABLES_SPEC.md`.
+
+
+
+## Output Contract
+
+Each run produces timezone-naive local artifacts:- `--mode {file,sql}` switches between historian files and SQL ingestion.- `--mode {file,sql}` switches between historian files and SQL ingestion.
+
+
+
+```- `--score-start` and `--score-end` constrain scoring windows for backfills.- `--score-start` and `--score-end` constrain scoring windows for backfills.
+
+artifacts/{EQUIP}/run_{timestamp}/
+
+    tables/            # Operator and engineering CSV tables- `--enable-report` produces the full chart and table bundle.- `--enable-report` produces the full chart and table bundle.
+
+    charts/            # PNG visuals (health timelines, detector comparison, heatmaps)
+
+    plots/             # Legacy plots (being consolidated)- `--no-cache` skips persisted models for a cold run.- `--no-cache` skips persisted models for a cold run.
+
+    scores.csv         # Detector and fused z-scores
+
+    episodes.csv       # Episode timeline with culprit sensors- `--artifact-root` changes where artifacts are written (default `artifacts`).- `--artifact-root` changes where artifacts are written (default `artifacts`).
+
+    meta.json          # Durations, cache state, and health metrics
+
+    run.jsonl          # Execution log stream
+
+    models/            # Cached detector bundles (managed automatically)
+
+```------
+
+
+
+Always route new exports through the output manager to keep naming, batching, and SQL guardrails
+
+consistent. Respect the local time policy by using helper functions `_to_naive*` in
+
+`core/output_manager.py` and `core/acm_main.py`.## SQL Mode Checklist## SQL Mode Checklist
+
+
+
+## Adaptive Tuning, Drift, and Persistence
+
+- Adaptive tuning monitors detector saturation, silhouette, and anomaly rates to adjust thresholds
+
+  and fusion weights.1. Provision the ACM schema using scripts in `scripts/sql/` (see `docs/SQL_SCHEMA_DESIGN.md`).1. Provision the ACM schema using scripts in `scripts/sql/` (see `docs/SQL_SCHEMA_DESIGN.md`).
+
+- Drift and regime detection (`core/drift.py`, `core/regimes.py`) quantify operating state changes
+
+  and feed episode logic.2. Populate `configs/sql_connection.ini` or equivalent environment variables (credentials are never committed).2. Populate `configs/sql_connection.ini` or equivalent environment variables (credentials are never committed).
+
+- Cache hits typically reduce retrain times by 5-8x; use `--no-cache` or `--clear-cache` when
+
+  validating new behavior.3. Smoke test the connection:3. Smoke test the connection:
+
+- Preserve configuration history and tuning logs for auditability via
+
+  `core/config_history_writer.log_auto_tune_changes`.
+
+
+
+## Operational Tooling   ```powershell   ```powershell
+
+- `python scripts/analyze_latest_run.py --equip FD_FAN` reviews the most recent artifact bundle.
+
+- `python scripts/chunk_replay.py --equip FD_FAN GAS_TURBINE` replays historian batches stored in   python scripts/sql/verify_acm_connection.py   python scripts/sql/verify_acm_connection.py
+
+  `data/chunked/`.
+
+- `scripts/run_file_mode.ps1` wraps the default file-mode execution on Windows.   ```   ```
+
+- `python scripts/sql/verify_acm_connection.py` validates SQL credentials and permissions.
+
+- `python scripts/polars_benchmark.py` compares pandas vs. Polars performance for fast features.
+
+
+
+## Testing and Quality Gates4. Execute the pipeline with `--mode sql --enable-report`. SQL writes are limited to `core/output_manager.ALLOWED_TABLES` and batched for transactional safety.4. Execute the pipeline with `--mode sql --enable-report`. SQL writes are limited to `core/output_manager.ALLOWED_TABLES` and batched for transactional safety.
+
+- Core feature coverage: `pytest tests/test_fast_features.py`
+
+- Output dual-write guardrails: `pytest tests/test_dual_write.py`
+
+- Pipeline progress tracking: `pytest tests/test_progress_tracking.py`
+
+------
+
+Optional linting and typing live under `pyproject.toml` extras (`ruff`, `mypy`). Run them when
+
+modifying shared modules.
+
+
+
+## Repository Layout (abridged)## Configuration Model## Configuration Model
+
+```
+
+.
+
+├── core/                 # Pipeline modules (orchestration, detectors, fusion, outputs)
+
+├── configs/              # Config table and SQL connection template (local only)Configuration lives in `configs/config_table.csv` and is loaded through `utils/config_dict.ConfigDict`.Configuration lives in `configs/config_table.csv` and is loaded through `utils/config_dict.ConfigDict`.
+
+├── data/                 # Sample historian exports and chunked replay sets
+
+├── docs/                 # Design notes, analytics specs, and workflow guides
+
+├── scripts/              # Batch harnesses, SQL utilities, and helper tooling
+
+├── tests/                # Targeted pytest suites| Priority | EquipID value | Purpose || Priority | EquipID value | Purpose |
+
+├── utils/                # Shared helpers (config dict, logging, paths)
+
+├── artifacts/            # Gitignored run outputs|---------|---------------|---------||---------|---------------|---------|
+
+├── backups/              # Gitignored backup directory
+
+├── pyproject.toml        # Project metadata and dependencies| 1 | `*` | Global defaults || 1 | `*` | Global defaults |
+
+└── # To Do.md            # Backlog tracking
+
+```| 2 | Deterministic hash (for example `5396` for `FD_FAN`) | Equipment overrides || 2 | Deterministic hash (for example `5396` for `FD_FAN`) | Equipment overrides |
+
+
+
+## Documentation Map
+
+- `docs/Analytics Backbone.md` - Detector, fusion, and episode contracts.
+
+- `docs/COLDSTART_MODE.md` - Cold-start strategy and guardrails.Access values via dot paths (`cfg["fusion"]["weights"]["omr_z"]`). When adding parameters:Access values via dot paths (`cfg["fusion"]["weights"]["omr_z"]`). When adding parameters:
+
+- `docs/BATCH_PROCESSING.md` - Chunk replay and batch harness procedures.
+
+- `docs/OMR_DETECTOR.md` - Overall Model Residual theory and troubleshooting.
+
+- `docs/SQL_INTEGRATION_PLAN.md` and `docs/SQL_SCHEMA_DESIGN.md` - Database architecture details.
+
+- `docs/PROJECT_STRUCTURE.md` - Deep dive into directory layout and integration points.- Document the change in `docs/CHANGELOG.md` and `# To Do.md`.- Document the change in `docs/CHANGELOG.md` and `# To Do.md`.
+
+- `docs/CHANGELOG.md` - Authoritative change history.
+
+- Update dependent docs such as `docs/Analytics Backbone.md`.- Update dependent docs such as `docs/Analytics Backbone.md`.
+
+## Contribution and Support
+
+- Keep file mode healthy before extending SQL paths; regression-test with chunk replay when in
+
+  doubt.
+
+- Document schema or configuration changes in this README and the relevant design notes; update theConfiguration feeds the cache signature, so edits invalidate cached models on the next run.Configuration feeds the cache signature, so edits invalidate cached models on the next run.
+
+  backlog in `# To Do.md` when work lands.
+
+- Follow the local time policy and route all outputs through `core/output_manager`.
+
+- Never commit credentials; `configs/sql_connection.ini` stays local and should rely on environment
+
+  variables where possible.------
+
+- Open issues with run metadata (`meta.json`) and relevant logs, or coordinate via the backlog for
+
+  feature requests. For ambiguous instructions, document assumptions in the same commit to keep the
+
+  knowledge base current.
+
+## Output Contract## Output Contract
+
+
+
+Each run creates a timestamped directory with timezone-naive local data:Each run creates a timestamped directory with timezone-naive local data:
+
+
+
+``````
+
+artifacts/{EQUIP}/run_{timestamp}/artifacts/{EQUIP}/run_{timestamp}/
+
+   tables/            # Operator and engineering CSV tables   tables/            # Operator and engineering CSV tables
+
+   charts/            # PNG visuals (health timeline, detector comparison, heatmaps, etc.)   charts/            # PNG visuals (health timeline, detector comparison, heatmaps, etc.)
+
+   plots/             # Legacy detector plots (migration in progress)   plots/             # Legacy detector plots (migration in progress)
+
+   scores.csv         # Detector and fused z-scores   scores.csv         # Detector and fused z-scores
+
+   episodes.csv       # Episode timeline with culprit sensors   episodes.csv       # Episode timeline with culprit sensors
+
+   meta.json          # Durations, cache state, health metrics   meta.json          # Durations, cache state, health metrics
+
+   run.jsonl          # Execution log stream   run.jsonl          # Execution log stream
+
+   models/            # Cached detector bundles managed by model_persistence   models/            # Cached detector bundles managed by model_persistence
+
+``````
+
+
+
+Always route new exports through `core/output_manager.OutputManager` to keep naming, batching, and SQL guardrails consistent.Always route new exports through `core/output_manager.OutputManager` to keep naming, batching, and SQL guardrails consistent.
+
+
+
+------
+
+
+
+## Adaptive Tuning, Drift, and Persistence## Adaptive Tuning, Drift, and Persistence
+
+
+
+- **Adaptive tuning** monitors detector saturation, silhouette, and anomaly rates to auto-adjust thresholds and weights.- **Adaptive tuning** monitors detector saturation, silhouette, and anomaly rates to auto-adjust thresholds and weights.
+
+- **Drift and regimes** in `core/drift.py` and `core/regimes.py` quantify operating-state changes that drive episode logic.- **Drift and regimes** in `core/drift.py` and `core/regimes.py` quantify operating-state changes that drive episode logic.
+
+- **Caching** in `core/model_persistence.py` stores detector bundles keyed by config, feature, and schema signatures; cache hits typically reduce retrain time by 5-8x. Use `--no-cache` or `--clear-cache` when validating new behavior.- **Caching** in `core/model_persistence.py` stores detector bundles keyed by config, feature, and schema signatures; cache hits typically reduce retrain time by 5-8x. Use `--no-cache` or `--clear-cache` when validating new behavior.
+
+- **Time policy** keeps all timestamps timezone-naive local; use `_to_naive*` helpers in `core/output_manager.py` and `core/acm_main.py` for conversions.- **Time policy** keeps all timestamps timezone-naive local; use `_to_naive*` helpers in `core/output_manager.py` and `core/acm_main.py` for conversions.
+
+
+
+------
+
+
+
+## Operational Tooling## Operational Tooling
+
+
+
+- `python scripts/analyze_latest_run.py --equip FD_FAN` reviews the most recent artifact bundle.- `python scripts/analyze_latest_run.py --equip FD_FAN` reviews the most recent artifact bundle.
+
+- `python scripts/chunk_replay.py --equip FD_FAN GAS_TURBINE` replays historian batches from `data/chunked/`.- `python scripts/chunk_replay.py --equip FD_FAN GAS_TURBINE` replays historian batches from `data/chunked/`.
+
+- `scripts/run_file_mode.ps1` wraps the default file-mode execution on Windows.- `scripts/run_file_mode.ps1` wraps the default file-mode execution on Windows.
+
+- `python scripts/sql/verify_acm_connection.py` validates SQL credentials and permissions.- `python scripts/sql/verify_acm_connection.py` validates SQL credentials and permissions.
+
+
+
+------
+
+
+
+## Testing and Quality Gates## Testing and Quality Gates
+
+
+
+- Core feature coverage: `pytest tests/test_fast_features.py`- Core feature coverage: `pytest tests/test_fast_features.py`
+
+- Output dual-write guardrails: `pytest tests/test_dual_write.py`- Output dual-write guardrails: `pytest tests/test_dual_write.py`
+
+- Pipeline progress tracking: `pytest tests/test_progress_tracking.py`- Pipeline progress tracking: `pytest tests/test_progress_tracking.py`
+
+
+
+Optional linting and typing live in `pyproject.toml` extras (`ruff`, `mypy`).Optional linting and typing live in `pyproject.toml` extras (`ruff`, `mypy`).
+
+
+
+------
+
+
+
+## Repository Layout (abridged)## Repository Layout (abridged)
+
+
+
+``````
+
+core/core/
+
+   acm_main.py            # Pipeline entry point   acm_main.py            # Pipeline entry point
+
+   analytics.py           # Adaptive tuning logic   analytics.py           # Adaptive tuning logic
+
+   fast_features.py       # Vectorized feature engineering   fast_features.py       # Vectorized feature engineering
+
+   fuse.py                # Detector fusion   fuse.py                # Detector fusion
+
+   output_manager.py      # Tables/charts/SQL orchestration   output_manager.py      # Tables/charts/SQL orchestration
+
+   model_persistence.py   # Cache management   model_persistence.py   # Cache management
+
+configs/configs/
+
+   config_table.csv       # Cascading configuration table   config_table.csv       # Cascading configuration table
+
+   sql_connection.ini     # SQL credentials template (local only)   sql_connection.ini     # SQL credentials template (local only)
+
+data/data/
+
+   *.csv                  # Sample historian exports   *.csv                  # Sample historian exports
+
+docs/docs/
+
+   Analytics Backbone.md  # Detector and fusion contracts   Analytics Backbone.md  # Detector and fusion contracts
+
+   COLDSTART_MODE.md      # Cold-start workflow details   COLDSTART_MODE.md      # Cold-start workflow details
+
+scripts/scripts/
+
+   chunk_replay.py        # Historian replay harness   chunk_replay.py        # Historian replay harness
+
+   analyze_latest_run.py  # Artifact inspection helper   analyze_latest_run.py  # Artifact inspection helper
+
+tests/tests/
+
+   test_fast_features.py   test_fast_features.py
+
+   test_dual_write.py   test_dual_write.py
+
+``````
+
+
+
+See the `docs/` directory for deeper design notes (`docs/PROJECT_STRUCTURE.md`, `docs/OUTPUT_CONSOLIDATION.md`, etc.).See the `docs/` directory for deeper design notes (`docs/PROJECT_STRUCTURE.md`, `docs/OUTPUT_CONSOLIDATION.md`, etc.).
+
+
+
+------
+
+
+
+## Change Management## Change Management
+
+
+
+- Keep this README in sync with pipeline behavior, output schemas, and CLI changes.- Keep this README in sync with pipeline behavior, output schemas, and CLI changes.
+
+- Record significant updates in `docs/CHANGELOG.md` and track follow-up work in `# To Do.md`.- Record significant updates in `docs/CHANGELOG.md` and track follow-up work in `# To Do.md`.
+
+- When detector logic changes, update `docs/Analytics Backbone.md` and related detector guides (for example `docs/OMR_DETECTOR.md`).- When detector logic changes, update `docs/Analytics Backbone.md` and related detector guides (for example `docs/OMR_DETECTOR.md`).
+
+
+
+------
+
+
+
+## Support and Contact## Support and Contact
+
+
+
+- Consult the `docs/` directory for design deep dives, validation reports, and operating procedures.- Consult the `docs/` directory for design deep dives, validation reports, and operating procedures.
+
+- Coordinate enhancements through `# To Do.md`, linking to relevant design notes.- Coordinate enhancements through `# To Do.md`, linking to relevant design notes.
+
+- Maintain file-mode health before expanding SQL paths; use the chunk replay harness for regression testing.- Maintain file-mode health before expanding SQL paths; use the chunk replay harness for regression testing.
+
+
+
+ACM V8 is designed to run unattended once configured. Preserve configuration history, tuning logs, and artifacts to maintain a full operational audit trail.ACM V8 is designed to run unattended once configured. Preserve configuration history, tuning logs, and artifacts to maintain a full operational audit trail.
+
+- PowerShell shortcut: `scripts/run_file_mode.ps1` executes the default file-mode pipeline.
+
+## Repository Layout
+```
+.
+├── core/                 # Pipeline modules (orchestration, detectors, fusion, outputs)
+├── configs/              # Config table + SQL connection template
+├── data/                 # Sample historian exports and chunked replay sets
+├── docs/                 # Detailed design notes, analytics specs, and workflow guides
+├── scripts/              # Batch harnesses, SQL utilities, and helper tooling
+├── tests/                # Targeted pytest suites
+├── utils/                # Shared helpers (config dict, logger, paths, timer)
+├── artifacts/            # Gitignored run outputs
+├── backups/              # Gitignored backup directory
+├── pyproject.toml        # Project metadata and dependency declarations
+└── # To Do.md            # Backlog tracking (keep in sync when work lands)
+```
+
+## Documentation Map
+- `docs/Analytics Backbone.md`  detector, fusion, and episode contract.
+- `docs/COLDSTART_MODE.md`  cold-start strategy and guardrails.
+- `docs/BATCH_PROCESSING.md`  chunk replay, batch harness, and replay validation.
+- `docs/OMR_DETECTOR.md`  overall model residual theory, charts, and troubleshooting.
+- `docs/SQL_INTEGRATION_PLAN.md` & `docs/SQL_SCHEMA_DESIGN.md`  database architecture.
+- `docs/PROJECT_STRUCTURE.md`  deep dive into directory layout and SQL integration.
+- `docs/CHANGELOG.md`  authoritative change history.
+
+## Contribution Notes
+- Keep file-mode stability before modifying SQL paths.
+- Document schema or config changes in the README and relevant docs; update backlog entries in `# To Do.md`.
+- Follow the local time policy (no UTC conversions) and route all outputs through `core/output_manager`.
+- Never commit credentials; `configs/sql_connection.ini` must remain local.
+
+## Support
+Open an issue in this repository with run metadata (`meta.json`) and relevant logs, or reference the backlog (`# To Do.md`) when requesting new features. For ambiguous instructions, document assumptions in the same commit to keep the knowledge base current.
 # ACM V8 – Autonomous Asset Condition Monitoring
 
-- [ACM V8 – Autonomous Asset Condition Monitoring](#acm-v6--autonomous-asset-condition-monitoring)
+- [ACM V8 - Autonomous Asset Condition Monitoring# ACM V8 - Autonomous Asset Condition Monitoring# ACM V8 - Autonomous Asset Condition Monitoring](#acm-v8---autonomous-asset-condition-monitoring-acm-v8---autonomous-asset-condition-monitoring-acm-v8---autonomous-asset-condition-monitoring)
+  - [System Overview](#system-overview)
+  - [Quick Start (File Mode)](#quick-start-file-mode)
+  - [Documentation Map](#documentation-map)
+  - [Contribution and Support](#contribution-and-support)
+  - [Output Contract## Output Contract](#output-contract-output-contract)
+  - [Adaptive Tuning, Drift, and Persistence## Adaptive Tuning, Drift, and Persistence](#adaptive-tuning-drift-and-persistence-adaptive-tuning-drift-and-persistence)
+  - [Operational Tooling## Operational Tooling](#operational-tooling-operational-tooling)
+  - [Testing and Quality Gates## Testing and Quality Gates](#testing-and-quality-gates-testing-and-quality-gates)
+  - [Repository Layout (abridged)## Repository Layout (abridged)](#repository-layout-abridged-repository-layout-abridged)
+  - [Change Management## Change Management](#change-management-change-management)
+  - [Support and Contact## Support and Contact](#support-and-contact-support-and-contact)
+  - [Repository Layout](#repository-layout)
+  - [Documentation Map](#documentation-map-1)
+  - [Contribution Notes](#contribution-notes)
+  - [Support](#support)
+- [ACM V8 – Autonomous Asset Condition Monitoring](#acm-v8--autonomous-asset-condition-monitoring)
   - [Quick Links](#quick-links)
   - [What's New (Nov 10, 2025)](#whats-new-nov-10-2025)
     - [CRITICAL FIXES - Production Readiness](#critical-fixes---production-readiness)
