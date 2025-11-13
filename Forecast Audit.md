@@ -1,5 +1,10 @@
 # Forecast Audit
 
+**⚠️ CONSOLIDATED:** Tasks from this audit have been integrated into `# To Do.md` (root) as of 2025-11-13.  
+**Refer to:** Section 8 - Forecast & AR(1) Model (tasks FCST-01 through FCST-14)
+
+---
+
 ## Overall Assessment
 
 **Status:** Much improved from previous version - syntax errors fixed, but **critical statistical and algorithmic issues remain**.

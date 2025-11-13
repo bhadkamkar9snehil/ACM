@@ -1,72 +1,11 @@
 # ACM V8 - Task Backlog
 
-- [ACM V8 - Task Backlog](#acm-v6---task-backlog)
-  - [Workspace Directory Audit (2025-11-10)](#workspace-directory-audit-2025-11-10)
-    - [Directory Structure Overview](#directory-structure-overview)
-    - [Key Finding: ACM Already Uses Batch-Over-Batch!](#key-finding-acm-already-uses-batch-over-batch)
-    - [Train/Test Terminology Cleanup](#traintest-terminology-cleanup)
-    - [Cleanup Actions Required](#cleanup-actions-required)
-    - [Code Analysis: 100+ "train" References](#code-analysis-100-train-references)
-    - [Files NOT Requiring Changes](#files-not-requiring-changes)
-  - [Recent Performance Analysis (2025-11-05)](#recent-performance-analysis-2025-11-05)
-  - [Priority Legend](#priority-legend)
-  - [Status Legend](#status-legend)
-  - [1. Core Analytics \& Detection (PRIORITY FOCUS)](#1-core-analytics--detection-priority-focus)
-    - [1.1 Data Quality \& Preprocessing](#11-data-quality--preprocessing)
-    - [1.2 Feature Engineering](#12-feature-engineering)
-    - [1.3 Detectors \& Anomaly Detection](#13-detectors--anomaly-detection)
-    - [1.4 Fusion \& Episode Detection](#14-fusion--episode-detection)
-    - [1.5 Regime Clustering \& Operating States](#15-regime-clustering--operating-states)
-  - [2. Model Management \& Persistence](#2-model-management--persistence)
-    - [2.1 Model Versioning \& Caching](#21-model-versioning--caching)
-    - [2.2 Configuration Management](#22-configuration-management)
-    - [2.3 Model Quality Monitoring](#23-model-quality-monitoring)
-  - [3. Batch Streaming \& Cold-Start (PRIORITY FOCUS)](#3-batch-streaming--cold-start-priority-focus)
-    - [3.1 Cold-Start Capabilities](#31-cold-start-capabilities)
-    - [3.2 Chunk Replay \& Batch Processing](#32-chunk-replay--batch-processing)
-    - [3.3 Streaming Preparation (Future)](#33-streaming-preparation-future)
-  - [4. Outputs \& Reporting](#4-outputs--reporting)
-    - [4.1 Tabular Outputs](#41-tabular-outputs)
-    - [4.2 Visualization](#42-visualization)
-  - [5. Performance \& Optimization](#5-performance--optimization)
-  - [6. Documentation \& Operations](#6-documentation--operations)
-    - [6.1 Documentation](#61-documentation)
-    - [6.2 Operations (Future)](#62-operations-future)
-  - [7. Technical Debt (From README Analysis)](#7-technical-debt-from-readme-analysis)
-    - [7.1 High Severity Issues](#71-high-severity-issues)
-    - [7.2 Medium Severity Issues](#72-medium-severity-issues)
-    - [7.3 Low Priority Technical Debt](#73-low-priority-technical-debt)
-  - [8. AVEVA-Inspired Features (DEFERRED - Future Phases)](#8-aveva-inspired-features-deferred---future-phases)
-    - [8.1 Residuals \& Predictions](#81-residuals--predictions)
-    - [8.2 Diagnostics \& Fault Mapping](#82-diagnostics--fault-mapping)
-    - [8.3 RUL \& Health Forecasting](#83-rul--health-forecasting)
-    - [8.4 Transient State Handling](#84-transient-state-handling)
-    - [8.5 Alerting \& Case Management](#85-alerting--case-management)
-    - [8.6 Enhanced Visualizations](#86-enhanced-visualizations)
-  - [9. SQL Integration Tasks (DEPRIORITIZED)](#9-sql-integration-tasks-deprioritized)
-  - [10. Summary Statistics](#10-summary-statistics)
-    - [By Priority](#by-priority)
-    - [By Status](#by-status)
-    - [By Category](#by-category)
-  - [11. Near-Term Priorities (Next Sprint)](#11-near-term-priorities-next-sprint)
-    - [Must-Have (Blocking Core Functionality)](#must-have-blocking-core-functionality)
-    - [Should-Have (High Value)](#should-have-high-value)
-    - [Nice-to-Have (Quick Wins)](#nice-to-have-quick-wins)
-  - [11. Code Quality \& Architecture Improvements (NEW - 2025-11-05)](#11-code-quality--architecture-improvements-new---2025-11-05)
-    - [11.1 Forecasting Module Enhancements](#111-forecasting-module-enhancements)
-    - [11.2 Fusion \& Weight Tuning Improvements](#112-fusion--weight-tuning-improvements)
-    - [11.3 Drift Detection Enhancements](#113-drift-detection-enhancements)
-    - [11.4 Overall Model Residual (OMR) - NEW](#114-overall-model-residual-omr---new)
-    - [11.5 Regime Clustering Improvements](#115-regime-clustering-improvements)
-    - [11.6 Output Manager Hardening](#116-output-manager-hardening)
-    - [11.7 Configuration Discoverability](#117-configuration-discoverability)
-    - [11.8 Audit-Identified Issues (Nov 10, 2025)](#118-audit-identified-issues-nov-10-2025)
-  - [12. Long-Term Roadmap](#12-long-term-roadmap)
-    - [Phase 1: Analytical Backbone Hardening (CURRENT)](#phase-1-analytical-backbone-hardening-current)
-    - [Phase 2: Advanced Analytics (NEXT)](#phase-2-advanced-analytics-next)
-    - [Phase 3: SQL Integration \& Production Deployment (FUTURE)](#phase-3-sql-integration--production-deployment-future)
-    - [Phase 4: Continuous Learning \& Streaming (FUTURE)](#phase-4-continuous-learning--streaming-future)
+**‚ö†Ô∏è DEPRECATED:** This is an older version of the task backlog.  
+**Current Version:** `# To Do.md` in the root directory (updated 2025-11-13 with consolidated audit findings)
 
+**Please refer to the root directory's `# To Do.md` for the most up-to-date consolidated task list.**
+
+---
 
 **Last Updated:** 2025-11-10  
 **Focus:** Hands-Off, Self-Tuning, Continuous Adaptation
@@ -284,7 +223,7 @@ See `scripts/verify_quick_wins.py` for full verification report.
 
 | ID | Priority | Task | Module | Description | Completion Criteria | Status | Notes |
 |----|----------|------|--------|-------------|---------------------|--------|-------|
-| **DET-01** | Critical | **Adaptive Clipping Validation** | `core/fuse.py`, `core/outliers.py` | Adaptive `clip_z = max(default, 1.5◊train p99)` capped at configurable `max_clip_z` | =1% saturation across detectors; audit trail in config table | Done | Saturation fix validated in EPISODE_THRESHOLD_FIX.md |
+| **DET-01** | Critical | **Adaptive Clipping Validation** | `core/fuse.py`, `core/outliers.py` | Adaptive `clip_z = max(default, 1.5ÔøΩtrain p99)` capped at configurable `max_clip_z` | =1% saturation across detectors; audit trail in config table | Done | Saturation fix validated in EPISODE_THRESHOLD_FIX.md |
 | **DET-02** | High | **Detector Correlation Table** | `core/output_manager.py` | Compute pairwise Pearson r between all detector z-streams | `tables/detector_correlation.csv` generated correctly | Done | `_generate_detector_correlation()` implemented |
 | **DET-03** | High | **Mahalanobis Refactor** | `core/correlation.py` | Replace unstable inverse-cov with robust pseudo-inv and guard for rank deficiency | Stable outputs with identical z-scales across runs | Done | Pseudo-inverse implemented |
 | **DET-04** | High | **Drift/CUSUM Enhancements** | `core/drift.py` | Documented config keys (`k_sigma`, `h_sigma`); add `tables/drift_events.csv` | Drift peak detection table populated | Done | `_generate_drift_events()` in output_manager |
@@ -303,7 +242,7 @@ See `scripts/verify_quick_wins.py` for full verification report.
 | **FUSE-03** | High | **Culprit Attribution v2** | `core/fuse.py`, `core/output_manager.py` | Add lead/lag context, rank by contribution, output `culprit_history.csv` | Table written; integrated into outputs | Done | Enhanced with weighted contribution ranking, lead/lag temporal analysis (10-sample window), and fallback for missing data |
 | **FUSE-04** | Medium | **Fusion Schema Descriptor** | `core/output_manager.py` | Auto-emit JSON describing schema (columns + types) for `scores.csv` | `schema.json` present in run folder | Done | Implemented in acm_main.py after scores.csv write. Generates schema.json with column names, dtypes, nullability, and semantic descriptions for all detector outputs, fusion scores, alerts, and regime labels |
 | **FUSE-05** | Medium | **Episode Duration/Frequency Metrics** | `core/output_manager.py` | Add summary statistics for episode patterns | Table `episode_metrics.csv` with duration/frequency stats | Done | `_generate_episode_metrics()` implemented and verified. Outputs 8 metrics: TotalEpisodes, TotalDurationHours, AvgDurationHours, MedianDurationHours, MaxDurationHours, MinDurationHours, RatePerDay, MeanInterarrivalHours |
-| **FUSE-06** | Medium | **Automatic Barrier Adjustment** | `core/fuse.py` | Dynamically tune k_sigma/h_sigma based on training score distribution | Prevents detector saturation from blocking episode detection | Done | Implemented in combine() function. Auto-tunes k_sigma based on std (k_factor ◊ std) and h_sigma based on p95-p50 spread (h_factor ◊ spread). Config: `episodes.cpd.auto_tune.enabled`, `k_factor`, `h_factor`. Bounds: k_sigma ? [0.1, 2.0], h_sigma ? [2.0, 10.0]. |
+| **FUSE-06** | Medium | **Automatic Barrier Adjustment** | `core/fuse.py` | Dynamically tune k_sigma/h_sigma based on training score distribution | Prevents detector saturation from blocking episode detection | Done | Implemented in combine() function. Auto-tunes k_sigma based on std (k_factor ÔøΩ std) and h_sigma based on p95-p50 spread (h_factor ÔøΩ spread). Config: `episodes.cpd.auto_tune.enabled`, `k_factor`, `h_factor`. Bounds: k_sigma ? [0.1, 2.0], h_sigma ? [2.0, 10.0]. |
 
 ### 1.5 Regime Clustering & Operating States
 
@@ -376,7 +315,7 @@ See `scripts/verify_quick_wins.py` for full verification report.
 |----|----------|------|--------|-------------|---------------------|--------|-------|
 | **STREAM-01** | Low | **River Half-Space Trees Integration** | `core/river_models.py` | Complete streaming detector; support checkpoint | Detectors stream without errors | Planned | Requires River dependency |
 | **STREAM-02** | Low | **River State Persistence** | `core/river_models.py` | Save model state between runs | State resumes correctly after reload | Planned | Enables true continuous learning |
-| **STREAM-03** | Deferred | **Scheduler Loop** | `core/acm_main.py` | Enable periodic window runs (15ñ30 min) | Continuous scoring verified | Planned | **Requires SQL integration (deferred)** |
+| **STREAM-03** | Deferred | **Scheduler Loop** | `core/acm_main.py` | Enable periodic window runs (15ÔøΩ30 min) | Continuous scoring verified | Planned | **Requires SQL integration (deferred)** |
 
 ---
 
@@ -408,7 +347,7 @@ See `scripts/verify_quick_wins.py` for full verification report.
 | ID | Priority | Task | Module | Description | Completion Criteria | Status | Notes |
 |----|----------|------|--------|-------------|---------------------|--------|-------|
 | **PERF-01** | Medium | **Profiling (py-spy/line_profiler)** | All core modules | Identify hotspots, especially in feature loop | Profiling report generated; hotspots documented | Pending | Use py-spy for production profiling |
-| **PERF-02** | Medium | **Rust Bridge for Rolling Stats** | `rust_bridge/` | Migrate rolling mean/std/MAD to Rust via PyO3 | Speed gain = 3◊ baseline | Pending | Significant speedup for large datasets |
+| **PERF-02** | Medium | **Rust Bridge for Rolling Stats** | `rust_bridge/` | Migrate rolling mean/std/MAD to Rust via PyO3 | Speed gain = 3ÔøΩ baseline | Pending | Significant speedup for large datasets |
 | **PERF-03** | Medium | **Lazy Evaluation for Optional Detectors** | `core/fuse.py` | Skip disabled detectors entirely | Runtime reduced proportionally | Done | **IMPLEMENTED 2025-11-05: Added lazy evaluation in acm_main.py lines 937-959. Checks fusion.weights config to determine which detectors are enabled. Skips fitting and scoring for disabled detectors (weight=0). Currently pca_t2_z=0.0 in config. Logging: '[PERF] Lazy evaluation: skipping disabled detectors'. Validated with test suite (31.8s runtime).** |
 | **PERF-04** | Medium | **Polars Adoption Expansion** | `core/fast_features.py` | Expand Polars usage beyond feature engineering | 50%+ speedup on data processing | Pending | Already 82% faster than pandas |
 | **PERF-05** | High | **Lower Polars Threshold (Quick Win)** | Config | Set `features.polars_threshold=5000` to force Polars backend | 5-8s speedup on feature engineering (20-40% faster) | Done | **IMPLEMENTED 2025-11-05: Features 21.6s?0.1s (99.5% faster!). Saved 38.7% of total runtime. Requires polars + pyarrow packages installed.** |
@@ -525,7 +464,7 @@ See `scripts/verify_quick_wins.py` for full verification report.
 
 | ID | Priority | Task | Module | Description | Completion Criteria | Status | Notes |
 |----|----------|------|--------|-------------|---------------------|--------|-------|
-| **AV-04** | Deferred | **Large Health Gauge** | `core/output_manager.py` | 0ñ100 health gauge with trend arrow | health_gauge.png generated | Planned | Executive dashboard element |
+| **AV-04** | Deferred | **Large Health Gauge** | `core/output_manager.py` | 0ÔøΩ100 health gauge with trend arrow | health_gauge.png generated | Planned | Executive dashboard element |
 | **AV-18** | Deferred | **Health Dashboard v2** | `core/output_manager.py` | Consolidated dashboard with gauge, residual KPI, trend | Single PNG with labeled sections | Planned | Enhanced defect_dashboard.png |
 
 ---
@@ -611,11 +550,11 @@ See `scripts/verify_quick_wins.py` for full verification report.
 |----|----------|------|--------|-------------|---------------------|--------|-------|
 | **FCST-01** | High | **Intelligent Series Selection** | `core/forecast.py` | Replace "first match" with stability scoring (variance, NaN rate) for series selection; allow `forecast.series_override` in config | Series selected based on min NaN rate & variance; logged choice | Done | Implemented stability scoring with NaN penalty, variance reward, coverage weighting. Tested on FD_FAN: chose mhal_z (0% NaN, var=1368.76). |
 | **FCST-02** | High | **Dynamic Horizon Calculation** | `core/forecast.py` | Derive horizon from data frequency: `ceil(24h / freq)`, capped to ns-safe bound | Horizon scales with cadence (24h worth of samples); config override available | Done | Calculates `horizon = ceil(horizon_hours * samples_per_hour)` from inferred frequency. FD_FAN: 30min ? 48 samples for 24h. Config: `forecast.horizon_hours`. |
-| **FCST-03** | High | **Forecast Uncertainty Bands** | `core/forecast.py` | Return µ±ks confidence intervals using AR(1) residual std (`sd_train`); plot shaded CI; write to `tables/forecast_confidence.csv` | CI bands in plot & table; configurable k (default 1.96 for 95% CI) | Done | Exports `forecast_confidence.csv` with (timestamp, yhat, ci_lower, ci_upper). Plots shaded ±1.96s bands. FD_FAN: CI width ±17.14. Config: `forecast.confidence_k`. |
+| **FCST-03** | High | **Forecast Uncertainty Bands** | `core/forecast.py` | Return ÔøΩÔøΩks confidence intervals using AR(1) residual std (`sd_train`); plot shaded CI; write to `tables/forecast_confidence.csv` | CI bands in plot & table; configurable k (default 1.96 for 95% CI) | Done | Exports `forecast_confidence.csv` with (timestamp, yhat, ci_lower, ci_upper). Plots shaded ÔøΩ1.96s bands. FD_FAN: CI width ÔøΩ17.14. Config: `forecast.confidence_k`. |
 | **FCST-04** | High | **Robust Frequency Inference** | `core/forecast.py` | Add fallback: use config freq or infer from scores.csv cadence; expose `forecast.freq_override` in config | No failure with <2 points; freq fallback logged | Done | 3-level fallback: config override ? infer from data ? default "1min". FD_FAN: inferred "30min" successfully. Config: `forecast.freq_override`, `forecast.default_freq`. |
 | **FCST-05** | Medium | **Optional Plotting** | `core/forecast.py` | Gate plotting behind `ctx.enable_report` flag; return data first, make plotting optional | Headless runs skip I/O; data still returned | Done | Plotting gated by `ctx.enable_report` flag. Data always returned regardless. Tested with enable_report=True (chart generated). |
-| **FCST-06** | Medium | **Vectorized AR(1) Forecast** | `core/forecast.py` | Replace scalar loop with closed-form: `y_{t+h} = µ + f^h(y_t - µ)` for entire horizon | 2-5x faster for long horizons (>50 steps) | Done | Replaced iterative forecast loop with vectorized closed-form: yhat = µ + f^h(y_t - µ). Uses np.power for f^h computation. Cleaner code, faster execution. |
-| **FCST-07** | Medium | **Forecast Metrics Export** | `core/forecast.py` | Emit `tables/forecast_metrics.csv` with (f, µ, s, horizon, series_used, NaN_rate) per run | CSV generated for QA regression testing | Done | Exports comprehensive metrics: AR(1) parameters, horizon, frequency, series selection method, NaN rate, variance. Validated on FD_FAN run. |
+| **FCST-06** | Medium | **Vectorized AR(1) Forecast** | `core/forecast.py` | Replace scalar loop with closed-form: `y_{t+h} = ÔøΩ + f^h(y_t - ÔøΩ)` for entire horizon | 2-5x faster for long horizons (>50 steps) | Done | Replaced iterative forecast loop with vectorized closed-form: yhat = ÔøΩ + f^h(y_t - ÔøΩ). Uses np.power for f^h computation. Cleaner code, faster execution. |
+| **FCST-07** | Medium | **Forecast Metrics Export** | `core/forecast.py` | Emit `tables/forecast_metrics.csv` with (f, ÔøΩ, s, horizon, series_used, NaN_rate) per run | CSV generated for QA regression testing | Done | Exports comprehensive metrics: AR(1) parameters, horizon, frequency, series selection method, NaN rate, variance. Validated on FD_FAN run. |
 
 ### 11.2 Fusion & Weight Tuning Improvements
 
@@ -641,7 +580,7 @@ See `scripts/verify_quick_wins.py` for full verification report.
 | **OMR-01** | High | **Multivariate Health Residual** | `models/omr.py` (new) | Fit multivariate model (PLS, VAE, or linear) on healthy baseline; compute reconstruction error as health indicator | OMR score computed per timestep; trained on healthy regime data | Done (2025-11-05) | PLS/Ridge/PCA models with auto-selection. Per-sensor contribution tracking. 7 unit tests passing. |
 | **OMR-02** | High | **OMR Integration & Fusion** | `core/acm_main.py` | Add OMR to detector suite; include in fusion weights; export omr_z score alongside other detectors | OMR_z column in scores.csv; included in fusion with configurable weight | Done (2025-11-05) | Lazy evaluation, auto-tuning, contribution export (omr_contributions.csv). Bug fix: moved export before file mode return. |
 | **OMR-03** | Medium | **OMR Model Selection** | `models/omr.py` | Support multiple architectures: PLS regression, linear autoencoder, PCA reconstruction; auto-select based on data characteristics | Config option for omr.model_type; auto-selection based on n_samples/n_features | Done (2025-11-05) | Auto-selection logic: PLS (n<1000 & f<100), Ridge (n<5000), PCA (default). Config: omr.model_type='auto'. |
-| **OMR-04** | Medium | **OMR Visualization & Attribution** | `core/output_manager.py` | Add OMR residual timeline chart; per-sensor contribution heatmap showing top contributors during high OMR episodes | OMR timeline PNG + contribution heatmap PNG in charts/; interactive attribution view | Done (2025-11-06) | 3 chart types integrated into consolidated output_manager: timeline (z-score with thresholds), heatmap (sensor◊time, top 15), bar chart (top 10 contributors). Charts generated in equipment's own artifact directory. |
+| **OMR-04** | Medium | **OMR Visualization & Attribution** | `core/output_manager.py` | Add OMR residual timeline chart; per-sensor contribution heatmap showing top contributors during high OMR episodes | OMR timeline PNG + contribution heatmap PNG in charts/; interactive attribution view | Done (2025-11-06) | 3 chart types integrated into consolidated output_manager: timeline (z-score with thresholds), heatmap (sensorÔøΩtime, top 15), bar chart (top 10 contributors). Charts generated in equipment's own artifact directory. |
 
 ### 11.5 Regime Clustering Improvements
 
@@ -674,7 +613,7 @@ See `scripts/verify_quick_wins.py` for full verification report.
 - DEBT-13: River weight config cleanup
 
 **Deferred Items** (Low risk, cataloged for future):
-- SEC-01 (Path traversal), PERF-11 (Episode O(n≤)), DET-10 (PCA warning) - High priority
+- SEC-01 (Path traversal), PERF-11 (Episode O(nÔøΩ)), DET-10 (PCA warning) - High priority
 - PERF-12-14 (Hash sampling, Index cache, Cholesky) - Medium priority  
 - DEBT-15-17 (Try-except, Immutable config, Magic numbers) - Low priority
 - ARCH-01 (acm_main refactoring) - **USER DECISION: NOT NOW** - Defer to later phase

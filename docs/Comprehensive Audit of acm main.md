@@ -1,5 +1,10 @@
 # Comprehensive Audit of `acm_main.py`
 
+**⚠️ CONSOLIDATED:** Tasks from this audit have been integrated into `# To Do.md` (root) as of 2025-11-13.  
+**Refer to:** Section 10 - Architecture & Code Quality (tasks QUAL-01 through QUAL-03)
+
+---
+
 ## Executive Summary
 
 This is a **production-grade anomaly detection system** with approximately **1,800 lines** of complex orchestration code. It implements a multi-detector fusion pipeline for industrial equipment monitoring with SQL and file-based persistence modes.

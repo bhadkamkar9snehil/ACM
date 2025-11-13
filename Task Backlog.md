@@ -1,5 +1,7 @@
 # ACM V8 – Task Backlog (Master Consolidated Edition)
 
+**⚠️ NOTE:** This document focuses on SQL integration tasks. For the complete consolidated task list including all audit findings, see `# To Do.md` (root directory).
+
 **Last Updated:** 2025-11-13
 **Focus:** Hands-Off Analytics | Continuous Adaptation | Self-Tuning | **SQL Integration (89% Complete)**
 
