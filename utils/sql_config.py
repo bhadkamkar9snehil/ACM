@@ -100,7 +100,7 @@ def _load_config_from_sql(equipment_code: Optional[str] = None) -> Optional[Dict
         if equipment_code:
             equip_id = _get_equipment_id(client, equipment_code)
             if equip_id is None:
-                Console.warn(f"[CFG] Equipment {equipment_code} not found in Equipments table. Using global defaults.")
+                Console.warn(f"[CFG] Equipment {equipment_code} not found in Equipment table. Using global defaults.")
         
         # Query config: global defaults + equipment overrides
         cursor = client.cursor()
@@ -154,11 +154,11 @@ def _load_config_from_sql(equipment_code: Optional[str] = None) -> Optional[Dict
 
 
 def _get_equipment_id(client, equipment_code: str) -> Optional[int]:
-    """Look up EquipID from Equipments table."""
+    """Look up EquipID from Equipment table."""
     cursor = client.cursor()
     try:
         cursor.execute(
-            "SELECT EquipID FROM Equipments WHERE EquipCode = ?",
+            "SELECT EquipID FROM Equipment WHERE EquipCode = ?",
             (equipment_code,)
         )
         row = cursor.fetchone()

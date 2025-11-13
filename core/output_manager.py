@@ -1104,16 +1104,19 @@ class OutputManager:
                     cols_all = set(_get_table_columns(cursor_factory, table_name))
                     self._table_columns_cache[table_name] = cols_all
                     table_cols = cols_all
-            if "RunID" in df.columns and self.run_id and "RunID" in table_cols:
-                # Prefer scoping by (RunID, EquipID) when possible
-                if "EquipID" in df.columns and "EquipID" in table_cols and self.equip_id is not None:
-                    rows_deleted = cur.execute(f"DELETE FROM dbo.[{table_name}] WHERE RunID = ? AND EquipID = ?", (self.run_id, int(self.equip_id or 0))).rowcount
-                    if rows_deleted > 0:
-                        Console.info(f"[OUTPUT] Deleted {rows_deleted} existing rows from {table_name} for RunID={self.run_id}, EquipID={self.equip_id}")
-                else:
-                    rows_deleted = cur.execute(f"DELETE FROM dbo.[{table_name}] WHERE RunID = ?", (self.run_id,)).rowcount
-                    if rows_deleted > 0:
-                        Console.info(f"[OUTPUT] Deleted {rows_deleted} existing rows from {table_name} for RunID={self.run_id}")
+            # NOTE: DELETE before INSERT removed - unnecessary since RunID is unique per run
+            # Each pipeline execution generates a new RunID, so no duplicate data exists
+            # Keeping this comment for historical context about the upsert pattern
+            # if "RunID" in df.columns and self.run_id and "RunID" in table_cols:
+            #     # Prefer scoping by (RunID, EquipID) when possible
+            #     if "EquipID" in df.columns and "EquipID" in table_cols and self.equip_id is not None:
+            #         rows_deleted = cur.execute(f"DELETE FROM dbo.[{table_name}] WHERE RunID = ? AND EquipID = ?", (self.run_id, int(self.equip_id or 0))).rowcount
+            #         if rows_deleted > 0:
+            #             Console.info(f"[OUTPUT] Deleted {rows_deleted} existing rows from {table_name} for RunID={self.run_id}, EquipID={self.equip_id}")
+            #     else:
+            #         rows_deleted = cur.execute(f"DELETE FROM dbo.[{table_name}] WHERE RunID = ?", (self.run_id,)).rowcount
+            #         if rows_deleted > 0:
+            #             Console.info(f"[OUTPUT] Deleted {rows_deleted} existing rows from {table_name} for RunID={self.run_id}")
 
             # only insert columns that actually exist in the table
             columns = [c for c in df.columns if c in table_cols]
@@ -1122,28 +1125,57 @@ class OutputManager:
             insert_sql = f"INSERT INTO dbo.[{table_name}] ({cols_str}) VALUES ({placeholders})"
 
             # Clean NaN/Inf values for SQL Server compatibility (pyodbc cannot handle these)
+            import numpy as np
             df_clean = df[columns].copy()
             
-            # Convert timestamp columns to datetime objects BEFORE cleaning NaN
+            # Replace 'N/A' strings with NaN (common in CSV data)
+            df_clean = df_clean.replace(['N/A', 'n/a', 'NA', 'na', '#N/A'], np.nan)
+            
+            # Convert timestamp columns to datetime objects FIRST
             for col in df_clean.columns:
                 if 'timestamp' in col.lower() or col in ['Date', 'date']:
                     try:
-                        df_clean[col] = pd.to_datetime(df_clean[col], errors='coerce')
+                        # Try standard format first, then let pandas infer
+                        df_clean[col] = pd.to_datetime(df_clean[col], format='mixed', errors='coerce')
                         if hasattr(df_clean[col].dtype, 'tz') and df_clean[col].dtype.tz is not None:
                             df_clean[col] = df_clean[col].dt.tz_localize(None)
-                    except Exception:
+                        # Log if any conversions failed
+                        null_count = df_clean[col].isna().sum()
+                        if null_count > 0:
+                            Console.warn(f"[OUTPUT] {null_count} timestamps failed to parse in column {col}")
+                    except Exception as ex:
+                        Console.warn(f"[OUTPUT] Timestamp conversion failed for {col}: {ex}")
                         pass  # Not a timestamp column, skip conversion
             
-            # Replace Inf with None, then replace all NaN with None for SQL NULL
+            # Replace extreme float values BEFORE replacing NaN (so we can use .abs())
             import numpy as np
+            for col in df_clean.columns:
+                if df_clean[col].dtype in [np.float64, np.float32]:
+                    # Check for extreme values that will cause SQL Server errors
+                    # Use pandas notnull() to avoid NaN before checking absolute value
+                    valid_mask = pd.notnull(df_clean[col])
+                    if valid_mask.any():
+                        extreme_mask = valid_mask & (df_clean[col].abs() > 1e100)
+                        if extreme_mask.any():
+                            Console.warn(f"[OUTPUT] Replacing {extreme_mask.sum()} extreme float values in {table_name}.{col}")
+                            df_clean.loc[extreme_mask, col] = None
+            
+            # Replace Inf with None, then replace all NaN with None for SQL NULL
             df_clean = df_clean.replace([np.inf, -np.inf], None)
-            df_clean = df_clean.where(pd.notnull(df_clean), None)
+            # Convert to object dtype to allow None values, then replace NaN with None
+            df_clean = df_clean.astype(object).where(pd.notnull(df_clean), None)
             
             records = [tuple(row) for row in df_clean.itertuples(index=False, name=None)]
             for i in range(0, len(records), self.batch_size):
                 batch = records[i:i+self.batch_size]
-                cur.executemany(insert_sql, batch)
-                inserted += len(batch)
+                try:
+                    cur.executemany(insert_sql, batch)
+                    inserted += len(batch)
+                except Exception as batch_error:
+                    # Log failed batch with first few records for debugging
+                    sample = batch[:3] if len(batch) > 3 else batch
+                    Console.error(f"[OUTPUT] Batch insert failed for {table_name} (sample: {sample}): {batch_error}")
+                    raise
         except Exception as e:
             Console.error(f"[OUTPUT] SQL insert failed for {table_name}: {e}")
             raise
@@ -3669,8 +3701,13 @@ class OutputManager:
             }
             
             # ANA-07: Add mhal_cond_num column (only populated for mhal_z row)
+            # Ensure extreme values don't get written (already handled by output_manager SQL cleaning)
             if detector == 'mhal_z' and mhal_cond_num is not None:
-                row['MahalCondNum'] = round(mhal_cond_num, 2)
+                # Check for extreme values before rounding
+                if abs(mhal_cond_num) > 1e100:
+                    row['MahalCondNum'] = None  # Extreme value, set to NULL
+                else:
+                    row['MahalCondNum'] = round(mhal_cond_num, 2)
             else:
                 row['MahalCondNum'] = None
             
@@ -4122,10 +4159,10 @@ class OutputManager:
                         'EndTimestamp': self._safe_single_timestamp(end_ts),
                         'DurationHours': round(duration_hours, 1),
                         'PrimaryDetector': str(culprits),
-                        'WeightedContribution': 'N/A',
-                        'LeadMeanZ': 'N/A',
-                        'DuringMeanZ': 'N/A',
-                        'LagMeanZ': 'N/A'
+                        'WeightedContribution': None,
+                        'LeadMeanZ': None,
+                        'DuringMeanZ': None,
+                        'LagMeanZ': None
                     })
                     continue
                 
@@ -4164,9 +4201,9 @@ class OutputManager:
                     'DurationHours': round(duration_hours, 1),
                     'PrimaryDetector': primary_detector,
                     'WeightedContribution': weighted_contrib,
-                    'LeadMeanZ': round(lead_mean, 2) if not pd.isna(lead_mean) else 'N/A',
-                    'DuringMeanZ': round(during_mean, 2) if not pd.isna(during_mean) else 'N/A',
-                    'LagMeanZ': round(lag_mean, 2) if not pd.isna(lag_mean) else 'N/A'
+                    'LeadMeanZ': round(lead_mean, 2) if not pd.isna(lead_mean) else None,
+                    'DuringMeanZ': round(during_mean, 2) if not pd.isna(during_mean) else None,
+                    'LagMeanZ': round(lag_mean, 2) if not pd.isna(lag_mean) else None
                 })
                 
             except Exception as e:
@@ -4177,10 +4214,10 @@ class OutputManager:
                     'EndTimestamp': self._safe_single_timestamp(end_ts),
                     'DurationHours': round(duration_hours, 1),
                     'PrimaryDetector': str(culprits),
-                    'WeightedContribution': 'N/A',
-                    'LeadMeanZ': 'N/A',
-                    'DuringMeanZ': 'N/A',
-                    'LagMeanZ': 'N/A'
+                    'WeightedContribution': None,
+                    'LeadMeanZ': None,
+                    'DuringMeanZ': None,
+                    'LagMeanZ': None
                 })
         
         return pd.DataFrame(culprit_history)
@@ -4206,9 +4243,9 @@ class OutputManager:
             
             culprit_history.append({
                 'StartTimestamp': self._safe_single_timestamp(start_ts),
-                'EndTimestamp': self._safe_single_timestamp(end_ts) if end_ts and not pd.isna(end_ts) else 'N/A',
-                'DurationHours': round(duration_hours, 1),
-                'Culprits': str(culprits)
+                'EndTimestamp': self._safe_single_timestamp(end_ts) if end_ts and not pd.isna(end_ts) else None,
+                'DurationHours': round(duration_hours, 1) if duration_hours else None,
+                'Culprits': str(culprits) if culprits != 'unknown' else None
             })
         
         return pd.DataFrame(culprit_history)
