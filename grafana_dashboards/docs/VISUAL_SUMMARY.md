@@ -1,6 +1,13 @@
-# ACM Grafana Dashboard - Visual Summary
+# ACM Grafana Dashboards - Visual Summary
 
-## Dashboard at a Glance
+There are currently two ACM dashboards:
+
+- **ACM Asset Health Dashboard** – detailed, engineering‑oriented view.
+- **ACM Operator View** – simplified run‑scoped view reusing the same SQL tables.
+
+Both dashboards share the same core panels (health gauge, health timeline, regime timeline, detector contributions, sensor hotspots, defect/event views). The Operator View focuses on the most important panels for real‑time monitoring and adds an explanations table driven by `ACM_SensorDefects` and `ACM_DetectorMetadata`.
+
+## Asset Health Dashboard at a Glance
 
 ```
 ╔══════════════════════════════════════════════════════════════════════╗

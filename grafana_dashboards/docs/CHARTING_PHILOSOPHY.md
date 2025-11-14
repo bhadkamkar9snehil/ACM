@@ -92,10 +92,10 @@ The dashboard should answer the operator's natural progression of questions:
 
 **Components**:
 
-#### A. Current Sensor Contributions (Bar Chart)
+#### A. Current Detector Contributions (Bar Chart)
 - **Type**: Horizontal bar chart, sorted by contribution
 - **X-Axis**: Contribution percentage (0-100%)
-- **Y-Axis**: Sensor names
+- **Y-Axis**: Detector / head names (e.g., `mhal_z`, `pca_spe_z`)
 - **Color**: Bars colored by severity (z-score thresholds)
   - Green: z < 2.0 (normal)
   - Yellow: 2.0 ≤ z < 2.5 (watch)
@@ -104,17 +104,19 @@ The dashboard should answer the operator's natural progression of questions:
 - **Limit**: Top 10-15 sensors
 - **Tooltip**: Sensor name, contribution %, z-score, current value
 
-**Query**: `SELECT TOP 15 DetectorType, ContributionPct, ZScore FROM ACM_ContributionCurrent WHERE EquipID = $equipment ORDER BY ContributionPct DESC`
+**Query** (latest run):
+`SELECT TOP 10 DetectorType, ContributionPct, ZScore FROM ACM_ContributionCurrent WHERE EquipID = $equipment AND RunID = (SELECT TOP 1 RunID FROM ACM_ContributionCurrent WHERE EquipID = $equipment ORDER BY RunID DESC) ORDER BY ContributionPct DESC`
 
-#### B. Sensor Contributions Over Time (Stacked Area)
+#### B. Detector Contributions Over Time (Stacked Area)
 - **Type**: Stacked area chart
 - **Y-Axis**: Contribution percentage (0-100%)
-- **Series**: Top 5-8 contributing sensors
-- **Colors**: Distinct palette per sensor
-- **Purpose**: Show how blame shifts over time
-- **Tooltip**: Timestamp, sensor, contribution %, cumulative %
+- **Series**: Top 5-8 contributing detectors/heads
+- **Colors**: Distinct palette per detector
+- **Purpose**: Show how responsibility shifts between heads over time
+- **Tooltip**: Timestamp, detector, contribution %, cumulative %
 
-**Query**: `SELECT Timestamp, DetectorType, ContributionPct FROM ACM_ContributionTimeline WHERE EquipID = $equipment AND Timestamp >= $__timeFrom AND Timestamp <= $__timeTo ORDER BY Timestamp`
+**Query** (latest run):
+`SELECT Timestamp, DetectorType, ContributionPct FROM ACM_ContributionTimeline WHERE EquipID = $equipment AND RunID = (SELECT TOP 1 RunID FROM ACM_ContributionTimeline WHERE EquipID = $equipment ORDER BY RunID DESC) AND Timestamp >= $__timeFrom AND Timestamp <= $__timeTo ORDER BY Timestamp, DetectorType`
 
 #### C. Sensor Hotspots Table
 - **Type**: Sortable table

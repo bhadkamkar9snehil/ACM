@@ -1,601 +1,555 @@
 # ACM Dashboard SQL Queries Reference
 
-This document provides the complete SQL query reference for all panels in the ACM Asset Health Dashboard. Use this for troubleshooting, customization, or creating derivative dashboards.
+This document provides the SQL query reference for all panels in the ACM Grafana dashboards:
 
-## Variables
+- **ACM Asset Health Dashboard** (`asset_health_dashboard.json`)
+- **ACM Operator View** (`acm_operator_dashboard.json`)
+
+Use this for troubleshooting, customization, or creating derivative dashboards.
+
+## Common Variables
 
 All queries use these Grafana variables:
-- `$datasource`: SQL Server data source (auto-selected)
-- `$equipment`: Equipment ID (user-selectable)
-- `$__timeFrom()`: Start of selected time range
-- `$__timeTo()`: End of selected time range
-- `$health_zone`: Health zone filter (optional, multi-select)
+- `$datasource`: SQL Server data source (auto-selected).
+- `$equipment`: Equipment ID (user-selectable).
+- `$__timeFrom()`: Start of selected time range.
+- `$__timeTo()`: End of selected time range.
+
+Unless stated otherwise, all queries are scoped by `EquipID` and the dashboard time picker.
+
+---
 
 ## Executive Summary Panels
 
-### 1. Overall Health Score (Gauge)
+Used by both dashboards (with minor label differences).
+
+### 1. Overall Health Score (Gauge / Bar Gauge)
 ```sql
-SELECT TOP 1 HealthIndex 
-FROM ACM_HealthTimeline 
-WHERE EquipID = $equipment 
-ORDER BY Timestamp DESC
+SELECT TOP 1 HealthIndex
+FROM ACM_HealthTimeline
+WHERE EquipID = $equipment
+ORDER BY Timestamp DESC;
 ```
-**Purpose**: Current health index (0-100 scale)  
-**Expected Result**: Single numeric value  
-**Thresholds**: Red <70, Yellow 70-84, Green 85-100
+**Purpose**: Current health index (0‑100 scale).  
+**Expected Result**: Single numeric value.  
+**Thresholds**: Red <70, Yellow 70‑84, Green 85‑100.
 
 ---
 
 ### 2. Current Status (Stat)
 ```sql
-SELECT TOP 1 
-  CASE 
+SELECT TOP 1
+  CASE
     WHEN HealthIndex >= 85 THEN 'HEALTHY'
     WHEN HealthIndex >= 70 THEN 'CAUTION'
     ELSE 'ALERT'
-  END as Status
-FROM ACM_HealthTimeline 
-WHERE EquipID = $equipment 
-ORDER BY Timestamp DESC
+  END AS Status
+FROM ACM_HealthTimeline
+WHERE EquipID = $equipment
+ORDER BY Timestamp DESC;
 ```
-**Purpose**: Text status badge  
-**Expected Result**: String - HEALTHY/CAUTION/ALERT  
-**Color Mode**: Background color based on value
+**Purpose**: Text status badge.  
+**Expected Result**: `HEALTHY` / `CAUTION` / `ALERT`.
 
 ---
 
 ### 3. Days Since Last Alert (Stat)
 ```sql
-SELECT TOP 1 
-  DATEDIFF(day, StartTimestamp, GETDATE()) as DaysSince
-FROM ACM_AlertAge 
-WHERE EquipID = $equipment 
-  AND AlertZone = 'ALERT'
-ORDER BY StartTimestamp DESC
+SELECT TOP 1
+  DATEDIFF(DAY, StartTimestamp, SYSUTCDATETIME()) AS DaysSinceLastAlert
+FROM ACM_AlertAge
+WHERE EquipID = $equipment;
 ```
-**Purpose**: Days since equipment was last in ALERT zone  
-**Expected Result**: Integer (days)  
-**Unit**: days (d)
+**Purpose**: Days since equipment was last in the ALERT zone.  
+**Expected Result**: Integer (days).
+
+> Asset Health Dashboard originally filtered explicitly on `AlertZone = 'ALERT'`; the operator dashboard treats `ACM_AlertAge` as pre‑filtered per zone. Adjust if you store multiple zones.
 
 ---
 
 ### 4. Active Episodes (Stat)
+
+Asset Health Dashboard (recent episodes from culprit history):
 ```sql
-SELECT COUNT(*) as ActiveEpisodes
-FROM ACM_CulpritHistory 
-WHERE EquipID = $equipment 
-  AND (EndTimestamp IS NULL OR EndTimestamp >= DATEADD(hour, -24, GETDATE()))
+SELECT COUNT(*) AS ActiveEpisodes
+FROM ACM_CulpritHistory
+WHERE EquipID = $equipment
+  AND (EndTimestamp IS NULL OR EndTimestamp >= DATEADD(HOUR, -24, GETDATE()));
 ```
-**Purpose**: Count of episodes active or recently ended (<24h)  
-**Expected Result**: Integer count  
-**Color**: Green=0, Yellow=1-4, Red=5+
+
+Operator View (summary from latest `ACM_EpisodeMetrics`):
+```sql
+SELECT TOP 1 TotalEpisodes
+FROM ACM_EpisodeMetrics
+WHERE EquipID = $equipment
+ORDER BY RunID DESC;
+```
+**Purpose**: Episode burden indicator – either active/recent episodes or per‑run totals.
 
 ---
 
 ### 5. Worst Sensor (Stat)
 ```sql
-SELECT TOP 1 
-  CONCAT(SensorName, ' (z=', CAST(ROUND(LatestAbsZ, 2) as VARCHAR), ')') as WorstSensor
-FROM ACM_SensorHotspots 
-WHERE EquipID = $equipment 
-ORDER BY LatestAbsZ DESC
+SELECT TOP 1
+  SensorName AS WorstSensor,
+  ROUND(LatestAbsZ, 2) AS CurrentZ
+FROM ACM_SensorHotspots
+WHERE EquipID = $equipment
+  AND RunID = (
+      SELECT TOP 1 RunID
+      FROM ACM_SensorHotspots
+      WHERE EquipID = $equipment
+      ORDER BY RunID DESC
+  )
+ORDER BY LatestAbsZ DESC;
 ```
-**Purpose**: Sensor with highest current z-score  
-**Expected Result**: String (e.g., "BEARING_TEMP (z=3.45)")  
-**Display**: Text only
+**Purpose**: Highest deviating sensor in the latest run.  
+**Expected Result**: Single row with sensor name and current z‑score.
 
 ---
 
-### 6. Current Regime (Stat)
+### 6. Current Regime (Stat – Asset Health Dashboard)
 ```sql
-SELECT TOP 1 
-  CONCAT('Regime ', CAST(RegimeLabel as VARCHAR)) as CurrentRegime
-FROM ACM_RegimeTimeline 
-WHERE EquipID = $equipment 
-ORDER BY Timestamp DESC
+SELECT TOP 1
+  CONCAT('Regime ', CAST(RegimeLabel AS VARCHAR)) AS CurrentRegime
+FROM ACM_RegimeTimeline
+WHERE EquipID = $equipment
+ORDER BY Timestamp DESC;
 ```
-**Purpose**: Current operating regime/mode  
-**Expected Result**: String (e.g., "Regime 2")  
-**Display**: Text only
+**Purpose**: Current operating regime label.  
+Operator View instead uses the full regime state in the timeline panel (see below).
 
 ---
 
-## Health Timeline Panel
+## Health & Regime Panels
 
 ### 7. Health Index Timeline (Time Series)
-```sql
-SELECT 
-  Timestamp as time, 
-  HealthIndex, 
-  HealthZone
-FROM ACM_HealthTimeline 
-WHERE EquipID = $equipment 
-  AND Timestamp >= $__timeFrom() 
-  AND Timestamp <= $__timeTo()
-ORDER BY Timestamp
-```
-**Purpose**: Health index over time with zone classification  
-**Expected Result**: Time series with 3 columns  
-**Visualization**: Line chart with area fill  
-**Colors**: Gradient based on HealthZone (GOOD=green, WATCH=yellow, ALERT=red)
 
-**Performance Note**: This is the most frequently queried table. Ensure index exists:
+Asset Health Dashboard (health + fused z‑score, latest run):
 ```sql
-CREATE NONCLUSTERED INDEX IX_ACM_HealthTimeline_EquipTime 
-ON ACM_HealthTimeline(EquipID, Timestamp) 
+SELECT
+    Timestamp AS time,
+    HealthIndex,
+    FusedZ
+FROM ACM_HealthTimeline
+WHERE EquipID = $equipment
+  AND RunID = (
+      SELECT TOP 1 RunID
+      FROM ACM_HealthTimeline
+      WHERE EquipID = $equipment
+      ORDER BY RunID DESC
+  )
+  AND $__timeFilter(Timestamp)
+ORDER BY Timestamp;
+```
+
+Operator View (health only, same pattern):
+```sql
+SELECT
+    Timestamp AS time,
+    HealthIndex AS [Health Index]
+FROM ACM_HealthTimeline
+WHERE EquipID = $equipment
+  AND RunID = (
+      SELECT TOP 1 RunID
+      FROM ACM_HealthTimeline
+      WHERE EquipID = $equipment
+      ORDER BY RunID DESC
+  )
+  AND $__timeFilter(Timestamp)
+ORDER BY Timestamp;
+```
+**Purpose**: Health index trend for the latest run, aligned to the dashboard time range.
+
+**Index recommendation**:
+```sql
+CREATE NONCLUSTERED INDEX IX_ACM_HealthTimeline_EquipTime
+ON ACM_HealthTimeline(EquipID, Timestamp)
 INCLUDE (HealthIndex, HealthZone, FusedZ);
 ```
 
 ---
 
-## Regime Timeline Panel
-
 ### 8. Operating Regime Timeline (State Timeline)
+
+Asset Health Dashboard:
 ```sql
-SELECT 
-  Timestamp as time, 
-  CONCAT('Regime ', CAST(RegimeLabel as VARCHAR)) as regime,
-  RegimeState as state
-FROM ACM_RegimeTimeline 
-WHERE EquipID = $equipment 
-  AND Timestamp >= $__timeFrom() 
-  AND Timestamp <= $__timeTo()
-ORDER BY Timestamp
+SELECT
+    Timestamp AS time,
+    CONCAT('Regime ', CAST(RegimeLabel AS VARCHAR(10))) AS value
+FROM ACM_RegimeTimeline
+WHERE EquipID = $equipment
+  AND RunID = (
+      SELECT TOP 1 RunID
+      FROM ACM_RegimeTimeline
+      WHERE EquipID = $equipment
+      ORDER BY RunID DESC
+  )
+  AND $__timeFilter(Timestamp)
+ORDER BY Timestamp;
 ```
-**Purpose**: Operating mode over time  
-**Expected Result**: Time series with regime labels  
-**Visualization**: State timeline (horizontal colored bars)  
-**Colors**: Auto-assigned per regime or use overrides
+
+Operator View (uses `RegimeState` directly as the categorical value):
+```sql
+SELECT
+    Timestamp AS time,
+    RegimeState AS value
+FROM ACM_RegimeTimeline
+WHERE EquipID = $equipment
+  AND RunID = (
+      SELECT TOP 1 RunID
+      FROM ACM_RegimeTimeline
+      WHERE EquipID = $equipment
+      ORDER BY RunID DESC
+  )
+  AND $__timeFilter(Timestamp)
+ORDER BY Timestamp;
+```
+**Purpose**: Visual ribbon of operating modes over time, aligned with the health timeline.
 
 ---
 
-## Root Cause Analysis Panels
+## Detector & Sensor Root Cause Panels
 
-### 9. Current Sensor Contributions (Bar Chart)
+### 9. Current Detector Contributions (Bar Chart)
+
+Used in both dashboards (titled “Current Detector Contributions”; `Sensor` wording is legacy).
 ```sql
-SELECT TOP 15 
-  DetectorType as sensor, 
-  ContributionPct as contribution,
-  ZScore as zscore
-FROM ACM_ContributionCurrent 
-WHERE EquipID = $equipment 
-ORDER BY ContributionPct DESC
+SELECT TOP 10
+       DetectorType AS detector,
+       ContributionPct AS contribution
+FROM ACM_ContributionCurrent
+WHERE EquipID = $equipment
+  AND RunID = (
+      SELECT TOP 1 RunID
+      FROM ACM_ContributionCurrent
+      WHERE EquipID = $equipment
+      ORDER BY RunID DESC
+  )
+ORDER BY ContributionPct DESC;
 ```
-**Purpose**: Top sensors contributing to current anomaly score  
-**Expected Result**: 3 columns, up to 15 rows  
-**Visualization**: Horizontal bar chart  
-**Colors**: Thresholds on zscore (green <2, yellow 2-2.5, orange 2.5-3, red >3)
+**Purpose**: Shows which heads/detectors are contributing most to the fused anomaly right now.  
+**Expected Result**: Up to 10 rows; one per `DetectorType`.
 
-**Note**: If table is empty, equipment is healthy (no anomaly)
+If you want to surface z‑scores for severity coloring:
+```sql
+SELECT TOP 10
+       DetectorType AS detector,
+       ContributionPct AS contribution,
+       ZScore
+FROM ACM_ContributionCurrent
+WHERE EquipID = $equipment
+  AND RunID = (
+      SELECT TOP 1 RunID
+      FROM ACM_ContributionCurrent
+      WHERE EquipID = $equipment
+      ORDER BY RunID DESC
+  )
+ORDER BY ContributionPct DESC;
+```
 
 ---
 
-### 10. Sensor Contributions Over Time (Stacked Area)
-```sql
-SELECT 
-  Timestamp as time, 
-  DetectorType as metric, 
-  ContributionPct as value
-FROM ACM_ContributionTimeline 
-WHERE EquipID = $equipment 
-  AND Timestamp >= $__timeFrom() 
-  AND Timestamp <= $__timeTo()
-ORDER BY Timestamp, DetectorType
-```
-**Purpose**: Historical sensor contribution trends  
-**Expected Result**: Time series with multiple sensors  
-**Visualization**: Stacked area chart (100% stack)  
-**Colors**: Distinct color per sensor
+### 10. Detector Contributions Over Time (Time Series)
 
-**Performance Warning**: Large table (~50k rows per 30 days). Consider limiting to top 8 sensors:
+Operator View:
 ```sql
--- Optimized version (filter to top sensors first)
-WITH TopSensors AS (
+SELECT
+  Timestamp AS time,
+  DetectorType AS metric,
+  ContributionPct AS value
+FROM ACM_ContributionTimeline
+WHERE EquipID = $equipment
+  AND RunID = (
+      SELECT TOP 1 RunID
+      FROM ACM_ContributionTimeline
+      WHERE EquipID = $equipment
+      ORDER BY RunID DESC
+  )
+  AND $__timeFilter(Timestamp)
+ORDER BY Timestamp, DetectorType;
+```
+**Purpose**: How each detector’s contribution evolves during the latest run.  
+**Visualization**: Multi‑line or stacked area chart (per detector).
+
+For large histories, you can pre‑filter to top N detectors:
+```sql
+WITH TopHeads AS (
   SELECT TOP 8 DetectorType
-  FROM ACM_ContributionCurrent 
-  WHERE EquipID = $equipment 
+  FROM ACM_ContributionCurrent
+  WHERE EquipID = $equipment
   ORDER BY ContributionPct DESC
 )
-SELECT 
-  ct.Timestamp as time, 
-  ct.DetectorType as metric, 
-  ct.ContributionPct as value
+SELECT
+  ct.Timestamp AS time,
+  ct.DetectorType AS metric,
+  ct.ContributionPct AS value
 FROM ACM_ContributionTimeline ct
-INNER JOIN TopSensors ts ON ct.DetectorType = ts.DetectorType
-WHERE ct.EquipID = $equipment 
-  AND ct.Timestamp >= $__timeFrom() 
-  AND ct.Timestamp <= $__timeTo()
-ORDER BY ct.Timestamp, ct.DetectorType
+JOIN TopHeads th ON th.DetectorType = ct.DetectorType
+WHERE ct.EquipID = $equipment
+  AND ct.RunID = (
+      SELECT TOP 1 RunID
+      FROM ACM_ContributionTimeline
+      WHERE EquipID = $equipment
+      ORDER BY RunID DESC
+  )
+  AND $__timeFilter(ct.Timestamp)
+ORDER BY ct.Timestamp, ct.DetectorType;
 ```
 
 ---
 
-## Sensor Hotspots Panel
+### 11. Sensor Hotspots (Table)
 
-### 11. Sensor Hotspots Table
+Asset Health Dashboard (includes extra level and time window):
 ```sql
-SELECT TOP 20 
-  SensorName as [Sensor Name],
-  ROUND(LatestAbsZ, 2) as [Current Z-Score],
-  ROUND(MaxAbsZ, 2) as [Peak Z-Score],
-  MaxTimestamp as [Peak Time],
-  ROUND(LatestValue, 2) as [Current Value],
-  ROUND(TrainMean, 2) as [Normal Mean],
-  AboveAlertCount as [Alert Count]
-FROM ACM_SensorHotspots 
-WHERE EquipID = $equipment 
-ORDER BY LatestAbsZ DESC
+SELECT
+  TOP 20 SensorName        AS [Sensor Name],
+         ROUND(LatestAbsZ, 2) AS [Current Z-Score],
+         ROUND(MaxAbsZ, 2)    AS [Peak Z-Score],
+         MaxTimestamp          AS [Peak Time],
+         ROUND(LatestValue, 2) AS [Current Value],
+         ROUND(TrainMean, 2)   AS [Normal Mean],
+         AboveAlertCount       AS [Alert Count],
+         CASE
+           WHEN LatestAbsZ >= 3 THEN 'ALERT'
+           WHEN LatestAbsZ >= 2 THEN 'WARN'
+           ELSE 'NORMAL'
+         END AS [Level]
+FROM ACM_SensorHotspots
+WHERE EquipID = $equipment
+  AND MaxTimestamp >= DATEADD(HOUR, -48, GETDATE())
+ORDER BY LatestAbsZ DESC;
 ```
-**Purpose**: Detailed sensor deviation metrics  
-**Expected Result**: Table with up to 20 rows  
-**Visualization**: Table with cell color overrides on z-score columns  
-**Sorting**: Default by Current Z-Score descending
 
-**Cell Color Override** (apply to Current Z-Score and Peak Z-Score columns):
-- Green: 0-2.0
-- Yellow: 2.0-2.5
-- Orange: 2.5-3.0
-- Red: >3.0
+Operator View (simpler, no time filter or level column):
+```sql
+SELECT TOP 20
+       SensorName           AS [Sensor Name],
+       ROUND(LatestAbsZ, 2) AS [Current Z-Score],
+       ROUND(MaxAbsZ, 2)    AS [Peak Z-Score],
+       MaxTimestamp          AS [Peak Time],
+       ROUND(LatestValue, 2) AS [Current Value],
+       ROUND(TrainMean, 2)   AS [Normal Mean],
+       AboveAlertCount       AS [Alert Count]
+FROM ACM_SensorHotspots
+WHERE EquipID = $equipment
+  AND RunID = (
+      SELECT TOP 1 RunID
+      FROM ACM_SensorHotspots
+      WHERE EquipID = $equipment
+      ORDER BY RunID DESC
+  )
+ORDER BY [Current Z-Score] DESC;
+```
+**Purpose**: Rank sensors by current deviation and context against baseline.
 
 ---
 
-## Diagnostics Panels
+## Diagnostics & Distribution Panels
 
 ### 12. Detector Correlation Matrix (Heatmap)
 ```sql
-SELECT 
-  DetectorA as detector1, 
-  DetectorB as detector2, 
-  PearsonR as correlation
-FROM ACM_DetectorCorrelation 
-WHERE EquipID = $equipment
+SELECT
+  DetectorA AS detector1,
+  DetectorB AS detector2,
+  PearsonR  AS correlation
+FROM ACM_DetectorCorrelation
+WHERE EquipID = $equipment;
 ```
-**Purpose**: Show which detectors agree/disagree  
-**Expected Result**: ~28 rows (8 detectors × 7 pairs)  
-**Visualization**: Heatmap  
-**Color Scale**: -1 (red) to +1 (green), 0 = neutral
-
-**Interpretation**:
-- High correlation (>0.8): Detectors see same anomalies (redundant)
-- Low correlation (<0.3): Detectors see different anomalies (complementary)
-- Negative correlation (<0): Inverse relationship (unusual, investigate)
+**Purpose**: Show which detectors agree/disagree (`PearsonR` from ‑1 to +1).  
+High correlation = redundant heads; low correlation = complementary heads.
 
 ---
 
-### 13. Health Zone Distribution by Period (Stacked Bar)
+### 13. Health Zone Distribution by Period
+
+Asset Health Dashboard (raw rows):
 ```sql
-SELECT 
-  PeriodStart as period, 
-  HealthZone as zone, 
-  ZonePct as percentage
-FROM ACM_HealthZoneByPeriod 
-WHERE EquipID = $equipment 
-  AND PeriodStart >= $__timeFrom() 
-  AND PeriodStart <= $__timeTo()
-ORDER BY PeriodStart
+SELECT
+    PeriodStart AS period,
+    HealthZone  AS zone,
+    ZonePct     AS percentage
+FROM ACM_HealthZoneByPeriod
+WHERE EquipID = $equipment
+  AND RunID = (
+      SELECT TOP 1 RunID
+      FROM ACM_HealthZoneByPeriod
+      WHERE EquipID = $equipment
+      ORDER BY RunID DESC
+  )
+  AND $__timeFilter(PeriodStart)
+ORDER BY PeriodStart, HealthZone;
 ```
-**Purpose**: Daily health zone percentages  
-**Expected Result**: 3 rows per day (GOOD, WATCH, ALERT)  
-**Visualization**: Stacked bar chart (100% stack)  
-**Colors**: Green (GOOD), Yellow (WATCH), Red (ALERT)
 
-**Trend Analysis**:
-- Increasing red % = degrading
-- Increasing green % = improving
-- High yellow % = borderline, needs attention
+Operator View (pivoted for stacked bar):
+```sql
+SELECT
+    PeriodStart AS period,
+    SUM(CASE WHEN HealthZone = 'GOOD'  THEN ZonePct ELSE 0 END) AS GoodPct,
+    SUM(CASE WHEN HealthZone = 'WATCH' THEN ZonePct ELSE 0 END) AS WatchPct,
+    SUM(CASE WHEN HealthZone = 'ALERT' THEN ZonePct ELSE 0 END) AS AlertPct
+FROM ACM_HealthZoneByPeriod
+WHERE EquipID = $equipment
+  AND RunID = (
+      SELECT TOP 1 RunID
+      FROM ACM_HealthZoneByPeriod
+      WHERE EquipID = $equipment
+      ORDER BY RunID DESC
+  )
+  AND $__timeFilter(PeriodStart)
+GROUP BY PeriodStart
+ORDER BY PeriodStart;
+```
+**Purpose**: For each period, what fraction of time was GOOD/WATCH/ALERT.
 
 ---
-
-## Defect Timeline Panel
 
 ### 14. Defect Event Timeline (Time Series)
-```sql
-SELECT 
-  Timestamp as time, 
-  CONCAT(FromZone, ' → ', ToZone) as transition,
-  HealthIndex as health,
-  FusedZ as zscore
-FROM ACM_DefectTimeline 
-WHERE EquipID = $equipment 
-  AND Timestamp >= $__timeFrom() 
-  AND Timestamp <= $__timeTo()
-ORDER BY Timestamp
-```
-**Purpose**: Health zone transitions and events  
-**Expected Result**: Time series with zone change markers  
-**Visualization**: Time series with points (draw_style: points)  
-**Colors**: Based on ToZone (target zone color)
 
-**Event Types**:
-- GOOD → WATCH: Early warning
-- WATCH → ALERT: Escalation
-- ALERT → WATCH: Improving
-- WATCH → GOOD: Recovery
+Operator View (recommended):
+```sql
+SELECT
+  Timestamp AS time,
+  HealthIndex AS [Health Index],
+  FusedZ      AS [Fused Score]
+FROM ACM_DefectTimeline
+WHERE EquipID = $equipment
+  AND RunID = (
+      SELECT TOP 1 RunID
+      FROM ACM_DefectTimeline
+      WHERE EquipID = $equipment
+      ORDER BY RunID DESC
+  )
+  AND $__timeFilter(Timestamp)
+ORDER BY Timestamp;
+```
+**Purpose**: Plot discrete defect events on the same scale as health and fused score.
+
+Asset Health Dashboard may omit the `RunID` filter to show events from multiple runs; for run‑scoped views the filter is recommended.
 
 ---
 
-## Historical Context Panels
-
-### 15. Episode Metrics (Stat Grid)
+### 15. Episode Metrics (Stat / Table)
 ```sql
-SELECT 
-  TotalEpisodes as [Total Episodes],
-  ROUND(AvgDurationHours, 1) as [Avg Duration (h)],
-  ROUND(MaxDurationHours, 1) as [Max Duration (h)],
-  ROUND(RatePerDay, 2) as [Episodes/Day],
-  ROUND(MeanInterarrivalHours, 1) as [Interarrival (h)]
-FROM ACM_EpisodeMetrics 
+SELECT TOP 1
+  TotalEpisodes,
+  AvgDurationHours,
+  MaxDurationHours,
+  RatePerDay,
+  MeanInterarrivalHours
+FROM ACM_EpisodeMetrics
 WHERE EquipID = $equipment
+ORDER BY RunID DESC;
 ```
-**Purpose**: Aggregate episode statistics  
-**Expected Result**: Single row with 5 metrics  
-**Visualization**: Stat grid (5 panels)  
-**Display**: Each metric in its own stat panel
+**Purpose**: Summarise how often and how long anomalies occur.
 
 ---
 
 ### 16. Regime Occupancy (Pie Chart)
 ```sql
-SELECT 
-  CONCAT('Regime ', CAST(RegimeLabel as VARCHAR)) as regime,
-  Percentage as value
-FROM ACM_RegimeOccupancy 
-WHERE EquipID = $equipment
+SELECT
+  CONCAT('Regime ', CAST(RegimeLabel AS VARCHAR)) AS regime,
+  Percentage AS value
+FROM ACM_RegimeOccupancy
+WHERE EquipID = $equipment;
 ```
-**Purpose**: Time distribution across operating regimes  
-**Expected Result**: 3-5 rows (one per regime)  
-**Visualization**: Donut chart  
-**Display**: Percentage labels on slices
+**Purpose**: How time is distributed across regimes.
 
 ---
 
 ### 17. Drift Detection (Time Series)
 ```sql
-SELECT 
-  Timestamp as time, 
-  DriftValue as value
-FROM ACM_DriftSeries 
-WHERE EquipID = $equipment 
-  AND Timestamp >= $__timeFrom() 
-  AND Timestamp <= $__timeTo()
-ORDER BY Timestamp
+SELECT
+  Timestamp AS time,
+  DriftValue AS value
+FROM ACM_DriftSeries
+WHERE EquipID = $equipment
+  AND $__timeFilter(Timestamp)
+ORDER BY Timestamp;
 ```
-**Purpose**: Baseline drift over time (CUSUM statistic)  
-**Expected Result**: Time series, one value per timestamp  
-**Visualization**: Line chart  
-**Threshold**: Horizontal line at 3.0 (drift detected above this)
-
-**Interpretation**:
-- Flat near 0: Stable baseline
-- Gradual increase: Slow drift
-- Spikes above 3: Drift events (baseline shift detected)
+**Purpose**: Visualise slowly accumulating drift metrics.
 
 ---
-
-## Sensor Anomaly Heatmap Panel
 
 ### 18. Sensor Anomaly Rates by Period (Heatmap)
 ```sql
-SELECT 
-  PeriodStart as time,
-  DetectorType as sensor,
-  AnomalyRatePct as value
-FROM ACM_SensorAnomalyByPeriod 
-WHERE EquipID = $equipment 
-  AND PeriodStart >= $__timeFrom() 
-  AND PeriodStart <= $__timeTo()
-ORDER BY PeriodStart, DetectorType
+SELECT
+  PeriodStart AS time,
+  DetectorType AS detector,
+  AnomalyRatePct AS value
+FROM ACM_SensorAnomalyByPeriod
+WHERE EquipID = $equipment
+  AND $__timeFilter(PeriodStart)
+ORDER BY PeriodStart, DetectorType;
 ```
-**Purpose**: Daily anomaly rates per sensor  
-**Expected Result**: Multiple rows (days × sensors)  
-**Visualization**: Heatmap  
-**Color Scale**: White (0%) to Red (100%)
-
-**Pattern Recognition**:
-- Horizontal bright stripes: Chronic sensor issue
-- Vertical bright stripes: Event affecting multiple sensors
-- Scattered bright cells: Intermittent issues
-- Dark (all green): Healthy period
+**Purpose**: Which detectors have high anomaly rates in each period.
 
 ---
-
-## Calibration & System Health Panels
 
 ### 19. Detector Calibration Summary (Table)
 ```sql
-SELECT 
-  DetectorType as [Detector],
-  ROUND(MeanZ, 2) as [Mean Z],
-  ROUND(P95Z, 2) as [P95 Z],
-  ROUND(P99Z, 2) as [P99 Z],
-  ROUND(ClipZ, 1) as [Clip Threshold],
-  ROUND(SaturationPct, 1) as [Saturation %]
-FROM ACM_CalibrationSummary 
-WHERE EquipID = $equipment
+SELECT
+  DetectorType      AS [Detector],
+  ROUND(MeanZ, 2)   AS [Mean Z],
+  ROUND(P95Z, 2)    AS [P95 Z],
+  ROUND(P99Z, 2)    AS [P99 Z],
+  ROUND(ClipZ, 1)   AS [Clip Threshold],
+  ROUND(SaturationPct, 1) AS [Saturation %]
+FROM ACM_CalibrationSummary
+WHERE EquipID = $equipment;
 ```
-**Purpose**: Detector health and calibration metrics  
-**Expected Result**: 8-10 rows (one per detector)  
-**Visualization**: Table  
-**Alert Threshold**: Highlight if Saturation % > 10% (detector clipping too often)
-
-**Interpretation**:
-- Mean Z near 0: Well calibrated
-- P95 Z < clip threshold: Good headroom
-- Saturation % > 10%: Detector saturating, needs recalibration
+**Purpose**: Calibration quality of each head; helps tune thresholds and identify saturation.
 
 ---
 
-### 20. Regime Stability Metrics (Stat Grid)
+### 20. Regime Stability Metrics (Stat / Table)
 ```sql
-SELECT 
-  MetricName as metric,
-  ROUND(MetricValue, 2) as value
-FROM ACM_RegimeStability 
-WHERE EquipID = $equipment
+SELECT
+  MetricName  AS metric,
+  ROUND(MetricValue, 2) AS value
+FROM ACM_RegimeStability
+WHERE EquipID = $equipment;
 ```
-**Purpose**: Regime detection quality metrics  
-**Expected Result**: 4 rows (churn_rate, total_transitions, avg_dwell, median_dwell)  
-**Visualization**: Stat grid (4 panels)  
-**Display**: One stat panel per metric
-
-**Interpretation**:
-- Low churn rate (<5%): Stable regime detection
-- High avg dwell (>1000 periods): Regimes don't flip frequently
-- High transitions: Noisy regime detection (may need tuning)
+**Purpose**: High‑level summary of regime model stability (e.g., transitions per day, dwell characteristics).
 
 ---
 
-## Query Optimization Tips
+## Detector Explanations Panel (Operator View)
 
-### 1. Always Filter by EquipID and Time
+The **Detector Explanations** table combines `ACM_SensorDefects` with `ACM_DetectorMetadata` to provide human‑readable descriptions per detector family.
+
 ```sql
--- Good
-WHERE EquipID = $equipment 
-  AND Timestamp >= $__timeFrom() 
-  AND Timestamp <= $__timeTo()
-
--- Bad
-WHERE EquipID = $equipment  -- Missing time filter, scans entire table
+SELECT
+  sd.DetectorType,
+  sd.DetectorFamily,
+  sd.Severity,
+  sd.CurrentZ,
+  sd.ViolationPct,
+  dm.ShortName,
+  dm.Explanation,
+  dm.OperatorHint
+FROM ACM_SensorDefects sd
+LEFT JOIN ACM_DetectorMetadata dm
+  ON dm.DetectorFamily = sd.DetectorFamily
+WHERE sd.EquipID = $equipment
+  AND sd.RunID = (
+      SELECT TOP 1 RunID
+      FROM ACM_SensorDefects
+      WHERE EquipID = $equipment
+      ORDER BY RunID DESC
+  )
+ORDER BY
+  CASE sd.Severity
+    WHEN 'CRITICAL' THEN 3
+    WHEN 'HIGH'     THEN 2
+    WHEN 'MEDIUM'   THEN 1
+    ELSE 0
+  END DESC,
+  sd.ViolationPct DESC;
 ```
 
-### 2. Use TOP for Ranking Queries
-```sql
--- Good
-SELECT TOP 15 ... ORDER BY ContributionPct DESC
+**Tables used**:
+- `ACM_SensorDefects` – per‑detector severity and violation statistics.
+- `ACM_DetectorMetadata` – lookup table with explanations and operator hints (created by `scripts/sql/56_create_detector_metadata.sql`).
 
--- Bad
-SELECT ... ORDER BY ContributionPct DESC  -- Returns all rows, Grafana limits display
-```
-
-### 3. Round Floats in Query, Not in Grafana
-```sql
--- Good
-SELECT ROUND(HealthIndex, 2) as HealthIndex
-
--- Bad
-SELECT HealthIndex  -- Let Grafana round (slower, inconsistent)
-```
-
-### 4. Use CONCAT for String Building
-```sql
--- Good
-CONCAT('Regime ', CAST(RegimeLabel as VARCHAR))
-
--- Bad
-'Regime ' + CAST(RegimeLabel as VARCHAR)  -- Fails on NULLs
-```
-
-### 5. Ensure Indexes Exist
-```sql
--- Critical indexes for dashboard performance
-CREATE NONCLUSTERED INDEX IX_ACM_HealthTimeline_EquipTime 
-ON ACM_HealthTimeline(EquipID, Timestamp) INCLUDE (HealthIndex, HealthZone);
-
-CREATE NONCLUSTERED INDEX IX_ACM_ContributionTimeline_EquipTime 
-ON ACM_ContributionTimeline(EquipID, Timestamp) INCLUDE (DetectorType, ContributionPct);
-
-CREATE NONCLUSTERED INDEX IX_ACM_SensorHotspots_EquipZ 
-ON ACM_SensorHotspots(EquipID, LatestAbsZ DESC) INCLUDE (SensorName, MaxAbsZ);
-```
-
----
-
-## Troubleshooting Query Issues
-
-### Query Returns No Data
-**Check**:
-1. Equipment ID exists: `SELECT COUNT(*) FROM ACM_HealthTimeline WHERE EquipID = 1`
-2. Time range has data: `SELECT MIN(Timestamp), MAX(Timestamp) FROM ACM_HealthTimeline WHERE EquipID = 1`
-3. Variable syntax: Ensure `$equipment` not `${equipment}` in SQL mode
-
-### Query Timeout
-**Solutions**:
-1. Add missing indexes (see section 5 above)
-2. Reduce time range
-3. Limit result set (TOP N)
-4. Consider table partitioning for large datasets
-
-### Wrong Data Type Errors
-**Common Issues**:
-- CAST datetime to VARCHAR for CONCAT: `CAST(Timestamp as VARCHAR(30))`
-- Handle NULLs: Use `ISNULL()` or `COALESCE()`
-- Grafana expects specific column names: `time`, `metric`, `value` for time series
-
-### Performance Tuning
-**Query execution time targets**:
-- Stat panels: <100ms
-- Time series: <500ms
-- Tables: <1s
-- Heatmaps: <2s
-
-If queries exceed these, optimize using:
-1. Indexed views for expensive aggregations
-2. Materialized summary tables
-3. Query result caching (Grafana level)
-4. Table partitioning by month/year
-
----
-
-## Custom Query Examples
-
-### Example 1: Top 5 Episodes by Duration
-```sql
-SELECT TOP 5
-  StartTimestamp as StartTime,
-  EndTimestamp as EndTime,
-  ROUND(DurationHours, 1) as [Duration (h)],
-  PrimaryDetector as [Culprit Sensor]
-FROM ACM_CulpritHistory
-WHERE EquipID = $equipment
-  AND StartTimestamp >= $__timeFrom()
-  AND StartTimestamp <= $__timeTo()
-ORDER BY DurationHours DESC
-```
-
-### Example 2: Health Trend (Daily Average)
-```sql
-SELECT 
-  CAST(Timestamp as DATE) as date,
-  ROUND(AVG(HealthIndex), 1) as AvgHealth,
-  MIN(HealthIndex) as MinHealth,
-  MAX(HealthIndex) as MaxHealth
-FROM ACM_HealthTimeline
-WHERE EquipID = $equipment
-  AND Timestamp >= $__timeFrom()
-  AND Timestamp <= $__timeTo()
-GROUP BY CAST(Timestamp as DATE)
-ORDER BY date
-```
-
-### Example 3: Sensor Z-Score Distribution
-```sql
-SELECT 
-  SensorName,
-  COUNT(*) as Observations,
-  ROUND(AVG(LatestAbsZ), 2) as AvgZ,
-  ROUND(STDEV(LatestAbsZ), 2) as StdZ,
-  MAX(MaxAbsZ) as PeakZ
-FROM ACM_SensorHotspotTimeline
-WHERE EquipID = $equipment
-  AND Timestamp >= $__timeFrom()
-  AND Timestamp <= $__timeTo()
-GROUP BY SensorName
-ORDER BY PeakZ DESC
-```
-
----
-
-## Related Documentation
-
-- **Dashboard README**: `grafana_dashboards/README.md` - Setup and usage
-- **Operator Guide**: `grafana_dashboards/docs/OPERATOR_QUICK_START.md` - Non-technical guide
-- **Charting Philosophy**: `grafana_dashboards/docs/CHARTING_PHILOSOPHY.md` - Design principles
-- **SQL Schema**: `docs/SQL_SCHEMA_DESIGN.md` - Table structures
-- **Output Manager**: `core/output_manager.py` - Table population logic
-
----
-
-**Last Updated**: 2025-11-13  
-**Dashboard Version**: 1.0  
-**SQL Server**: 2016+  
-**Author**: ACM Team

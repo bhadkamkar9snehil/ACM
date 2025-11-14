@@ -1,8 +1,13 @@
-# ACM Asset Health Dashboard - Quick Start Guide for Operators
+# ACM ACM Dashboards - Quick Start Guide for Operators
 
-## What is this dashboard?
+## What are these dashboards?
 
-The ACM (Autonomous Condition Monitoring) Asset Health Dashboard shows you the health of your equipment in real-time. It uses machine learning to detect problems before they become failures.
+ACM (Autonomous Condition Monitoring) provides two Grafana dashboards:
+
+- **ACM Asset Health Dashboard** – full, detailed view (good for engineers).
+- **ACM Operator View** – simplified run‑scoped view (recommended for daily operation).
+
+Both show you the health of your equipment in near real-time and use machine learning to detect problems before they become failures.
 
 **Think of it as a health monitor for your equipment** - just like a fitness tracker for humans, but for industrial assets.
 
@@ -10,7 +15,7 @@ The ACM (Autonomous Condition Monitoring) Asset Health Dashboard shows you the h
 
 1. Open your web browser
 2. Go to: `http://your-grafana-server/dashboards`
-3. Click on **"ACM Asset Health Dashboard"** under ACM Dashboards folder
+3. Click on **"ACM Operator View"** (or **"ACM Asset Health Dashboard"**) under the ACM Dashboards folder
 4. Select your equipment from the dropdown at the top
 
 ## Understanding the Dashboard in 3 Levels
@@ -63,9 +68,9 @@ The ACM (Autonomous Condition Monitoring) Asset Health Dashboard shows you the h
 
 **If you need to investigate an alert, follow this checklist:**
 
-#### Step 1: Identify the Problem Sensors
+#### Step 1: Identify the Problem Sensors / Detectors
 
-**Look at the "Current Sensor Contributions" bar chart (middle-left):**
+**Look at the "Current Detector Contributions" bar chart (middle-left):**
 - Longer bars = bigger contributors to the problem
 - Colors indicate severity:
   - Green = Normal
@@ -73,7 +78,7 @@ The ACM (Autonomous Condition Monitoring) Asset Health Dashboard shows you the h
   - Orange = Concerning
   - Red = Critical
 
-**The top 3 sensors in this chart are usually the culprits.**
+**The top 3 detectors/sensors in this chart usually point to the problem area.**
 
 #### Step 2: Check the Sensor Details
 
