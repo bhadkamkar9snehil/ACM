@@ -27,6 +27,7 @@ import subprocess
 import sys
 import textwrap
 import os
+import math
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
@@ -47,7 +48,7 @@ class SQLBatchRunner:
     def __init__(self, 
                  sql_conn_string: str,
                  artifact_root: Path,
-                 tick_minutes: int = 30,
+                 tick_minutes: int = 240,
                  max_coldstart_attempts: int = 10,
                  max_batches: Optional[int] = None,
                  start_from_beginning: bool = False):
@@ -199,6 +200,24 @@ class SQLBatchRunner:
             print(f"[DEV] Truncated SQL outputs for EquipID={equip_id}")
         except Exception as e:
             print(f"[WARN] Failed to truncate outputs for EquipID={equip_id}: {e}")
+
+    def _delete_models_for_equip(self, equip_id: int) -> None:
+        """
+        Development helper: delete existing models for an equipment from
+        ModelRegistry so a coldstart can truly rebuild from scratch.
+        """
+        try:
+            with self._get_sql_connection() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    "IF OBJECT_ID('dbo.ModelRegistry', 'U') IS NOT NULL "
+                    "DELETE FROM dbo.ModelRegistry WHERE EquipID = ?",
+                    (equip_id,),
+                )
+                conn.commit()
+            print(f"[DEV] Deleted existing models from ModelRegistry for EquipID={equip_id}")
+        except Exception as e:
+            print(f"[WARN] Failed to delete models for EquipID={equip_id}: {e}")
 
     def _inspect_last_run_outputs(self, equip_name: str) -> None:
         """
@@ -560,8 +579,21 @@ class SQLBatchRunner:
             batches_completed = 0
         
         # Calculate total batches
-        total_minutes = (max_ts - current_ts).total_seconds() / 60
-        total_batches = int(total_minutes / self.tick_minutes)
+        total_minutes = max((max_ts - current_ts).total_seconds() / 60, 0)
+        total_batches = int(total_minutes / self.tick_minutes) if self.tick_minutes > 0 else 0
+
+        # If a demo cap is provided, automatically widen the batch window so
+        # the full history fits in at most max_batches windows. This keeps
+        # long histories from exploding into thousands of tiny batches.
+        if self.max_batches is not None and self.max_batches > 0 and total_batches > self.max_batches:
+            new_tick = int(math.ceil(total_minutes / self.max_batches)) or self.tick_minutes
+            if new_tick > self.tick_minutes:
+                print(
+                    f"[BATCH] {equip_name}: Adjusting tick_minutes from {self.tick_minutes} "
+                    f"to {new_tick} to honor max-batches={self.max_batches}"
+                )
+                self.tick_minutes = new_tick
+                total_batches = int(total_minutes / self.tick_minutes) if self.tick_minutes > 0 else 0
         
         print(f"[BATCH] {equip_name}: Processing {total_batches} batch(es) ({self.tick_minutes}-minute windows)")
         
@@ -645,6 +677,9 @@ class SQLBatchRunner:
                 self.tick_minutes = inferred
                 self._set_tick_minutes(equip_id, inferred)
                 self._truncate_outputs_for_equip(equip_id)
+                # For a true fresh coldstart, also remove existing models
+                # so ModelRegistry does not short-circuit coldstart as complete.
+                self._delete_models_for_equip(equip_id)
             else:
                 self._set_tick_minutes(equip_id, self.tick_minutes)
             if self.start_from_beginning and not resume:

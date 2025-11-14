@@ -2333,8 +2333,8 @@
     ]
   },
   "time": {
-    "from": "2025-10-14T20:16:41.400Z",
-    "to": "2025-11-14T08:53:43.673Z"
+    "from": "now-30d",
+    "to": "now"
   },
   "timepicker": {
     "refresh_intervals": [

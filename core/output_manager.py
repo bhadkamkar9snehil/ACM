@@ -629,11 +629,14 @@ class OutputManager:
             raise ValueError("[DATA] Please set data.train_csv and data.score_csv in config.")
 
         _sampling = data_cfg.get("sampling_secs", 1)
-        # Treat empty string / "auto"/"null" as auto-detect cadence
-        if _sampling in (None, "", "auto", "null"):
-            sampling_secs: Optional[int] = None
-        else:
-            sampling_secs = int(_sampling)
+        # Treat empty/invalid values as "auto" (let cadence be inferred)
+        try:
+            if _sampling in (None, "", "auto", "null"):
+                sampling_secs: Optional[int] = None
+            else:
+                sampling_secs = int(_sampling)
+        except (TypeError, ValueError):
+            sampling_secs = None
 
         allow_resample = bool(_cfg_get(data_cfg, "allow_resample", True))
         resample_strict = bool(_cfg_get(data_cfg, "resample_strict", False))
@@ -887,11 +890,14 @@ class OutputManager:
         
         # Cadence check + resampling (same logic as CSV mode)
         _sampling = data_cfg.get("sampling_secs", 1)
-        # Treat empty string / "auto"/"null" as auto-detect cadence
-        if _sampling in (None, "", "auto", "null"):
-            sampling_secs: Optional[int] = None
-        else:
-            sampling_secs = int(_sampling)
+        # Treat empty/invalid values as "auto" (let cadence be inferred)
+        try:
+            if _sampling in (None, "", "auto", "null"):
+                sampling_secs: Optional[int] = None
+            else:
+                sampling_secs = int(_sampling)
+        except (TypeError, ValueError):
+            sampling_secs = None
         
         allow_resample = bool(_cfg_get(data_cfg, "allow_resample", True))
         resample_strict = bool(_cfg_get(data_cfg, "resample_strict", False))
