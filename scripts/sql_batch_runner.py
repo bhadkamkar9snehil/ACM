@@ -40,7 +40,9 @@ class SQLBatchRunner:
                  sql_conn_string: str,
                  artifact_root: Path,
                  tick_minutes: int = 30,
-                 max_coldstart_attempts: int = 10):
+                 max_coldstart_attempts: int = 10,
+                 max_batches: Optional[int] = None,
+                 start_from_beginning: bool = False):
         """Initialize batch runner.
         
         Args:
@@ -54,10 +56,82 @@ class SQLBatchRunner:
         self.tick_minutes = tick_minutes
         self.max_coldstart_attempts = max_coldstart_attempts
         self.progress_file = artifact_root / ".sql_batch_progress.json"
+        self.max_batches = max_batches
+        self.start_from_beginning = start_from_beginning
     
     def _get_sql_connection(self) -> pyodbc.Connection:
         """Create SQL connection."""
         return pyodbc.connect(self.sql_conn_string)
+
+    # ------------------------
+    # SQL helpers (config/progress)
+    # ------------------------
+    def _get_equip_id(self, equip_name: str) -> Optional[int]:
+        try:
+            with self._get_sql_connection() as conn:
+                cur = conn.cursor()
+                cur.execute("SELECT EquipID FROM dbo.Equipment WHERE EquipCode = ?", (equip_name,))
+                row = cur.fetchone()
+                return int(row[0]) if row else None
+        except Exception as e:
+            print(f"[WARN] Could not resolve EquipID for {equip_name}: {e}")
+            return None
+
+    def _get_config_int(self, equip_id: int, param_path: str, default_value: int) -> int:
+        """Fetch integer config value from ACM_Config for an equipment, with default fallback."""
+        try:
+            with self._get_sql_connection() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT TOP 1 ParamValue FROM dbo.ACM_Config WHERE EquipID = ? AND ParamPath = ? ORDER BY UpdatedAt DESC",
+                    (equip_id, param_path)
+                )
+                row = cur.fetchone()
+                if row and row[0] is not None:
+                    try:
+                        return int(row[0])
+                    except ValueError:
+                        return default_value
+        except Exception as e:
+            print(f"[WARN] Could not read config {param_path} for EquipID={equip_id}: {e}")
+        return default_value
+
+    def _set_tick_minutes(self, equip_id: int, minutes: int) -> None:
+        """Upsert runtime.tick_minutes in ACM_Config for the equipment (patched: no Category/ChangeReason)."""
+        try:
+            with self._get_sql_connection() as conn:
+                cur = conn.cursor()
+                # Try update first
+                cur.execute(
+                    "UPDATE dbo.ACM_Config SET ParamValue = ?, UpdatedAt = SYSUTCDATETIME() "
+                    "WHERE EquipID = ? AND ParamPath = 'runtime.tick_minutes'",
+                    (str(minutes), equip_id)
+                )
+                if cur.rowcount == 0:
+                    # Insert (patched: only valid columns)
+                    cur.execute(
+                        "INSERT INTO dbo.ACM_Config (EquipID, ParamPath, ParamValue, ValueType, UpdatedBy, UpdatedAt) "
+                        "VALUES (?, 'runtime.tick_minutes', ?, 'int', 'sql_batch_runner', SYSUTCDATETIME())",
+                        (equip_id, str(minutes))
+                    )
+                conn.commit()
+                print(f"[CFG] Set runtime.tick_minutes={minutes} for EquipID={equip_id}")
+        except Exception as e:
+            print(f"[WARN] Could not set runtime.tick_minutes for EquipID={equip_id}: {e}")
+
+    def _reset_progress_to_beginning(self, equip_id: int) -> None:
+        """Optional: Clear Runs and Coldstart state to force start from earliest EntryDateTime."""
+        try:
+            with self._get_sql_connection() as conn:
+                cur = conn.cursor()
+                # Clear coldstart and runs for this equipment
+                cur.execute("SET QUOTED_IDENTIFIER ON;")
+                cur.execute("DELETE FROM dbo.ACM_ColdstartState WHERE EquipID = ?", (equip_id,))
+                cur.execute("DELETE FROM dbo.Runs WHERE EquipID = ?", (equip_id,))
+                conn.commit()
+                print(f"[RESET] Cleared Runs and Coldstart for EquipID={equip_id}")
+        except Exception as e:
+            print(f"[WARN] Could not reset progress for EquipID={equip_id}: {e}")
     
     def _load_progress(self) -> Dict[str, Dict]:
         """Load progress tracking state.
@@ -139,16 +213,18 @@ class SQLBatchRunner:
             if not row:
                 cur.close()
                 conn.close()
-                return False, 0, 500
+                # When equip not found, use default min rows 50
+                return False, 0, 50
             
             equip_id = row[0]
             
             # Check ModelRegistry for existing models
             cur.execute("""
                 SELECT COUNT(*) FROM ModelRegistry 
-                WHERE EquipID = ? AND ModelType IN ('pca', 'gmm', 'iforest')
+                WHERE EquipID = ? AND ModelType IN ('pca_model', 'gmm_model', 'iforest_model')
             """, (equip_id,))
-            model_count = cur.fetchone()[0]
+            _row_mc = cur.fetchone()
+            model_count = int(_row_mc[0]) if _row_mc else 0
             
             # Check coldstart state
             cur.execute("""
@@ -165,15 +241,17 @@ class SQLBatchRunner:
             if model_count >= 3:
                 return True, 0, 0
             
+            # Determine required rows: prefer ColdstartState.RequiredRows, else config runtime.coldstart_min_rows (default 50)
+            min_required = self._get_config_int(equip_id, 'runtime.coldstart_min_rows', 50)
             if row:
                 status, accum_rows, req_rows = row
-                return status == 'COMPLETE', accum_rows or 0, req_rows or 500
-            
-            return False, 0, 500
+                required = req_rows or min_required
+                return status == 'COMPLETE', accum_rows or 0, required
+            return False, 0, min_required
             
         except Exception as e:
             print(f"[WARN] Could not check coldstart status: {e}")
-            return False, 0, 500
+            return False, 0, 50
     
     def _run_acm_batch(self, equip_name: str, *, dry_run: bool = False) -> tuple[bool, str]:
         """Run single ACM batch for equipment.
@@ -344,12 +422,17 @@ class SQLBatchRunner:
             if not dry_run:
                 self._save_progress(progress)
             
-            print(f"[BATCH] ✓ {equip_name}: Batch {batch_num} completed (outcome={outcome})")
+            print(f"[BATCH] {equip_name}: Batch {batch_num} completed (outcome={outcome})")
             
+            # Respect demo cap if provided
+            if self.max_batches is not None and batch_num >= self.max_batches:
+                print(f"[BATCH] Reached max-batches cap ({self.max_batches}); stopping early")
+                break
+
             # Move to next window
             current_ts = next_ts
         
-        print(f"\n[BATCH] ✓ {equip_name}: Processed {batches_completed} batch(es)")
+        print(f"\n[BATCH] {equip_name}: Processed {batches_completed} batch(es)")
         return batches_completed
     
     def process_equipment(self, equip_name: str, *, dry_run: bool = False, 
@@ -371,6 +454,13 @@ class SQLBatchRunner:
         # Load progress
         progress = self._load_progress()
         equip_progress = progress.get(equip_name, {})
+
+        # Apply per-run configuration overrides
+        equip_id = self._get_equip_id(equip_name)
+        if equip_id:
+            self._set_tick_minutes(equip_id, self.tick_minutes)
+            if self.start_from_beginning and not resume:
+                self._reset_progress_to_beginning(equip_id)
         
         # Check if coldstart already complete
         coldstart_complete = equip_progress.get('coldstart_complete', False)
@@ -438,6 +528,10 @@ def main() -> int:
                         help="Max coldstart retry attempts (default: 10)")
     parser.add_argument("--max-workers", type=int, default=1,
                         help="Number of equipment to process in parallel (default: 1)")
+    parser.add_argument("--max-batches", type=int, default=None,
+                        help="For demos: cap number of batches per equipment (default: unlimited)")
+    parser.add_argument("--start-from-beginning", action="store_true",
+                        help="Development: reset Runs/Coldstart to begin at earliest data timestamp")
     parser.add_argument("--resume", action="store_true",
                         help="Resume from last successful batch")
     parser.add_argument("--dry-run", action="store_true",
@@ -460,7 +554,9 @@ def main() -> int:
         sql_conn_string=sql_conn_string,
         artifact_root=artifact_root,
         tick_minutes=args.tick_minutes,
-        max_coldstart_attempts=args.max_coldstart_attempts
+        max_coldstart_attempts=args.max_coldstart_attempts,
+        max_batches=args.max_batches,
+        start_from_beginning=args.start_from_beginning
     )
 
     max_workers = max(1, args.max_workers)
@@ -506,18 +602,24 @@ def main() -> int:
                     if not success:
                         errors.append(f"{equip}: Processing incomplete")
                 except Exception as exc:
-                    errors.append(f"{equip}: {exc}")
-                    print(f"[ERROR] {equip}: {exc}", file=sys.stderr)
+                    # Sanitize exception text to ASCII to avoid Windows cp1252 encode errors
+                    exc_text = str(exc)
+                    try:
+                        exc_text.encode("cp1252")
+                    except Exception:
+                        exc_text = exc_text.encode("ascii", "ignore").decode()
+                    errors.append(f"{equip}: {exc_text}")
+                    print(f"[ERROR] {equip}: {exc_text}", file=sys.stderr)
 
     print("\n" + "="*60)
     if errors:
         print("BATCH RUNNER COMPLETED WITH ERRORS:")
         for line in errors:
-            print(f"  ✗ {line}")
+            print(f"  [FAIL] {line}")
         print("="*60)
         return 1
     else:
-        print("✓ BATCH RUNNER COMPLETED SUCCESSFULLY")
+        print("BATCH RUNNER COMPLETED SUCCESSFULLY")
         print("="*60)
         return 0
 

@@ -1402,6 +1402,9 @@ class OutputManager:
 
     def write_json(self, data: Dict[str, Any], file_path: Path) -> None:
         """Write JSON data to file."""
+        if self.sql_only_mode:
+            Console.info(f"[OUTPUT] SQL-only mode: Skipping JSON write for {file_path}")
+            return
         file_path.parent.mkdir(parents=True, exist_ok=True)
         
         with file_path.open('w', encoding='utf-8') as f:
@@ -1412,6 +1415,9 @@ class OutputManager:
     
     def write_jsonl(self, records: List[Dict[str, Any]], file_path: Path) -> None:
         """Write JSON Lines format."""
+        if self.sql_only_mode:
+            Console.info(f"[OUTPUT] SQL-only mode: Skipping JSONL write for {file_path}")
+            return
         file_path.parent.mkdir(parents=True, exist_ok=True)
         
         with file_path.open('w', encoding='utf-8') as f:
@@ -1810,17 +1816,18 @@ class OutputManager:
         )
         
         # OUT-28: Emit episodes severity mapping JSON
-        try:
-            severity_mapping = self._generate_episode_severity_mapping(episodes_for_output)
-            tables_dir = run_dir / "tables"
-            tables_dir.mkdir(exist_ok=True)
-            severity_path = tables_dir / "episodes_severity_mapping.json"
-            with open(severity_path, 'w') as f:
-                import json
-                json.dump(severity_mapping, f, indent=2)
-            Console.info(f"[EPISODES] Generated severity mapping: {severity_path}")
-        except Exception as e:
-            Console.warn(f"[EPISODES] Failed to generate severity mapping: {e}")
+        if not self.sql_only_mode:
+            try:
+                severity_mapping = self._generate_episode_severity_mapping(episodes_for_output)
+                tables_dir = run_dir / "tables"
+                tables_dir.mkdir(exist_ok=True)
+                severity_path = tables_dir / "episodes_severity_mapping.json"
+                with open(severity_path, 'w') as f:
+                    import json
+                    json.dump(severity_mapping, f, indent=2)
+                Console.info(f"[EPISODES] Generated severity mapping: {severity_path}")
+            except Exception as e:
+                Console.warn(f"[EPISODES] Failed to generate severity mapping: {e}")
         
         return result
     
@@ -1877,7 +1884,7 @@ class OutputManager:
                 self.batch_write_csvs(self._current_batch.csv_files)
                 self._current_batch.csv_files.clear()
             
-            if self._current_batch.json_files:
+            if self._current_batch.json_files and not self.sql_only_mode:
                 for path, data in self._current_batch.json_files.items():
                     self.write_json(data, path)
                 self._current_batch.json_files.clear()
@@ -2334,15 +2341,16 @@ class OutputManager:
                         Console.warn(f"[ANALYTICS] Failed to write data_quality to SQL: {e}")
                 
                 # OUT-20: Generate schema descriptor JSON after all tables are written
-                try:
-                    schema_descriptor = self._generate_schema_descriptor(tables_dir)
-                    schema_path = tables_dir / "schema_descriptor.json"
-                    with open(schema_path, 'w') as f:
-                        import json
-                        json.dump(schema_descriptor, f, indent=2)
-                    Console.info(f"[ANALYTICS] Generated schema descriptor: {schema_path}")
-                except Exception as e:
-                    Console.warn(f"[ANALYTICS] Failed to generate schema descriptor: {e}")
+                if not self.sql_only_mode:
+                    try:
+                        schema_descriptor = self._generate_schema_descriptor(tables_dir)
+                        schema_path = tables_dir / "schema_descriptor.json"
+                        with open(schema_path, 'w') as f:
+                            import json
+                            json.dump(schema_descriptor, f, indent=2)
+                        Console.info(f"[ANALYTICS] Generated schema descriptor: {schema_path}")
+                    except Exception as e:
+                        Console.warn(f"[ANALYTICS] Failed to generate schema descriptor: {e}")
                     
                 Console.info(f"[ANALYTICS] Generated {table_count} comprehensive analytics tables")
                 Console.info(f"[ANALYTICS] Written {sql_count} tables to SQL database")
@@ -2363,6 +2371,9 @@ class OutputManager:
         sensor_context: Optional[Dict[str, Any]] = None
     ) -> List[Path]:
         """Render baseline charts that operators rely on for quick triage."""
+        if self.sql_only_mode:
+            Console.info("[CHARTS] SQL-only mode: Skipping chart generation")
+            return []
         try:
             import matplotlib.pyplot as plt  # type: ignore
             from matplotlib import dates as mdates  # type: ignore
@@ -3299,7 +3310,7 @@ class OutputManager:
             Console.warn(f"[CHARTS] OMR chart generation failed: {exc}")
 
         # OUT-14: Write chart generation log
-        if chart_log:
+        if chart_log and not self.sql_only_mode:
             try:
                 log_df = pd.DataFrame(chart_log)
                 tables_dir = charts_path.parent / "tables"

@@ -81,10 +81,23 @@ param(
     [switch]$Resume,
     
     [Parameter(Mandatory=$false)]
-    [switch]$DryRun
+    [switch]$DryRun,
+
+    [Parameter(Mandatory=$false)]
+    [int]$MaxBatches,
+
+    [Parameter(Mandatory=$false)]
+    [switch]$StartFromBeginning
 )
 
 # Ensure we're in the project root
+$OutputEncoding = [Console]::OutputEncoding
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+[Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)
+$PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'
+$env:PYTHONIOENCODING = 'utf-8'
+$env:PYTHONUTF8 = '1'
+
 $ScriptDir = Split-Path -Parent $PSCommandPath
 $ProjectRoot = Resolve-Path (Join-Path $ScriptDir "..\..") 
 Set-Location $ProjectRoot
@@ -104,6 +117,9 @@ $cmd += " --sql-database `"$SQLDatabase`""
 $cmd += " --tick-minutes $TickMinutes"
 $cmd += " --max-coldstart-attempts $MaxColdstartAttempts"
 $cmd += " --max-workers $MaxWorkers"
+
+if ($MaxBatches) { $cmd += " --max-batches $MaxBatches" }
+if ($StartFromBeginning) { $cmd += " --start-from-beginning" }
 
 if ($Resume) {
     $cmd += " --resume"

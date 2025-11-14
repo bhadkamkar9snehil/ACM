@@ -248,6 +248,13 @@ def _write_run_meta_json(local_vars: Dict[str, Any]) -> None:
 
 def _maybe_write_run_meta_json(local_vars: Dict[str, Any]) -> None:
     """Invoke run metadata writer if it is available in the module globals."""
+    # Enforce SQL-only: do not write meta.json when running in SQL mode
+    try:
+        if bool(local_vars.get('SQL_MODE')):
+            Console.info("[META] SQL-only mode: Skipping meta.json write")
+            return
+    except Exception:
+        pass
     writer = globals().get("_write_run_meta_json")
     if callable(writer):
         writer(local_vars)
@@ -480,7 +487,9 @@ def _ensure_local_index(df: pd.DataFrame) -> pd.DataFrame:
 # SQL helpers (local)
 # =======================
 def _sql_mode(cfg: Dict[str, Any]) -> bool:
-    return (cfg.get("runtime", {}).get("storage_backend", "file") == "sql")
+    """Check if SQL mode is enabled. SQL mode is now the DEFAULT."""
+    backend = cfg.get("runtime", {}).get("storage_backend", "sql")  # Changed default from "file" to "sql"
+    return backend == "sql"
 
 def _sql_connect(cfg: Dict[str, Any]) -> Optional[Any]:
     if not SQLClient:
@@ -1146,11 +1155,12 @@ def main() -> None:
                                     drop_df = pd.DataFrame(drop_records)
                                     drop_log_path = tables_dir / "feature_drop_log.csv"
                                     # Append mode to preserve history across runs
-                                    if drop_log_path.exists():
-                                        drop_df.to_csv(drop_log_path, mode='a', header=False, index=False)
-                                    else:
-                                        drop_df.to_csv(drop_log_path, mode='w', header=True, index=False)
-                                    Console.info(f"[FEAT] Logged {len(drop_records)} dropped features -> {drop_log_path}")
+                                    if not SQL_MODE:
+                                        if drop_log_path.exists():
+                                            drop_df.to_csv(drop_log_path, mode='a', header=False, index=False)
+                                        else:
+                                            drop_df.to_csv(drop_log_path, mode='w', header=True, index=False)
+                                        Console.info(f"[FEAT] Logged {len(drop_records)} dropped features -> {drop_log_path}")
                             except Exception as drop_e:
                                 Console.warn(f"[FEAT] Feature drop logging failed: {drop_e}")
                     
@@ -1574,10 +1584,11 @@ def main() -> None:
                             df_config = pd.concat([df_config, pd.DataFrame([new_row])], ignore_index=True)
                             Console.info(f"  Inserted {adj['param']}: {adj['new']}")
                     
-                    # Save config
-                    df_config.to_csv(config_table_path, index=False)
-                    Console.info(f"[ADAPTIVE] Config updated: {config_table_path}")
-                    Console.info(f"[ADAPTIVE] Rerun ACM to apply new parameters (current run continues with old params)")
+                    # Save config (file-mode only)
+                    if not SQL_MODE:
+                        df_config.to_csv(config_table_path, index=False)
+                        Console.info(f"[ADAPTIVE] Config updated: {config_table_path}")
+                        Console.info(f"[ADAPTIVE] Rerun ACM to apply new parameters (current run continues with old params)")
                     
                 except Exception as e:
                     Console.error(f"[ADAPTIVE] Failed to update config: {e}")
@@ -2110,9 +2121,10 @@ def main() -> None:
                                 if previous_weights:
                                     tuning_diagnostics["previous_weights"] = previous_weights
                                 
-                                with open(tune_path, 'w') as f:
-                                    json.dump(tuning_diagnostics, f, indent=2)
-                                Console.info(f"[TUNE] Saved tuning diagnostics -> {tune_path}")
+                                if not SQL_MODE:
+                                    with open(tune_path, 'w') as f:
+                                        json.dump(tuning_diagnostics, f, indent=2)
+                                    Console.info(f"[TUNE] Saved tuning diagnostics -> {tune_path}")
                                 
                                 # FUSE-12: Export fusion metrics to CSV for QA regression testing
                                 metrics_rows = []
@@ -2130,8 +2142,9 @@ def main() -> None:
                                 if metrics_rows:
                                     metrics_df = pd.DataFrame(metrics_rows)
                                     metrics_path = tables_dir / "fusion_metrics.csv"
-                                    metrics_df.to_csv(metrics_path, index=False)
-                                    Console.info(f"[TUNE] Saved fusion metrics -> {metrics_path}")
+                                    if not SQL_MODE:
+                                        metrics_df.to_csv(metrics_path, index=False)
+                                        Console.info(f"[TUNE] Saved fusion metrics -> {metrics_path}")
                             except Exception as save_e:
                                 Console.warn(f"[TUNE] Failed to save diagnostics: {save_e}")
                 except Exception as tune_e:
@@ -2312,17 +2325,18 @@ def main() -> None:
                     # Persist a refit marker so next run bypasses cache even if params unchanged
                     try:
                         # Atomic write: create temp then replace
-                        tmp_path = refit_flag_path.with_suffix(".pending")
-                        with tmp_path.open("w", encoding="utf-8") as rf:
-                            rf.write(f"requested_at={pd.Timestamp.now().isoformat()}\n")
-                            rf.write(f"reasons={'; '.join(reasons)}\n")
-                        try:
-                            import os
-                            os.replace(tmp_path, refit_flag_path)
-                        except Exception:
-                            # Fallback to rename on platforms without os.replace edge cases
-                            tmp_path.rename(refit_flag_path)
-                        Console.info(f"[MODEL] Refit flag written atomically -> {refit_flag_path}")
+                        if not SQL_MODE:
+                            tmp_path = refit_flag_path.with_suffix(".pending")
+                            with tmp_path.open("w", encoding="utf-8") as rf:
+                                rf.write(f"requested_at={pd.Timestamp.now().isoformat()}\n")
+                                rf.write(f"reasons={'; '.join(reasons)}\n")
+                            try:
+                                import os
+                                os.replace(tmp_path, refit_flag_path)
+                            except Exception:
+                                # Fallback to rename on platforms without os.replace edge cases
+                                tmp_path.rename(refit_flag_path)
+                            Console.info(f"[MODEL] Refit flag written atomically -> {refit_flag_path}")
                     except Exception as re:
                         Console.warn(f"[MODEL] Failed to write refit flag: {re}")
                 
@@ -2584,9 +2598,10 @@ def main() -> None:
                     if max_points and max_points > 0 and len(combined) > max_points:
                         combined = combined.iloc[-max_points:]
 
-                # CHART-04: Use uniform timestamp format without 'T' or 'Z' suffixes
-                combined.to_csv(buffer_path, index=True, date_format="%Y-%m-%d %H:%M:%S")
-                Console.info(f"[BASELINE] Updated rolling baseline buffer -> {buffer_path} rows={len(combined)} cols={len(combined.columns)}")
+                # CHART-04: Use uniform timestamp format without 'T' or 'Z' suffixes (file-mode only)
+                if not SQL_MODE:
+                    combined.to_csv(buffer_path, index=True, date_format="%Y-%m-%d %H:%M:%S")
+                    Console.info(f"[BASELINE] Updated rolling baseline buffer -> {buffer_path} rows={len(combined)} cols={len(combined.columns)}")
                 
                 # Write to SQL ACM_BaselineBuffer table if in SQL mode
                 if sql_client and SQL_MODE:
@@ -2681,7 +2696,10 @@ def main() -> None:
         # Check if dual-write mode is enabled (write to both file and SQL)
         dual_mode = cfg.get("output", {}).get("dual_mode", False)
         
-        if not SQL_MODE:
+        # FILE_MODE: Now explicitly enabled via config flag (default is SQL-only)
+        file_mode_enabled = cfg.get("output", {}).get("enable_file_mode", False)
+        
+        if not SQL_MODE and file_mode_enabled:
             # ---------- FILE MODE (or DUAL MODE) ----------
             with T.section("persist"):
                 out_log = run_dir / "run.jsonl"
@@ -2735,10 +2753,10 @@ def main() -> None:
                                 schema_dict["columns"].append(col_info)
                             
                             # Write schema.json with pretty formatting
-                            with schema_path.open("w", encoding="utf-8") as sf:
-                                json.dump(schema_dict, sf, indent=2, ensure_ascii=False)
-                            
-                            Console.info(f"[ART] {schema_path}")
+                            if not SQL_MODE:
+                                with schema_path.open("w", encoding="utf-8") as sf:
+                                    json.dump(schema_dict, sf, indent=2, ensure_ascii=False)
+                                Console.info(f"[ART] {schema_path}")
                         except Exception as se:
                             Console.warn(f"[IO] Failed to write schema.json: {se}")
                             
@@ -2786,24 +2804,25 @@ def main() -> None:
                 # Emit a lightweight culprits.jsonl for episode-level attribution
                 with T.section("persist.write_culprits"):
                     try:
-                        culprits_path = run_dir / "culprits.jsonl"
-                        with culprits_path.open("w", encoding="utf-8") as cj:
-                            for _, row in episodes.iterrows():
-                                # CHART-04: Use uniform timestamp format without 'T' or 'Z' suffixes
-                                start_ts_val = row.get("start_ts")
-                                end_ts_val = row.get("end_ts")
-                                start_ts_str = None
-                                end_ts_str = None
-                                if pd.notna(start_ts_val):
-                                    start_dt = pd.to_datetime(start_ts_val, errors="coerce")
-                                    if pd.notna(start_dt):
-                                        start_ts_str = start_dt.strftime("%Y-%m-%d %H:%M:%S")
-                                if pd.notna(end_ts_val):
-                                    end_dt = pd.to_datetime(end_ts_val, errors="coerce")
-                                    if pd.notna(end_dt):
-                                        end_ts_str = end_dt.strftime("%Y-%m-%d %H:%M:%S")
-                                
-                                rec = {
+                        if not SQL_MODE:
+                            culprits_path = run_dir / "culprits.jsonl"
+                            with culprits_path.open("w", encoding="utf-8") as cj:
+                                for _, row in episodes.iterrows():
+                                    # CHART-04: Use uniform timestamp format without 'T' or 'Z' suffixes
+                                    start_ts_val = row.get("start_ts")
+                                    end_ts_val = row.get("end_ts")
+                                    start_ts_str = None
+                                    end_ts_str = None
+                                    if pd.notna(start_ts_val):
+                                        start_dt = pd.to_datetime(start_ts_val, errors="coerce")
+                                        if pd.notna(start_dt):
+                                            start_ts_str = start_dt.strftime("%Y-%m-%d %H:%M:%S")
+                                    if pd.notna(end_ts_val):
+                                        end_dt = pd.to_datetime(end_ts_val, errors="coerce")
+                                        if pd.notna(end_dt):
+                                            end_ts_str = end_dt.strftime("%Y-%m-%d %H:%M:%S")
+                                    
+                                    rec = {
                                     "start_ts": start_ts_str,
                                     "end_ts": end_ts_str,
                                     "duration_hours": float(row.get("duration_hours", np.nan)) if pd.notna(row.get("duration_hours", np.nan)) else None,
@@ -2811,16 +2830,18 @@ def main() -> None:
                                     "method": "episode_primary_detector"
                                 }
                                 cj.write(json.dumps(rec, ensure_ascii=False) + "\n")
-                        Console.info(f"[ART] {culprits_path}")
+                        if not SQL_MODE:
+                            Console.info(f"[ART] {culprits_path}")
                     except Exception as ce:
                         Console.warn(f"[IO] Failed to write culprits.jsonl: {ce}")
                 with T.section("persist.write_runlog"):
-                    with out_log.open("w", encoding="utf-8") as f:
-                        f.write(json.dumps({
-                            "equip": equip,
-                            "rows": int(len(frame)),
-                            "kept_cols": meta.kept_cols
-                        }, ensure_ascii=False) + "\n")
+                    if not SQL_MODE:
+                        with out_log.open("w", encoding="utf-8") as f:
+                            f.write(json.dumps({
+                                "equip": equip,
+                                "rows": int(len(frame)),
+                                "kept_cols": meta.kept_cols
+                            }, ensure_ascii=False) + "\n")
 
                 if cache_payload:
                     with T.section("persist.cache_detectors"):
@@ -2883,37 +2904,39 @@ def main() -> None:
                 Console.info(f"[OUTPUTS] Generated {table_count} analytics tables via OutputManager")
                 Console.info(f"[OUTPUTS] Tables: {tables_dir}")
                 
-                # === FORECAST GENERATION ===
-                Console.info("[FORECAST] Generating forecast with uncertainty bands...")
-                try:
-                    with T.section("outputs.forecast"):
-                        charts_dir = run_dir / "charts"
-                        charts_dir.mkdir(exist_ok=True)
-                        
-                        forecast_ctx = {
-                            "run_dir": run_dir,
-                            "plots_dir": charts_dir,
-                            "tables_dir": tables_dir,
-                            "config": cfg,
-                            "run_id": run_id,
-                            "equip_id": int(equip_id) if 'equip_id' in locals() else None
-                        }
-                        forecast_result = forecast.run(forecast_ctx)
-                        if "error" not in forecast_result:
-                            Console.info(f"[FORECAST] Generated {len(forecast_result.get('tables', []))} forecast tables and {len(forecast_result.get('plots', []))} plots")
-                            if forecast_result.get("metrics"):
-                                metrics = forecast_result["metrics"]
-                                Console.info(f"[FORECAST] Series: {metrics.get('series_used', 'N/A')}, phi={metrics.get('ar1_phi', 0):.3f}, Horizon: {metrics.get('horizon', 0)} ({metrics.get('horizon_hours', 24)}h)")
-                        else:
-                            Console.warn(f"[FORECAST] {forecast_result['error']['message']}")
-                except Exception as e:
-                    Console.warn(f"[FORECAST] Forecast generation failed: {str(e)}")
+                # === FORECAST GENERATION (disabled by default in SQL-only mode) ===
+                forecast_enabled = cfg.get("output", {}).get("enable_forecast", False)
+                if forecast_enabled:
+                    Console.info("[FORECAST] Generating forecast with uncertainty bands...")
+                    try:
+                        with T.section("outputs.forecast"):
+                            charts_dir = run_dir / "charts"
+                            charts_dir.mkdir(exist_ok=True)
+                            
+                            forecast_ctx = {
+                                "run_dir": run_dir,
+                                "plots_dir": charts_dir,
+                                "tables_dir": tables_dir,
+                                "config": cfg,
+                                "run_id": run_id,
+                                "equip_id": int(equip_id) if 'equip_id' in locals() else None
+                            }
+                            forecast_result = forecast.run(forecast_ctx)
+                            if "error" not in forecast_result:
+                                Console.info(f"[FORECAST] Generated {len(forecast_result.get('tables', []))} forecast tables and {len(forecast_result.get('plots', []))} plots")
+                                if forecast_result.get("metrics"):
+                                    metrics = forecast_result["metrics"]
+                                    Console.info(f"[FORECAST] Series: {metrics.get('series_used', 'N/A')}, phi={metrics.get('ar1_phi', 0):.3f}, Horizon: {metrics.get('horizon', 0)} ({metrics.get('horizon_hours', 24)}h)")
+                            else:
+                                Console.warn(f"[FORECAST] {forecast_result['error']['message']}")
+                    except Exception as e:
+                        Console.warn(f"[FORECAST] Forecast generation failed: {str(e)}")
 
             except Exception as e:
                 Console.warn(f"[OUTPUTS] Output generation failed: {e}")
 
-            # Check if chart generation is enabled
-            charts_enabled = (cfg.get("outputs", {}) or {}).get("charts", {}).get("enabled", True)
+            # Check if chart generation is enabled (default FALSE for SQL-only mode)
+            charts_enabled = (cfg.get("outputs", {}) or {}).get("charts", {}).get("enabled", False)
             
             if charts_enabled:
                 with T.section("outputs.charts"):
@@ -2970,8 +2993,8 @@ def main() -> None:
         except Exception as e:
             Console.warn(f"[OUTPUTS] Comprehensive analytics generation failed: {e}")
 
-        # Check if chart generation is enabled
-        charts_enabled = (cfg.get("outputs", {}) or {}).get("charts", {}).get("enabled", True)
+        # Check if chart generation is enabled (default FALSE for SQL-only mode)
+        charts_enabled = (cfg.get("outputs", {}) or {}).get("charts", {}).get("enabled", False)
         
         if charts_enabled:
             with T.section("outputs.charts"):
