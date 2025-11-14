@@ -26,11 +26,19 @@ import json
 import subprocess
 import sys
 import textwrap
+import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 from datetime import datetime, timedelta
 import pyodbc
+
+# Ensure project root is on sys.path so `core` imports work when running as a script
+project_root = Path(__file__).resolve().parents[1]
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
+from core.output_manager import ALLOWED_TABLES
 
 
 class SQLBatchRunner:
@@ -60,8 +68,28 @@ class SQLBatchRunner:
         self.start_from_beginning = start_from_beginning
     
     def _get_sql_connection(self) -> pyodbc.Connection:
-        """Create SQL connection."""
-        return pyodbc.connect(self.sql_conn_string)
+        """Create SQL connection with a short timeout."""
+        # Use the pyodbc timeout parameter instead of a custom
+        # connection-string attribute to avoid driver errors.
+        return pyodbc.connect(self.sql_conn_string, timeout=10)
+
+    def _test_sql_connection(self) -> bool:
+        """Quick sanity check that SQL is reachable.
+
+        This is used once per equipment run so that connection issues are
+        clearly reported up front instead of being hit repeatedly inside the
+        coldstart loop.
+        """
+        try:
+            with self._get_sql_connection() as conn:
+                cur = conn.cursor()
+                cur.execute("SELECT 1")
+                cur.fetchone()
+            print("[SQL] Connection test OK")
+            return True
+        except Exception as exc:
+            print(f"[ERROR] SQL connection test failed: {exc}")
+            return False
 
     # ------------------------
     # SQL helpers (config/progress)
@@ -118,6 +146,124 @@ class SQLBatchRunner:
                 print(f"[CFG] Set runtime.tick_minutes={minutes} for EquipID={equip_id}")
         except Exception as e:
             print(f"[WARN] Could not set runtime.tick_minutes for EquipID={equip_id}: {e}")
+
+    def _infer_tick_minutes_from_raw(self, equip_name: str, target_rows_per_batch: int = 5000) -> int:
+        """
+        Infer a reasonable tick size (minutes) from the raw historian table so
+        that each batch processes roughly target_rows_per_batch samples.
+        """
+        try:
+            table_name = f"{equip_name}_Data"
+            with self._get_sql_connection() as conn:
+                cur = conn.cursor()
+                cur.execute(f"SELECT MIN(EntryDateTime), MAX(EntryDateTime), COUNT(*) FROM {table_name}")
+                row = cur.fetchone()
+                cur.close()
+            if not row or not row[0] or not row[1] or not row[2]:
+                return self.tick_minutes
+            min_ts, max_ts, total_rows = row[0], row[1], int(row[2])
+            total_minutes = max((max_ts - min_ts).total_seconds() / 60.0, 1.0)
+            rows_per_minute = total_rows / total_minutes if total_minutes > 0 else 0.0
+            if rows_per_minute <= 0:
+                return self.tick_minutes
+            inferred = int(max(1, round(target_rows_per_batch / rows_per_minute)))
+            inferred = max(5, min(inferred, 240))  # clamp to sane range
+            print(
+                f"[CONFIG] Inferred tick_minutes={inferred} for {equip_name} "
+                f"(rows={total_rows}, minutes={total_minutes:.1f})"
+            )
+            return inferred
+        except Exception as e:
+            print(f"[WARN] Could not infer tick_minutes from raw table for {equip_name}: {e}")
+            return self.tick_minutes
+
+    def _truncate_outputs_for_equip(self, equip_id: int) -> None:
+        """
+        Development helper: delete existing outputs for an equipment from ACM
+        analytical tables so a dev batch run starts from a clean slate.
+        """
+        try:
+            with self._get_sql_connection() as conn:
+                cur = conn.cursor()
+                for table in sorted(ALLOWED_TABLES):
+                    try:
+                        cur.execute(
+                            f"IF OBJECT_ID('dbo.{table}', 'U') IS NOT NULL "
+                            f"AND COL_LENGTH('dbo.{table}', 'EquipID') IS NOT NULL "
+                            f"DELETE FROM dbo.{table} WHERE EquipID = ?",
+                            (equip_id,),
+                        )
+                    except Exception as tbl_err:
+                        print(f"[WARN] Failed to truncate {table} for EquipID={equip_id}: {tbl_err}")
+                conn.commit()
+            print(f"[DEV] Truncated SQL outputs for EquipID={equip_id}")
+        except Exception as e:
+            print(f"[WARN] Failed to truncate outputs for EquipID={equip_id}: {e}")
+
+    def _inspect_last_run_outputs(self, equip_name: str) -> None:
+        """
+        Lightweight QA: after a batch run, report row counts in key tables for
+        the last RunID for this equipment so a dev can spot anomalies.
+        """
+        try:
+            equip_id = self._get_equip_id(equip_name)
+            if not equip_id:
+                print(f"[QA] EquipID not found for {equip_name}, skipping output inspection")
+                return
+            with self._get_sql_connection() as conn:
+                cur = conn.cursor()
+                # ACM_Runs schema uses StartedAt/CompletedAt, not window columns.
+                # For QA we just need the latest RunID for this EquipID.
+                cur.execute(
+                    "SELECT TOP 1 RunID, StartedAt, CompletedAt "
+                    "FROM dbo.ACM_Runs WHERE EquipID = ? ORDER BY StartedAt DESC",
+                    (equip_id,),
+                )
+                row = cur.fetchone()
+                if not row:
+                    print(f"[QA] No ACM_Runs entry found for EquipID={equip_id}, skipping inspection")
+                    return
+                run_id, started_at, completed_at = row[0], row[1], row[2]
+                print(
+                    f"[QA] Inspecting outputs for EquipID={equip_id}, RunID={run_id}, "
+                    f"window=[{started_at},{completed_at})"
+                )
+                tables_to_check: List[Tuple[str, bool]] = [
+                    ("ACM_HealthTimeline", True),
+                    ("ACM_SensorHotspots", True),
+                    ("ACM_DefectTimeline", True),
+                    ("ACM_HealthForecast_TS", True),
+                    ("ACM_FailureForecast_TS", True),
+                    ("ACM_RUL_Summary", True),
+                    ("ACM_RUL_Attribution", True),
+                    ("ACM_EpisodeMetrics", True),
+                ]
+                for table_name, has_run in tables_to_check:
+                    try:
+                        if has_run:
+                            cur.execute(
+                                f"IF OBJECT_ID('dbo.{table_name}', 'U') IS NOT NULL "
+                                f"SELECT COUNT(*) FROM dbo.{table_name} WHERE EquipID = ? AND RunID = ? "
+                                f"ELSE SELECT 0",
+                                (equip_id, run_id),
+                            )
+                        else:
+                            cur.execute(
+                                f"IF OBJECT_ID('dbo.{table_name}', 'U') IS NOT NULL "
+                                f"SELECT COUNT(*) FROM dbo.{table_name} WHERE EquipID = ? "
+                                f"ELSE SELECT 0",
+                                (equip_id,),
+                            )
+                        cnt_row = cur.fetchone()
+                        count_val = int(cnt_row[0]) if cnt_row else 0
+                        print(
+                            f"[QA] {table_name}: {count_val} row(s) for EquipID={equip_id} "
+                            f"{'(RunID scoped)' if has_run else ''}"
+                        )
+                    except Exception as tbl_err:
+                        print(f"[QA] Skipped {table_name}: {tbl_err}")
+        except Exception as e:
+            print(f"[QA] Output inspection failed for {equip_name}: {e}")
 
     def _reset_progress_to_beginning(self, equip_id: int) -> None:
         """Optional: Clear Runs and Coldstart state to force start from earliest EntryDateTime."""
@@ -203,6 +349,7 @@ class SQLBatchRunner:
         Returns:
             Tuple of (is_complete, accumulated_rows, required_rows)
         """
+        print(f"[COLDSTART] {equip_name}: Checking coldstart status in SQL (ModelRegistry/ACM_ColdstartState)...")
         try:
             conn = self._get_sql_connection()
             cur = conn.cursor()
@@ -214,6 +361,7 @@ class SQLBatchRunner:
                 cur.close()
                 conn.close()
                 # When equip not found, use default min rows 50
+                print(f"[COLDSTART] {equip_name}: Equipment not found in Equipment table; using default minimum rows=50")
                 return False, 0, 50
             
             equip_id = row[0]
@@ -239,6 +387,7 @@ class SQLBatchRunner:
             
             # Coldstart complete if models exist
             if model_count >= 3:
+                print(f"[COLDSTART] {equip_name}: Detected existing models in ModelRegistry (count={model_count})")
                 return True, 0, 0
             
             # Determine required rows: prefer ColdstartState.RequiredRows, else config runtime.coldstart_min_rows (default 50)
@@ -246,7 +395,13 @@ class SQLBatchRunner:
             if row:
                 status, accum_rows, req_rows = row
                 required = req_rows or min_required
-                return status == 'COMPLETE', accum_rows or 0, required
+                is_complete = status == 'COMPLETE'
+                print(
+                    f"[COLDSTART] {equip_name}: Status={status}, "
+                    f"AccumulatedRows={accum_rows or 0}, RequiredRows={required}"
+                )
+                return is_complete, accum_rows or 0, required
+            print(f"[COLDSTART] {equip_name}: No ACM_ColdstartState row; using default minimum rows={min_required}")
             return False, 0, min_required
             
         except Exception as e:
@@ -276,12 +431,15 @@ class SQLBatchRunner:
             return True, "OK"
         
         print(f"[RUN] {printable}")
-        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        # Force SQL mode in acm_main so that SQL historian + stored procedures
+        # are used instead of legacy CSV/file mode, regardless of older config.
+        env = dict(os.environ)
+        env["ACM_FORCE_SQL_MODE"] = "1"
+        result = subprocess.run(cmd, capture_output=True, text=True, check=False, env=env)
         
         # Parse outcome from logs
         outcome = "FAIL"
         if result.returncode == 0:
-            # Look for outcome in output
             for line in result.stdout.split('\n'):
                 if 'outcome=OK' in line:
                     outcome = "OK"
@@ -290,9 +448,24 @@ class SQLBatchRunner:
                     outcome = "NOOP"
                     break
             else:
-                outcome = "OK"  # Assume OK if no explicit outcome
+                outcome = "OK"
         
         success = result.returncode == 0
+
+        # If the batch failed or outcome was not OK/NOOP, surface logs so the
+        # caller can see exactly what went wrong inside acm_main.
+        if not success or outcome == "FAIL":
+            print(f"[RUN-DEBUG] {equip_name}: acm_main exited with code {result.returncode}")
+            if result.stdout:
+                print(f"[RUN-DEBUG] {equip_name}: --- acm_main stdout ---")
+                print(result.stdout)
+            if result.stderr:
+                print(f"[RUN-DEBUG] {equip_name}: --- acm_main stderr ---", file=sys.stderr)
+                print(result.stderr, file=sys.stderr)
+
+        if success and outcome in ("OK", "NOOP"):
+            # After a successful batch, inspect SQL outputs for this equipment
+            self._inspect_last_run_outputs(equip_name)
         return success, outcome
     
     def _process_coldstart(self, equip_name: str, *, dry_run: bool = False) -> bool:
@@ -317,7 +490,7 @@ class SQLBatchRunner:
             # Check current status
             is_complete, accum_rows, req_rows = self._check_coldstart_status(equip_name)
             if is_complete:
-                print(f"[COLDSTART] ✓ {equip_name}: Coldstart COMPLETE!")
+                print(f"[COLDSTART] {equip_name}: Coldstart COMPLETE!")
                 return True
             
             print(f"[COLDSTART] {equip_name}: Status - {accum_rows}/{req_rows} rows accumulated")
@@ -326,23 +499,23 @@ class SQLBatchRunner:
             success, outcome = self._run_acm_batch(equip_name, dry_run=dry_run)
             
             if not success and outcome == "FAIL":
-                print(f"[COLDSTART] ✗ {equip_name}: Attempt {attempt} FAILED (error)")
+                print(f"[COLDSTART] {equip_name}: Attempt {attempt} FAILED (error)")
                 continue
             
             if outcome == "NOOP":
-                print(f"[COLDSTART] → {equip_name}: Deferred (insufficient data), will retry...")
+                print(f"[COLDSTART] {equip_name}: Deferred (insufficient data), will retry...")
                 continue
             
             if outcome == "OK":
                 # Check if coldstart completed
                 is_complete, _, _ = self._check_coldstart_status(equip_name)
                 if is_complete:
-                    print(f"[COLDSTART] ✓ {equip_name}: Coldstart COMPLETE!")
+                    print(f"[COLDSTART] {equip_name}: Coldstart COMPLETE!")
                     return True
                 else:
-                    print(f"[COLDSTART] → {equip_name}: Making progress, continuing...")
+                    print(f"[COLDSTART] {equip_name}: Making progress, continuing...")
         
-        print(f"[COLDSTART] ✗ {equip_name}: Max attempts ({self.max_coldstart_attempts}) reached without completion")
+        print(f"[COLDSTART] {equip_name}: Max attempts ({self.max_coldstart_attempts}) reached without completion")
         return False
     
     def _process_batches(self, equip_name: str, start_from: Optional[datetime] = None, 
@@ -365,7 +538,7 @@ class SQLBatchRunner:
         # Get data range
         min_ts, max_ts = self._get_data_range(equip_name)
         if not min_ts or not max_ts:
-            print(f"[BATCH] ✗ {equip_name}: No data available in historian")
+            print(f"[BATCH] {equip_name}: No data available in historian")
             return 0
         
         print(f"[BATCH] {equip_name}: Data available from {min_ts} to {max_ts}")
@@ -408,7 +581,7 @@ class SQLBatchRunner:
             success, outcome = self._run_acm_batch(equip_name, dry_run=dry_run)
             
             if not success:
-                print(f"[BATCH] ✗ {equip_name}: Batch {batch_num} FAILED")
+                print(f"[BATCH] {equip_name}: Batch {batch_num} FAILED")
                 break
             
             batches_completed += 1
@@ -453,6 +626,11 @@ class SQLBatchRunner:
         print(f"\n{'#'*60}")
         print(f"# Processing Equipment: {equip_name}")
         print(f"{'#'*60}")
+
+        # Fail fast if SQL is unreachable so we do not appear hung
+        if not self._test_sql_connection():
+            print(f"[ERROR] {equip_name}: Skipping processing due to SQL connection failure")
+            return False
         
         # Load progress
         progress = self._load_progress()
@@ -461,7 +639,14 @@ class SQLBatchRunner:
         # Apply per-run configuration overrides
         equip_id = self._get_equip_id(equip_name)
         if equip_id:
-            self._set_tick_minutes(equip_id, self.tick_minutes)
+            # In dev mode, optionally infer tick size from raw data
+            if self.start_from_beginning and not resume:
+                inferred = self._infer_tick_minutes_from_raw(equip_name)
+                self.tick_minutes = inferred
+                self._set_tick_minutes(equip_id, inferred)
+                self._truncate_outputs_for_equip(equip_id)
+            else:
+                self._set_tick_minutes(equip_id, self.tick_minutes)
             if self.start_from_beginning and not resume:
                 self._reset_progress_to_beginning(equip_id)
         
@@ -548,7 +733,7 @@ def main() -> int:
 
     args = parser.parse_args()
 
-    # Build SQL connection string
+    # Build SQL connection string (login timeout is controlled via pyodbc.connect timeout)
     sql_conn_string = (
         f"DRIVER={{ODBC Driver 17 for SQL Server}};"
         f"SERVER={args.sql_server};"

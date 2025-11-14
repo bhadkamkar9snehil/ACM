@@ -25,7 +25,7 @@
       "id": 1,
       "type": "bargauge",
       "title": "Overall Health Score",
-      "gridPos": { "h": 3, "w": 5, "x": 0, "y": 0 },
+      "gridPos": { "h": 3, "w": 4, "x": 0, "y": 0 },
       "datasource": { "type": "mssql", "uid": "${datasource}" },
       "fieldConfig": {
         "defaults": {
@@ -81,7 +81,7 @@
       "id": 2,
       "type": "stat",
       "title": "Current Status",
-      "gridPos": { "h": 3, "w": 3, "x": 5, "y": 0 },
+      "gridPos": { "h": 3, "w": 4, "x": 4, "y": 0 },
       "datasource": { "type": "mssql", "uid": "${datasource}" },
       "fieldConfig": {
         "defaults": {
@@ -131,10 +131,54 @@
       ]
     },
     {
+      "id": 23,
+      "type": "stat",
+      "title": "Remaining Useful Life (Hours)",
+      "gridPos": { "h": 3, "w": 4, "x": 8, "y": 0 },
+      "datasource": { "type": "mssql", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": 0 },
+              { "color": "yellow", "value": 24 },
+              { "color": "green", "value": 72 }
+            ]
+          },
+          "unit": "h"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto"
+      },
+      "pluginVersion": "12.2.1",
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT TOP 1 RUL_Hours\nFROM ACM_RUL_Summary\nWHERE EquipID = $equipment\nORDER BY LastUpdate DESC"
+        }
+      ]
+    },
+    {
       "id": 3,
       "type": "stat",
       "title": "Days Since Last Alert",
-      "gridPos": { "h": 3, "w": 4, "x": 8, "y": 0 },
+      "gridPos": { "h": 3, "w": 4, "x": 12, "y": 0 },
       "datasource": { "type": "mssql", "uid": "${datasource}" },
       "fieldConfig": {
         "defaults": {
@@ -179,7 +223,7 @@
       "id": 4,
       "type": "stat",
       "title": "Active Episodes (Last Run)",
-      "gridPos": { "h": 3, "w": 4, "x": 12, "y": 0 },
+      "gridPos": { "h": 3, "w": 4, "x": 16, "y": 0 },
       "datasource": { "type": "mssql", "uid": "${datasource}" },
       "fieldConfig": {
         "defaults": {
@@ -223,7 +267,7 @@
       "id": 5,
       "type": "stat",
       "title": "Worst Sensor (Current Run)",
-      "gridPos": { "h": 3, "w": 5, "x": 16, "y": 0 },
+      "gridPos": { "h": 3, "w": 4, "x": 20, "y": 0 },
       "datasource": { "type": "mssql", "uid": "${datasource}" },
       "fieldConfig": {
         "defaults": {
@@ -331,7 +375,7 @@
       "id": 21,
       "type": "timeseries",
       "title": "Health Forecast (Next 24h)",
-      "gridPos": { "h": 6, "w": 16, "x": 0, "y": 35 },
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 3 },
       "datasource": { "type": "mssql", "uid": "${datasource}" },
       "fieldConfig": {
         "defaults": {
@@ -371,400 +415,10 @@
       ]
     },
     {
-      "id": 22,
-      "type": "timeseries",
-      "title": "Failure Probability (Next 24h)",
-      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 35 },
-      "datasource": { "type": "mssql", "uid": "${datasource}" },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "palette-classic" },
-          "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "smooth",
-            "lineWidth": 2,
-            "fillOpacity": 0,
-            "showPoints": "never",
-            "axisPlacement": "auto",
-            "axisColorMode": "text",
-            "axisBorderShow": false,
-            "thresholdsStyle": { "mode": "line" }
-          },
-          "unit": "percent"
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "showLegend": false,
-          "displayMode": "list",
-          "placement": "bottom",
-          "calcs": []
-        },
-        "tooltip": { "mode": "single", "sort": "none", "hideZeros": false }
-      },
-      "pluginVersion": "12.2.1",
-      "targets": [
-        {
-          "refId": "A",
-          "format": "time_series",
-          "rawQuery": true,
-          "rawSql": "SELECT\n  Timestamp AS time,\n  FailureProb * 100.0 AS [Failure Probability]\nFROM ACM_FailureForecast_TS\nWHERE EquipID = $equipment\n  AND RunID = (\n      SELECT TOP 1 RunID\n      FROM ACM_FailureForecast_TS\n      WHERE EquipID = $equipment\n      ORDER BY RunID DESC\n  )\n  AND $__timeFilter(Timestamp)\nORDER BY Timestamp"
-        }
-      ]
-    },
-    {
-      "id": 23,
-      "type": "stat",
-      "title": "Remaining Useful Life (Hours)",
-      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 41 },
-      "datasource": { "type": "mssql", "uid": "${datasource}" },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "red", "value": 0 },
-              { "color": "yellow", "value": 24 },
-              { "color": "green", "value": 72 }
-            ]
-          },
-          "unit": "h"
-        },
-        "overrides": []
-      },
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": ["lastNotNull"],
-          "fields": "",
-          "values": false
-        },
-        "showPercentChange": false,
-        "textMode": "auto"
-      },
-      "pluginVersion": "12.2.1",
-      "targets": [
-        {
-          "refId": "A",
-          "format": "table",
-          "rawQuery": true,
-          "rawSql": "SELECT TOP 1 RUL_Hours\nFROM ACM_RUL_Summary\nWHERE EquipID = $equipment\nORDER BY LastUpdate DESC"
-        }
-      ]
-    },
-    {
-      "id": 24,
-      "type": "table",
-      "title": "Failure Attribution by Sensor (at Predicted Failure Time)",
-      "gridPos": { "h": 8, "w": 18, "x": 6, "y": 41 },
-      "datasource": { "type": "mssql", "uid": "${datasource}" },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "thresholds" },
-          "custom": {
-            "align": "auto",
-            "cellOptions": { "type": "auto" },
-            "footer": { "reducers": [] },
-            "inspect": false
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "green", "value": 0 },
-              { "color": "yellow", "value": 0.2 },
-              { "color": "red", "value": 0.5 }
-            ]
-          },
-          "unit": "percent"
-        },
-        "overrides": []
-      },
-      "options": {
-        "cellHeight": "sm",
-        "showHeader": true,
-        "sortBy": [
-          { "desc": true, "displayName": "FailureContribution" }
-        ]
-      },
-      "pluginVersion": "12.2.1",
-      "targets": [
-        {
-          "refId": "A",
-          "format": "table",
-          "rawQuery": true,
-          "rawSql": "SELECT TOP 10\n  ra.SensorName,\n  ra.FailureContribution * 100.0 AS FailureContribution,\n  ra.ZScoreAtFailure,\n  ra.AlertCount,\n  ra.FailureTime,\n  ISNULL(ff.FailureProb * 100.0, 0.0) AS FailureProbabilityAtTime\nFROM ACM_RUL_Attribution ra\nOUTER APPLY (\n  SELECT TOP 1 FailureProb\n  FROM ACM_FailureForecast_TS ff\n  WHERE ff.EquipID = ra.EquipID\n    AND ff.RunID = ra.RunID\n    AND ff.Timestamp >= ra.FailureTime\n  ORDER BY ff.Timestamp ASC\n) ff\nWHERE ra.EquipID = $equipment\n  AND ra.RunID = (\n      SELECT TOP 1 RunID\n      FROM ACM_RUL_Attribution\n      WHERE EquipID = $equipment\n      ORDER BY FailureTime DESC\n  )\nORDER BY FailureContribution DESC"
-        }
-      ]
-    },
-    {
-      "id": 25,
-      "type": "table",
-      "title": "Maintenance Recommendation Window",
-      "gridPos": { "h": 4, "w": 12, "x": 0, "y": 49 },
-      "datasource": { "type": "mssql", "uid": "${datasource}" },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "thresholds" },
-          "custom": {
-            "align": "auto",
-            "cellOptions": { "type": "auto" },
-            "footer": { "reducers": [] },
-            "inspect": false
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "green", "value": 0 },
-              { "color": "yellow", "value": 30 },
-              { "color": "red", "value": 60 }
-            ]
-          },
-          "unit": "percent"
-        },
-        "overrides": []
-      },
-      "options": {
-        "cellHeight": "sm",
-        "showHeader": true,
-        "sortBy": [
-          { "desc": false, "displayName": "PreferredWindowStart" }
-        ]
-      },
-      "pluginVersion": "12.2.1",
-      "targets": [
-        {
-          "refId": "A",
-          "format": "table",
-          "rawQuery": true,
-          "rawSql": "SELECT\n  EarliestMaintenance,\n  PreferredWindowStart,\n  PreferredWindowEnd,\n  FailureProbAtWindowEnd * 100.0 AS FailureProbabilityAtEnd\nFROM ACM_MaintenanceRecommendation\nWHERE EquipID = $equipment\n  AND RunID = (\n      SELECT TOP 1 RunID\n      FROM ACM_MaintenanceRecommendation\n      WHERE EquipID = $equipment\n      ORDER BY PreferredWindowEnd DESC\n  )"
-        }
-      ]
-    },
-    {
-      "id": 26,
-      "type": "timeseries",
-      "title": "Sensor Forecast (Top Hot Sensors)",
-      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 49 },
-      "datasource": { "type": "mssql", "uid": "${datasource}" },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "palette-classic" },
-          "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "smooth",
-            "lineWidth": 2,
-            "fillOpacity": 20,
-            "showPoints": "never",
-            "axisPlacement": "auto",
-            "axisColorMode": "text",
-            "axisBorderShow": false,
-            "thresholdsStyle": { "mode": "line" }
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "showLegend": true,
-          "displayMode": "list",
-          "placement": "bottom",
-          "calcs": []
-        },
-        "tooltip": { "mode": "multi", "sort": "desc", "hideZeros": false }
-      },
-      "pluginVersion": "12.2.1",
-      "targets": [
-        {
-          "refId": "A",
-          "format": "time_series",
-          "rawQuery": true,
-          "rawSql": "SELECT\n  Timestamp AS time,\n  SensorName AS metric,\n  ForecastValue AS value\nFROM ACM_SensorForecast_TS\nWHERE EquipID = $equipment\n  AND RunID = (\n      SELECT TOP 1 RunID\n      FROM ACM_SensorForecast_TS\n      WHERE EquipID = $equipment\n      ORDER BY RunID DESC\n  )\n  AND $__timeFilter(Timestamp)\nORDER BY Timestamp, SensorName"
-        }
-      ]
-    },
-    {
-      "id": 8,
-      "type": "state-timeline",
-      "title": "Operating Regime Timeline",
-      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 3 },
-      "datasource": { "type": "mssql", "uid": "${datasource}" },
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "lineWidth": 0,
-            "fillOpacity": 70,
-            "spanNulls": false,
-            "insertNulls": false,
-            "hideFrom": { "tooltip": false, "viz": false, "legend": false },
-            "axisPlacement": "auto"
-          },
-          "color": { "mode": "palette-classic" }
-        },
-        "overrides": []
-      },
-      "options": {
-        "mergeValues": true,
-        "showValue": "auto",
-        "alignValue": "left",
-        "rowHeight": 0.9,
-        "legend": {
-          "showLegend": true,
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none",
-          "hideZeros": false
-        }
-      },
-      "pluginVersion": "12.2.1",
-      "targets": [
-        {
-          "refId": "A",
-          "format": "time_series",
-          "rawQuery": true,
-          "rawSql": "SELECT\n  Timestamp AS time,\n  RegimeState AS value\nFROM ACM_RegimeTimeline\nWHERE EquipID = $equipment\n  AND RunID = (\n      SELECT TOP 1 RunID\n      FROM ACM_RegimeTimeline\n      WHERE EquipID = $equipment\n      ORDER BY RunID DESC\n  )\n  AND $__timeFilter(Timestamp)\nORDER BY Timestamp"
-        }
-      ]
-    },
-    {
-      "id": 9,
-      "type": "barchart",
-      "title": "Current Detector Contributions",
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 10 },
-      "datasource": { "type": "mssql", "uid": "${datasource}" },
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "lineWidth": 1,
-            "fillOpacity": 80,
-            "gradientMode": "none",
-            "axisPlacement": "auto",
-            "axisLabel": "",
-            "axisColorMode": "text",
-            "axisBorderShow": false,
-            "scaleDistribution": { "type": "linear" },
-            "axisCenteredZero": false,
-            "hideFrom": { "tooltip": false, "viz": false, "legend": false },
-            "thresholdsStyle": { "mode": "off" }
-          },
-          "color": { "mode": "thresholds" },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "green", "value": 0 },
-              { "color": "yellow", "value": 50 },
-              { "color": "red", "value": 75 }
-            ]
-          },
-          "unit": "percent"
-        },
-        "overrides": []
-      },
-      "options": {
-        "orientation": "horizontal",
-        "xTickLabelRotation": 0,
-        "xTickLabelSpacing": 0,
-        "showValue": "auto",
-        "stacking": "none",
-        "groupWidth": 0.7,
-        "barWidth": 0.97,
-        "barRadius": 0,
-        "fullHighlight": false,
-        "tooltip": {
-          "mode": "single",
-          "sort": "none",
-          "hideZeros": false
-        },
-        "legend": {
-          "showLegend": true,
-          "displayMode": "list",
-          "placement": "bottom",
-          "calcs": []
-        }
-      },
-      "pluginVersion": "12.2.1",
-      "targets": [
-        {
-          "refId": "A",
-          "format": "table",
-          "rawQuery": true,
-          "rawSql": "SELECT TOP 10\n       DetectorType AS detector,\n       ContributionPct AS contribution\nFROM ACM_ContributionCurrent\nWHERE EquipID = $equipment\n  AND RunID = (\n      SELECT TOP 1 RunID\n      FROM ACM_ContributionCurrent\n      WHERE EquipID = $equipment\n      ORDER BY RunID DESC\n  )\nORDER BY ContributionPct DESC"
-        }
-      ]
-    },
-    {
-      "id": 10,
-      "type": "timeseries",
-      "title": "Detector Contributions Over Time",
-      "gridPos": { "h": 8, "w": 16, "x": 8, "y": 10 },
-      "datasource": { "type": "mssql", "uid": "${datasource}" },
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "smooth",
-            "barAlignment": 0,
-            "barWidthFactor": 0.6,
-            "lineWidth": 2,
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "spanNulls": false,
-            "insertNulls": false,
-            "showPoints": "never",
-            "showValues": false,
-            "pointSize": 5,
-            "stacking": {
-              "mode": "none",
-              "group": "A"
-            },
-            "axisPlacement": "auto",
-            "axisLabel": "",
-            "axisColorMode": "text",
-            "axisBorderShow": false,
-            "scaleDistribution": { "type": "linear" },
-            "axisCenteredZero": false,
-            "hideFrom": { "tooltip": false, "viz": false, "legend": false },
-            "thresholdsStyle": { "mode": "line" }
-          },
-          "color": { "mode": "palette-classic" },
-          "unit": "percent"
-        },
-        "overrides": []
-      },
-      "options": {
-        "tooltip": { "mode": "single", "sort": "none", "hideZeros": false },
-        "legend": {
-          "showLegend": true,
-          "displayMode": "list",
-          "placement": "bottom",
-          "calcs": []
-        }
-      },
-      "pluginVersion": "12.2.1",
-      "targets": [
-        {
-          "refId": "A",
-          "format": "time_series",
-          "rawQuery": true,
-          "rawSql": "SELECT\n  Timestamp AS time,\n  DetectorType AS metric,\n  ContributionPct AS value\nFROM ACM_ContributionTimeline\nWHERE EquipID = $equipment\n  AND RunID = (\n      SELECT TOP 1 RunID\n      FROM ACM_ContributionTimeline\n      WHERE EquipID = $equipment\n      ORDER BY RunID DESC\n  )\n  AND $__timeFilter(Timestamp)\nORDER BY Timestamp, DetectorType"
-        }
-      ]
-    },
-    {
       "id": 11,
       "type": "table",
       "title": "Sensor Hotspots",
-      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 18 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 10 },
       "datasource": { "type": "mssql", "uid": "${datasource}" },
       "fieldConfig": {
         "defaults": {
@@ -805,159 +459,10 @@
       ]
     },
     {
-      "id": 13,
-      "type": "barchart",
-      "title": "Health Zone Distribution by Period",
-      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 18 },
-      "datasource": { "type": "mssql", "uid": "${datasource}" },
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "lineWidth": 1,
-            "fillOpacity": 80,
-            "gradientMode": "none",
-            "axisPlacement": "auto",
-            "axisLabel": "",
-            "axisColorMode": "text",
-            "axisBorderShow": false,
-            "scaleDistribution": { "type": "linear" },
-            "axisCenteredZero": false,
-            "hideFrom": { "tooltip": false, "viz": false, "legend": false },
-            "thresholdsStyle": { "mode": "off" }
-          },
-          "color": { "mode": "palette-classic" },
-          "unit": "percent"
-        },
-        "overrides": []
-      },
-      "options": {
-        "orientation": "vertical",
-        "xTickLabelRotation": 0,
-        "xTickLabelSpacing": 100,
-        "showValue": "auto",
-        "stacking": { "mode": "normal" },
-        "groupWidth": 0.7,
-        "barWidth": 0.97,
-        "barRadius": 0,
-        "fullHighlight": false,
-        "tooltip": {
-          "mode": "single",
-          "sort": "none",
-          "hideZeros": false
-        },
-        "legend": {
-          "showLegend": true,
-          "displayMode": "list",
-          "placement": "bottom",
-          "calcs": []
-        }
-      },
-      "pluginVersion": "12.2.1",
-      "targets": [
-        {
-          "refId": "A",
-          "format": "table",
-          "rawQuery": true,
-          "rawSql": "SELECT\n    PeriodStart AS period,\n    SUM(CASE WHEN HealthZone = 'GOOD'  THEN ZonePct ELSE 0 END) AS GoodPct,\n    SUM(CASE WHEN HealthZone = 'WATCH' THEN ZonePct ELSE 0 END) AS WatchPct,\n    SUM(CASE WHEN HealthZone = 'ALERT' THEN ZonePct ELSE 0 END) AS AlertPct\nFROM ACM_HealthZoneByPeriod\nWHERE EquipID = $equipment\n  AND RunID = (\n      SELECT TOP 1 RunID\n      FROM ACM_HealthZoneByPeriod\n      WHERE EquipID = $equipment\n      ORDER BY RunID DESC\n  )\n  AND $__timeFilter(PeriodStart)\nGROUP BY PeriodStart\nORDER BY PeriodStart"
-        }
-      ]
-    },
-    {
-      "id": 14,
-      "type": "timeseries",
-      "title": "Defect Event Timeline",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 27 },
-      "datasource": { "type": "mssql", "uid": "${datasource}" },
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "points",
-            "lineInterpolation": "smooth",
-            "barAlignment": 0,
-            "barWidthFactor": 0.6,
-            "lineWidth": 2,
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "spanNulls": false,
-            "insertNulls": false,
-            "showPoints": "always",
-            "showValues": false,
-            "pointSize": 5,
-            "stacking": { "mode": "none", "group": "A" },
-            "axisPlacement": "auto",
-            "axisLabel": "",
-            "axisColorMode": "text",
-            "axisBorderShow": false,
-            "scaleDistribution": { "type": "linear" },
-            "axisCenteredZero": false,
-            "hideFrom": { "tooltip": false, "viz": false, "legend": false },
-            "thresholdsStyle": { "mode": "line" }
-          },
-          "color": { "mode": "palette-classic" },
-          "unit": "percent"
-        },
-        "overrides": []
-      },
-      "options": {
-        "tooltip": { "mode": "single", "sort": "none", "hideZeros": false },
-        "legend": {
-          "showLegend": true,
-          "displayMode": "list",
-          "placement": "bottom",
-          "calcs": []
-        }
-      },
-      "pluginVersion": "12.2.1",
-      "targets": [
-        {
-          "refId": "A",
-          "format": "time_series",
-          "rawQuery": true,
-          "rawSql": "SELECT\n  Timestamp AS time,\n  HealthIndex AS [Health Index],\n  FusedZ      AS [Fused Score]\nFROM ACM_DefectTimeline\nWHERE EquipID = $equipment\n  AND RunID = (\n      SELECT TOP 1 RunID\n      FROM ACM_DefectTimeline\n      WHERE EquipID = $equipment\n      ORDER BY RunID DESC\n  )\n  AND $__timeFilter(Timestamp)\nORDER BY Timestamp"
-        }
-      ]
-    },
-    {
-      "id": 15,
-      "type": "stat",
-      "title": "Episode Metrics (Summary)",
-      "gridPos": { "h": 8, "w": 4, "x": 12, "y": 27 },
-      "datasource": { "type": "mssql", "uid": "${datasource}" },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "thresholds" },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "options": {
-        "colorMode": "none",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": ["lastNotNull"],
-          "fields": "",
-          "values": false
-        },
-        "showPercentChange": false,
-        "textMode": "value_and_name"
-      },
-      "pluginVersion": "12.2.1",
-      "targets": [
-        {
-          "refId": "A",
-          "format": "table",
-          "rawQuery": true,
-          "rawSql": "SELECT TOP 1\n  TotalEpisodes,\n  AvgDurationHours,\n  RatePerDay\nFROM ACM_EpisodeMetrics\nWHERE EquipID = $equipment\nORDER BY RunID DESC"
-        }
-      ]
-    },
-    {
-      "id": 16,
+      "id": 24,
       "type": "table",
-      "title": "Detector Explanations",
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 27 },
+      "title": "Failure Attribution by Sensor (at Predicted Failure Time)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 10 },
       "datasource": { "type": "mssql", "uid": "${datasource}" },
       "fieldConfig": {
         "defaults": {
@@ -972,11 +477,11 @@
             "mode": "absolute",
             "steps": [
               { "color": "green", "value": 0 },
-              { "color": "yellow", "value": 2 },
-              { "color": "orange", "value": 2.5 },
-              { "color": "red", "value": 3 }
+              { "color": "yellow", "value": 0.2 },
+              { "color": "red", "value": 0.5 }
             ]
-          }
+          },
+          "unit": "percent"
         },
         "overrides": []
       },
@@ -984,7 +489,7 @@
         "cellHeight": "sm",
         "showHeader": true,
         "sortBy": [
-          { "desc": true, "displayName": "Severity" }
+          { "desc": true, "displayName": "FailureContribution" }
         ]
       },
       "pluginVersion": "12.2.1",
@@ -993,7 +498,94 @@
           "refId": "A",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT\n  sd.DetectorType,\n  sd.DetectorFamily,\n  sd.Severity,\n  sd.CurrentZ,\n  sd.ViolationPct,\n  dm.ShortName,\n  dm.Explanation,\n  dm.OperatorHint\nFROM ACM_SensorDefects sd\nLEFT JOIN ACM_DetectorMetadata dm\n  ON dm.DetectorFamily = sd.DetectorFamily\nWHERE sd.EquipID = $equipment\n  AND sd.RunID = (\n      SELECT TOP 1 RunID\n      FROM ACM_SensorDefects\n      WHERE EquipID = $equipment\n      ORDER BY RunID DESC\n  )\nORDER BY\n  CASE sd.Severity\n    WHEN 'CRITICAL' THEN 3\n    WHEN 'HIGH' THEN 2\n    WHEN 'MEDIUM' THEN 1\n    ELSE 0\n  END DESC,\n  sd.ViolationPct DESC"
+          "rawSql": "SELECT TOP 10\n  ra.SensorName,\n  ra.FailureContribution * 100.0 AS FailureContribution,\n  ra.ZScoreAtFailure,\n  ra.AlertCount,\n  ra.FailureTime,\n  ISNULL(ff.FailureProb * 100.0, 0.0) AS FailureProbabilityAtTime\nFROM ACM_RUL_Attribution ra\nOUTER APPLY (\n  SELECT TOP 1 FailureProb\n  FROM ACM_FailureForecast_TS ff\n  WHERE ff.EquipID = ra.EquipID\n    AND ff.RunID = ra.RunID\n    AND ff.Timestamp >= ra.FailureTime\n  ORDER BY ff.Timestamp ASC\n) ff\nWHERE ra.EquipID = $equipment\n  AND ra.RunID = (\n      SELECT TOP 1 RunID\n      FROM ACM_RUL_Attribution\n      WHERE EquipID = $equipment\n      ORDER BY FailureTime DESC\n  )\nORDER BY FailureContribution DESC"
+        }
+      ]
+    },
+    {
+      "id": 22,
+      "type": "timeseries",
+      "title": "Failure Probability (Next 24h)",
+      "gridPos": { "h": 4, "w": 12, "x": 0, "y": 18 },
+      "datasource": { "type": "mssql", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "axisPlacement": "auto",
+            "axisColorMode": "text",
+            "axisBorderShow": false,
+            "thresholdsStyle": { "mode": "line" }
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": false,
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": []
+        },
+        "tooltip": { "mode": "single", "sort": "none", "hideZeros": false }
+      },
+      "pluginVersion": "12.2.1",
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  Timestamp AS time,\n  FailureProb * 100.0 AS [Failure Probability]\nFROM ACM_FailureForecast_TS\nWHERE EquipID = $equipment\n  AND RunID = (\n      SELECT TOP 1 RunID\n      FROM ACM_FailureForecast_TS\n      WHERE EquipID = $equipment\n      ORDER BY RunID DESC\n  )\n  AND $__timeFilter(Timestamp)\nORDER BY Timestamp"
+        }
+      ]
+    },
+    {
+      "id": 25,
+      "type": "table",
+      "title": "Maintenance Recommendation Window",
+      "gridPos": { "h": 4, "w": 12, "x": 12, "y": 18 },
+      "datasource": { "type": "mssql", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "custom": {
+            "align": "auto",
+            "cellOptions": { "type": "auto" },
+            "footer": { "reducers": [] },
+            "inspect": false
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": 0 },
+              { "color": "yellow", "value": 30 },
+              { "color": "red", "value": 60 }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "options": {
+        "cellHeight": "sm",
+        "showHeader": true,
+        "sortBy": [
+          { "desc": false, "displayName": "PreferredWindowStart" }
+        ]
+      },
+      "pluginVersion": "12.2.1",
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  EarliestMaintenance,\n  PreferredWindowStart,\n  PreferredWindowEnd,\n  FailureProbAtWindowEnd * 100.0 AS FailureProbabilityAtEnd\nFROM ACM_MaintenanceRecommendation\nWHERE EquipID = $equipment\n  AND RunID = (\n      SELECT TOP 1 RunID\n      FROM ACM_MaintenanceRecommendation\n      WHERE EquipID = $equipment\n      ORDER BY PreferredWindowEnd DESC\n  )"
         }
       ]
     }
@@ -1005,7 +597,10 @@
   "templating": {
     "list": [
       {
-        "current": { "text": "B19CL3PCSQLSERVER", "value": "cf42m5bbjxmo0e" },
+        "current": {
+          "text": "B19CL3PCSQLSERVER",
+          "value": "cf42m5bbjxmo0e"
+        },
         "includeAll": false,
         "label": "Data Source",
         "name": "datasource",
@@ -1016,8 +611,14 @@
         "type": "datasource"
       },
       {
-        "current": { "text": "2621", "value": "2621" },
-        "datasource": { "type": "mssql", "uid": "${datasource}" },
+        "current": {
+          "text": "2621",
+          "value": "2621"
+        },
+        "datasource": {
+          "type": "mssql",
+          "uid": "${datasource}"
+        },
         "definition": "SELECT DISTINCT EquipID FROM ACM_HealthTimeline ORDER BY EquipID",
         "includeAll": false,
         "label": "Equipment",
@@ -1041,5 +642,6 @@
   "timezone": "",
   "title": "ACM Operator View",
   "uid": "acm-operator-view",
-  "version": 1
+  "version": 2
 }
+

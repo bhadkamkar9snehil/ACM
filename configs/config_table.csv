@@ -121,6 +121,7 @@ EquipID,Category,ParamPath,ParamValue,ValueType,LastUpdated,UpdatedBy,ChangeReas
 0,runtime,storage_backend,sql,string,2025-11-13 00:00:00,COPILOT,sql_only_mode_enabled,
 0,runtime,reuse_model_fit,False,bool,2025-10-27 00:00:00,SYSTEM,initial_config,
 0,runtime,tick_minutes,30,int,2025-11-13 00:00:00,COPILOT,aligned_with_data_cadence,
+0,runtime,future_grace_minutes,1051200,int,2025-11-14 17:05:00,COPILOT,enable_historian_backfill_beyond_now,
 0,runtime,equip_codes,"[""FD_FAN""]",list,2025-10-27 00:00:00,SYSTEM,initial_config,
 0,runtime,equip_id,1,int,2025-10-29 00:00:00,SYSTEM,sql_mode_config,
 0,runtime,stage,score,string,2025-10-27 00:00:00,SYSTEM,initial_config,

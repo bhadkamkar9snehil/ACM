@@ -141,6 +141,17 @@ def _cfg_get(cfg: Dict[str, Any], path: str, default: T) -> T:
             return default
     return current  # type: ignore[return-value]
 
+
+def _future_cutoff_ts(cfg: Dict[str, Any]) -> pd.Timestamp:
+    """Return timestamp cutoff that optionally allows future data via config."""
+    raw_value = _cfg_get(cfg, "runtime.future_grace_minutes", 0) or 0
+    try:
+        minutes = int(raw_value)
+    except (TypeError, ValueError):
+        minutes = 0
+    minutes = max(0, minutes)
+    return pd.Timestamp.now() + pd.Timedelta(minutes=minutes)
+
 # Safe datetime cast helpers - local time policy
 def _to_naive(ts) -> Optional[pd.Timestamp]:
     """Convert to timezone-naive local timestamp or None."""
@@ -618,7 +629,8 @@ class OutputManager:
             raise ValueError("[DATA] Please set data.train_csv and data.score_csv in config.")
 
         _sampling = data_cfg.get("sampling_secs", 1)
-        if _sampling in (None, "auto", "null"):
+        # Treat empty string / "auto"/"null" as auto-detect cadence
+        if _sampling in (None, "", "auto", "null"):
             sampling_secs: Optional[int] = None
         else:
             sampling_secs = int(_sampling)
@@ -681,7 +693,7 @@ class OutputManager:
         score = _parse_ts_index(score_raw, ts_col)
         hb.stop()
 
-        now_cutoff = pd.Timestamp.now()
+        now_cutoff = _future_cutoff_ts(cfg)
         train, tz_stripped_train, future_train = _coerce_local_and_filter_future(train, "TRAIN", now_cutoff)
         score, tz_stripped_score, future_score = _coerce_local_and_filter_future(score, "SCORE", now_cutoff)
         tz_stripped_total = tz_stripped_train + tz_stripped_score
@@ -849,7 +861,7 @@ class OutputManager:
         hb.stop()
         
         # Filter future timestamps
-        now_cutoff = pd.Timestamp.now()
+        now_cutoff = _future_cutoff_ts(cfg)
         train, tz_stripped_train, future_train = _coerce_local_and_filter_future(train, "TRAIN", now_cutoff)
         score, tz_stripped_score, future_score = _coerce_local_and_filter_future(score, "SCORE", now_cutoff)
         tz_stripped_total = tz_stripped_train + tz_stripped_score
@@ -875,7 +887,8 @@ class OutputManager:
         
         # Cadence check + resampling (same logic as CSV mode)
         _sampling = data_cfg.get("sampling_secs", 1)
-        if _sampling in (None, "auto", "null"):
+        # Treat empty string / "auto"/"null" as auto-detect cadence
+        if _sampling in (None, "", "auto", "null"):
             sampling_secs: Optional[int] = None
         else:
             sampling_secs = int(_sampling)

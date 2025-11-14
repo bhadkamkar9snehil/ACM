@@ -46,6 +46,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **User Philosophy**: "We want to always ensure our model does not just drift away and we always know what the normal is. We should know when we are in transient mode. We should know when the data is bad. This is part of hands off approach that is central to ACM."
   - **Impact**: 
     - Eliminates manual parameter tuning
+
+- **CFG-07: Future Data Grace Window** (2025-11-14):
+  - **Issue**: SQL-mode replay dropped every row newer than the current wall clock, preventing historical backfills because historian data extends into 2026–2027.
+  - **Change**: Introduced `runtime.future_grace_minutes` (default 0) and taught `core/output_manager.py` to extend the "now" cutoff by that many minutes before filtering future timestamps.
+  - **Config**: Global default set to `1,051,200` minutes (~2 years) in `configs/config_table.csv`; production values can be tuned per equipment via `ACM_Config`.
+  - **Impact**: Allows Grafana/SQL batch replays to ingest archived months ahead of real time without hacking system clocks, while still keeping the guardrail for operators who leave the grace window at 0.
     - Continuous adaptation to data characteristics
     - Equipment-agnostic (parameters adapt per equipment automatically)
     - Production-ready self-tuning system

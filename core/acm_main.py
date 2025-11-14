@@ -7,6 +7,7 @@ import json
 import time
 import threading
 from datetime import datetime
+import os
 from typing import Any, Dict, List, Tuple, Optional, Sequence
 
 import numpy as np
@@ -488,7 +489,15 @@ def _ensure_local_index(df: pd.DataFrame) -> pd.DataFrame:
 # SQL helpers (local)
 # =======================
 def _sql_mode(cfg: Dict[str, Any]) -> bool:
-    """Check if SQL mode is enabled. SQL mode is now the DEFAULT."""
+    """Check if SQL mode is enabled. SQL mode is now the DEFAULT.
+
+    Allows an environment override via ACM_FORCE_SQL_MODE so callers
+    like the SQL batch runner can force SQL mode even if older configs
+    still have runtime.storage_backend='file'.
+    """
+    force = os.getenv("ACM_FORCE_SQL_MODE", "").strip().lower()
+    if force in ("1", "true", "yes", "sql"):
+        return True
     backend = cfg.get("runtime", {}).get("storage_backend", "sql")  # Changed default from "file" to "sql"
     return backend == "sql"
 
@@ -2977,29 +2986,6 @@ def main() -> None:
             except Exception as e:
                 Console.warn(f"[OUTPUTS] Output generation failed: {e}")
 
-            # Check if chart generation is enabled (default FALSE for SQL-only mode)
-            charts_enabled = (cfg.get("outputs", {}) or {}).get("charts", {}).get("enabled", False)
-            
-            if charts_enabled:
-                with T.section("outputs.charts"):
-                    try:
-                        charts_dir = run_dir / "charts"
-                        chart_files = output_manager.generate_default_charts(
-                            scores_df=frame,
-                            episodes_df=episodes,
-                            cfg=cfg,
-                            charts_dir=charts_dir,
-                            sensor_context=sensor_context
-                        )
-                        if chart_files:
-                            Console.info(f"[OUTPUTS] Charts: {charts_dir} ({len(chart_files)} files)")
-                    except Exception as chart_err:
-                        Console.warn(f"[OUTPUTS] Chart generation failed: {chart_err}")
-            else:
-                Console.info("[OUTPUTS] Chart generation disabled via config (outputs.charts.enabled=False)")
-
-            # OMR contributions are now exported via OutputManager analytics tables
-
             # File mode path exits here (finally still runs, no SQL finalize executed).
             run_completion_time = datetime.now()
             _maybe_write_run_meta_json(locals())
@@ -3035,29 +3021,6 @@ def main() -> None:
         except Exception as e:
             Console.warn(f"[OUTPUTS] Comprehensive analytics generation failed: {e}")
 
-        # Check if chart generation is enabled (default FALSE for SQL-only mode)
-        charts_enabled = (cfg.get("outputs", {}) or {}).get("charts", {}).get("enabled", False)
-        
-        if charts_enabled:
-            with T.section("outputs.charts"):
-                try:
-                    charts_dir = run_dir / "charts"
-                    chart_files = output_manager.generate_default_charts(
-                        scores_df=frame,
-                        episodes_df=episodes,
-                        cfg=cfg,
-                        charts_dir=charts_dir,
-                        sensor_context=sensor_context
-                    )
-                    if chart_files:
-                        Console.info(f"[OUTPUTS] Charts: {charts_dir} ({len(chart_files)} files)")
-                except Exception as chart_err:
-                    Console.warn(f"[OUTPUTS] Chart generation failed: {chart_err}")
-        else:
-            Console.info("[OUTPUTS] Chart generation disabled via config (outputs.charts.enabled=False)")
-        
-        # OMR contributions are exported via OutputManager analytics tables
-            
         # === SQL-SPECIFIC ARTIFACT WRITING (BATCHED TRANSACTION) ===
         # Batch all SQL writes in a single transaction to prevent connection pool exhaustion
         if sql_client:
@@ -3316,24 +3279,6 @@ def main() -> None:
                     )
                     Console.info(f"[RUN_META] Successfully wrote run metadata to ACM_Runs for RunID={run_id}")
 
-                    # MODEL-LOG: Write lightweight model_history.csv for batch-to-batch evolution
-                    try:
-                        mh_rows = [{
-                            "RunID": run_id,
-                            "EquipID": int(equip_id),
-                            "ConfigSignature": config_signature,
-                            "FeatureHash": train_feature_hash if 'train_feature_hash' in locals() else None,
-                            "FitRows": int(len(train)) if 'train' in locals() and isinstance(train, pd.DataFrame) else 0,
-                            "ScoreRows": int(len(frame)) if isinstance(frame, pd.DataFrame) else 0,
-                            "PerRegimeEnabled": bool(run_metadata.get("per_regime_enabled", False)),
-                            "RegimeCount": int(run_metadata.get("regime_count", 0)),
-                            "RefitRequested": bool('refit_requested' in locals() and refit_requested),
-                            "KeptColumns": kept_cols_str,
-                        }]
-                        model_hist_df = pd.DataFrame(mh_rows)
-                        output_manager.write_dataframe(model_hist_df, tables_dir / "model_history.csv")
-                    except Exception as mh_err:
-                        Console.warn(f"[MODEL] Model history write skipped: {mh_err}")
             except Exception as e:
                 Console.warn(f"[RUN_META] Failed to write ACM_Runs metadata: {e}")
 
