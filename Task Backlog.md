@@ -176,6 +176,16 @@ All tabular output hardening items are complete (see Completed Task Stats). No o
 | FCST-12 | Low      | `core/forecast.py`| Optimize DataFrame fusion using NumPy              | DataFrame fusion is faster                                | Planned |
 | FCST-13 | Low      | `core/forecast.py`| Improve numerical stability for high phi values    | High phi values do not cause numerical instability        | Planned |
 | FCST-14 | Low      | `core/forecast.py`| Add comprehensive documentation for AR(1) model    | AR(1) model assumptions and limitations are documented    | Planned |
+| FCST-15 | Critical | `core/forecast.py`, `core/acm_main.py`, `core/output_manager.py` | Remove `scores.csv` dependency and stream results through OutputManager so forecast works in SQL-only mode | Forecast runs when `sql_only_mode=True`, reads in-memory scores, and writes forecast tables directly to SQL | Planned |
+| FCST-16 | High     | `core/forecast.py`, `core/output_manager.py`                     | Publish per-sensor/regime forecasts into `ACM_SensorForecast_TS` with quality scores for Grafana | Sensor-level forecast ribbons + diagnostics available in SQL/Grafana without manual stitching | Planned |
+
+### 8.1 RUL & Maintenance Intelligence
+
+| ID      | Priority | Module                                         | Task                                                                 | Completion Criteria                                                         | Status  |
+| ------- | -------- | ---------------------------------------------- | -------------------------------------------------------------------- | --------------------------------------------------------------------------- | ------- |
+| RUL-01  | Critical | `core/rul_estimator.py`, `core/output_manager.py` | Replace `health_timeline.csv` dependency with SQL-native ingestion + OutputManager artifact cache so RUL still runs in SQL-only mode | RUL tables populate when `sql_only_mode=True` without touching disk files   | Planned |
+| RUL-02  | High     | `core/rul_estimator.py`                        | Add probabilistic RUL bands (p10/p50/p90) and maintenance window telemetry to SQL tables | `ACM_RUL_TS`/`ACM_MaintenanceRecommendation` expose quantile columns for Grafana | Planned |
+| RUL-03  | Medium   | `core/rul_estimator.py`, `grafana_dashboards`  | Fuse sensor hotspots with `ACM_SensorForecast_TS` so RUL outputs include time-aligned driver sensors at predicted failure | Grafana dashboard shows sensor contribution trend sourced from SQL tables   | Planned |
 
 ---
 
@@ -280,6 +290,8 @@ All tabular output hardening items are complete (see Completed Task Stats). No o
 |         |          |                          | → Service account credentials          | → SQL write permissions verified          |          |
 |         |          |                          | → Monitoring dashboard                 | → Query v_Equip_Latest_Run for status     |          |
 |         |          |                          | → Retention policy for old data        | → Archive runs older than 1 year          |          |
+| SQL-34  | HIGH     | `core/output_manager.py` | Add artifact cache so analytics tables can be consumed without CSVs | Forecast/RUL modules read cached DataFrames and SQL writes succeed in SQL-only mode | PLANNED  |
+| SQL-35  | HIGH     | `core/acm_main.py`       | Wire cached analytics into forecast/RUL + skip tables dir when SQL-only | SQL-only runs emit forecast/RUL SQL tables with no filesystem dependency | PLANNED  |
 
 ### Legacy Items (Superseded)
 | ID      | Priority | Module                   | Task                           | Completion Criteria                       | Status      |
