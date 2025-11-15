@@ -40,7 +40,50 @@ class RULConfig:
     maintenance_risk_high: float = 0.5
 
 
-def _load_health_timeline(tables_dir: Path) -> Optional[pd.DataFrame]:
+def _load_health_timeline(
+    tables_dir: Path,
+    sql_client: Optional[Any] = None,
+    equip_id: Optional[int] = None,
+    run_id: Optional[str] = None,
+) -> Optional[pd.DataFrame]:
+    """
+    Load health timeline for RUL estimation.
+
+    Priority:
+    1. If sql_client and identifiers are available, read from ACM_HealthTimeline.
+    2. Fallback to health_timeline.csv in tables_dir (legacy file mode).
+    """
+    # Prefer SQL when possible (SQL-only mode)
+    if sql_client is not None and equip_id is not None and run_id:
+        try:
+            cur = sql_client.cursor()
+            cur.execute(
+                """
+                SELECT Timestamp, HealthIndex
+                FROM dbo.ACM_HealthTimeline
+                WHERE EquipID = ? AND RunID = ?
+                ORDER BY Timestamp
+                """,
+                (equip_id, run_id),
+            )
+            rows = cur.fetchall()
+            cur.close()
+            if rows:
+                df = pd.DataFrame.from_records(rows, columns=["Timestamp", "HealthIndex"])
+                df["Timestamp"] = pd.to_datetime(df["Timestamp"], errors="coerce", utc=True)
+                df = df.dropna(subset=["Timestamp"]).sort_values("Timestamp")
+                Console.info(
+                    f"[RUL] Loaded {len(df)} health points from SQL for EquipID={equip_id}, RunID={run_id}"
+                )
+                return df
+            else:
+                Console.warn(
+                    f"[RUL] No rows in ACM_HealthTimeline for EquipID={equip_id}, RunID={run_id}"
+                )
+        except Exception as e:
+            Console.warn(f"[RUL] Failed to load health timeline from SQL: {e}")
+
+    # Fallback: legacy CSV path (file mode)
     p = tables_dir / "health_timeline.csv"
     if not p.exists():
         Console.warn(f"[RUL] health_timeline.csv not found in {tables_dir}")
@@ -144,6 +187,7 @@ def estimate_rul_and_failure(
     run_id: Optional[str],
     health_threshold: float = 70.0,
     cfg: Optional[RULConfig] = None,
+    sql_client: Optional[Any] = None,
 ) -> Dict[str, pd.DataFrame]:
     """
     Main entrypoint used by acm_main.
@@ -157,8 +201,16 @@ def estimate_rul_and_failure(
     - ACM_MaintenanceRecommendation
     """
     cfg = cfg or RULConfig(health_threshold=health_threshold)
-    health_df = _load_health_timeline(tables_dir)
-    if health_df is None or "HealthIndex" not in health_df.columns:
+    health_df = _load_health_timeline(
+        tables_dir, sql_client=sql_client, equip_id=equip_id, run_id=run_id
+    )
+    if health_df is None:
+        Console.warn("[RUL] Health timeline not available; skipping RUL/forecast outputs.")
+        return {}
+    if "HealthIndex" not in health_df.columns or "Timestamp" not in health_df.columns:
+        Console.warn(
+            f"[RUL] Health timeline missing required columns (have={list(health_df.columns)})"
+        )
         return {}
 
     # Prepare health time series
@@ -166,12 +218,15 @@ def estimate_rul_and_failure(
     hi.index = pd.to_datetime(health_df["Timestamp"], utc=True)
     hi = hi.sort_index()
     if hi.size < cfg.min_points:
-        Console.warn(f"[RUL] Not enough health points ({hi.size}) for RUL.")
+        Console.warn(
+            f"[RUL] Not enough health points ({hi.size}, min={cfg.min_points}) for RUL."
+        )
         return {}
 
     # Forecast health
     forecast, forecast_std, h_hours = _simple_ar1_forecast(hi, cfg)
     if forecast.empty:
+        Console.warn("[RUL] Forecast series is empty; skipping RUL outputs.")
         return {}
 
     ci_k = 1.96
@@ -274,6 +329,7 @@ def estimate_rul_and_failure(
         equip_id=equip_id_val,
         run_id=run_id_val,
         failure_time=failure_time,
+        sql_client=sql_client,
     )
 
     # Maintenance recommendation window based on failure probability curve
@@ -296,31 +352,63 @@ def estimate_rul_and_failure(
 
 
 def _build_sensor_attribution(
-    tables_dir: Path, equip_id: Optional[int], run_id: str, failure_time: pd.Timestamp
+    tables_dir: Path,
+    equip_id: Optional[int],
+    run_id: str,
+    failure_time: pd.Timestamp,
+    sql_client: Optional[Any] = None,
 ) -> pd.DataFrame:
     """
     Heuristic sensor attribution: use current SensorHotspots as proxy for which
     sensors are most likely to be responsible at predicted failure time.
     """
-    p = tables_dir / "sensor_hotspots.csv"
-    if not p.exists():
-        Console.warn(f"[RUL] sensor_hotspots.csv not found in {tables_dir}")
-        return pd.DataFrame(columns=["RunID", "EquipID", "FailureTime", "SensorName",
-                                     "FailureContribution", "ZScoreAtFailure", "AlertCount", "Comment"])
-
-    df = pd.read_csv(p)
-    if "SensorName" not in df.columns or "LatestAbsZ" not in df.columns:
-        return pd.DataFrame(columns=["RunID", "EquipID", "FailureTime", "SensorName",
-                                     "FailureContribution", "ZScoreAtFailure", "AlertCount", "Comment"])
-
-    df = df.rename(columns={"LatestAbsZ": "Z"})
-    df["Z"] = df["Z"].astype(float).clip(lower=0.0)
-    if df["Z"].sum() <= 0:
-        return pd.DataFrame(columns=["RunID", "EquipID", "FailureTime", "SensorName",
-                                     "FailureContribution", "ZScoreAtFailure", "AlertCount", "Comment"])
-
-    df["FailureContribution"] = df["Z"] / df["Z"].sum()
-    df = df.sort_values("FailureContribution", ascending=False).head(10)
+    # Prefer SQL when available
+    if sql_client is not None and equip_id is not None and run_id:
+        try:
+            cur = sql_client.cursor()
+            cur.execute(
+                """
+                SELECT TOP 10 SensorName, LatestAbsZ, AboveAlertCount
+                FROM dbo.ACM_SensorHotspots
+                WHERE EquipID = ? AND RunID = ?
+                ORDER BY LatestAbsZ DESC
+                """,
+                (equip_id, run_id),
+            )
+            rows = cur.fetchall()
+            cur.close()
+            if rows:
+                df = pd.DataFrame.from_records(rows, columns=["SensorName", "Z", "AlertCount"])
+                df["Z"] = pd.to_numeric(df["Z"], errors="coerce").clip(lower=0.0)
+                df = df.dropna(subset=["Z"])
+                if df["Z"].sum() > 0:
+                    df["FailureContribution"] = df["Z"] / df["Z"].sum()
+                    df = df.sort_values("FailureContribution", ascending=False).head(10)
+                else:
+                    df = pd.DataFrame(columns=["SensorName", "FailureContribution", "Z", "AlertCount"])
+            else:
+                df = pd.DataFrame(columns=["SensorName", "FailureContribution", "Z", "AlertCount"])
+        except Exception as e:
+            Console.warn(f"[RUL] Failed to load sensor hotspots from SQL: {e}")
+            df = pd.DataFrame(columns=["SensorName", "FailureContribution", "Z", "AlertCount"])
+    else:
+        # Fallback to CSV (file mode)
+        p = tables_dir / "sensor_hotspots.csv"
+        if not p.exists():
+            Console.warn(f"[RUL] sensor_hotspots.csv not found in {tables_dir}")
+            return pd.DataFrame(columns=["RunID", "EquipID", "FailureTime", "SensorName",
+                                         "FailureContribution", "ZScoreAtFailure", "AlertCount", "Comment"])
+        df = pd.read_csv(p)
+        if "SensorName" not in df.columns or "LatestAbsZ" not in df.columns:
+            return pd.DataFrame(columns=["RunID", "EquipID", "FailureTime", "SensorName",
+                                         "FailureContribution", "ZScoreAtFailure", "AlertCount", "Comment"])
+        df = df.rename(columns={"LatestAbsZ": "Z"})
+        df["Z"] = df["Z"].astype(float).clip(lower=0.0)
+        if df["Z"].sum() <= 0:
+            return pd.DataFrame(columns=["RunID", "EquipID", "FailureTime", "SensorName",
+                                         "FailureContribution", "ZScoreAtFailure", "AlertCount", "Comment"])
+        df["FailureContribution"] = df["Z"] / df["Z"].sum()
+        df = df.sort_values("FailureContribution", ascending=False).head(10)
 
     result = pd.DataFrame(
         {

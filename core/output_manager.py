@@ -842,6 +842,15 @@ class OutputManager:
         # Validate sufficient data
         if len(df_all) < 10:
             raise ValueError(f"[DATA] Insufficient data from SQL historian: {len(df_all)} rows (minimum 10 required)")
+
+        # Robust timestamp handling for SQL historian: if configured column is missing
+        # but the standard EntryDateTime column is present, fall back to it.
+        if ts_col not in df_all.columns and "EntryDateTime" in df_all.columns:
+            Console.warn(
+                f"[DATA] Timestamp column '{ts_col}' not found in SQL historian results; "
+                "falling back to 'EntryDateTime'."
+            )
+            ts_col = "EntryDateTime"
         
         # Split into train/score based on ratio
         hb = Heartbeat("Splitting train/score data", next_hint="parse timestamps", eta_hint=3).start()

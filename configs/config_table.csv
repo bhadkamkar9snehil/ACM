@@ -155,7 +155,7 @@ EquipID,Category,ParamPath,ParamValue,ValueType,LastUpdated,UpdatedBy,ChangeReas
 8630,regimes,k_max,12,int,2025-10-28 10:16:45,SYSTEM,Low silhouette (0.00),
 2621,thresholds,self_tune.clip_z,43.2,float,2025-11-10 18:30:12,SYSTEM,High saturation (14.1%),
 1,runtime,storage_backend,sql,string,2025-11-03 10:34:00,LOCAL_RUN,file_mode_override,
-2621,runtime,storage_backend,file,string,2025-11-03 12:15:00,LOCAL_RUN,gas_turbine_file_mode,
+2621,runtime,storage_backend,sql,string,2025-11-15 10:30:00,COPILOT,sql_only_mode_enabled_for_gas_turbine,
 1,regimes,auto_k.k_max,12,int,2025-11-04 12:50:07,SYSTEM,Low silhouette (0.00),
 2621,regimes,auto_k.k_max,12,int,2025-11-05 03:10:14,SYSTEM,Low silhouette (0.00),
 1,episodes,cpd.k_sigma,4.0,float,2025-11-05 00:49:03,SYSTEM,High anomaly rate (12.6%),

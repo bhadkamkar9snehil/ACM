@@ -42,6 +42,8 @@ from core.omr import OMRDetector  # OMR-02: Overall Model Residual
 # Import the unified output system
 from core.output_manager import OutputManager
 from core import rul_estimator
+from core import enhanced_forecasting  # file-based (non-SQL) enhanced forecasting
+from core import enhanced_forecasting_sql  # SQL-only wrapper for enhanced forecasting
 # Import run metadata writer
 from core.run_metadata_writer import write_run_metadata, extract_run_metadata_from_scores, extract_data_quality_score
 # Import episode culprits writer
@@ -240,10 +242,12 @@ def _write_run_meta_json(local_vars: Dict[str, Any]) -> None:
         }
 
         meta_path = run_dir_path / "meta.json"
-        meta_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(meta_path, "w", encoding="utf-8") as handle:
-            json.dump(meta_payload, handle, indent=2, default=str)
-        Console.info(f"[META] Written run metadata to {meta_path}")
+        # Respect SQL-only mode: skip filesystem metadata when SQL_MODE is true
+        if not bool(local_vars.get("SQL_MODE")):
+            meta_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(meta_path, "w", encoding="utf-8") as handle:
+                json.dump(meta_payload, handle, indent=2, default=str)
+            Console.info(f"[META] Written run metadata to {meta_path}")
     except Exception as meta_err:
         Console.warn(f"[META] Failed to write meta.json: {meta_err}")
 
@@ -645,7 +649,8 @@ def main() -> None:
     run_dir = equip_root / f"run_{run_id_ts}"
     Console.info(f"[RUN] Creating unique run directory: {run_dir}")
     models_dir = run_dir / "models"
-    models_dir.mkdir(parents=True, exist_ok=True)
+    if not SQL_MODE:
+        models_dir.mkdir(parents=True, exist_ok=True)
 
     # Heartbeat gating
     heartbeat_on = bool(cfg.get("runtime", {}).get("heartbeat", True))
@@ -653,10 +658,11 @@ def main() -> None:
     reuse_models = bool(cfg.get("runtime", {}).get("reuse_model_fit", False))
     # CRITICAL FIX: Stable cache must match equipment root (artifacts/{EQUIP}/models/)
     stable_models_dir = equip_root / "models"
-    try:
-        stable_models_dir.mkdir(parents=True, exist_ok=True)
-    except Exception:
-        pass
+    if not SQL_MODE:
+        try:
+            stable_models_dir.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
     # Refit-request marker path (set by quality/drift policy)
     refit_flag_path = stable_models_dir / "refit_requested.flag"
     model_cache_path = (stable_models_dir / "detectors.joblib")
@@ -672,7 +678,8 @@ def main() -> None:
     score_numeric: Optional[pd.DataFrame] = None
     cache_payload: Optional[Dict[str, Any]] = None
     regime_quality_ok: bool = True
-    _ensure_dir(run_dir)
+    if not SQL_MODE:
+        _ensure_dir(run_dir)
 
     if args.clear_cache:
         if model_cache_path.exists():
@@ -904,7 +911,8 @@ def main() -> None:
                 with T.section("data.guardrails.data_quality"):
                     try:
                         tables_dir = (run_dir / "tables")
-                        tables_dir.mkdir(parents=True, exist_ok=True)
+                        if not SQL_MODE:
+                            tables_dir.mkdir(parents=True, exist_ok=True)
                         interp_method = str((cfg.get("data", {}) or {}).get("interp_method", "linear"))
                         sampling_secs = (cfg.get("data", {}) or {}).get("sampling_secs", None)
                         # Build summary for intersecting columns only
@@ -1144,35 +1152,35 @@ def main() -> None:
                         train = train.drop(columns=cols_to_drop)
                         score = score.drop(columns=cols_to_drop)
                         
-                        # FEAT-03: Log feature drops to feature_drop_log.csv
-                        with T.section("features.log_drops"):
-                            try:
-                                tables_dir = (run_dir / "tables")
-                                tables_dir.mkdir(parents=True, exist_ok=True)
-                                drop_records = []
-                                for col in cols_to_drop:
-                                    reason = "all_NaN" if col in all_nan_cols else "low_variance"
-                                    med_val = col_meds.get(col)
-                                    std_val = feat_stds.get(col)
-                                    drop_records.append({
-                                        "feature": str(col),
-                                        "reason": reason,
-                                        "train_median": str(med_val) if not pd.isna(med_val) else "NaN",
-                                        "train_std": f"{std_val:.6f}" if not pd.isna(std_val) else "NaN",
-                                        "timestamp": pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')  # CHART-04: Standard format
-                                    })
-                                if drop_records:
-                                    drop_df = pd.DataFrame(drop_records)
-                                    drop_log_path = tables_dir / "feature_drop_log.csv"
-                                    # Append mode to preserve history across runs
-                                    if not SQL_MODE:
+                        # FEAT-03: Log feature drops to feature_drop_log.csv (file-mode only)
+                        if not SQL_MODE:
+                            with T.section("features.log_drops"):
+                                try:
+                                    tables_dir = (run_dir / "tables")
+                                    tables_dir.mkdir(parents=True, exist_ok=True)
+                                    drop_records = []
+                                    for col in cols_to_drop:
+                                        reason = "all_NaN" if col in all_nan_cols else "low_variance"
+                                        med_val = col_meds.get(col)
+                                        std_val = feat_stds.get(col)
+                                        drop_records.append({
+                                            "feature": str(col),
+                                            "reason": reason,
+                                            "train_median": str(med_val) if not pd.isna(med_val) else "NaN",
+                                            "train_std": f"{std_val:.6f}" if not pd.isna(std_val) else "NaN",
+                                            "timestamp": pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')  # CHART-04: Standard format
+                                        })
+                                    if drop_records:
+                                        drop_df = pd.DataFrame(drop_records)
+                                        drop_log_path = tables_dir / "feature_drop_log.csv"
+                                        # Append mode to preserve history across runs
                                         if drop_log_path.exists():
                                             drop_df.to_csv(drop_log_path, mode='a', header=False, index=False)
                                         else:
                                             drop_df.to_csv(drop_log_path, mode='w', header=True, index=False)
                                         Console.info(f"[FEAT] Logged {len(drop_records)} dropped features -> {drop_log_path}")
-                            except Exception as drop_e:
-                                Console.warn(f"[FEAT] Feature drop logging failed: {drop_e}")
+                                except Exception as drop_e:
+                                    Console.warn(f"[FEAT] Feature drop logging failed: {drop_e}")
                     
                     # Final guard: ensure we have at least one usable feature
                     if train.shape[1] == 0:
@@ -2773,37 +2781,39 @@ def main() -> None:
                     except Exception as we:
                         Console.warn(f"[IO] Failed to write scores via OutputManager: {we}")
 
-                with T.section("persist.write_score_stream"):
-                    try:
-                        # Write score stream using OutputManager  
-                        stream = frame.copy().reset_index().rename(columns={"index": "ts"})
-                        output_manager.write_dataframe(
-                            stream, 
-                            models_dir / "score_stream.csv",
-                            index=False
-                        )
-                    except Exception as se:
-                        Console.warn(f"[IO] Failed to write score_stream via OutputManager: {se}")
-
-                if regime_model is not None:
-                    with T.section("persist.regime_model"):
+                # Skip all filesystem persistence in SQL-only mode
+                if not SQL_MODE:
+                    with T.section("persist.write_score_stream"):
                         try:
-                            # Save regime model with joblib persistence (KMeans + Scaler)
-                            regimes.save_regime_model(regime_model, models_dir)
-                        except Exception as e:
-                            Console.warn(f"[REGIME] Failed to persist regime model: {e}")
-                        promote_dir: Optional[Path] = None
-                        if stable_models_dir and stable_models_dir != models_dir:
-                            promote_dir = stable_models_dir
+                            # Write score stream using OutputManager  
+                            stream = frame.copy().reset_index().rename(columns={"index": "ts"})
+                            output_manager.write_dataframe(
+                                stream, 
+                                models_dir / "score_stream.csv",
+                                index=False
+                            )
+                        except Exception as se:
+                            Console.warn(f"[IO] Failed to write score_stream via OutputManager: {se}")
 
-                        if promote_dir and regime_quality_ok:
+                    if regime_model is not None:
+                        with T.section("persist.regime_model"):
                             try:
-                                regimes.save_regime_model(regime_model, promote_dir)
-                                Console.info(f"[REGIME] Promoted regime model to {promote_dir}")
-                            except Exception as promote_exc:
-                                Console.warn(f"[REGIME] Failed to promote regime model to stable cache: {promote_exc}")
-                        elif promote_dir and not regime_quality_ok:
-                            Console.info("[REGIME] Skipping stable regime cache update because quality_ok=False")
+                                # Save regime model with joblib persistence (KMeans + Scaler)
+                                regimes.save_regime_model(regime_model, models_dir)
+                            except Exception as e:
+                                Console.warn(f"[REGIME] Failed to persist regime model: {e}")
+                            promote_dir: Optional[Path] = None
+                            if stable_models_dir and stable_models_dir != models_dir:
+                                promote_dir = stable_models_dir
+
+                            if promote_dir and regime_quality_ok:
+                                try:
+                                    regimes.save_regime_model(regime_model, promote_dir)
+                                    Console.info(f"[REGIME] Promoted regime model to {promote_dir}")
+                                except Exception as promote_exc:
+                                    Console.warn(f"[REGIME] Failed to promote regime model to stable cache: {promote_exc}")
+                            elif promote_dir and not regime_quality_ok:
+                                Console.info("[REGIME] Skipping stable regime cache update because quality_ok=False")
 
                 with T.section("persist.write_episodes"):
                     try:
@@ -2869,7 +2879,8 @@ def main() -> None:
             try:
                 # Use OutputManager directly for all output operations
                 tables_dir = run_dir / "tables"
-                tables_dir.mkdir(exist_ok=True)
+                if not SQL_MODE:
+                    tables_dir.mkdir(exist_ok=True)
 
                 with T.section("outputs.comprehensive_analytics"):
                     # Generate comprehensive analytics tables using OutputManager
@@ -2917,7 +2928,8 @@ def main() -> None:
                 # === FORECAST GENERATION (enabled by default; opt-out via output.enable_forecast=False) ===
                 output_cfg = (cfg.get("output", {}) or {})
                 forecast_enabled = bool(output_cfg.get("enable_forecast", True))
-                if forecast_enabled:
+                # In SQL-only mode, skip file-based forecast module entirely.
+                if forecast_enabled and not SQL_MODE:
                     Console.info("[FORECAST] Generating forecast with uncertainty bands...")
                     try:
                         with T.section("outputs.forecast"):
@@ -2938,50 +2950,102 @@ def main() -> None:
                                 if forecast_result.get("metrics"):
                                     metrics = forecast_result["metrics"]
                                     Console.info(f"[FORECAST] Series: {metrics.get('series_used', 'N/A')}, phi={metrics.get('ar1_phi', 0):.3f}, Horizon: {metrics.get('horizon', 0)} ({metrics.get('horizon_hours', 24)}h)")
+                    except Exception as fe:
+                        Console.warn(f"[FORECAST] Forecast generation failed: {fe}")
 
-                                # === RUL + SQL surfacing of forecast ===
-                                try:
-                                    health_threshold = float(
-                                        (cfg.get("analytics", {}) or {}).get(
-                                            "health_alert_threshold", 70.0
-                                        )
-                                    )
-                                except Exception:
-                                    health_threshold = 70.0
-                                try:
-                                    rul_tables = rul_estimator.estimate_rul_and_failure(
-                                        tables_dir=tables_dir,
-                                        equip_id=int(equip_id) if 'equip_id' in locals() else None,
-                                        run_id=str(run_id) if run_id is not None else None,
-                                        health_threshold=health_threshold,
-                                    )
-                                    if rul_tables:
-                                        Console.info(f"[RUL] Generated {len(rul_tables)} RUL/forecast tables")
-                                        enable_sql_rul = getattr(output_manager, "sql_client", None) is not None
-                                        for sql_name, df in rul_tables.items():
-                                            if df is None or df.empty:
-                                                continue
-                                            csv_name = {
-                                                "ACM_HealthForecast_TS": "health_forecast_ts.csv",
-                                                "ACM_FailureForecast_TS": "failure_forecast_ts.csv",
-                                                "ACM_RUL_TS": "rul_timeseries.csv",
-                                                "ACM_RUL_Summary": "rul_summary.csv",
-                                                "ACM_RUL_Attribution": "rul_attribution.csv",
-                                                "ACM_MaintenanceRecommendation": "maintenance_recommendation.csv",
-                                            }.get(sql_name, f"{sql_name}.csv")
-                                            out_path = tables_dir / csv_name
-                                            output_manager.write_dataframe(
-                                                df,
-                                                out_path,
-                                                sql_table=sql_name if enable_sql_rul else None,
-                                                add_created_at="CreatedAt" not in df.columns,
-                                            )
-                                except Exception as e:
-                                    Console.warn(f"[RUL] RUL estimation failed: {e}")
-                            else:
-                                Console.warn(f"[FORECAST] {forecast_result['error']['message']}")
-                    except Exception as e:
-                        Console.warn(f"[FORECAST] Forecast generation failed: {str(e)}")
+                # === RUL + SQL surfacing of forecast ===
+                try:
+                    health_threshold = float(
+                        (cfg.get("analytics", {}) or {}).get(
+                            "health_alert_threshold", 70.0
+                        )
+                    )
+                except Exception:
+                    health_threshold = 70.0
+                try:
+                    rul_tables = rul_estimator.estimate_rul_and_failure(
+                        tables_dir=tables_dir,
+                        equip_id=int(equip_id) if 'equip_id' in locals() else None,
+                        run_id=str(run_id) if run_id is not None else None,
+                        health_threshold=health_threshold,
+                        sql_client=getattr(output_manager, "sql_client", None),
+                    )
+                    if rul_tables:
+                        Console.info(f"[RUL] Generated {len(rul_tables)} RUL/forecast tables")
+                        enable_sql_rul = getattr(output_manager, "sql_client", None) is not None
+                        for sql_name, df in rul_tables.items():
+                            if df is None or df.empty:
+                                continue
+                            csv_name = {
+                                "ACM_HealthForecast_TS": "health_forecast_ts.csv",
+                                "ACM_FailureForecast_TS": "failure_forecast_ts.csv",
+                                "ACM_RUL_TS": "rul_timeseries.csv",
+                                "ACM_RUL_Summary": "rul_summary.csv",
+                                "ACM_RUL_Attribution": "rul_attribution.csv",
+                                "ACM_MaintenanceRecommendation": "maintenance_recommendation.csv",
+                            }.get(sql_name, f"{sql_name}.csv")
+                            out_path = tables_dir / csv_name
+                            output_manager.write_dataframe(
+                                df,
+                                out_path,
+                                sql_table=sql_name if enable_sql_rul else None,
+                                add_created_at="CreatedAt" not in df.columns,
+                            )
+                except Exception as e:
+                    Console.warn(f"[RUL] RUL estimation failed: {e}")
+
+                # === ENHANCED FORECASTING ===
+                try:
+                    enhanced_enabled = (cfg.get("forecasting", {}) or {}).get("enhanced_enabled", True)
+                    if enhanced_enabled:
+                        # In SQL mode, use the SQL-only wrapper to avoid filesystem dependencies.
+                        if SQL_MODE and getattr(output_manager, "sql_client", None) is not None:
+                            Console.info("[ENHANCED_FORECAST] Running enhanced forecasting (SQL mode)")
+                            ef_result = enhanced_forecasting_sql.run_enhanced_forecasting_sql(
+                                sql_client=output_manager.sql_client,
+                                equip_id=int(equip_id) if 'equip_id' in locals() else None,
+                                run_id=str(run_id) if run_id is not None else None,
+                                config=cfg,
+                            )
+                            metrics = (ef_result or {}).get("metrics") or {}
+                            if metrics:
+                                Console.info(
+                                    "[ENHANCED_FORECAST] "
+                                    f"RUL={metrics.get('rul_hours', 0.0):.1f}h, "
+                                    f"MaxFailProb={metrics.get('max_failure_probability', 0.0)*100:.1f}%, "
+                                    f"MaintenanceRequired={metrics.get('maintenance_required', False)}, "
+                                    f"Urgency={metrics.get('urgency_score', 0.0):.0f}/100"
+                                )
+                            # NOTE: ef_result['tables'] contains in-memory DataFrames for
+                            # failure_probability_ts, failure_causation, enhanced_maintenance_recommendation,
+                            # and recommended_actions. These can be mapped to SQL tables in a later step.
+                        # In file mode, fall back to original file-based enhanced forecasting integration.
+                        elif not SQL_MODE:
+                            Console.info("[ENHANCED_FORECAST] Running enhanced forecasting (file mode)")
+                            enhanced_ctx = {
+                                "run_dir": run_dir,
+                                "tables_dir": tables_dir,
+                                "plots_dir": plots_dir,
+                                "config": cfg,
+                                "run_id": str(run_id) if run_id is not None else None,
+                                "equip_id": int(equip_id) if 'equip_id' in locals() else None,
+                            }
+                            enhanced_result = enhanced_forecasting.EnhancedForecastingEngine(cfg).run(enhanced_ctx)
+                            if enhanced_result and enhanced_result.get("tables"):
+                                Console.info(
+                                    f"[ENHANCED_FORECAST] Generated {len(enhanced_result['tables'])} enhanced tables"
+                                )
+                            if enhanced_result and enhanced_result.get("metrics"):
+                                m = enhanced_result["metrics"]
+                                Console.info(
+                                    "[ENHANCED_FORECAST] "
+                                    f"RUL={m.get('rul_hours', 0.0):.1f}h, "
+                                    f"MaxFailProb={m.get('max_failure_probability', 0.0)*100:.1f}%, "
+                                    f"MaintenanceRequired={m.get('maintenance_required', False)}, "
+                                    f"Urgency={m.get('urgency_score', 0.0):.0f}/100"
+                                )
+                except Exception as e:
+                    Console.warn(f"[ENHANCED_FORECAST] Enhanced forecasting failed: {e}")
 
             except Exception as e:
                 Console.warn(f"[OUTPUTS] Output generation failed: {e}")
@@ -3017,6 +3081,48 @@ def main() -> None:
                     Console.info(f"[ANALYTICS] Written {result.get('sql_tables', 0)} tables to SQL database")
                 except Exception as e:
                     Console.error(f"[ANALYTICS] Error generating comprehensive analytics: {str(e)}")
+
+            # === RUL + SQL surfacing of forecast (SQL mode) ===
+            try:
+                try:
+                    health_threshold = float(
+                        (cfg.get("analytics", {}) or {}).get(
+                            "health_alert_threshold", 70.0
+                        )
+                    )
+                except Exception:
+                    health_threshold = 70.0
+
+                rul_tables = rul_estimator.estimate_rul_and_failure(
+                    tables_dir=tables_dir,
+                    equip_id=int(equip_id) if 'equip_id' in locals() else None,
+                    run_id=str(run_id) if run_id is not None else None,
+                    health_threshold=health_threshold,
+                    sql_client=getattr(output_manager, "sql_client", None),
+                )
+                if rul_tables:
+                    Console.info(f"[RUL] Generated {len(rul_tables)} RUL/forecast tables (SQL mode)")
+                    enable_sql_rul = getattr(output_manager, "sql_client", None) is not None
+                    for sql_name, df in rul_tables.items():
+                        if df is None or df.empty:
+                            continue
+                        csv_name = {
+                            "ACM_HealthForecast_TS": "health_forecast_ts.csv",
+                            "ACM_FailureForecast_TS": "failure_forecast_ts.csv",
+                            "ACM_RUL_TS": "rul_timeseries.csv",
+                            "ACM_RUL_Summary": "rul_summary.csv",
+                            "ACM_RUL_Attribution": "rul_attribution.csv",
+                            "ACM_MaintenanceRecommendation": "maintenance_recommendation.csv",
+                        }.get(sql_name, f"{sql_name}.csv")
+                        out_path = tables_dir / csv_name
+                        output_manager.write_dataframe(
+                            df,
+                            out_path,
+                            sql_table=sql_name if enable_sql_rul else None,
+                            add_created_at="CreatedAt" not in df.columns,
+                        )
+            except Exception as e:
+                Console.warn(f"[RUL] RUL estimation (SQL mode) failed: {e}")
 
         except Exception as e:
             Console.warn(f"[OUTPUTS] Comprehensive analytics generation failed: {e}")
