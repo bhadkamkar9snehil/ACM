@@ -18,7 +18,7 @@
 | **Audit Documents Reviewed** | 4 | State Management, Regime, Forecast, Comprehensive Audits |
 
 **Recent Completions (2025-11-11 - Latest Session):**  
-CHART-03 (OMR gating fixed self.cfg→cfg), CHART-04 (Timestamp format default), CHART-12 (Severity colors), OUT-03 (Schema descriptor), OUT-05 (Run metadata), OUT-20 (Schema automation), OUT-21 (Meta artifact list), OUT-24 (ASCII-only), OUT-26 (Health index), OUT-27 (Chart count), OUT-28 (Severity JSON), DEBT-04 (SQL vars), Folder structure fix, CFG-07 (runtime.future_grace_minutes to allow historian backfills)
+CHART-03 (OMR gating fixed self.cfg→cfg), CHART-04 (Timestamp format default), CHART-12 (Severity colors), OUT-03 (Schema descriptor), OUT-05 (Run metadata), OUT-20 (Schema automation), OUT-21 (Meta artifact list), OUT-24 (ASCII-only), OUT-26 (Health index), OUT-27 (Chart count), OUT-28 (Severity JSON), DEBT-04 (SQL vars), Folder structure fix, CFG-07 (runtime.future_grace_minutes to allow historian backfills), SQL-57 (Enhanced forecasting outputs mapped to permanent SQL tables)
 
 **Consolidation Notes (2025-11-13):**
 - Added Section 8: Forecast & AR(1) Model (14 tasks from Forecast Audit)

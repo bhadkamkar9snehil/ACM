@@ -131,6 +131,84 @@ BEGIN
 END
 GO
 
+-- Enhanced failure probability time series (per run/horizon)
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'ACM_EnhancedFailureProbability_TS' AND schema_id = SCHEMA_ID('dbo'))
+BEGIN
+    CREATE TABLE dbo.ACM_EnhancedFailureProbability_TS (
+        RunID                  UNIQUEIDENTIFIER NOT NULL,
+        EquipID                INT NOT NULL,
+        Timestamp              DATETIME2 NOT NULL,
+        ForecastHorizon_Hours  FLOAT NOT NULL,
+        ForecastHealth         FLOAT NULL,
+        ForecastUncertainty    FLOAT NULL,
+        FailureProbability     FLOAT NOT NULL,
+        RiskLevel              NVARCHAR(50) NOT NULL,
+        Confidence             FLOAT NULL,
+        Model                  NVARCHAR(50) NULL,
+        CreatedAt              DATETIME2 NOT NULL CONSTRAINT DF_ACM_EnhancedFailureProbability_TS_CreatedAt DEFAULT (SYSUTCDATETIME()),
+        CONSTRAINT PK_ACM_EnhancedFailureProbability_TS PRIMARY KEY CLUSTERED (RunID, EquipID, Timestamp, ForecastHorizon_Hours)
+    );
+END
+GO
+
+-- Detector-level failure causation snapshot
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'ACM_FailureCausation' AND schema_id = SCHEMA_ID('dbo'))
+BEGIN
+    CREATE TABLE dbo.ACM_FailureCausation (
+        RunID               UNIQUEIDENTIFIER NOT NULL,
+        EquipID             INT NOT NULL,
+        PredictedFailureTime DATETIME2 NOT NULL,
+        FailurePattern      NVARCHAR(200) NULL,
+        Detector            NVARCHAR(100) NOT NULL,
+        MeanZ               FLOAT NULL,
+        MaxZ                FLOAT NULL,
+        SpikeCount          INT NULL,
+        TrendSlope          FLOAT NULL,
+        ContributionWeight  FLOAT NULL,
+        ContributionPct     FLOAT NULL,
+        CreatedAt           DATETIME2 NOT NULL CONSTRAINT DF_ACM_FailureCausation_CreatedAt DEFAULT (SYSUTCDATETIME()),
+        CONSTRAINT PK_ACM_FailureCausation PRIMARY KEY CLUSTERED (RunID, EquipID, Detector)
+    );
+END
+GO
+
+-- Enhanced maintenance recommendation (hours-to-window representation)
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'ACM_EnhancedMaintenanceRecommendation' AND schema_id = SCHEMA_ID('dbo'))
+BEGIN
+    CREATE TABLE dbo.ACM_EnhancedMaintenanceRecommendation (
+        RunID                   UNIQUEIDENTIFIER NOT NULL,
+        EquipID                 INT NOT NULL,
+        UrgencyScore            FLOAT NOT NULL,
+        MaintenanceRequired     BIT NOT NULL,
+        EarliestMaintenance     FLOAT NULL,
+        PreferredWindowStart    FLOAT NULL,
+        PreferredWindowEnd      FLOAT NULL,
+        LatestSafeTime          FLOAT NULL,
+        FailureProbAtLatest     FLOAT NULL,
+        FailurePattern          NVARCHAR(200) NULL,
+        Confidence              FLOAT NULL,
+        EstimatedDuration_Hours FLOAT NULL,
+        CreatedAt               DATETIME2 NOT NULL CONSTRAINT DF_ACM_EnhancedMaintenanceRecommendation_CreatedAt DEFAULT (SYSUTCDATETIME()),
+        CONSTRAINT PK_ACM_EnhancedMaintenanceRecommendation PRIMARY KEY CLUSTERED (RunID, EquipID)
+    );
+END
+GO
+
+-- Recommended maintenance actions (one row per suggested action)
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'ACM_RecommendedActions' AND schema_id = SCHEMA_ID('dbo'))
+BEGIN
+    CREATE TABLE dbo.ACM_RecommendedActions (
+        RunID                   UNIQUEIDENTIFIER NOT NULL,
+        EquipID                 INT NOT NULL,
+        Action                  NVARCHAR(400) NOT NULL,
+        Priority                NVARCHAR(50) NULL,
+        EstimatedDuration_Hours FLOAT NULL,
+        CreatedAt               DATETIME2 NOT NULL CONSTRAINT DF_ACM_RecommendedActions_CreatedAt DEFAULT (SYSUTCDATETIME()),
+        CONSTRAINT PK_ACM_RecommendedActions PRIMARY KEY CLUSTERED (RunID, EquipID, Action)
+    );
+END
+GO
+
 PRINT 'Forecast and RUL tables created/ensured successfully.';
 GO
 

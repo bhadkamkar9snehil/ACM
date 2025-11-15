@@ -25,6 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Note**: River HST detector is planned feature (STREAM-01, STREAM-02), currently disabled. Fusion already handles missing streams gracefully.
 
 ### Added
+- **SQL-57: Enhanced Forecasting Tables** (2025-11-14):
+  - Added permanent SQL tables for enhanced forecasting outputs: `ACM_EnhancedFailureProbability_TS`, `ACM_FailureCausation`, `ACM_EnhancedMaintenanceRecommendation`, and `ACM_RecommendedActions`.
+  - Extends `scripts/sql/57_create_forecast_and_rul_tables.sql` so SQL-mode runs can persist failure probabilities, detector causation, prescriptive maintenance windows, and recommended action rows for Grafana dashboards.
+  - Paves the way for `core/output_manager.OutputManager` to dual-write the enhanced DataFrames once hooks are wired up.
 - **DET-09: Adaptive Parameter Tuning** (2025-11-10):
   - **Purpose**: Hands-off, continuous self-monitoring and auto-adjustment of model hyperparameters
   - **Philosophy**: No separate commissioning modes - ACM adapts continuously during normal operation
