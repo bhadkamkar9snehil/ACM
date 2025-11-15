@@ -27,8 +27,12 @@ from utils.logger import Console
 
 
 def _norm_cdf(x: np.ndarray) -> np.ndarray:
-    """Standard normal CDF using math.erf."""
-    return 0.5 * (1.0 + erf(x / sqrt(2.0)))
+    """Standard normal CDF that accepts scalars or numpy arrays."""
+    arr = np.asarray(x, dtype=float)
+    scaled = arr / sqrt(2.0)
+    # math.erf only supports scalars; vectorize to handle numpy arrays.
+    erf_vec = np.vectorize(erf, otypes=[float])
+    return 0.5 * (1.0 + erf_vec(scaled))
 
 
 @dataclass
