@@ -10,9 +10,7 @@ ACM V8 is an autonomous condition monitoring pipeline for industrial equipment.
 
 - `core/fast_features.py` delivers vectorized feature engineering with optional Polars acceleration.
 
-- Detector implementations live under `core/` (Mahalanobis, PCA SPE/T2, Isolation Forest,
-
-  Gaussian Mixture, AR1 residual, Overall Model Residual).
+- Detector implementations live under `core/` (Mahalanobis, PCA SPE/T2, Isolation Forest,  Gaussian Mixture, AR1 residual, Overall Model Residual).
 
 - Fusion (`core/fuse.py`) combines detector scores; `core/episode_culprits_writer.py` highlights## System Overview## System Overview
 
@@ -23,8 +21,6 @@ ACM V8 is an autonomous condition monitoring pipeline for industrial equipment.
   changes with `core/config_history_writer.log_auto_tune_changes`.
 
 - `core/output_manager.OutputManager` governs all CSV/PNG/SQL writes and enforces the local time- **Entry point**: `python -m core.acm_main` orchestrates ingestion, feature engineering, detector fitting, scoring, and reporting.- **Entry point**: `python -m core.acm_main` orchestrates ingestion, feature engineering, detector fitting, scoring, and reporting.
-
-  policy.
 
 - `core/model_persistence.py` caches detector bundles under `artifacts/{equip}/models` by- **Feature engineering**: `core/fast_features.py` delivers vectorized pandas transforms with optional Polars acceleration.- **Feature engineering**: `core/fast_features.py` delivers vectorized pandas transforms with optional Polars acceleration.
 
@@ -717,8 +713,26 @@ ACM V8 is designed to run unattended once configured. Preserve configuration his
 Open an issue in this repository with run metadata (`meta.json`) and relevant logs, or reference the backlog (`# To Do.md`) when requesting new features. For ambiguous instructions, document assumptions in the same commit to keep the knowledge base current.
 # ACM V8 – Autonomous Asset Condition Monitoring
 
-- [ACM V8 - Autonomous Asset Condition Monitoring# ACM V8 - Autonomous Asset Condition Monitoring# ACM V8 - Autonomous Asset Condition Monitoring](#acm-v8---autonomous-asset-condition-monitoring-acm-v8---autonomous-asset-condition-monitoring-acm-v8---autonomous-asset-condition-monitoring)
+- [ACM V8 - Autonomous Asset Condition Monitoring](#acm-v8---autonomous-asset-condition-monitoring)
   - [System Overview](#system-overview)
+  - [How ACM Thinks: The Multi-Head Framework](#how-acm-thinks-the-multi-head-framework)
+    - [Detector Heads – Core Idea](#detector-heads--core-idea)
+    - [What Each Detector Identifies in Physical Terms](#what-each-detector-identifies-in-physical-terms)
+      - [AR1 – Dynamic Instability \& Control Oscillation](#ar1--dynamic-instability--control-oscillation)
+      - [PCA (SPE/T²) – Shape and Variance Anomalies](#pca-spet--shape-and-variance-anomalies)
+      - [Mahalanobis Distance – Global Shift or Scaling](#mahalanobis-distance--global-shift-or-scaling)
+      - [GMM – Regime Recognition / Novel Condition](#gmm--regime-recognition--novel-condition)
+      - [Isolation Forest – Localized, Sparse Outliers](#isolation-forest--localized-sparse-outliers)
+      - [OMR – Cross-Sensor Coupling Breaks](#omr--cross-sensor-coupling-breaks)
+      - [CUSUM / Drift Detector – Slow Degradation](#cusum--drift-detector--slow-degradation)
+    - [Fusion – The Consensus Layer](#fusion--the-consensus-layer)
+      - [Why We Fuse](#why-we-fuse)
+      - [What Head Contributions Mean](#what-head-contributions-mean)
+    - [Reading ACM Outputs – The Human Hierarchy](#reading-acm-outputs--the-human-hierarchy)
+    - [Physical Example: Gas Turbine Case](#physical-example-gas-turbine-case)
+    - [Operator-Facing Summary](#operator-facing-summary)
+    - [Why Multiple Heads Are Still Needed](#why-multiple-heads-are-still-needed)
+    - [Summary Takeaways](#summary-takeaways)
   - [Quick Start (File Mode)](#quick-start-file-mode)
   - [Documentation Map](#documentation-map)
   - [Contribution and Support](#contribution-and-support)
