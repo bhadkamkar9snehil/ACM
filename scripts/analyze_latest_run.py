@@ -1,5 +1,13 @@
+import sys
 import pandas as pd
 from pathlib import Path
+
+# Add project root to path for imports
+project_root = Path(__file__).resolve().parents[1]
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
+from utils.logger import Console
 
 run_dir = Path(r"artifacts/FD_FAN_COLDSTART").glob("run_*")
 run_dir = max(run_dir, key=lambda p: p.name)  # latest by name timestamp
@@ -42,7 +50,8 @@ for c in scols:
         })
 
 out = pd.DataFrame(rows).sort_values('delta_alert_minus_good', key=lambda s: s.abs(), ascending=False)
-print("Top 5 sensors by median change (ALERT - GOOD):")
+Console.info("Top 5 sensors by median change (ALERT - GOOD):")
 for _, r in out.head(5).iterrows():
-    print(f"- {r['sensor']}: good={r['median_good']:.2f}, alert={r['median_alert']:.2f}, delta={r['delta_alert_minus_good']:+.2f}")
+    Console.info(f"- {r['sensor']}: good={r['median_good']:.2f}, alert={r['median_alert']:.2f}, delta={r['delta_alert_minus_good']:+.2f}", 
+                 sensor=r['sensor'], median_good=r['median_good'], median_alert=r['median_alert'], delta=r['delta_alert_minus_good'])
 

@@ -21,6 +21,13 @@ from pathlib import Path
 import re
 from typing import Iterable, List, Dict, Set
 
+# Add project root to path for imports
+project_root = Path(__file__).resolve().parents[1]
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
+from utils.logger import Console
+
 
 def _discover_assets(chunk_root: Path, requested: Iterable[str] | None) -> List[str]:
     if requested:
@@ -49,7 +56,7 @@ def _load_progress(artifact_root: Path) -> Dict[str, Set[str]]:
             # Convert lists back to sets
             return {asset: set(chunks) for asset, chunks in data.items()}
     except (json.JSONDecodeError, OSError) as exc:
-        print(f"[WARN] Could not load progress file: {exc}")
+        Console.warn(f"[WARN] Could not load progress file: {exc}", error=str(exc))
         return {}
 
 
@@ -63,7 +70,7 @@ def _save_progress(artifact_root: Path, progress: Dict[str, Set[str]]) -> None:
         with open(progress_file, "w") as f:
             json.dump(data, f, indent=2)
     except OSError as exc:
-        print(f"[WARN] Could not save progress file: {exc}")
+        Console.warn(f"[WARN] Could not save progress file: {exc}", error=str(exc))
 
 
 def _mark_chunk_completed(artifact_root: Path, asset: str, chunk_name: str) -> None:
@@ -106,9 +113,9 @@ def _build_command(equip: str, artifact_root: Path, chunk_path: Path, *, bootstr
 def _run_chunk_command(cmd: List[str], *, dry_run: bool) -> int:
     printable = " ".join(cmd)
     if dry_run:
-        print(f"[DRY] {printable}")
+        Console.info(f"[DRY] {printable}", mode="dry-run")
         return 0
-    print(f"[RUN] {printable}")
+    Console.info(f"[RUN] {printable}", command=printable)
     result = subprocess.run(cmd, check=False)
     return result.returncode
 
@@ -126,26 +133,26 @@ def _process_asset(equip: str, chunk_root: Path, artifact_root: Path, *, dry_run
         progress = _load_progress(artifact_root)
         completed_chunks = progress.get(equip, set())
         if completed_chunks:
-            print(f"[INFO] {equip}: resuming from previous run ({len(completed_chunks)} chunks already completed)")
+            Console.info(f"[INFO] {equip}: resuming from previous run ({len(completed_chunks)} chunks already completed)", equipment=equip, completed=len(completed_chunks))
 
     total = len(chunks)
     remaining = [c for c in chunks if c.name not in completed_chunks]
     
     if not remaining:
-        print(f"[INFO] {equip}: all {total} chunks already completed, skipping")
+        Console.info(f"[INFO] {equip}: all {total} chunks already completed, skipping", equipment=equip, total=total)
         return
     
-    print(f"[INFO] {equip}: processing {len(remaining)}/{total} chunk(s) from {chunk_dir}")
+    Console.info(f"[INFO] {equip}: processing {len(remaining)}/{total} chunk(s) from {chunk_dir}", equipment=equip, remaining=len(remaining), total=total)
 
     for idx, chunk_path in enumerate(chunks, start=1):
         # Skip already completed chunks
         if chunk_path.name in completed_chunks:
-            print(f"[INFO] {equip}: chunk {idx}/{total} (skipped) -> {chunk_path.name}")
+            Console.info(f"[INFO] {equip}: chunk {idx}/{total} (skipped) -> {chunk_path.name}", equipment=equip, chunk=idx, total=total)
             continue
             
         bootstrap = idx == 1
         phase = "bootstrap" if bootstrap else "score"
-        print(f"[INFO] {equip}: chunk {idx}/{total} ({phase}) -> {chunk_path.name}")
+        Console.info(f"[INFO] {equip}: chunk {idx}/{total} ({phase}) -> {chunk_path.name}", equipment=equip, chunk=idx, total=total, phase=phase)
         cmd = _build_command(
             equip,
             artifact_root,
@@ -201,7 +208,7 @@ def main() -> int:
 
     assets = _discover_assets(chunk_root, args.equip)
     if not assets:
-        print(f"[ERROR] No assets found under {chunk_root}", file=sys.stderr)
+        Console.error(f"[ERROR] No assets found under {chunk_root}", chunk_root=str(chunk_root))
         return 1
 
     max_workers = max(1, args.max_workers)
@@ -226,15 +233,15 @@ def main() -> int:
                 future.result()
             except Exception as exc:  # noqa: BLE001 - want full context
                 errors.append(f"{equip}: {exc}")
-                print(f"[ERROR] {equip}: {exc}", file=sys.stderr)
+                Console.error(f"[ERROR] {equip}: {exc}", equipment=equip, error=str(exc))
 
     if errors:
-        print("[ERROR] One or more chunk replays failed:", file=sys.stderr)
+        Console.error("[ERROR] One or more chunk replays failed:")
         for line in errors:
-            print(f"  - {line}", file=sys.stderr)
+            Console.error(f"  - {line}")
         return 1
 
-    print("[OK] Chunk replay complete")
+    Console.ok("[OK] Chunk replay complete")
     return 0
 
 

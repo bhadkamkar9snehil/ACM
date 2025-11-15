@@ -1,7 +1,16 @@
 """
 Insert wildcard equipment (EquipID=0) for default config parameters.
 """
+import sys
+from pathlib import Path
 import pyodbc
+
+# Add project root to path for imports
+project_root = Path(__file__).resolve().parents[2]
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
+from utils.logger import Console
 
 def insert_wildcard_equipment():
     """Insert EquipID=0 as wildcard equipment for default config."""
@@ -13,7 +22,7 @@ def insert_wildcard_equipment():
     )
     
     try:
-        print("[EQUIP] Connecting to ACM database...")
+        Console.info("[EQUIP] Connecting to ACM database...")
         conn = pyodbc.connect(conn_str, timeout=10)
         cursor = conn.cursor()
         
@@ -22,13 +31,13 @@ def insert_wildcard_equipment():
         count = cursor.fetchone()[0]
         
         if count > 0:
-            print(f"[EQUIP] Wildcard equipment (EquipID=0) already exists")
+            Console.info(f"[EQUIP] Wildcard equipment (EquipID=0) already exists", equip_id=0)
             cursor.close()
             conn.close()
             return
         
         # Insert wildcard equipment (IDENTITY_INSERT requires multiple statements)
-        print(f"[EQUIP] Inserting wildcard equipment (EquipID=0)...")
+        Console.info(f"[EQUIP] Inserting wildcard equipment (EquipID=0)...", equip_id=0)
         
         cursor.execute("SET IDENTITY_INSERT Equipment ON")
         
@@ -41,13 +50,13 @@ def insert_wildcard_equipment():
         
         conn.commit()
         
-        print(f"[EQUIP] Successfully inserted wildcard equipment (EquipID=0)")
+        Console.ok(f"[EQUIP] Successfully inserted wildcard equipment (EquipID=0)", equip_id=0)
         
         cursor.close()
         conn.close()
         
     except Exception as e:
-        print(f"[EQUIP] Error inserting wildcard equipment: {e}")
+        Console.error(f"[EQUIP] Error inserting wildcard equipment: {e}", error=str(e))
         raise
 
 if __name__ == "__main__":
