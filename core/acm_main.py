@@ -42,6 +42,7 @@ from core.omr import OMRDetector  # OMR-02: Overall Model Residual
 # Import the unified output system
 from core.output_manager import OutputManager
 from core import rul_estimator
+from core import enhanced_forecasting
 # Import run metadata writer
 from core.run_metadata_writer import write_run_metadata, extract_run_metadata_from_scores, extract_data_quality_score
 # Import episode culprits writer
@@ -2978,6 +2979,32 @@ def main() -> None:
                                             )
                                 except Exception as e:
                                     Console.warn(f"[RUL] RUL estimation failed: {e}")
+                                
+                                # === ENHANCED FORECASTING (if enabled) ===
+                                try:
+                                    enhanced_enabled = cfg.get("forecasting", {}).get("enhanced_enabled", True)
+                                    if enhanced_enabled:
+                                        Console.info("[ENHANCED_FORECAST] Running enhanced forecasting analysis")
+                                        enhanced_ctx = {
+                                            'run_dir': run_dir,
+                                            'tables_dir': tables_dir,
+                                            'plots_dir': plots_dir,
+                                            'config': cfg,
+                                            'run_id': str(run_id) if run_id is not None else None,
+                                            'equip_id': int(equip_id) if 'equip_id' in locals() else None
+                                        }
+                                        enhanced_result = enhanced_forecasting.EnhancedForecastingEngine(cfg).run(enhanced_ctx)
+                                        if enhanced_result and enhanced_result.get('tables'):
+                                            Console.info(f"[ENHANCED_FORECAST] Generated {len(enhanced_result['tables'])} enhanced tables")
+                                            # Tables already written by enhanced_forecasting module
+                                        if enhanced_result and enhanced_result.get('metrics'):
+                                            metrics = enhanced_result['metrics']
+                                            Console.info(f"[ENHANCED_FORECAST] RUL: {metrics.get('rul_hours', 0):.1f}h, "
+                                                       f"Max Failure Prob: {metrics.get('max_failure_probability', 0)*100:.1f}%, "
+                                                       f"Maintenance Required: {metrics.get('maintenance_required', False)}, "
+                                                       f"Urgency: {metrics.get('urgency_score', 0):.0f}/100")
+                                except Exception as e:
+                                    Console.warn(f"[ENHANCED_FORECAST] Enhanced forecasting failed: {e}")
                             else:
                                 Console.warn(f"[FORECAST] {forecast_result['error']['message']}")
                     except Exception as e:
