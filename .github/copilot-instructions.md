@@ -3,6 +3,8 @@
 - **Primary entrypoint**: `python -m core.acm_main --equip FD_FAN --enable-report` (see README §Development Workflow); most flows go through `run_pipeline()` in `core/acm_main.py`.
 - **Modes**: file-mode reads `data/*.csv`; SQL-mode requires `configs/sql_connection.ini` and `core/sql_client.SQLClient`. Keep file-mode working before touching SQL paths.
 
+- NEVER EVER EVER USE EMOJIS IN COMMENTS OR IN CODE OR ANYWHERE EVER. THIS INCLUDES ALL THE TEST THAT YOU GENERATE.
+
 - **Configuration**: `utils/config_dict.ConfigDict` loads cascading config from `configs/config_table.csv` (global `*` rows overridden by equipment-specific rows). Callers expect dot-path access (e.g., `cfg['fusion']['weights']['omr_z']`). Update docs/CHANGELOG + `# To Do.md` when changing schemas.
 - **Adaptive tuning**: `core/analytics.py::AdaptiveTuning` logs changes through `core/config_history_writer.log_auto_tune_changes`. Respect this flow instead of writing directly to CSV/SQL.
 - **Caching**: `core/model_persistence.py` persists models under `artifacts/{equip}/models`. Signatures must include config+schema; use existing helpers rather than new hash logic.
