@@ -5,7 +5,7 @@
 
 - NEVER EVER EVER USE EMOJIS IN COMMENTS OR IN CODE OR ANYWHERE EVER. THIS INCLUDES ALL THE TEST THAT YOU GENERATE.
 
-- **Configuration**: `utils/config_dict.ConfigDict` loads cascading config from `configs/config_table.csv` (global `*` rows overridden by equipment-specific rows). Callers expect dot-path access (e.g., `cfg['fusion']['weights']['omr_z']`). Update docs/CHANGELOG + `# To Do.md` when changing schemas.
+- **Configuration**: `utils/config_dict.ConfigDict` loads cascading config from `configs/config_table.csv` (global `*` rows overridden by equipment-specific rows). Callers expect dot-path access (e.g., `cfg['fusion']['weights']['omr_z']`). Update docs/CHANGELOG + `Task Backlog.md` when changing schemas.
 - **Adaptive tuning**: `core/analytics.py::AdaptiveTuning` logs changes through `core/config_history_writer.log_auto_tune_changes`. Respect this flow instead of writing directly to CSV/SQL.
 - **Caching**: `core/model_persistence.py` persists models under `artifacts/{equip}/models`. Signatures must include config+schema; use existing helpers rather than new hash logic.
 - **Output contract**: `core/output_manager.OutputManager` governs all CSV/PNG/SQL writes. Route new tables/charts through it; dual-write guardrails expect `ALLOWED_TABLES` and batched transactions.

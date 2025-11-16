@@ -315,5 +315,5 @@ Track if regime parameters drift over time (gradual shift in normal behavior).
 - **Code:** `core/acm_main.py` lines 1430-1595 (calibration integration)
 - **Code:** `core/run_metadata_writer.py` lines 164-207 (metadata extraction)
 - **Config:** `configs/config_table.csv` line 63 (`fusion.per_regime`)
-- **Backlog:** `# To Do.md` line 107 (DET-07 task)
+- **Backlog:** `Task Backlog.md` line 107 (DET-07 task)
 - **User docs:** `README.md` section 4 (calibration & fusion)

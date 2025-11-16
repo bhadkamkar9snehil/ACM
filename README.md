@@ -298,7 +298,7 @@ hash for `FD_FAN`). Access values with dot paths such as `cfg["fusion"]["weights
 
 When introducing new parameters:
 
-- Document the change in `docs/CHANGELOG.md` and the backlog (`# To Do.md`).   ```powershell   ```powershell
+- Document the change in `docs/CHANGELOG.md` and the backlog (`Task Backlog.md`).   ```powershell   ```powershell
 
 - Update dependent design notes (for example `docs/Analytics Backbone.md`).
 
@@ -444,7 +444,7 @@ modifying shared modules.
 
 ├── pyproject.toml        # Project metadata and dependencies| 1 | `*` | Global defaults || 1 | `*` | Global defaults |
 
-└── # To Do.md            # Backlog tracking
+└── Task Backlog.md            # Backlog tracking
 
 ```| 2 | Deterministic hash (for example `5396` for `FD_FAN`) | Equipment overrides || 2 | Deterministic hash (for example `5396` for `FD_FAN`) | Equipment overrides |
 
@@ -462,7 +462,7 @@ modifying shared modules.
 
 - `docs/SQL_INTEGRATION_PLAN.md` and `docs/SQL_SCHEMA_DESIGN.md` - Database architecture details.
 
-- `docs/PROJECT_STRUCTURE.md` - Deep dive into directory layout and integration points.- Document the change in `docs/CHANGELOG.md` and `# To Do.md`.- Document the change in `docs/CHANGELOG.md` and `# To Do.md`.
+- `docs/PROJECT_STRUCTURE.md` - Deep dive into directory layout and integration points.- Document the change in `docs/CHANGELOG.md` and `Task Backlog.md`.- Document the change in `docs/CHANGELOG.md` and `Task Backlog.md`.
 
 - `docs/CHANGELOG.md` - Authoritative change history.
 
@@ -476,7 +476,7 @@ modifying shared modules.
 
 - Document schema or configuration changes in this README and the relevant design notes; update theConfiguration feeds the cache signature, so edits invalidate cached models on the next run.Configuration feeds the cache signature, so edits invalidate cached models on the next run.
 
-  backlog in `# To Do.md` when work lands.
+  backlog in `Task Backlog.md` when work lands.
 
 - Follow the local time policy and route all outputs through `core/output_manager`.
 
@@ -652,7 +652,7 @@ See the `docs/` directory for deeper design notes (`docs/PROJECT_STRUCTURE.md`, 
 
 - Keep this README in sync with pipeline behavior, output schemas, and CLI changes.- Keep this README in sync with pipeline behavior, output schemas, and CLI changes.
 
-- Record significant updates in `docs/CHANGELOG.md` and track follow-up work in `# To Do.md`.- Record significant updates in `docs/CHANGELOG.md` and track follow-up work in `# To Do.md`.
+- Record significant updates in `docs/CHANGELOG.md` and track follow-up work in `Task Backlog.md`.- Record significant updates in `docs/CHANGELOG.md` and track follow-up work in `Task Backlog.md`.
 
 - When detector logic changes, update `docs/Analytics Backbone.md` and related detector guides (for example `docs/OMR_DETECTOR.md`).- When detector logic changes, update `docs/Analytics Backbone.md` and related detector guides (for example `docs/OMR_DETECTOR.md`).
 
@@ -668,7 +668,7 @@ See the `docs/` directory for deeper design notes (`docs/PROJECT_STRUCTURE.md`, 
 
 - Consult the `docs/` directory for design deep dives, validation reports, and operating procedures.- Consult the `docs/` directory for design deep dives, validation reports, and operating procedures.
 
-- Coordinate enhancements through `# To Do.md`, linking to relevant design notes.- Coordinate enhancements through `# To Do.md`, linking to relevant design notes.
+- Coordinate enhancements through `Task Backlog.md`, linking to relevant design notes.- Coordinate enhancements through `Task Backlog.md`, linking to relevant design notes.
 
 - Maintain file-mode health before expanding SQL paths; use the chunk replay harness for regression testing.- Maintain file-mode health before expanding SQL paths; use the chunk replay harness for regression testing.
 
@@ -691,7 +691,7 @@ ACM V8 is designed to run unattended once configured. Preserve configuration his
 ├── artifacts/            # Gitignored run outputs
 ├── backups/              # Gitignored backup directory
 ├── pyproject.toml        # Project metadata and dependency declarations
-└── # To Do.md            # Backlog tracking (keep in sync when work lands)
+└── Task Backlog.md            # Backlog tracking (keep in sync when work lands)
 ```
 
 ## Documentation Map
@@ -705,12 +705,12 @@ ACM V8 is designed to run unattended once configured. Preserve configuration his
 
 ## Contribution Notes
 - Keep file-mode stability before modifying SQL paths.
-- Document schema or config changes in the README and relevant docs; update backlog entries in `# To Do.md`.
+- Document schema or config changes in the README and relevant docs; update backlog entries in `Task Backlog.md`.
 - Follow the local time policy (no UTC conversions) and route all outputs through `core/output_manager`.
 - Never commit credentials; `configs/sql_connection.ini` must remain local.
 
 ## Support
-Open an issue in this repository with run metadata (`meta.json`) and relevant logs, or reference the backlog (`# To Do.md`) when requesting new features. For ambiguous instructions, document assumptions in the same commit to keep the knowledge base current.
+Open an issue in this repository with run metadata (`meta.json`) and relevant logs, or reference the backlog (`Task Backlog.md`) when requesting new features. For ambiguous instructions, document assumptions in the same commit to keep the knowledge base current.
 # ACM V8 – Autonomous Asset Condition Monitoring
 
 - [ACM V8 - Autonomous Asset Condition Monitoring](#acm-v8---autonomous-asset-condition-monitoring)
@@ -824,7 +824,7 @@ ACM V8 is a **fully autonomous, asset-agnostic** condition monitoring system tha
 **New Features:** Incremental batch processing, OMR multivariate detector, multi-feature drift detection, stable data hashing, expanded config integrity, asset-specific configs, cold-start mode, model persistence, autonomous tuning  
 **Achievement:** Deploy-once system handling unlimited equipment types with zero intervention  
 **Code Quality:** **B+ (85/100)** rated by comprehensive audit - Excellent numerical stability, robust error handling, comprehensive instrumentation  
-**Task Progress:** **77/141 tasks completed (54.6%)** **PAST HALFWAY!** - [View detailed backlog](# To Do.md)  
+**Task Progress:** **77/141 tasks completed (54.6%)** **PAST HALFWAY!** - [View detailed backlog](Task Backlog.md)  
 **Recent Fixes (Nov 10):** Model persistence dict bug (PERS-05, 4-8x speedup), Mahalanobis regularization (DET-08, 580x stability), Batch testing protocol (TEST-03)
 **Latest Batch Runs (2025-11-10):** GAS_TURBINE run_20251110_161328 (high-severity alert driven by radial vibration; drift events logged Jan 3 & Jan 25) | FD_FAN run_20251110_162456 (single 423h episode anchored by bearing temperature z≈28; drift logic flagged FAULT and refit requested)
 
@@ -838,7 +838,7 @@ ACM V8 is a **fully autonomous, asset-agnostic** condition monitoring system tha
 - **[What's New (2025-11-06)](#whats-new-2025-11-06)** - Multi-feature drift detection + OMR detector
 - **[Code Quality Audit](#code-quality-audit-nov-10-2025)** - **B+ (85/100)** - Comprehensive 700-line technical audit
 - **[Phase 1 Features](#15-phase-1-features-new)** - Cold-start mode, asset-specific configs, autonomous tuning
-- **[Task Backlog](# To Do.md)** - **77/141 tasks completed (54.6%)** **PAST HALFWAY!**
+- **[Task Backlog](Task Backlog.md)** - **77/141 tasks completed (54.6%)** **PAST HALFWAY!**
 - **[Pipeline Overview](#3-pipeline-overview)** - Processing stages and detector architecture
 - **[Output Artifacts](#5-output-artifacts-file-mode)** - 27 tables + 15 charts generated per run
 - **[OMR Documentation](docs/OMR_DETECTOR.md)** - Detailed guide for multivariate health detection
@@ -1133,7 +1133,7 @@ EquipID,Category,ParamPath,ParamValue,ValueType
 6. [FIXED] **SQL connection leaks** - Proper cleanup in finally blocks (already implemented)
 
 **Improvement Tasks Cataloged:**
-- See **[Section 11 of TODO](# To Do.md#11-code-quality--architecture-improvements)** for 23 new improvement tasks
+- See **[Section 11 of TODO](Task Backlog.md#11-code-quality--architecture-improvements)** for 23 new improvement tasks
 - Categories: Forecasting (7 tasks), Fusion (6 tasks), Drift (1 task), Regimes (2 tasks), Output Manager (2 tasks), Config (1 task)
 - Priority: High-priority tasks focus on model robustness, performance, and explainability
 - Status: All marked Pending, ready for implementation
@@ -1400,7 +1400,7 @@ Phase 3 (Production): SQL mode
 - Scheduled (15–30 min) or always-on loop.  
 - Window discovery and historian reads via a stored procedure that receives equipment, tag list, and date bounds.  
 - Persisted state for River models and fusion thresholds.  
-*Implementation pending; tracked in `# To Do.md`.*
+*Implementation pending; tracked in `Task Backlog.md`.*
 
 ---
 
@@ -2083,11 +2083,11 @@ artifacts/{EQUIP}/run_{timestamp}/
 
 ## 7. Contributing
 
-1. Update task backlog in `# To Do.md` when adding or completing work.  
+1. Update task backlog in `Task Backlog.md` when adding or completing work.  
 2. Keep file-mode execution functional before introducing SQL or service features.  
 3. Document any schema changes in both README and `docs/Analytics Backbone.md`.  
 4. Tests are currently out of scope; focus on manual verification through the generated artifacts.
 
-For questions or coordination, refer to tracked tasks in `# To Do.md` and the backbone design doc.
+For questions or coordination, refer to tracked tasks in `Task Backlog.md` and the backbone design doc.
 
 ---

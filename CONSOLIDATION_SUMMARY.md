@@ -8,7 +8,7 @@
 ## Documents Consolidated
 
 ### Primary Target Document
-**`# To Do.md`** (root directory) - **MASTER CONSOLIDATED BACKLOG**
+**`Task Backlog.md`** (root directory) - **MASTER CONSOLIDATED BACKLOG**
 - Most comprehensive and up-to-date
 - Now includes 61 active tasks (up from 25)
 - Added 36 new tasks from audit reviews
@@ -38,7 +38,7 @@
 ### Supporting Documents
 
 - **Task Backlog.md** (root) - SQL integration focus, added cross-reference note
-- **docs/To Do.md** - Marked as DEPRECATED with reference to root # To Do.md
+- **docs/To Do.md** - Marked as DEPRECATED with reference to root Task Backlog.md
 
 ---
 
@@ -68,7 +68,7 @@
 
 ## Consolidation Actions Taken
 
-1. ✅ **Updated # To Do.md** with new sections:
+1. ✅ **Updated Task Backlog.md** with new sections:
    - Section 8: Forecast & AR(1) Model
    - Section 9: Regime Clustering Enhancements
    - Section 10: Architecture & Code Quality
@@ -123,7 +123,7 @@
 
 ## Document Structure
 
-The consolidated `# To Do.md` now contains:
+The consolidated `Task Backlog.md` now contains:
 
 1. **Progress Summary** - Overall metrics and recent completions
 2. **Sections 1-7** - Existing task categories (Analytics, Model Management, etc.)
@@ -136,10 +136,10 @@ The consolidated `# To Do.md` now contains:
 
 ## Maintenance Guidelines
 
-1. **Single Update Point**: Update only `# To Do.md` for task tracking
+1. **Single Update Point**: Update only `Task Backlog.md` for task tracking
 2. **Audit Documents**: Keep audit documents as historical reference, don't update
 3. **Completed Tasks**: Move from Pending → Done with completion date
-4. **New Audits**: Add new sections to `# To Do.md` following existing format
+4. **New Audits**: Add new sections to `Task Backlog.md` following existing format
 5. **Regular Reviews**: Update progress summary monthly
 
 ---
@@ -184,7 +184,7 @@ These were left in place under `artifacts/archive/` for traceability; the canoni
 
 ### D. Open Follow‑ups (no new IDs added)
 
-Rather than introducing new task IDs, the following should be tracked against existing sections in `# To Do.md`:
+Rather than introducing new task IDs, the following should be tracked against existing sections in `Task Backlog.md`:
 
 - Verify `ACM_DriftEvents` schema and populate it with rich drift event data (timestamps, values) so Grafana drift annotations become meaningful.
 - Decide on a final visual for detector correlation (table with colored cells vs heatmap) and wire it to `ACM_DetectorCorrelation`.
@@ -197,4 +197,4 @@ No additional task IDs were added to the master backlog; these items can be reco
 **Consolidation Completed:** 2025-11-13  
 **Consolidated By:** GitHub Copilot Agent  
 **Total Tasks Added:** 36 (from 4 audit documents)  
-**Master Document:** `# To Do.md` (root directory)
+**Master Document:** `Task Backlog.md` (root directory)
