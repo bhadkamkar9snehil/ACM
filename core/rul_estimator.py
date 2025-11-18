@@ -178,7 +178,7 @@ def _simple_ar1_forecast(
     max_steps = int(np.ceil(cfg.max_forecast_hours * samples_per_hour))
 
     # build forecast index
-    last_ts = idx[-1]
+    last_ts = pd.Timestamp(idx[-1])  # Ensure Timestamp type for arithmetic
     freq = pd.to_timedelta(step_sec, unit="s")
     idx_fore = pd.date_range(last_ts + freq, periods=max_steps, freq=freq)
     h_steps = np.arange(1, len(idx_fore) + 1, dtype=int)
@@ -230,6 +230,45 @@ def estimate_rul_and_failure(
     - ACM_MaintenanceRecommendation
     """
     cfg = cfg or RULConfig(health_threshold=health_threshold)
+    
+    # Cleanup old forecast data to prevent RunID overlap in charts (SQL mode only)
+    if sql_client is not None and equip_id is not None:
+        try:
+            cur = sql_client.cursor()
+            # Keep only the 2 most recent RunIDs to preserve some history while reducing clutter
+            cur.execute("""
+                WITH RankedRuns AS (
+                    SELECT DISTINCT RunID, 
+                           ROW_NUMBER() OVER (ORDER BY MAX(CreatedAt) DESC) AS rn
+                    FROM dbo.ACM_HealthForecast_TS
+                    WHERE EquipID = ?
+                    GROUP BY RunID
+                )
+                DELETE FROM dbo.ACM_HealthForecast_TS
+                WHERE EquipID = ? 
+                  AND RunID IN (SELECT RunID FROM RankedRuns WHERE rn > 2)
+            """, (equip_id, equip_id))
+            
+            cur.execute("""
+                WITH RankedRuns AS (
+                    SELECT DISTINCT RunID, 
+                           ROW_NUMBER() OVER (ORDER BY MAX(CreatedAt) DESC) AS rn
+                    FROM dbo.ACM_FailureForecast_TS
+                    WHERE EquipID = ?
+                    GROUP BY RunID
+                )
+                DELETE FROM dbo.ACM_FailureForecast_TS
+                WHERE EquipID = ? 
+                  AND RunID IN (SELECT RunID FROM RankedRuns WHERE rn > 2)
+            """, (equip_id, equip_id))
+            
+            if not sql_client.conn.autocommit:
+                sql_client.conn.commit()
+            Console.info(f"[RUL] Cleaned old forecast data for EquipID={equip_id}")
+        except Exception as e:
+            Console.warn(f"[RUL] Failed to cleanup old forecasts: {e}")
+            # Non-fatal, continue with RUL estimation
+    
     health_df = _load_health_timeline(
         tables_dir, sql_client=sql_client, equip_id=equip_id, run_id=run_id,
         output_manager=output_manager

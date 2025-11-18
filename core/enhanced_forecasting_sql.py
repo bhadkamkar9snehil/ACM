@@ -61,6 +61,43 @@ def run_enhanced_forecasting_sql(
         Console.info("[ENHANCED_FORECAST] Module disabled via config.forecasting.enabled")
         return {"tables": {}, "metrics": {}}
 
+    # --- Cleanup old forecast data to prevent RunID overlap in charts ---
+    try:
+        cur = sql_client.cursor()
+        # Keep only the 2 most recent RunIDs to preserve some history while reducing clutter
+        cur.execute("""
+            WITH RankedRuns AS (
+                SELECT DISTINCT RunID, 
+                       ROW_NUMBER() OVER (ORDER BY MAX(CreatedAt) DESC) AS rn
+                FROM dbo.ACM_HealthForecast_TS
+                WHERE EquipID = ?
+                GROUP BY RunID
+            )
+            DELETE FROM dbo.ACM_HealthForecast_TS
+            WHERE EquipID = ? 
+              AND RunID IN (SELECT RunID FROM RankedRuns WHERE rn > 2)
+        """, (equip_id, equip_id))
+        
+        cur.execute("""
+            WITH RankedRuns AS (
+                SELECT DISTINCT RunID, 
+                       ROW_NUMBER() OVER (ORDER BY MAX(CreatedAt) DESC) AS rn
+                FROM dbo.ACM_FailureForecast_TS
+                WHERE EquipID = ?
+                GROUP BY RunID
+            )
+            DELETE FROM dbo.ACM_FailureForecast_TS
+            WHERE EquipID = ? 
+              AND RunID IN (SELECT RunID FROM RankedRuns WHERE rn > 2)
+        """, (equip_id, equip_id))
+        
+        if not sql_client.conn.autocommit:
+            sql_client.conn.commit()
+        Console.info(f"[ENHANCED_FORECAST] Cleaned old forecast data for EquipID={equip_id}")
+    except Exception as e:
+        Console.warn(f"[ENHANCED_FORECAST] Failed to cleanup old forecasts: {e}")
+        # Non-fatal, continue with forecasting
+
     # --- Load health timeline from SQL (reuse rul_estimator helper) ---
     try:
         df_health = rul_estimator._load_health_timeline(  # type: ignore[attr-defined]
@@ -143,12 +180,14 @@ def run_enhanced_forecasting_sql(
 
     # --- Core enhanced forecasting logic (mirrors EnhancedForecastingEngine.run) ---
     try:
+        import traceback
         forecast_result = engine.forecaster.forecast(
             health_history=hi,
             horizons=engine.forecast_config.forecast_horizons,
         )
     except Exception as e:
         Console.warn(f"[ENHANCED_FORECAST] Forecasting failed: {e}")
+        Console.debug(f"[ENHANCED_FORECAST] Traceback: {traceback.format_exc()}")
         return {"tables": {}, "metrics": {}}
 
     try:
