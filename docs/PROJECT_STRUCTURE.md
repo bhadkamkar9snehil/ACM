@@ -111,7 +111,7 @@ python scripts/sql/verify_acm_connection.py
 
 ### Run ACM in File Mode
 ```powershell
-python -m core.acm_main --equip "FD_FAN" --artifact-root artifacts --config configs/config.yaml --mode batch --enable-report
+python -m core.acm_main --equip "FD_FAN" --config configs/config.yaml
 ```
 
 ### Install SQL Database

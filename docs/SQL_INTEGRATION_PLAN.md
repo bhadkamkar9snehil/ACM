@@ -227,8 +227,7 @@ EquipID,Section,Key,Value,Type
 **How to Run:**
 ```powershell
 # Enable SQL mode in config, then:
-python -m core.acm_main --equip FD_FAN --artifact-root artifacts
-# No --enable-report flag required (deprecated)
+python -m core.acm_main --equip FD_FAN
 ```
 
 **Benefits:**
@@ -433,7 +432,7 @@ python -m core.acm_main --equip FD_FAN --artifact-root artifacts
 cd "c:\Users\bhadk\Documents\ACM V8 SQL\ACM"
 
 # Run pipeline with SQL historian loading
-python -m core.acm_main --equip FD_FAN --artifact-root artifacts
+python -m core.acm_main --equip FD_FAN
 
 # Note: --enable-report flag REMOVED (no longer needed)
 # Pipeline automatically runs in SQL mode when storage_backend='sql'
@@ -468,7 +467,7 @@ def write_dataframe(self, df, filename, subdir=''):
 **Testing:**
 ```powershell
 # Run pipeline in SQL mode
-python -m core.acm_main --equip FD_FAN --artifact-root artifacts
+python -m core.acm_main --equip FD_FAN
 
 # Verify artifacts directory
 ls artifacts/FD_FAN/run_*/
@@ -509,7 +508,7 @@ class ModelVersionManager:
 **Testing:**
 ```powershell
 # Run pipeline, train models
-python -m core.acm_main --equip FD_FAN --artifact-root artifacts
+python -m core.acm_main --equip FD_FAN
 
 # Verify ModelRegistry table populated
 sqlcmd -S "localhost\B19CL3PCQLSERVER" -E -d ACM -Q "
@@ -529,7 +528,7 @@ ls artifacts/FD_FAN/models/*.joblib
 
 **Validation Checklist:**
 - [ ] Enable SQL mode: `runtime.storage_backend='sql'` in config
-- [ ] Run full pipeline: `python -m core.acm_main --equip FD_FAN --artifact-root artifacts`
+- [ ] Run full pipeline: `python -m core.acm_main --equip FD_FAN`
 - [ ] Verify data loading: Pipeline loads from SQL equipment tables (no CSV reads)
 - [ ] Verify output tables: All 33+ tables populated with correct row counts
 - [ ] Verify model persistence: ModelRegistry contains trained models (no .joblib files)
@@ -624,7 +623,7 @@ EquipID,Section,Key,Value,Type,LastModified,ModifiedBy,Reason
 cd "c:\Users\bhadk\Documents\ACM V8 SQL\ACM"
 
 # SQL mode (loads from SQL historian, writes to SQL tables)
-python -m core.acm_main --equip FD_FAN --artifact-root artifacts
+python -m core.acm_main --equip FD_FAN
 
 # Note: --enable-report flag removed (no longer needed)
 # Pipeline configuration determines output behavior
@@ -798,7 +797,7 @@ UNION ALL SELECT 'ModelRegistry', COUNT(*) FROM ModelRegistry;
 ### File Mode Fallback (Always Available):
 ```powershell
 # Run with file mode explicitly
-python -m core.acm_main --equip FD_FAN --artifact-root artifacts
+python -m core.acm_main --equip FD_FAN
 # Will use CSV files if storage_backend='file'
 ```
 **Impact:** Zero - file mode fully functional
@@ -887,7 +886,7 @@ ACM/
 cd "c:\Users\bhadk\Documents\ACM V8 SQL\ACM"
 
 # Run pipeline (NO --enable-report flag needed)
-python -m core.acm_main --equip FD_FAN --artifact-root artifacts
+python -m core.acm_main --equip FD_FAN
 
 # Pipeline automatically:
 # - Loads data from SQL (FD_FAN_Data table)

@@ -58,14 +58,8 @@ Write-Host "=== ACM V8 Single Equipment Runner ===" -ForegroundColor Cyan
 Write-Host "Equipment: $Equipment" -ForegroundColor Yellow
 Write-Host "Project Root: $ProjectRoot" -ForegroundColor Gray
 
-# ENFORCE CORRECT FOLDER STRUCTURE
-# artifacts/{EQUIP}/run_{timestamp}/
-$ArtifactRoot = Join-Path "artifacts" $Equipment
-
-Write-Host "Artifact Root: $ArtifactRoot (ENFORCED)" -ForegroundColor Green
-
 # Build command
-$cmd = "python -m core.acm_main --equip `"$Equipment`" --artifact-root `"$ArtifactRoot`""
+$cmd = "python -m core.acm_main --equip `"$Equipment`""
 
 if ($TrainCSV) {
     $cmd += " --train-csv `"$TrainCSV`""

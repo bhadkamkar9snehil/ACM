@@ -234,15 +234,15 @@ This fingerprint enables automatic **fault typing** and better RCA (Root Cause A
 
 
 
-4. Run the pipeline:------
-
-
+4. Run the pipeline:
 
    ```powershell
+   python -m core.acm_main --equip FD_FAN
+   ```
 
-   python -m core.acm_main --equip FD_FAN --artifact-root artifacts --enable-report
+   The run always writes to `artifacts/FD_FAN/run_{timestamp}/` and emits the full report bundle by default.
 
-   ```## Quick Start (File Mode)## Quick Start (File Mode)
+## Quick Start (File Mode)
 
 
 
@@ -250,17 +250,15 @@ This fingerprint enables automatic **fault typing** and better RCA (Root Cause A
 
 
 
-Common CLI flags:1. Place training and scoring CSVs in `data/` (datetime index + sensor columns).1. Place training and scoring CSVs in `data/` (datetime index + sensor columns).
+Common CLI flags:
 
-- `--mode {file,sql}` switches between historian files and SQL ingestion.
+- `--score-start` and `--score-end` constrain backfill windows when replaying historian slices.
+- `--train-csv` / `--score-csv` override the config-defined CSV paths for file-mode experiments.
+- `--clear-cache` removes persisted detector bundles for a cold start (alias: `--no-cache`).
+- `--log-level`, `--log-format`, `--log-file`, and `--log-module-level` control console/file logging.
 
-- `--score-start` and `--score-end` constrain scoring windows for backfills.2. (Optional) Add equipment overrides to `configs/config_table.csv`.2. (Optional) Add equipment overrides to `configs/config_table.csv`.
-
-- `--enable-report` produces the full chart and table bundle.
-
-- `--no-cache` or `--clear-cache` disable cached models.3. Create a virtual environment and install dependencies:3. Create a virtual environment and install dependencies:
-
-- `--artifact-root` chooses where artifacts are written (default `artifacts`).
+Artifacts now always live under `artifacts/{EQUIP}/run_{timestamp}` and SQL ingestion is the default runtime.
+Use `scripts/chunk_replay.py` or file-mode config overrides when you need to run against CSV snapshots.
 
 
 
@@ -282,9 +280,8 @@ Common CLI flags:1. Place training and scoring CSVs in `data/` (datetime index +
 
 
 
-4. Execute the pipeline with `--mode sql --enable-report`. SQL writes are restricted to   ```   ```
-
-   `core/output_manager.ALLOWED_TABLES` and are batched for transactional safety.
+4. Run `python -m core.acm_main --equip FD_FAN`. SQL writes flow through `core/output_manager.ALLOWED_TABLES`
+   and are automatically batched for transactional safety. No additional flags are required.
 
 
 
@@ -302,67 +299,36 @@ When introducing new parameters:
 
 - Update dependent design notes (for example `docs/Analytics Backbone.md`).
 
-- Expect cached models to invalidate automatically on the next run.   python -m core.acm_main --equip FD_FAN --artifact-root artifacts --enable-report   python -m core.acm_main --equip FD_FAN --artifact-root artifacts --enable-report
+- Expect cached models to invalidate automatically on the next run.
 
+## Pipeline Stages
 
-
-## Pipeline Stages   ```   ```
-
-1. **Ingestion** - File mode reads `data/*.csv`; SQL mode streams from `core/sql_client.SQLClient`.
-
-2. **Cleaning** - `core/clean.py` standardizes timestamps, fixes gaps, and enforces sensor schema.
-
-3. **Feature Engineering** - `core/fast_features.py` builds rolling stats, regressors, and deltas.
-
-4. **Detector Training** - Models in `core/` consume engineered features and persist through5. Inspect outputs under `artifacts/FD_FAN/run_{timestamp}/`.5. Inspect outputs under `artifacts/FD_FAN/run_{timestamp}/`.
-
-   `core/model_persistence.py`.
-
-5. **Scoring and Fusion** - Detector outputs feed `core/fuse.py`, producing fused z-scores that drive
-
-   episodes.
-
-6. **Reporting** - `core/output_manager.OutputManager` writes tables, charts, and metadata; optionalCommon CLI flags:Common CLI flags:
-
-   report bundles mirror the contract in `docs/CHART_TABLES_SPEC.md`.
-
-
+1. **Ingestion** – Historian CSVs are still available for development, but production runs read from SQL via `core/sql_client.SQLClient`.
+2. **Cleaning** – `core/clean.py` standardizes timestamps, fixes gaps, and enforces the sensor schema.
+3. **Feature Engineering** – `core/fast_features.py` builds rolling stats, regressors, and deltas.
+4. **Detector Training** – Models consume engineered features and persist through `core/model_persistence.py` when file artifacts are enabled.
+5. **Scoring and Fusion** – Detector outputs feed `core/fuse.py`, producing fused z-scores that drive episodes.
+6. **Reporting** – `core/output_manager.OutputManager` writes tables, charts, SQL tables, and run metadata per `docs/CHART_TABLES_SPEC.md`.
 
 ## Output Contract
 
-Each run produces timezone-naive local artifacts:- `--mode {file,sql}` switches between historian files and SQL ingestion.- `--mode {file,sql}` switches between historian files and SQL ingestion.
+Each run produces timezone-naive local artifacts under the fixed structure below. SQL-only mode may skip filesystem artifacts, but the layout remains reserved for file runs:
 
-
-
-```- `--score-start` and `--score-end` constrain scoring windows for backfills.- `--score-start` and `--score-end` constrain scoring windows for backfills.
-
+```
 artifacts/{EQUIP}/run_{timestamp}/
-
-    tables/            # Operator and engineering CSV tables- `--enable-report` produces the full chart and table bundle.- `--enable-report` produces the full chart and table bundle.
-
+    tables/            # Operator and engineering CSV tables
     charts/            # PNG visuals (health timelines, detector comparison, heatmaps)
-
-    plots/             # Legacy plots (being consolidated)- `--no-cache` skips persisted models for a cold run.- `--no-cache` skips persisted models for a cold run.
-
+    plots/             # Legacy plots (being consolidated)
     scores.csv         # Detector and fused z-scores
-
-    episodes.csv       # Episode timeline with culprit sensors- `--artifact-root` changes where artifacts are written (default `artifacts`).- `--artifact-root` changes where artifacts are written (default `artifacts`).
-
+    episodes.csv       # Episode timeline with culprit sensors
     meta.json          # Durations, cache state, and health metrics
-
     run.jsonl          # Execution log stream
-
     models/            # Cached detector bundles (managed automatically)
-
-```------
-
-
+```
 
 Always route new exports through the output manager to keep naming, batching, and SQL guardrails
-
 consistent. Respect the local time policy by using helper functions `_to_naive*` in
-
-`core/output_manager.py` and `core/acm_main.py`.## SQL Mode Checklist## SQL Mode Checklist
+`core/output_manager.py` and `core/acm_main.py`.
 
 
 
@@ -402,7 +368,10 @@ consistent. Respect the local time policy by using helper functions `_to_naive*`
 
 
 
-## Testing and Quality Gates4. Execute the pipeline with `--mode sql --enable-report`. SQL writes are limited to `core/output_manager.ALLOWED_TABLES` and batched for transactional safety.4. Execute the pipeline with `--mode sql --enable-report`. SQL writes are limited to `core/output_manager.ALLOWED_TABLES` and batched for transactional safety.
+## Testing and Quality Gates
+
+Run `python -m core.acm_main --equip FD_FAN` for smoke validation; SQL writes are restricted to
+`core/output_manager.ALLOWED_TABLES` and batched for transactional safety.
 
 - Core feature coverage: `pytest tests/test_fast_features.py`
 
@@ -1257,9 +1226,9 @@ A comprehensive 700-line technical audit of `model_persistence.py`, `acm_main.py
 1. **Training pass** – Configure `data.train_csv` and `data.score_csv` in `configs/config_table.csv` for your equipment.  
 2. **Command**  
 
-   ```bash
-   python -m core.acm_main --equip "FD_FAN" --artifact-root artifacts --config configs/config_table.csv --mode batch --enable-report
-   ```  
+  ```bash
+  python -m core.acm_main --equip "FD_FAN" --config configs/config_table.csv
+  ```  
 
    The run writes `artifacts/<EQUIP>/run/` with `scores.csv`, `episodes.csv`, drift/regime tables, and staging report assets.
    - Ensure `configs/config_table.csv` has a local override for your equipment with `runtime.storage_backend=file` and `output.dual_mode=false` so the run stays in pure file mode when SQL Server is unavailable.
@@ -1387,10 +1356,10 @@ Phase 3 (Production): SQL mode
 1. **Training pass** – Configure `data.train_csv` and `data.score_csv` in `configs/config_table.csv` for your equipment.  
 2. **Command**  
 
-   ```powershell
-   Set-Location "C:/Users/Admin/Documents/Office/ACM V7/ACM V8 SQL"
-   python -m core.acm_main --equip "FD_FAN" --artifact-root artifacts --config configs/config_table.csv --mode batch --enable-report
-   ```  
+  ```powershell
+  Set-Location "C:/Users/Admin/Documents/Office/ACM V7/ACM V8 SQL"
+  python -m core.acm_main --equip "FD_FAN" --config configs/config_table.csv
+  ```  
 
    The run writes `artifacts/<EQUIP>/run/` with `scores.csv`, `episodes.csv`, drift/regime tables, and staging report assets.
 3. **Subsequent scoring passes** – keep the training CSV fixed, update `data.score_csv` to the next time slice, rerun the command. The detectors will reuse the training fit and produce scores for the new slice.
@@ -1789,7 +1758,7 @@ The HTML report is a temporary validation surface; long-term delivery will push 
 
 ```python
 # Simply omit train_csv - system auto-detects and splits score data
-python core/acm_main.py --equip NEW_ASSET --artifact-root artifacts --score-csv data/operational_batch.csv
+python core/acm_main.py --equip NEW_ASSET --score-csv data/operational_batch.csv
 ```
 
 **Results:**

@@ -411,7 +411,7 @@ regimes:
 
 ## 17) Manual Verification Checklist (no tests by directive)
 
-1. Run `python -m core.acm_main --equip <EQUIP> --artifact-root artifacts --config configs\config.yaml --mode batch --enable-report`.
+1. Run `python -m core.acm_main --equip <EQUIP> --config configs\config.yaml`.
 2. Confirm artifacts: `scores.csv`, `episodes.csv`, `drift.csv`, `fusion.json`, `culprits.jsonl`, `tables/regime_summary.csv`, `models/regime_model.json`.
 3. Inspect `scores.csv`: detector `*_z`, `fused_z`, `active_episode_id` consistency (no NaNs, monotonic TS).
 4. Check `fusion.json`: per-phase timings; `effective_weights`; calibration stats; z-tail mass.

@@ -452,11 +452,9 @@ class SQLBatchRunner:
         Returns:
             Tuple of (success, outcome) where outcome is 'OK', 'NOOP', or 'FAIL'
         """
-        equip_artifact_root = self.artifact_root / equip_name
         cmd = [
             sys.executable, "-m", "core.acm_main",
             "--equip", equip_name,
-            "--artifact-root", str(equip_artifact_root)
         ]
         
         printable = " ".join(cmd)
@@ -788,8 +786,6 @@ def main() -> int:
                         help="SQL Server instance (default: localhost\\B19CL3PCQLSERVER)")
     parser.add_argument("--sql-database", default="ACM",
                         help="SQL database name (default: ACM)")
-    parser.add_argument("--artifact-root", default="artifacts",
-                        help="ACM artifact root directory (default: artifacts)")
     parser.add_argument("--tick-minutes", type=int, default=30,
                         help="Batch window size in minutes (default: 30)")
     parser.add_argument("--max-coldstart-attempts", type=int, default=10,
@@ -815,7 +811,7 @@ def main() -> int:
         f"Trusted_Connection=yes;"
     )
 
-    artifact_root = Path(args.artifact_root).resolve()
+    artifact_root = Path("artifacts").resolve()
     
     # Create runner
     runner = SQLBatchRunner(

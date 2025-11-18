@@ -133,12 +133,10 @@ def _load_chunks(chunk_dir: Path) -> List[Path]:
     return sorted(files, key=_chunk_sort_key)
 
 
-def _build_command(equip: str, artifact_root: Path, chunk_path: Path, *, bootstrap: bool,
-                   clear_cache: bool, acm_args: List[str]) -> List[str]:
-    # Create equipment-specific artifact path
-    equip_artifact_root = artifact_root / equip
+def _build_command(equip: str, chunk_path: Path, *, bootstrap: bool,
+             clear_cache: bool, acm_args: List[str]) -> List[str]:
     cmd = [sys.executable, "-m", "core.acm_main", "--equip", equip,
-           "--artifact-root", str(equip_artifact_root), "--score-csv", str(chunk_path)]
+        "--score-csv", str(chunk_path)]
     if bootstrap:
         cmd.extend(["--train-csv", str(chunk_path)])
         if clear_cache:
@@ -193,7 +191,6 @@ def _process_asset(equip: str, chunk_root: Path, artifact_root: Path, *, dry_run
         Console.info(f"[INFO] {equip}: chunk {idx}/{total} ({phase}) -> {chunk_path.name}", equipment=equip, chunk=idx, total=total, phase=phase)
         cmd = _build_command(
             equip,
-            artifact_root,
             chunk_path,
             bootstrap=bootstrap,
             clear_cache=clear_cache and bootstrap,
@@ -225,7 +222,6 @@ def main() -> int:
     )
     parser.add_argument("--equip", nargs="*", help="Specific equipment codes to replay")
     parser.add_argument("--chunk-root", default="data/chunked", help="Path to chunked data root")
-    parser.add_argument("--artifact-root", default="artifacts", help="ACM artifact root directory")
     parser.add_argument("--max-workers", type=int, default=1,
                         help="Number of assets to process in parallel")
     parser.add_argument("--clear-cache", action="store_true",
@@ -239,7 +235,7 @@ def main() -> int:
     args = parser.parse_args()
 
     chunk_root = Path(args.chunk_root).resolve()
-    artifact_root = Path(args.artifact_root).resolve()
+    artifact_root = Path("artifacts").resolve()
 
     if args.acm_args and args.acm_args[0] == "--":
         args.acm_args = args.acm_args[1:]

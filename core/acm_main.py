@@ -594,14 +594,11 @@ def _sql_finalize_run(cli: Any, run_id: str, outcome: str, rows_read: int, rows_
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--equip", required=True)
-    ap.add_argument("--artifact-root", default="artifacts", 
-                    help="Base artifact path for charts/reports (equipment subdirectory always added: {base}/{EQUIP}/run_xxx/). Default: ./artifacts")
     ap.add_argument("--config", default=None, help="Config file path (auto-discovers configs/ directory if not specified)")
     ap.add_argument("--train-csv", help="Path to baseline CSV (historical normal data), overrides config.")
     ap.add_argument("--baseline-csv", dest="train_csv", help="Alias for --train-csv (baseline data)")
     ap.add_argument("--score-csv", help="Path to batch CSV (current data to analyze), overrides config.")
     ap.add_argument("--batch-csv", dest="score_csv", help="Alias for --score-csv (batch data)")
-    ap.add_argument("--mode", choices=["batch"], default="batch")
     ap.add_argument("--clear-cache", action="store_true", help="Force re-training by deleting the cached model for this equipment.")
     ap.add_argument("--log-level", choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"], help="Override global log level.")
     ap.add_argument("--log-format", choices=["text", "json"], help="Override log output format.")
@@ -614,7 +611,7 @@ def main() -> None:
     T = Timer(enable=True)
 
     equip = args.equip
-    art_root = Path(args.artifact_root)
+    art_root = Path("artifacts")
     cfg_path = Path(args.config) if args.config else None
     cfg = _load_config(cfg_path, equipment_name=equip)
     

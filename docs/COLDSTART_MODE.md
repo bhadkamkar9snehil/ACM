@@ -87,7 +87,6 @@ train, score, meta = data_io.load_data(cfg)
 # Provide only score data - system auto-detects cold-start
 python core/acm_main.py \
     --equip NEW_ASSET \
-    --artifact-root artifacts \
     --score-csv data/operational_data.csv
 ```
 
