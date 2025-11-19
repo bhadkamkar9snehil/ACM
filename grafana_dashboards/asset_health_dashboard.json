@@ -344,11 +344,11 @@
         {
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT TOP 1 \n           DATEDIFF(day, StartTimestamp, GETDATE()) as DaysSince\n           FROM ACM_AlertAge \n           WHERE EquipID = $equipment AND AlertZone = 'ALERT'\n           ORDER BY StartTimestamp DESC",
+          "rawSql": "SELECT TOP 1 \n           StartTimestamp as LastAlertTime,\n           DurationHours as AlertDurationHours\n           FROM ACM_AlertAge \n           WHERE EquipID = $equipment AND AlertZone = 'ALERT'\n           AND $__timeFilter(StartTimestamp)\n           ORDER BY StartTimestamp DESC",
           "refId": "A"
         }
       ],
-      "title": "Days Since Last Alert",
+      "title": "Last Alert Info",
       "type": "stat"
     },
     {
@@ -413,7 +413,7 @@
         {
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT COUNT(*) as ActiveEpisodes\n           FROM ACM_CulpritHistory \n           WHERE EquipID = $equipment \n           AND (EndTimestamp IS NULL OR EndTimestamp >= DATEADD(hour, -24, GETDATE()))",
+          "rawSql": "SELECT COUNT(*) as ActiveEpisodes\n           FROM ACM_CulpritHistory \n           WHERE EquipID = $equipment \n           AND $__timeFilter(StartTimestamp)",
           "refId": "A"
         }
       ],
@@ -1050,7 +1050,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT\n  TOP 20 SensorName AS [Sensor Name],\n  ROUND(LatestAbsZ, 2) AS [Current Z-Score],\n  ROUND(MaxAbsZ, 2) AS [Peak Z-Score],\n  MaxTimestamp AS [Peak Time],\n  ROUND(LatestValue, 2) AS [Current Value],\n  ROUND(TrainMean, 2) AS [Normal Mean],\n  AboveAlertCount AS [Alert Count],\n  CASE\n    WHEN LatestAbsZ >= 3 THEN 'ALERT'\n    WHEN LatestAbsZ >= 2 THEN 'WARN'\n    ELSE 'NORMAL'\n  END AS [Level]\nFROM\n  ACM_SensorHotspots\nWHERE\n  EquipID = $equipment\n  AND MaxTimestamp >= DATEADD(hour, -48, GETDATE()) -- avoid old peaks\nORDER BY\n  LatestAbsZ DESC",
+          "rawSql": "SELECT\n  TOP 20 SensorName AS [Sensor Name],\n  ROUND(LatestAbsZ, 2) AS [Current Z-Score],\n  ROUND(MaxAbsZ, 2) AS [Peak Z-Score],\n  MaxTimestamp AS [Peak Time],\n  ROUND(LatestValue, 2) AS [Current Value],\n  ROUND(TrainMean, 2) AS [Normal Mean],\n  AboveAlertCount AS [Alert Count],\n  CASE\n    WHEN LatestAbsZ >= 3 THEN 'ALERT'\n    WHEN LatestAbsZ >= 2 THEN 'WARN'\n    ELSE 'NORMAL'\n  END AS [Level]\nFROM\n  ACM_SensorHotspots\nWHERE\n  EquipID = $equipment\n  AND $__timeFilter(MaxTimestamp)\nORDER BY\n  LatestAbsZ DESC",
           "refId": "A",
           "sql": {
             "columns": [

@@ -1,0 +1,131 @@
+﻿
+  GRAFANA DASHBOARD PANEL ANALYSIS - EMPTY PANELS REPORT
+
+
+DASHBOARD: asset_health_dashboard.json
+
+PANEL QUERY VALIDATION:
+
+
+ WORKING PANELS (Tables exist with data):
+1. Health Index Gauge - ACM_HealthTimeline 
+2. Status Text - ACM_HealthTimeline   
+3. Worst Sensor - ACM_SensorHotspots 
+4. Current Regime - ACM_RegimeTimeline 
+5. Health Timeline Chart - ACM_HealthTimeline 
+6. Regime Timeline - ACM_RegimeTimeline 
+7. Sensor Hotspots Table - ACM_SensorHotspots 
+8. Episode Metrics Table - ACM_EpisodeMetrics 
+9. Regime Occupancy Pie - ACM_RegimeOccupancy 
+10. Health Forecast - ACM_HealthForecast_TS 
+11. Failure Probability - ACM_FailureForecast_TS 
+12. RUL Stat - ACM_RUL_Summary 
+13. RUL Attribution Table - ACM_RUL_Attribution 
+
+ EMPTY PANELS (Tables missing or empty):
+━
+
+1. Days Since Alert Stat
+   Query: SELECT TOP 1 DATEDIFF(day, StartTimestamp, GETDATE()) as DaysSince
+          FROM ACM_AlertAge 
+   Status:  Table EXISTS but likely EMPTY
+   Fix: Populate ACM_AlertAge or change to use ACM_HealthTimeline
+
+2. Active Episodes Stat
+   Query: SELECT COUNT(*) as ActiveEpisodes
+          FROM ACM_CulpritHistory 
+          WHERE EndTimestamp IS NULL OR EndTimestamp >= DATEADD(hour, -24, GETDATE())
+   Status:  Table EXISTS but query uses GETDATE() with historical data
+   Fix: Change GETDATE() to () or use relative time
+
+3. Defect Timeline Chart
+   Query: SELECT Timestamp, HealthIndex, FusedZ
+          FROM ACM_DefectTimeline
+   Status:  Table EXISTS and has data (FD_FAN: 24 rows, GAS_TURBINE: 4 rows)
+   Fix: None needed - should work
+
+4. Health Zone Distribution
+   Query: SELECT PeriodStart, HealthZone, ZonePct
+          FROM ACM_HealthZoneByPeriod
+   Status:  Table EXISTS but likely EMPTY
+   Fix: This is a rollup table - needs population
+
+5. Drift Timeline Chart
+   Query: SELECT Timestamp, DriftValue
+          FROM ACM_DriftSeries
+   Status:  Table EXISTS but likely EMPTY
+   Fix: Check ACM_Drift_TS instead (new table we created)
+
+6. Detector Contribution Current
+   Query: SELECT DetectorType, ContributionPct, ZScore
+          FROM ACM_ContributionCurrent
+   Status:  Table EXISTS but likely EMPTY
+   Fix: This is a current state table - needs population
+
+7. Detector Contribution Timeline
+   Query: SELECT Timestamp, DetectorType, ContributionPct
+          FROM ACM_ContributionTimeline
+   Status:  Table EXISTS but likely EMPTY
+   Fix: This is a time series table - needs population
+
+8. Detector Correlation Heatmap
+   Query: SELECT DetectorA, DetectorB, PearsonR
+          FROM ACM_DetectorCorrelation
+   Status:  Table EXISTS but likely EMPTY
+   Fix: Check if correlations are being calculated
+
+9. Sensor Anomaly by Period
+   Query: SELECT PeriodStart, DetectorType, AnomalyRatePct
+          FROM ACM_SensorAnomalyByPeriod
+   Status:  Table EXISTS but likely EMPTY
+   Fix: This is a rollup table - needs population
+
+10. Calibration Summary Table
+    Query: SELECT DetectorType, MeanZ, P95Z, P99Z, ClipZ, SaturationPct
+           FROM ACM_CalibrationSummary
+    Status:  Table EXISTS but likely EMPTY
+    Fix: Check if calibration metrics are being written
+
+11. Regime Stability Metrics
+    Query: SELECT MetricName, MetricValue
+           FROM ACM_RegimeStability
+    Status:  Table EXISTS but likely EMPTY
+    Fix: Check if regime stability metrics are being calculated
+
+12. Sensor Forecast Chart
+    Query: SELECT Timestamp, SensorName, ForecastValue
+           FROM ACM_SensorForecast_TS
+    Status:  Table EXISTS but likely EMPTY
+    Fix: Check if sensor-level forecasts are enabled
+
+13. Maintenance Recommendation Table
+    Query: SELECT EarliestMaintenance, PreferredWindowStart, PreferredWindowEnd
+           FROM ACM_MaintenanceRecommendation
+    Status:  Table EXISTS but likely EMPTY
+    Fix: Check if maintenance recommendations are being generated
+
+14. Normalized Sensor Values Chart
+    Query: SELECT Timestamp, SensorName, NormValue
+           FROM ACM_SensorNormalized_TS
+    Status:  Table EXISTS but likely EMPTY
+    Fix: Check if normalized values are being written
+
+15. Sensor Z-Scores Chart
+    Query: SELECT Timestamp, SensorName, ZScore
+           FROM ACM_SensorNormalized_TS
+    Status:  Table EXISTS but likely EMPTY
+    Fix: Check if sensor z-scores are being written
+
+SUMMARY:
+
+Total Panels: ~28
+Working Panels: 13 (46%)
+Empty Panels: 15 (54%)
+
+QUICK WIN FIXES:
+
+1. Change ACM_DriftSeries  ACM_Drift_TS (table was renamed)
+2. Fix GETDATE() time references  use Grafana time macros
+3. Verify output_manager is writing to all expected tables
+
+
