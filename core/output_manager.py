@@ -2365,6 +2365,35 @@ class OutputManager:
                     # Optional: per-sensor forecasting for top sensors (ACM_SensorForecast_TS)
                     if _simple_ar1_forecast is not None and RULConfig is not None:
                         try:
+                            # Cleanup old sensor forecast data to prevent RunID overlap in charts
+                            if self.sql_client is not None and self.equip_id is not None:
+                                try:
+                                    import os
+                                    try:
+                                        keep_runs = int(os.getenv("ACM_FORECAST_RUNS_RETAIN", "2"))
+                                    except Exception:
+                                        keep_runs = 2
+                                    keep_runs = max(1, min(int(keep_runs), 50))
+                                    cur = self.sql_client.cursor()
+                                    # Keep only the 2 most recent RunIDs
+                                    cur.execute("""
+                                        WITH RankedRuns AS (
+                                            SELECT DISTINCT RunID, 
+                                                   ROW_NUMBER() OVER (ORDER BY MAX(CreatedAt) DESC) AS rn
+                                            FROM dbo.ACM_SensorForecast_TS
+                                            WHERE EquipID = ?
+                                            GROUP BY RunID
+                                        )
+                                        DELETE FROM dbo.ACM_SensorForecast_TS
+                                        WHERE EquipID = ? 
+                                          AND RunID IN (SELECT RunID FROM RankedRuns WHERE rn > ?)
+                                    """, (self.equip_id, self.equip_id, keep_runs))
+                                    if not self.sql_client.conn.autocommit:
+                                        self.sql_client.conn.commit()
+                                    Console.info(f"[ANALYTICS] Cleaned old sensor forecast data for EquipID={self.equip_id} (kept {keep_runs} RunIDs)")
+                                except Exception as e:
+                                    Console.warn(f"[ANALYTICS] Failed to cleanup old sensor forecasts: {e}")
+                            
                             # Determine forecast horizon from config (fallback to 24h)
                             forecast_cfg = (cfg.get('forecast', {}) or {})
                             horizon_hours = float(forecast_cfg.get('horizon_hours', 24.0) or 24.0)

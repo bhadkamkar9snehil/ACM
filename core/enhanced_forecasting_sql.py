@@ -63,6 +63,12 @@ def run_enhanced_forecasting_sql(
 
     # --- Cleanup old forecast data to prevent RunID overlap in charts ---
     try:
+        import os
+        try:
+            keep_runs = int(os.getenv("ACM_FORECAST_RUNS_RETAIN", "2"))
+        except Exception:
+            keep_runs = 2
+        keep_runs = max(1, min(int(keep_runs), 50))
         cur = sql_client.cursor()
         # Keep only the 2 most recent RunIDs to preserve some history while reducing clutter
         cur.execute("""
@@ -75,8 +81,8 @@ def run_enhanced_forecasting_sql(
             )
             DELETE FROM dbo.ACM_HealthForecast_TS
             WHERE EquipID = ? 
-              AND RunID IN (SELECT RunID FROM RankedRuns WHERE rn > 2)
-        """, (equip_id, equip_id))
+              AND RunID IN (SELECT RunID FROM RankedRuns WHERE rn > ?)
+        """, (equip_id, equip_id, keep_runs))
         
         cur.execute("""
             WITH RankedRuns AS (
@@ -88,12 +94,12 @@ def run_enhanced_forecasting_sql(
             )
             DELETE FROM dbo.ACM_FailureForecast_TS
             WHERE EquipID = ? 
-              AND RunID IN (SELECT RunID FROM RankedRuns WHERE rn > 2)
-        """, (equip_id, equip_id))
+              AND RunID IN (SELECT RunID FROM RankedRuns WHERE rn > ?)
+        """, (equip_id, equip_id, keep_runs))
         
         if not sql_client.conn.autocommit:
             sql_client.conn.commit()
-        Console.info(f"[ENHANCED_FORECAST] Cleaned old forecast data for EquipID={equip_id}")
+        Console.info(f"[ENHANCED_FORECAST] Cleaned old forecast data for EquipID={equip_id} (kept {keep_runs} RunIDs)")
     except Exception as e:
         Console.warn(f"[ENHANCED_FORECAST] Failed to cleanup old forecasts: {e}")
         # Non-fatal, continue with forecasting

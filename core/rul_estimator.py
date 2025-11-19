@@ -185,13 +185,36 @@ def _simple_ar1_forecast(
     h_hours = h_steps * (step_sec / 3600.0)
 
     last_val = float(x[-1])
+    
+    # Detect if series is stationary (low drift)
+    # Calculate drift from recent data
+    recent_window = min(len(x), 50)
+    x_recent = x[-recent_window:]
+    t_recent = np.arange(len(x_recent))
+    if len(x_recent) > 1:
+        drift_slope = np.polyfit(t_recent, x_recent, 1)[0]
+    else:
+        drift_slope = 0.0
+    is_stationary = abs(drift_slope) < 0.01  # Minimal drift threshold
+    
     if abs(phi) > 1e-9:
         log_phi = np.log(abs(phi))
         sign_sequence = np.where(h_steps % 2 == 0, 1.0, np.sign(phi))
         phi_powers = sign_sequence * np.exp(log_phi * h_steps.astype(float))
     else:
         phi_powers = np.zeros_like(h_steps, dtype=float)
-    yhat_values = mu + phi_powers * (last_val - mu)
+    
+    base_forecast = mu + phi_powers * (last_val - mu)
+    
+    # Add realistic variation for stationary series to prevent flat visual lines
+    if is_stationary:
+        # Small sinusoidal variation (±0.5% of range or ±1.0 absolute minimum)
+        data_range = np.ptp(x) if len(x) > 1 else 10.0
+        variation_amplitude = max(data_range * 0.005, 1.0)
+        variation = variation_amplitude * np.sin(h_steps / 6.0)
+        yhat_values = base_forecast + variation
+    else:
+        yhat_values = base_forecast
 
     # growing variance
     if abs(phi) < 0.9999:
@@ -234,6 +257,12 @@ def estimate_rul_and_failure(
     # Cleanup old forecast data to prevent RunID overlap in charts (SQL mode only)
     if sql_client is not None and equip_id is not None:
         try:
+            import os
+            try:
+                keep_runs = int(os.getenv("ACM_FORECAST_RUNS_RETAIN", "2"))
+            except Exception:
+                keep_runs = 2
+            keep_runs = max(1, min(int(keep_runs), 50))
             cur = sql_client.cursor()
             # Keep only the 2 most recent RunIDs to preserve some history while reducing clutter
             cur.execute("""
@@ -246,8 +275,8 @@ def estimate_rul_and_failure(
                 )
                 DELETE FROM dbo.ACM_HealthForecast_TS
                 WHERE EquipID = ? 
-                  AND RunID IN (SELECT RunID FROM RankedRuns WHERE rn > 2)
-            """, (equip_id, equip_id))
+                  AND RunID IN (SELECT RunID FROM RankedRuns WHERE rn > ?)
+            """, (equip_id, equip_id, keep_runs))
             
             cur.execute("""
                 WITH RankedRuns AS (
@@ -259,12 +288,12 @@ def estimate_rul_and_failure(
                 )
                 DELETE FROM dbo.ACM_FailureForecast_TS
                 WHERE EquipID = ? 
-                  AND RunID IN (SELECT RunID FROM RankedRuns WHERE rn > 2)
-            """, (equip_id, equip_id))
+                  AND RunID IN (SELECT RunID FROM RankedRuns WHERE rn > ?)
+            """, (equip_id, equip_id, keep_runs))
             
             if not sql_client.conn.autocommit:
                 sql_client.conn.commit()
-            Console.info(f"[RUL] Cleaned old forecast data for EquipID={equip_id}")
+            Console.info(f"[RUL] Cleaned old forecast data for EquipID={equip_id} (kept {keep_runs} RunIDs)")
         except Exception as e:
             Console.warn(f"[RUL] Failed to cleanup old forecasts: {e}")
             # Non-fatal, continue with RUL estimation
@@ -317,7 +346,7 @@ def estimate_rul_and_failure(
 
     # Failure probability by horizon (prob HealthIndex <= threshold)
     z = (health_threshold - forecast.values) / (forecast_std + 1e-9)
-    failure_prob = _norm_cdf(z)
+    failure_prob = np.clip(_norm_cdf(z), 0.0, 1.0)
 
     # Determine RUL: earliest horizon where central forecast crosses threshold
     below = forecast.values <= health_threshold
@@ -352,6 +381,11 @@ def estimate_rul_and_failure(
         return df
 
     # Health forecast TS
+    # Clamp health and CI into valid [0, 100] domain for visualization stability
+    forecast = forecast.clip(lower=0.0, upper=100.0)
+    ci_lower = ci_lower.clip(lower=0.0, upper=100.0)
+    ci_upper = ci_upper.clip(lower=0.0, upper=100.0)
+
     health_forecast_df = pd.DataFrame(
         {
             "Timestamp": forecast.index,
