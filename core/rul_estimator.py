@@ -358,9 +358,9 @@ def estimate_rul_and_failure(
     thr = float(np.clip(health_threshold, 0.0, 100.0))
     z = (thr - forecast.values) / (forecast_std + 1e-9)
     failure_prob = np.clip(_norm_cdf(z), 0.0, 1.0)
-    # Enforce non-decreasing failure probability across horizon for interpretability
-    if failure_prob.size:
-        failure_prob = np.maximum.accumulate(failure_prob)
+    # NOTE: Removed np.maximum.accumulate - it was forcing all probabilities to be identical
+    # when forecasts were similar. Let failure probability reflect actual forecast trajectory.
+    # For improving health, failure prob should decrease; for degrading health, it increases naturally.
 
     # Determine RUL: earliest horizon where central forecast crosses threshold
     below = forecast.values <= thr
