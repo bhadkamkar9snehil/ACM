@@ -662,7 +662,7 @@ class Fuser:
         s_pos = 0.0
         active = False
         start: Optional[int] = None
-        episodes = []
+        episodes_raw: List[Tuple[int, int]] = []
         for i, xi in enumerate(x):
             s_pos = max(0.0, s_pos + (xi - mu - k))
             if active and s_pos <= 0.0:
@@ -673,27 +673,30 @@ class Fuser:
                 active = True
                 start = i
             if active and s_pos > h:
-                # close episode
+                # close episode - collect ALL episodes first (filter by min_len AFTER merging)
                 end = i
                 if start is None:
                     start = i
-                length = end - start + 1
-                if length >= self.ep.min_len:
-                    episodes.append((start, end))
+                episodes_raw.append((start, end))
                 s_pos = 0.0
                 active = False
                 start = None
-        # merge gaps
-        merged = []
-        for s, e in episodes:
-            if not merged:
-                merged.append([s, e])
+        
+        # Merge gaps FIRST (before min_len filtering)
+        # This allows consecutive short episodes to merge into valid longer episodes
+        merged_raw: List[List[int]] = []
+        for s, e in episodes_raw:
+            if not merged_raw:
+                merged_raw.append([s, e])
                 continue
-            ps, pe = merged[-1]
+            ps, pe = merged_raw[-1]
             if s - pe - 1 <= self.ep.gap_merge:
-                merged[-1][1] = e
+                merged_raw[-1][1] = e
             else:
-                merged.append([s, e])
+                merged_raw.append([s, e])
+        
+        # Now filter by min_len AFTER merging
+        merged = [ep for ep in merged_raw if ep[1] - ep[0] + 1 >= self.ep.min_len]
 
         raw_idx = series.index
         has_dt_index = isinstance(raw_idx, pd.DatetimeIndex)
