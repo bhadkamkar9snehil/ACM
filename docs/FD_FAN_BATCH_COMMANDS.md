@@ -3,7 +3,7 @@
 This document contains static commands for running ACM batches on the FD_FAN equipment. Each command processes a non-overlapping time window.
 
 **Equipment**: FD_FAN (Forced Draft Fan)  
-**Data Range**: 2023-10-15 to 2025-09-14  
+**Data Range**: 2023-10-15 to 2025-09-14 (time-shifted sample data)  
 **Total Duration**: ~23 months
 
 ## Instructions
@@ -150,7 +150,7 @@ python -m core.acm_main --equip FD_FAN --start-time "2025-08-15T00:00:00" --end-
 If you prefer automated sequential processing instead of manual commands, use the batch runner:
 
 ```powershell
-python scripts/sql_batch_runner.py --equip FD_FAN --tick-minutes 43200 --max-batches 23 --start-from-beginning
+python scripts/sql_batch_runner.py --equip FD_FAN --tick-minutes 44640 --max-batches 23 --start-from-beginning
 ```
 
-This will automatically process all 23 batches with 1-month windows (43200 minutes = 30 days).
+This will automatically process all 23 batches with approximately 1-month windows (44640 minutes = 31 days).
