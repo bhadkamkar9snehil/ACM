@@ -2,13 +2,53 @@
 
 ACM is a predictive maintenance and equipment health monitoring system for industrial assets. It ingests sensor data from equipment (fans, turbines, motors, etc.), applies machine learning and statistical analysis to detect anomalies, forecasts equipment health and remaining useful life (RUL), and delivers actionable insights through Grafana dashboards.
 
-**Current Version:** v10.3.0 - Consolidated Observability Stack
+**Current Version:** v10.4.0 - Tactical Stability Improvements *(In Progress - 21% complete)*
 
 **Key Value**: Engineers can understand **what is degrading**, **when it started**, **which sensors are responsible**, and **when failure is likely** - all through automated analysis and visual dashboards.
 
 For complete implementation details, see `docs/ACM_SYSTEM_OVERVIEW.md`.
 
+---
+
+## 🚨 v10.4.0 Status Update (2025-12-23)
+
+**Question**: Is v10.3 completely unusable?  
+**Answer**: **NO** - v10.3 is usable but unstable (Grade: B-)
+
+**What's Working**: Core analytics (6 detectors, fusion, health tracking, episodes)  
+**What's Broken**: Missing safety gates cause misleading outputs in edge cases
+
+**Solution**: v10.4 tactical improvements - "Amputate, don't fix"
+
+### Progress: 3 of 8 Phases Complete (21%)
+
+✅ **Phase 1: UNKNOWN Regime Support** - System can now say "I don't know"  
+✅ **Phase 2: RUL Reliability Gating** - Prevents unreliable predictions  
+✅ **Phase 3: Data Contract Validation** - Rejects corrupt data at entry  
+⏳ **Phases 4-8**: Wire contracts, fix leakage, consolidate, test (8-11 hours remaining)
+
+**See**: [`docs/V10.3_AUDIT_REPORT.md`](docs/V10.3_AUDIT_REPORT.md) for full audit  
+**See**: [`docs/V10.4_SUMMARY.md`](docs/V10.4_SUMMARY.md) for implementation status
+
+---
+
 ## Recent Updates (December 2025)
+
+### v10.4.0 - Tactical Stability Improvements *(In Progress)*
+Critical safety improvements to address v11 architectural requirements:
+- **UNKNOWN Regime Support**: System can now say "I don't know" instead of forcing nearest-regime assignment
+  - Added `REGIME_UNKNOWN = -1` constant for low-confidence states
+  - Confidence-based gating: `1.0 / (1.0 + normalized_distance)`
+  - Config: `regimes.assignment.min_confidence` (default: 0.0 = disabled)
+- **RUL Reliability Gating**: Prevents unreliable predictions
+  - Added `RULStatus` enum: RELIABLE, NOT_RELIABLE, INSUFFICIENT_DATA
+  - Prerequisite checks: data quality, stable regime, persistent degradation, low drift
+  - Returns NaN when prerequisites fail instead of misleading numbers
+- **Data Contract Validation**: Rejects corrupt data at pipeline entry
+  - 4 validation rules: timestamp order, no duplicates, no future rows, cadence
+  - Fail-fast approach with clear error messages
+  - Config: `data_contract.strict` (to be enabled in Phase 4)
+- **Status**: 3 of 8 phases complete (21%) - See `docs/V10.4_SUMMARY.md`
 
 ### v10.3.0 - Consolidated Observability Stack
 Complete observability integration with Docker-based stack:

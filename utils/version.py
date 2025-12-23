@@ -17,8 +17,8 @@ Release Management:
 - Production deployments use specific tags (never merge commits)
 """
 
-__version__ = "10.3.0"
-__version_date__ = "2025-12-17"  # v10.3.0: Consolidated Observability Stack (OpenTelemetry + structlog + Pyroscope)
+__version__ = "10.4.0"
+__version_date__ = "2025-12-23"  # v10.4.0: Tactical Stability Improvements (UNKNOWN regime, RUL gating, data contracts)
 __version_author__ = "ACM Development Team"
 
 VERSION_MAJOR, VERSION_MINOR, VERSION_PATCH = map(int, __version__.split("."))

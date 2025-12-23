@@ -36,7 +36,11 @@ try:
 except Exception:  # pragma: no cover - scipy optional in some deployments
     _median_filter = None
 
-REGIME_MODEL_VERSION = "2.1"  # Bumped for FIX #1-10 changes
+REGIME_MODEL_VERSION = "2.2"  # v10.4.0: UNKNOWN regime support (no forced assignment)
+
+# v10.4.0: Special regime labels for low-confidence states
+REGIME_UNKNOWN = -1  # Cannot reliably assign to any known regime
+REGIME_EMERGING = -2  # Detecting a potential new regime (reserved for future use)
 
 
 class ModelVersionMismatch(Exception):
@@ -98,6 +102,7 @@ _REGIME_CONFIG_SCHEMA = {
     "regimes.quality.silhouette_min": (float, 0.0, 1.0, "Minimum silhouette score"),
     "regimes.auto_k.max_eval_samples": (int, 100, 20000, "Max samples for auto-k evaluation"),
     "regimes.smoothing.passes": (int, 0, 5, "Number of label smoothing passes"),
+    "regimes.assignment.min_confidence": (float, 0.0, 1.0, "Minimum confidence for regime assignment (v10.4.0)"),
     "regimes.smoothing.window": (int, 0, 25, "Smoothing window size"),
     "regimes.transient_detection.roc_window": (int, 2, 500, "Transient ROC window"),
     "regimes.transient_detection.roc_threshold_high": (float, 0.0, 100.0, "Transient high ROC threshold"),
@@ -700,12 +705,26 @@ def fit_regime_model(
     return model
 
 
-def predict_regime(model: RegimeModel, basis_df: pd.DataFrame) -> np.ndarray:
+def predict_regime(model: RegimeModel, basis_df: pd.DataFrame, min_confidence: float = 0.0) -> np.ndarray:
     """
     Predict regime labels for new data using fitted model.
     
     FIX #6: Now validates feature dimensions and warns on mismatches
     instead of silently filling with zeros.
+    
+    v10.4.0: Added UNKNOWN regime support. When distance to nearest cluster center
+    exceeds threshold (low confidence), assigns REGIME_UNKNOWN (-1) instead of forcing
+    assignment to nearest regime.
+    
+    Args:
+        model: Trained RegimeModel with scaler and kmeans
+        basis_df: DataFrame with regime basis features
+        min_confidence: Minimum confidence threshold (0.0-1.0). Default 0.0 disables UNKNOWN.
+                       Confidence is computed as: 1.0 / (1.0 + normalized_distance_to_nearest)
+                       When confidence < min_confidence, assigns REGIME_UNKNOWN (-1)
+    
+    Returns:
+        Array of regime labels. May include REGIME_UNKNOWN (-1) if min_confidence > 0.
     """
     expected_cols = set(model.feature_columns)
     provided_cols = set(basis_df.columns)
@@ -741,7 +760,41 @@ def predict_regime(model: RegimeModel, basis_df: pd.DataFrame) -> np.ndarray:
     X_scaled = model.scaler.transform(aligned_arr)
     X_scaled = np.asarray(X_scaled, dtype=np.float64, order="C")
     centers = np.asarray(model.kmeans.cluster_centers_, dtype=np.float64, order="C")
-    labels = pairwise_distances_argmin(X_scaled, centers, axis=1)
+    
+    # v10.4.0: Compute distances and confidence for UNKNOWN regime support
+    from sklearn.metrics import pairwise_distances
+    
+    # Get distances to all cluster centers
+    distances = pairwise_distances(X_scaled, centers, metric='euclidean')
+    
+    # Find nearest cluster for each point
+    labels = np.argmin(distances, axis=1).astype(int)
+    nearest_distances = np.min(distances, axis=1)
+    
+    # v10.4.0: Apply confidence threshold to detect UNKNOWN regimes
+    if min_confidence > 0.0:
+        # Compute confidence as inverse of normalized distance
+        # Normalize by median distance to make threshold more interpretable
+        median_dist = np.median(nearest_distances)
+        if median_dist < 1e-8:
+            # All points are at cluster centers (perfect fit) - full confidence
+            confidence = np.ones_like(nearest_distances)
+        else:
+            normalized_dist = nearest_distances / median_dist
+            confidence = 1.0 / (1.0 + normalized_dist)
+        
+        # Mark low-confidence assignments as UNKNOWN
+        low_confidence_mask = confidence < min_confidence
+        if low_confidence_mask.any():
+            labels[low_confidence_mask] = REGIME_UNKNOWN
+            Console.warn(
+                f"Assigned {low_confidence_mask.sum()} samples to UNKNOWN regime (confidence < {min_confidence:.2f})",
+                component="REGIME",
+                n_unknown=int(low_confidence_mask.sum()),
+                n_total=len(labels),
+                median_confidence=float(np.median(confidence)),
+            )
+    
     return labels.astype(int, copy=False)
 
 
@@ -1728,8 +1781,11 @@ def label(score_df, ctx: Dict[str, Any], score_out: Dict[str, Any], cfg: Dict[st
         elif regime_model.train_hash is None and basis_hash is not None:
             regime_model.train_hash = basis_hash
 
-        train_labels = predict_regime(regime_model, basis_train)
-        score_labels = predict_regime(regime_model, basis_score)
+        # v10.4.0: Get min_confidence from config for UNKNOWN regime support
+        min_confidence = float(_cfg_get(cfg, "regimes.assignment.min_confidence", 0.0))
+        
+        train_labels = predict_regime(regime_model, basis_train, min_confidence=min_confidence)
+        score_labels = predict_regime(regime_model, basis_score, min_confidence=min_confidence)
         # Smoothing controls
         smooth_cfg = _cfg_get(cfg, "regimes.smoothing", {}) or {}
         passes = int(smooth_cfg.get("passes", 1))

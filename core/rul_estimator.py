@@ -1,5 +1,5 @@
 ﻿"""
-RUL Estimator with Monte Carlo Simulation (v10.1.0)
+RUL Estimator with Monte Carlo Simulation (v10.4.0)
 
 Remaining Useful Life estimation via Monte Carlo degradation simulations.
 Replaces logic from rul_engine.py (lines 248-394) and forecasting.py RUL sections.
@@ -11,6 +11,7 @@ Key Features:
 - Agresti-Coull confidence interval adjustment
 - Time-to-failure distribution via survival analysis
 - Integration with degradation models and failure probability functions
+- **v10.4.0: RUL reliability gating - returns NOT_RELIABLE when prerequisites fail**
 
 References:
 - Saxena et al. (2008) IEEE Trans: Monte Carlo RUL estimation with 500-5000 simulations
@@ -21,6 +22,7 @@ References:
 
 from dataclasses import dataclass
 from typing import Dict, Optional, Tuple
+from enum import Enum
 import numpy as np
 from scipy import stats
 
@@ -29,14 +31,32 @@ from core.failure_probability import compute_failure_statistics
 from core.observability import Console, Heartbeat, Span
 
 
+class RULStatus(Enum):
+    """
+    RUL reliability status (v10.4.0).
+    
+    Indicates whether RUL prediction meets reliability prerequisites.
+    """
+    RELIABLE = "RELIABLE"               # All prerequisites met, RUL is trustworthy
+    NOT_RELIABLE = "NOT_RELIABLE"      # Prerequisites failed, RUL should not be used
+    INSUFFICIENT_DATA = "INSUFFICIENT_DATA"  # Not enough data to estimate RUL
+
+
 @dataclass
 class RULEstimate:
-    """RUL estimate with uncertainty quantification"""
+    """RUL estimate with uncertainty quantification and reliability status (v10.4.0)"""
+    # Quantiles
     p10_lower_bound: float    # 10th percentile (pessimistic)
     p50_median: float         # 50th percentile (most likely)
     p90_upper_bound: float    # 90th percentile (optimistic)
     mean_rul: float           # Mean RUL across simulations
     std_rul: float            # Standard deviation of RUL
+    
+    # Reliability metadata (v10.4.0)
+    status: RULStatus         # Reliability status
+    status_reason: str        # Human-readable reason for status
+    
+    # Uncertainty metrics
     confidence_level: float   # Confidence level used (e.g., 0.80)
     n_simulations: int        # Number of Monte Carlo runs
     failure_probability: float  # Probability of failure within forecast horizon
@@ -99,30 +119,162 @@ class RULEstimator:
         self.confidence_level = confidence_level
         self.noise_factor = noise_factor
     
+    def check_prerequisites(
+        self,
+        data_quality: str = "OK",
+        regime_label: int = 0,
+        regime_confidence: float = 1.0,
+        degradation_trend: float = 0.0,
+        n_batches_degrading: int = 0,
+        drift_level: float = 0.0
+    ) -> Tuple[RULStatus, str]:
+        """
+        Check if prerequisites for reliable RUL estimation are met (v10.4.0).
+        
+        v11 Rule #7: Add explicit "RUL NOT RELIABLE" outcome and prevent numeric RUL
+        from being written when prerequisites fail.
+        
+        Prerequisites for RELIABLE RUL:
+        1. Data quality must be OK or GAPPY (not SPARSE, FLAT, NOISY)
+        2. Regime must be stable (not UNKNOWN, confidence > 0.6)
+        3. Persistent degradation trend (slope < 0 for >= 3 batches)
+        4. Low drift (drift_level < 0.5)
+        
+        Args:
+            data_quality: Health timeline quality flag (OK, SPARSE, GAPPY, FLAT, NOISY)
+            regime_label: Current regime label (-1 = UNKNOWN)
+            regime_confidence: Confidence in regime assignment (0-1)
+            degradation_trend: Health degradation slope (negative = degrading)
+            n_batches_degrading: Number of consecutive batches with negative trend
+            drift_level: Concept drift level (0-1, higher = more drift)
+        
+        Returns:
+            (status, reason) tuple:
+                - RELIABLE: All prerequisites met
+                - NOT_RELIABLE: One or more prerequisites failed (includes reason)
+                - INSUFFICIENT_DATA: Not enough data to assess
+        """
+        from core.regimes import REGIME_UNKNOWN
+        
+        # Check 1: Data quality
+        if data_quality in ["SPARSE", "FLAT", "MISSING"]:
+            return (
+                RULStatus.INSUFFICIENT_DATA,
+                f"Insufficient data quality: {data_quality}"
+            )
+        
+        if data_quality in ["NOISY"]:
+            return (
+                RULStatus.NOT_RELIABLE,
+                f"Data quality too poor for reliable RUL: {data_quality}"
+            )
+        
+        # Check 2: Stable regime
+        if regime_label == REGIME_UNKNOWN:
+            return (
+                RULStatus.NOT_RELIABLE,
+                "Operating regime unknown - cannot reliably predict degradation"
+            )
+        
+        if regime_confidence < 0.6:
+            return (
+                RULStatus.NOT_RELIABLE,
+                f"Regime confidence too low: {regime_confidence:.2f} < 0.6"
+            )
+        
+        # Check 3: Persistent degradation
+        if degradation_trend >= 0:
+            return (
+                RULStatus.NOT_RELIABLE,
+                "No degradation trend detected (health stable or improving)"
+            )
+        
+        if n_batches_degrading < 3:
+            return (
+                RULStatus.NOT_RELIABLE,
+                f"Degradation not persistent ({n_batches_degrading} batches < 3 required)"
+            )
+        
+        # Check 4: Low drift
+        if drift_level > 0.5:
+            return (
+                RULStatus.NOT_RELIABLE,
+                f"Concept drift too high: {drift_level:.2f} > 0.5 (model assumptions may be invalid)"
+            )
+        
+        # All checks passed
+        return (RULStatus.RELIABLE, "All prerequisites met")
+    
     def estimate_rul(
         self,
         current_health: float,
         dt_hours: float = 1.0,
-        max_horizon_hours: float = 720.0
+        max_horizon_hours: float = 720.0,
+        # v10.4.0: RUL reliability gating parameters
+        data_quality: str = "OK",
+        regime_label: int = 0,
+        regime_confidence: float = 1.0,
+        degradation_trend: float = 0.0,
+        n_batches_degrading: int = 0,
+        drift_level: float = 0.0
     ) -> RULEstimate:
         """
-        Estimate RUL via Monte Carlo simulation.
+        Estimate RUL via Monte Carlo simulation with reliability gating (v10.4.0).
         
         Process:
-        1. Generate baseline degradation forecast from model
-        2. Run N Monte Carlo simulations with stochastic noise
-        3. For each simulation, find time when health < failure_threshold
-        4. Compute quantiles (P10, P50, P90) from time-to-failure distribution
-        5. Apply Agresti-Coull adjustment for confidence intervals
+        1. **v10.4.0: Check prerequisites for reliable RUL estimation**
+        2. Generate baseline degradation forecast from model
+        3. Run N Monte Carlo simulations with stochastic noise
+        4. For each simulation, find time when health < failure_threshold
+        5. Compute quantiles (P10, P50, P90) from time-to-failure distribution
+        6. Apply Agresti-Coull adjustment for confidence intervals
         
         Args:
             current_health: Current health index value
             dt_hours: Time step for simulation (hours)
             max_horizon_hours: Maximum simulation horizon (hours)
+            data_quality: Health timeline quality flag (v10.4.0)
+            regime_label: Current regime label (v10.4.0, -1 = UNKNOWN)
+            regime_confidence: Confidence in regime assignment (v10.4.0)
+            degradation_trend: Health degradation slope (v10.4.0)
+            n_batches_degrading: Number of consecutive degrading batches (v10.4.0)
+            drift_level: Concept drift level 0-1 (v10.4.0)
         
         Returns:
-            RULEstimate with P10/P50/P90 quantiles and uncertainty metrics
+            RULEstimate with P10/P50/P90 quantiles, uncertainty metrics, and reliability status
         """
+        # v10.4.0: Check prerequisites BEFORE computing RUL
+        status, reason = self.check_prerequisites(
+            data_quality=data_quality,
+            regime_label=regime_label,
+            regime_confidence=regime_confidence,
+            degradation_trend=degradation_trend,
+            n_batches_degrading=n_batches_degrading,
+            drift_level=drift_level
+        )
+        
+        if status != RULStatus.RELIABLE:
+            # Return NOT_RELIABLE or INSUFFICIENT_DATA without numeric RUL
+            Console.warn(
+                f"RUL estimation not reliable: {reason}",
+                component="RUL",
+                status=status.value,
+                reason=reason
+            )
+            return RULEstimate(
+                p10_lower_bound=np.nan,
+                p50_median=np.nan,
+                p90_upper_bound=np.nan,
+                mean_rul=np.nan,
+                std_rul=np.nan,
+                status=status,
+                status_reason=reason,
+                confidence_level=self.confidence_level,
+                n_simulations=0,
+                failure_probability=np.nan,
+                simulation_times=np.array([])
+            )
+        
         # Quick check: already below threshold
         if current_health <= self.failure_threshold:
             return RULEstimate(
@@ -131,6 +283,8 @@ class RULEstimator:
                 p90_upper_bound=0.0,
                 mean_rul=0.0,
                 std_rul=0.0,
+                status=RULStatus.RELIABLE,
+                status_reason="Equipment already below failure threshold",
                 confidence_level=self.confidence_level,
                 n_simulations=self.n_simulations,
                 failure_probability=1.0,
@@ -188,6 +342,8 @@ class RULEstimator:
             p90_upper_bound=p90,
             mean_rul=mean_rul,
             std_rul=std_rul,
+            status=RULStatus.RELIABLE,  # v10.4.0
+            status_reason="All prerequisites met",  # v10.4.0
             confidence_level=self.confidence_level,
             n_simulations=self.n_simulations,
             failure_probability=failure_prob,
