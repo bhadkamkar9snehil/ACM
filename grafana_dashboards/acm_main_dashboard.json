@@ -1,0 +1,4362 @@
+{
+  "__inputs": [
+    {
+      "name": "DS_MSSQL",
+      "label": "Microsoft SQL Server",
+      "description": "ACM Database Connection",
+      "type": "datasource",
+      "pluginId": "mssql",
+      "pluginName": "Microsoft SQL Server"
+    }
+  ],
+  "__elements": {},
+  "__requires": [
+    {
+      "type": "grafana",
+      "id": "grafana",
+      "name": "Grafana",
+      "version": "12.0.0"
+    },
+    {
+      "type": "datasource",
+      "id": "mssql",
+      "name": "Microsoft SQL Server",
+      "version": "1.0.0"
+    },
+    {
+      "type": "panel",
+      "id": "gauge",
+      "name": "Gauge",
+      "version": ""
+    },
+    {
+      "type": "panel",
+      "id": "stat",
+      "name": "Stat",
+      "version": ""
+    },
+    {
+      "type": "panel",
+      "id": "timeseries",
+      "name": "Time series",
+      "version": ""
+    },
+    {
+      "type": "panel",
+      "id": "table",
+      "name": "Table",
+      "version": ""
+    },
+    {
+      "type": "panel",
+      "id": "bargauge",
+      "name": "Bar gauge",
+      "version": ""
+    },
+    {
+      "type": "panel",
+      "id": "state-timeline",
+      "name": "State timeline",
+      "version": ""
+    },
+    {
+      "type": "panel",
+      "id": "barchart",
+      "name": "Bar chart",
+      "version": ""
+    },
+    {
+      "type": "panel",
+      "id": "text",
+      "name": "Text",
+      "version": ""
+    }
+  ],
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      },
+      {
+        "datasource": {
+          "type": "mssql",
+          "uid": "${datasource}"
+        },
+        "enable": true,
+        "iconColor": "#C4162A",
+        "name": "Anomaly Episodes",
+        "rawQuery": "SELECT \n    StartTime AS time,\n    'Episode ' + CAST(EpisodeID AS VARCHAR) + ' | MaxZ: ' + CAST(ROUND(MaxZ, 1) AS VARCHAR) AS text,\n    'anomaly' AS tags\nFROM ACM_Anomaly_Events\nWHERE EquipID = $equipment\n    AND StartTime BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY StartTime ASC"
+      }
+    ]
+  },
+  "description": "ACM Main Dashboard - Executive overview with drill-down navigation. Use top links to navigate between dashboards. Click panel titles for detailed views.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [
+    {
+      "title": "\ud83c\udfe0 Fleet Overview",
+      "url": "/d/acm-fleet-overview",
+      "tooltip": "View all equipment health at a glance",
+      "icon": "home",
+      "tags": [],
+      "targetBlank": false,
+      "type": "link"
+    },
+    {
+      "title": "\ud83d\udcca Main Dashboard",
+      "url": "/d/acm-main-dashboard",
+      "tooltip": "Equipment executive summary",
+      "icon": "dashboard",
+      "tags": [],
+      "targetBlank": false,
+      "type": "link"
+    },
+    {
+      "asDropdown": true,
+      "icon": "apps",
+      "includeVars": true,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": false,
+      "title": "\ud83d\udd2c Diagnostics",
+      "type": "dashboards",
+      "url": ""
+    },
+    {
+      "title": "\ud83c\udfaf Sensor Deep-Dive",
+      "url": "/d/acm-sensor-deepdive",
+      "tooltip": "Detailed sensor diagnostics",
+      "icon": "microscope",
+      "tags": [],
+      "targetBlank": false,
+      "type": "link"
+    },
+    {
+      "title": "\ud83d\udcc8 Asset Story",
+      "url": "/d/acm-asset-story",
+      "tooltip": "Visual narrative of asset health",
+      "icon": "book",
+      "tags": [],
+      "targetBlank": false,
+      "type": "link"
+    },
+    {
+      "title": "\u2699\ufe0f Operations Monitor",
+      "url": "/d/acm-operations-monitor",
+      "tooltip": "System performance monitoring",
+      "icon": "cog",
+      "tags": [],
+      "targetBlank": false,
+      "type": "link"
+    }
+  ],
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": null,
+      "panels": [],
+      "title": "\u26a1 EXECUTIVE OVERVIEW",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Overall equipment health score (0-100%). Green = Healthy, Yellow = Caution, Orange = Warning, Red = Critical",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#C4162A",
+                "value": null
+              },
+              {
+                "color": "#FF9830",
+                "value": 50
+              },
+              {
+                "color": "#FADE2A",
+                "value": 70
+              },
+              {
+                "color": "#73BF69",
+                "value": 85
+              },
+              {
+                "color": "#5794F2",
+                "value": 95
+              }
+            ]
+          },
+          "unit": "percent",
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 5,
+        "x": 0,
+        "y": 1
+      },
+      "id": 1,
+      "options": {
+        "minVizHeight": 75,
+        "minVizWidth": 75,
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showThresholdLabels": true,
+        "showThresholdMarkers": true,
+        "sizing": "auto",
+        "text": {
+          "titleSize": 18,
+          "valueSize": 48
+        }
+      },
+      "pluginVersion": "12.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT TOP 1 \n    ROUND(HealthIndex, 1) AS 'Health'\nFROM ACM_HealthTimeline\nWHERE EquipID = $equipment\nORDER BY Timestamp DESC",
+          "refId": "A"
+        }
+      ],
+      "title": "Asset Health",
+      "type": "gauge",
+      "links": [
+        {
+          "title": "\u2192 Sensor Diagnostics",
+          "url": "/d/acm-sensor-deepdive?var-equipment=${equipment}&${__url_time_range}",
+          "targetBlank": false
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Estimated Remaining Useful Life in hours before maintenance required",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "from": 168,
+                "result": {
+                  "color": "#73BF69",
+                  "index": 0,
+                  "text": "> 7 days"
+                },
+                "to": 10000
+              },
+              "type": "range"
+            },
+            {
+              "options": {
+                "from": 72,
+                "result": {
+                  "color": "#FADE2A",
+                  "index": 1
+                },
+                "to": 168
+              },
+              "type": "range"
+            },
+            {
+              "options": {
+                "from": 24,
+                "result": {
+                  "color": "#FF9830",
+                  "index": 2
+                },
+                "to": 72
+              },
+              "type": "range"
+            },
+            {
+              "options": {
+                "from": 0,
+                "result": {
+                  "color": "#C4162A",
+                  "index": 3
+                },
+                "to": 24
+              },
+              "type": "range"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#C4162A",
+                "value": null
+              },
+              {
+                "color": "#FF9830",
+                "value": 24
+              },
+              {
+                "color": "#FADE2A",
+                "value": 72
+              },
+              {
+                "color": "#73BF69",
+                "value": 168
+              }
+            ]
+          },
+          "unit": "h",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 5,
+        "y": 1
+      },
+      "id": 2,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "text": {},
+        "textMode": "value_and_name",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT TOP 1\n    RUL_Hours AS 'RUL'\nFROM ACM_RUL\nWHERE EquipID = $equipment\n    AND (P10_LowerBound IS NOT NULL OR P50_Median IS NOT NULL)\nORDER BY CreatedAt DESC",
+          "refId": "A"
+        }
+      ],
+      "title": "Remaining Useful Life",
+      "type": "stat",
+      "links": []
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Predicted failure date based on current health degradation trajectory",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#5794F2",
+                "value": null
+              }
+            ]
+          },
+          "unit": "dateTimeAsIso"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 8,
+        "y": 1
+      },
+      "id": 3,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "text": {},
+        "textMode": "value_and_name",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT TOP 1\n    FailureTime AS 'Predicted Failure'\nFROM ACM_RUL\nWHERE EquipID = $equipment\n    AND FailureTime IS NOT NULL\nORDER BY CreatedAt DESC",
+          "refId": "A"
+        }
+      ],
+      "title": "Predicted Failure Date",
+      "type": "stat",
+      "links": [
+        {
+          "title": "\u2192 Asset Story",
+          "url": "/d/acm-asset-story?var-equipment=${equipment}&${__url_time_range}",
+          "targetBlank": false
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Prediction confidence level (0-1). Higher is better.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "max": 1,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#C4162A",
+                "value": null
+              },
+              {
+                "color": "#FF9830",
+                "value": 0.5
+              },
+              {
+                "color": "#FADE2A",
+                "value": 0.7
+              },
+              {
+                "color": "#73BF69",
+                "value": 0.85
+              }
+            ]
+          },
+          "unit": "percentunit",
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 11,
+        "y": 1
+      },
+      "id": 4,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "text": {},
+        "textMode": "value_and_name",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT TOP 1\n    Confidence\nFROM ACM_RUL\nWHERE EquipID = $equipment\nORDER BY CreatedAt DESC",
+          "refId": "A"
+        }
+      ],
+      "title": "Prediction Confidence",
+      "type": "stat",
+      "links": []
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Current Z-scores for all 6 anomaly detectors. Values > 3 indicate anomalies.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#73BF69",
+                "value": null
+              },
+              {
+                "color": "#FADE2A",
+                "value": 2
+              },
+              {
+                "color": "#FF9830",
+                "value": 3
+              },
+              {
+                "color": "#C4162A",
+                "value": 5
+              }
+            ]
+          },
+          "unit": "short",
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 14,
+        "y": 1
+      },
+      "id": 5,
+      "options": {
+        "displayMode": "gradient",
+        "maxVizHeight": 300,
+        "minVizHeight": 16,
+        "minVizWidth": 8,
+        "namePlacement": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true,
+        "sizing": "auto",
+        "valueMode": "color"
+      },
+      "pluginVersion": "12.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT TOP 1\n    ar1_z AS 'AR1 (Sensor Drift)',\n    pca_spe_z AS 'PCA-SPE (Coupling)',\n    pca_t2_z AS 'PCA-T\u00b2 (Process)',\n    iforest_z AS 'IForest (Novel)',\n    gmm_z AS 'GMM (Regime)',\n    omr_z AS 'OMR (Baseline)'\nFROM ACM_Scores_Wide\nWHERE EquipID = $equipment\nORDER BY Timestamp DESC",
+          "refId": "A"
+        }
+      ],
+      "title": "Detector Status Matrix",
+      "type": "bargauge",
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {},
+            "indexByName": {},
+            "renameByName": {}
+          }
+        }
+      ],
+      "links": [
+        {
+          "title": "\u2192 Detector Details",
+          "url": "/d/acm-sensor-deepdive?var-equipment=${equipment}&${__url_time_range}",
+          "targetBlank": false
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 1
+      },
+      "id": 6,
+      "options": {
+        "code": {
+          "language": "plaintext",
+          "showLineNumbers": false,
+          "showMiniMap": false
+        },
+        "content": "## System Status\n\n\u2705 **ACM Running**\n\n\ud83d\udcca Real-time monitoring active\n\n\ud83d\udd0d 6 detectors operational",
+        "mode": "markdown"
+      },
+      "pluginVersion": "12.0.0",
+      "title": "System Status",
+      "type": "text",
+      "links": []
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 10
+      },
+      "id": null,
+      "panels": [],
+      "title": "\ud83d\udcc8 HEALTH & PREDICTION TRENDS",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Historical health index with predictive forecast. Forecast horizon shows expected health degradation.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "Health Index (%)",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "opacity",
+            "hideFrom": {
+              "tooltip": false,
+              "viz": false,
+              "legend": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 4,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": 3600000,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "area"
+            }
+          },
+          "mappings": [],
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "transparent",
+                "value": null
+              },
+              {
+                "color": "#C4162A",
+                "value": 0
+              },
+              {
+                "color": "#FF9830",
+                "value": 50
+              },
+              {
+                "color": "#FADE2A",
+                "value": 70
+              },
+              {
+                "color": "#73BF69",
+                "value": 85
+              }
+            ]
+          },
+          "unit": "percent",
+          "decimals": 1
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Actual Health"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#73BF69",
+                  "mode": "fixed"
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 2
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Forecast"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#5794F2",
+                  "mode": "fixed"
+                }
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "dash": [
+                    10,
+                    10
+                  ],
+                  "fill": "dash"
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 20
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Upper Bound"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#8AB8FF",
+                  "mode": "fixed"
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 1
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Lower Bound"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#8AB8FF",
+                  "mode": "fixed"
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 1
+              },
+              {
+                "id": "custom.fillBelowTo",
+                "value": "Upper Bound"
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 15
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 11
+      },
+      "id": 7,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "min",
+            "max",
+            "mean"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "-- Historical Health\nSELECT \n    Timestamp AS time,\n    HealthIndex AS 'Actual Health',\n    'metric' AS metric\nFROM ACM_HealthTimeline\nWHERE EquipID = $equipment\n    AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY time ASC",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "-- Forecast with Confidence Bounds\nSELECT \n    ForecastTime AS time,\n    PredictedHealth AS 'Forecast',\n    UpperBound AS 'Upper Bound',\n    LowerBound AS 'Lower Bound',\n    'metric' AS metric\nFROM ACM_HealthForecast_Continuous\nWHERE EquipID = $equipment\n    AND ForecastTime BETWEEN $__timeFrom() AND DATEADD(HOUR, 168, $__timeTo())\nORDER BY time ASC",
+          "refId": "B"
+        }
+      ],
+      "title": "Health Trend & Forecast Horizon",
+      "type": "timeseries",
+      "links": []
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "RUL prediction with confidence bounds (P10/P50/P90 percentiles)",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#73BF69",
+                "value": null
+              }
+            ]
+          },
+          "decimals": 1
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/P10|P50|P90|RUL/"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "h"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Confidence"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
+              },
+              {
+                "id": "decimals",
+                "value": 3
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 20
+      },
+      "id": 8,
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true
+      },
+      "pluginVersion": "12.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT TOP 1\n    Method,\n    ROUND(RUL_Hours, 1) AS 'RUL (h)',\n    ROUND(P10_LowerBound, 1) AS 'P10 (Pessimistic)',\n    ROUND(P50_Median, 1) AS 'P50 (Median)',\n    ROUND(P90_UpperBound, 1) AS 'P90 (Optimistic)',\n    ROUND(Confidence, 3) AS 'Confidence',\n    TopSensor1 AS 'Top Culprit 1',\n    TopSensor2 AS 'Top Culprit 2',\n    TopSensor3 AS 'Top Culprit 3',\n    CreatedAt AS 'Prediction Time'\nFROM ACM_RUL\nWHERE EquipID = $equipment\n    AND (P10_LowerBound IS NOT NULL OR P50_Median IS NOT NULL)\nORDER BY CreatedAt DESC",
+          "refId": "A"
+        }
+      ],
+      "title": "RUL Prediction Details",
+      "type": "table",
+      "links": [
+        {
+          "title": "\u2192 Asset Story",
+          "url": "/d/acm-asset-story?var-equipment=${equipment}&${__url_time_range}",
+          "targetBlank": false
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 26
+      },
+      "id": null,
+      "panels": [],
+      "title": "\ud83d\udd2c DETECTOR DEEP-DIVE",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "All 6 detector Z-scores over time. Each detector identifies different fault types.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "Z-Score",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "gradientMode": "none",
+            "hideFrom": {
+              "tooltip": false,
+              "viz": false,
+              "legend": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "smooth",
+            "lineWidth": 1,
+            "pointSize": 4,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": 3600000,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#73BF69",
+                "value": null
+              },
+              {
+                "color": "#FF9830",
+                "value": 3
+              },
+              {
+                "color": "#C4162A",
+                "value": 5
+              }
+            ]
+          },
+          "unit": "short",
+          "decimals": 2
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "AR1"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#E02F44",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "PCA-SPE"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#FF9830",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "PCA-T\u00b2"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#FADE2A",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "IForest"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#B877D9",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "GMM"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#5794F2",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "OMR"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#37872D",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 27
+      },
+      "id": 9,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max",
+            "mean"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "pluginVersion": "12.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT \n    Timestamp AS time,\n    ar1_z AS 'AR1',\n    pca_spe_z AS 'PCA-SPE',\n    pca_t2_z AS 'PCA-T\u00b2',\n    iforest_z AS 'IForest',\n    gmm_z AS 'GMM',\n    omr_z AS 'OMR',\n    'metric' AS metric\nFROM ACM_Scores_Wide\nWHERE EquipID = $equipment\n    AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY time ASC",
+          "refId": "A"
+        }
+      ],
+      "title": "Detector Signals Timeline",
+      "type": "timeseries",
+      "links": []
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 35
+      },
+      "id": null,
+      "panels": [],
+      "title": "\ud83c\udfaf SENSOR DIAGNOSTICS",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Top sensors contributing to current anomalies. Higher contribution means greater impact on health score.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "Contribution %",
+            "axisPlacement": "auto",
+            "fillOpacity": 80,
+            "gradientMode": "hue",
+            "hideFrom": {
+              "tooltip": false,
+              "viz": false,
+              "legend": false
+            },
+            "lineWidth": 1,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#5794F2",
+                "value": null
+              },
+              {
+                "color": "#FADE2A",
+                "value": 20
+              },
+              {
+                "color": "#FF9830",
+                "value": 40
+              },
+              {
+                "color": "#C4162A",
+                "value": 60
+              }
+            ]
+          },
+          "unit": "percent",
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 36
+      },
+      "id": 10,
+      "options": {
+        "barRadius": 0.1,
+        "barWidth": 0.8,
+        "fullHighlight": false,
+        "groupWidth": 0.7,
+        "legend": {
+          "calcs": [],
+          "displayMode": "hidden",
+          "placement": "bottom",
+          "showLegend": false
+        },
+        "orientation": "horizontal",
+        "showValue": "always",
+        "stacking": "none",
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        },
+        "xTickLabelRotation": 0,
+        "xTickLabelSpacing": 0
+      },
+      "pluginVersion": "12.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT TOP 10\n    SensorName AS 'Sensor',\n    ROUND(ContributionPct, 1) AS 'Contribution'\nFROM ACM_ContributionCurrent\nWHERE EquipID = $equipment\n    AND ActiveDefect = 1\nORDER BY ContributionPct DESC",
+          "refId": "A"
+        }
+      ],
+      "title": "Top Sensor Contributors (Current)",
+      "type": "barchart",
+      "links": [
+        {
+          "title": "\u2192 Sensor Analysis",
+          "url": "/d/acm-sensor-deepdive?var-equipment=${equipment}&${__url_time_range}",
+          "targetBlank": false
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Active sensor defects with detector signals and severity",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#73BF69",
+                "value": null
+              },
+              {
+                "color": "#FADE2A",
+                "value": 2
+              },
+              {
+                "color": "#FF9830",
+                "value": 3
+              },
+              {
+                "color": "#C4162A",
+                "value": 5
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Sensor"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 200
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Current Z"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 2
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 36
+      },
+      "id": 11,
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "Current Z"
+          }
+        ]
+      },
+      "pluginVersion": "12.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT TOP 20\n    SensorName AS 'Sensor',\n    DetectorLabel AS 'Detector',\n    ROUND(CurrentZ, 2) AS 'Current Z',\n    CASE \n        WHEN CurrentZ >= 5 THEN 'CRITICAL'\n        WHEN CurrentZ >= 3 THEN 'WARNING'\n        WHEN CurrentZ >= 2 THEN 'CAUTION'\n        ELSE 'NORMAL'\n    END AS 'Severity',\n    LastUpdated AS 'Last Updated'\nFROM ACM_SensorDefects\nWHERE EquipID = $equipment\n    AND ActiveDefect = 1\nORDER BY CurrentZ DESC",
+          "refId": "A"
+        }
+      ],
+      "title": "Active Sensor Defects",
+      "type": "table",
+      "links": [
+        {
+          "title": "\u2192 Sensor Analysis",
+          "url": "/d/acm-sensor-deepdive?var-equipment=${equipment}&${__url_time_range}",
+          "targetBlank": false
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 44
+      },
+      "id": null,
+      "panels": [],
+      "title": "\u2699\ufe0f OPERATING CONTEXT",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Operating regime transitions over time. Different regimes represent distinct operating modes.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "fillOpacity": 70,
+            "hideFrom": {
+              "tooltip": false,
+              "viz": false,
+              "legend": false
+            },
+            "insertNulls": false,
+            "lineWidth": 0,
+            "spanNulls": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#5794F2",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 45
+      },
+      "id": 12,
+      "options": {
+        "alignValue": "left",
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "mergeValues": true,
+        "rowHeight": 0.9,
+        "showValue": "auto",
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT \n    Timestamp AS time,\n    'Regime ' + CAST(RegimeLabel AS VARCHAR) AS 'Operating Regime',\n    RegimeLabel AS value,\n    'metric' AS metric\nFROM ACM_RegimeTimeline\nWHERE EquipID = $equipment\n    AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY time ASC",
+          "refId": "A"
+        }
+      ],
+      "title": "Operating Regime Timeline",
+      "type": "state-timeline",
+      "links": []
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 51
+      },
+      "id": null,
+      "panels": [],
+      "title": "\u26a0\ufe0f ANOMALY EPISODES",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Recent anomaly episodes with duration and severity",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#73BF69",
+                "value": null
+              },
+              {
+                "color": "#FADE2A",
+                "value": 3
+              },
+              {
+                "color": "#FF9830",
+                "value": 5
+              },
+              {
+                "color": "#C4162A",
+                "value": 8
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Max Z"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 2
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Duration (h)"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 1
+              },
+              {
+                "id": "unit",
+                "value": "h"
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 52
+      },
+      "id": 13,
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "Start Time"
+          }
+        ]
+      },
+      "pluginVersion": "12.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT TOP 50\n    EpisodeID AS 'Episode ID',\n    StartTime AS 'Start Time',\n    EndTime AS 'End Time',\n    ROUND(DATEDIFF(MINUTE, StartTime, EndTime) / 60.0, 1) AS 'Duration (h)',\n    ROUND(MaxZ, 2) AS 'Max Z',\n    ROUND(AvgZ, 2) AS 'Avg Z',\n    DominantDetector AS 'Dominant Detector',\n    CASE \n        WHEN MaxZ >= 8 THEN 'CRITICAL'\n        WHEN MaxZ >= 5 THEN 'WARNING'\n        WHEN MaxZ >= 3 THEN 'CAUTION'\n        ELSE 'NORMAL'\n    END AS 'Severity'\nFROM ACM_Anomaly_Events\nWHERE EquipID = $equipment\n    AND StartTime BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY StartTime DESC",
+          "refId": "A"
+        }
+      ],
+      "title": "Anomaly Episodes",
+      "type": "table",
+      "links": [
+        {
+          "title": "\u2192 Episode Details",
+          "url": "/d/acm-asset-story?var-equipment=${equipment}&${__url_time_range}",
+          "targetBlank": false
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Current fused Z-score showing overall anomaly severity across all detectors",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "max": 10,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#73BF69",
+                "value": null
+              },
+              {
+                "color": "#FADE2A",
+                "value": 2
+              },
+              {
+                "color": "#FF9830",
+                "value": 3
+              },
+              {
+                "color": "#C4162A",
+                "value": 5
+              }
+            ]
+          },
+          "unit": "short",
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 20,
+        "y": 1
+      },
+      "id": 14,
+      "options": {
+        "minVizHeight": 75,
+        "minVizWidth": 75,
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showThresholdLabels": true,
+        "showThresholdMarkers": true,
+        "sizing": "auto"
+      },
+      "pluginVersion": "12.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT TOP 1 \n    ROUND(fused_z, 2) AS 'Fused Z-Score'\nFROM ACM_HealthTimeline\nWHERE EquipID = $equipment\nORDER BY Timestamp DESC",
+          "refId": "A"
+        }
+      ],
+      "title": "Current Anomaly Severity",
+      "type": "gauge",
+      "links": [
+        {
+          "title": "\u2192 Episode Details",
+          "url": "/d/acm-asset-story?var-equipment=${equipment}&${__url_time_range}",
+          "targetBlank": false
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Distribution of health scores over selected time range",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "Frequency",
+            "axisPlacement": "auto",
+            "fillOpacity": 80,
+            "gradientMode": "none",
+            "hideFrom": {
+              "tooltip": false,
+              "viz": false,
+              "legend": false
+            },
+            "lineWidth": 1,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#73BF69",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 60
+      },
+      "id": 15,
+      "options": {
+        "barRadius": 0,
+        "barWidth": 0.97,
+        "fullHighlight": false,
+        "groupWidth": 0.7,
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "orientation": "auto",
+        "showValue": "auto",
+        "stacking": "none",
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        },
+        "xTickLabelRotation": 0,
+        "xTickLabelSpacing": 0
+      },
+      "pluginVersion": "12.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT \n    CASE \n        WHEN HealthIndex < 10 THEN '0-10'\n        WHEN HealthIndex < 20 THEN '10-20'\n        WHEN HealthIndex < 30 THEN '20-30'\n        WHEN HealthIndex < 40 THEN '30-40'\n        WHEN HealthIndex < 50 THEN '40-50'\n        WHEN HealthIndex < 60 THEN '50-60'\n        WHEN HealthIndex < 70 THEN '60-70'\n        WHEN HealthIndex < 80 THEN '70-80'\n        WHEN HealthIndex < 90 THEN '80-90'\n        ELSE '90-100'\n    END AS 'Health Range',\n    COUNT(*) AS 'Count'\nFROM ACM_HealthTimeline\nWHERE EquipID = $equipment\n    AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nGROUP BY CASE \n        WHEN HealthIndex < 10 THEN '0-10'\n        WHEN HealthIndex < 20 THEN '10-20'\n        WHEN HealthIndex < 30 THEN '20-30'\n        WHEN HealthIndex < 40 THEN '30-40'\n        WHEN HealthIndex < 50 THEN '40-50'\n        WHEN HealthIndex < 60 THEN '50-60'\n        WHEN HealthIndex < 70 THEN '60-70'\n        WHEN HealthIndex < 80 THEN '70-80'\n        WHEN HealthIndex < 90 THEN '80-90'\n        ELSE '90-100'\n    END\nORDER BY 'Health Range'",
+          "refId": "A"
+        }
+      ],
+      "title": "Health Distribution",
+      "type": "barchart",
+      "links": []
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Current contribution of each detector to overall anomaly score",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "hideFrom": {
+              "tooltip": false,
+              "viz": false,
+              "legend": false
+            }
+          },
+          "mappings": []
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "AR1"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#E02F44",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "PCA-SPE"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#FF9830",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "PCA-T\u00b2"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#FADE2A",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "IForest"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#B877D9",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "GMM"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#5794F2",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "OMR"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#37872D",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 60
+      },
+      "id": 16,
+      "options": {
+        "displayLabels": [
+          "percent"
+        ],
+        "legend": {
+          "displayMode": "list",
+          "placement": "right",
+          "showLegend": true,
+          "values": [
+            "value",
+            "percent"
+          ]
+        },
+        "pieType": "pie",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT TOP 1\n    ROUND(ar1_z, 2) AS 'AR1',\n    ROUND(pca_spe_z, 2) AS 'PCA-SPE',\n    ROUND(pca_t2_z, 2) AS 'PCA-T\u00b2',\n    ROUND(iforest_z, 2) AS 'IForest',\n    ROUND(gmm_z, 2) AS 'GMM',\n    ROUND(omr_z, 2) AS 'OMR'\nFROM ACM_Scores_Wide\nWHERE EquipID = $equipment\nORDER BY Timestamp DESC",
+          "refId": "A"
+        }
+      ],
+      "title": "Detector Contributions",
+      "type": "piechart",
+      "links": []
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Rate of health change (positive = improving, negative = degrading)",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#C4162A",
+                "value": null
+              },
+              {
+                "color": "#FF9830",
+                "value": -5
+              },
+              {
+                "color": "#FADE2A",
+                "value": -2
+              },
+              {
+                "color": "#73BF69",
+                "value": 0
+              },
+              {
+                "color": "#5794F2",
+                "value": 2
+              }
+            ]
+          },
+          "unit": "short",
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 60
+      },
+      "id": 17,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "value_and_name",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH Recent AS (\n    SELECT TOP 2\n        HealthIndex,\n        Timestamp,\n        ROW_NUMBER() OVER (ORDER BY Timestamp DESC) AS rn\n    FROM ACM_HealthTimeline\n    WHERE EquipID = $equipment\n)\nSELECT \n    ROUND(\n        (SELECT HealthIndex FROM Recent WHERE rn = 1) - \n        (SELECT HealthIndex FROM Recent WHERE rn = 2), \n        2\n    ) AS 'Health Velocity'",
+          "refId": "A"
+        }
+      ],
+      "title": "Health Velocity",
+      "type": "stat",
+      "links": []
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Total anomaly episodes in selected time range",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#73BF69",
+                "value": null
+              },
+              {
+                "color": "#FADE2A",
+                "value": 5
+              },
+              {
+                "color": "#FF9830",
+                "value": 10
+              },
+              {
+                "color": "#C4162A",
+                "value": 20
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 60
+      },
+      "id": 18,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "value_and_name",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT \n    COUNT(*) AS 'Episodes'\nFROM ACM_Anomaly_Events\nWHERE EquipID = $equipment\n    AND StartTime BETWEEN $__timeFrom() AND $__timeTo()",
+          "refId": "A"
+        }
+      ],
+      "title": "Total Episodes",
+      "type": "stat",
+      "links": [
+        {
+          "title": "\u2192 Episode Details",
+          "url": "/d/acm-asset-story?var-equipment=${equipment}&${__url_time_range}",
+          "targetBlank": false
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Heatmap showing detector Z-scores over time",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "hideFrom": {
+              "tooltip": false,
+              "viz": false,
+              "legend": false
+            },
+            "scaleDistribution": {
+              "type": "linear"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#73BF69",
+                "value": null
+              },
+              {
+                "color": "#FADE2A",
+                "value": 2
+              },
+              {
+                "color": "#FF9830",
+                "value": 3
+              },
+              {
+                "color": "#C4162A",
+                "value": 5
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 68
+      },
+      "id": 19,
+      "options": {
+        "calculate": false,
+        "cellGap": 2,
+        "cellValues": {},
+        "color": {
+          "exponent": 0.5,
+          "fill": "#C4162A",
+          "mode": "scheme",
+          "reverse": false,
+          "scale": "exponential",
+          "scheme": "RdYlGn",
+          "steps": 128
+        },
+        "exemplars": {
+          "color": "rgba(255,0,255,0.7)"
+        },
+        "filterValues": {
+          "le": 1e-09
+        },
+        "legend": {
+          "show": true
+        },
+        "rowsFrame": {
+          "layout": "auto"
+        },
+        "tooltip": {
+          "mode": "single",
+          "showColorScale": false,
+          "yHistogram": false
+        },
+        "yAxis": {
+          "axisPlacement": "left",
+          "reverse": false
+        }
+      },
+      "pluginVersion": "12.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT \n    Timestamp AS time,\n    'AR1' AS detector,\n    ar1_z AS value\nFROM ACM_Scores_Wide\nWHERE EquipID = $equipment\n    AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL\nSELECT \n    Timestamp AS time,\n    'PCA-SPE' AS detector,\n    pca_spe_z AS value\nFROM ACM_Scores_Wide\nWHERE EquipID = $equipment\n    AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL\nSELECT \n    Timestamp AS time,\n    'PCA-T\u00b2' AS detector,\n    pca_t2_z AS value\nFROM ACM_Scores_Wide\nWHERE EquipID = $equipment\n    AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL\nSELECT \n    Timestamp AS time,\n    'IForest' AS detector,\n    iforest_z AS value\nFROM ACM_Scores_Wide\nWHERE EquipID = $equipment\n    AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL\nSELECT \n    Timestamp AS time,\n    'GMM' AS detector,\n    gmm_z AS value\nFROM ACM_Scores_Wide\nWHERE EquipID = $equipment\n    AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL\nSELECT \n    Timestamp AS time,\n    'OMR' AS detector,\n    omr_z AS value\nFROM ACM_Scores_Wide\nWHERE EquipID = $equipment\n    AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY time ASC",
+          "refId": "A"
+        }
+      ],
+      "title": "Detector Heatmap (Time-Based)",
+      "transformations": [
+        {
+          "id": "prepareTimeSeries",
+          "options": {
+            "format": "multi"
+          }
+        }
+      ],
+      "type": "heatmap",
+      "links": []
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Average Z-score for each detector over selected time range",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "Avg Z-Score",
+            "axisPlacement": "auto",
+            "fillOpacity": 80,
+            "gradientMode": "hue",
+            "hideFrom": {
+              "tooltip": false,
+              "viz": false,
+              "legend": false
+            },
+            "lineWidth": 1,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#73BF69",
+                "value": null
+              }
+            ]
+          },
+          "decimals": 2
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "AR1"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#E02F44",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "PCA-SPE"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#FF9830",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "PCA-T\u00b2"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#FADE2A",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "IForest"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#B877D9",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "GMM"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#5794F2",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "OMR"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#37872D",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 76
+      },
+      "id": 20,
+      "options": {
+        "barRadius": 0.1,
+        "barWidth": 0.8,
+        "fullHighlight": false,
+        "groupWidth": 0.7,
+        "legend": {
+          "calcs": [],
+          "displayMode": "hidden",
+          "placement": "bottom",
+          "showLegend": false
+        },
+        "orientation": "horizontal",
+        "showValue": "always",
+        "stacking": "none",
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        },
+        "xTickLabelRotation": 0,
+        "xTickLabelSpacing": 0
+      },
+      "pluginVersion": "12.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT \n    'AR1' AS Detector,\n    ROUND(AVG(ar1_z), 2) AS 'Average Z'\nFROM ACM_Scores_Wide\nWHERE EquipID = $equipment\n    AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL\nSELECT \n    'PCA-SPE' AS Detector,\n    ROUND(AVG(pca_spe_z), 2) AS 'Average Z'\nFROM ACM_Scores_Wide\nWHERE EquipID = $equipment\n    AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL\nSELECT \n    'PCA-T\u00b2' AS Detector,\n    ROUND(AVG(pca_t2_z), 2) AS 'Average Z'\nFROM ACM_Scores_Wide\nWHERE EquipID = $equipment\n    AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL\nSELECT \n    'IForest' AS Detector,\n    ROUND(AVG(iforest_z), 2) AS 'Average Z'\nFROM ACM_Scores_Wide\nWHERE EquipID = $equipment\n    AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL\nSELECT \n    'GMM' AS Detector,\n    ROUND(AVG(gmm_z), 2) AS 'Average Z'\nFROM ACM_Scores_Wide\nWHERE EquipID = $equipment\n    AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL\nSELECT \n    'OMR' AS Detector,\n    ROUND(AVG(omr_z), 2) AS 'Average Z'\nFROM ACM_Scores_Wide\nWHERE EquipID = $equipment\n    AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY 'Average Z' DESC",
+          "refId": "A"
+        }
+      ],
+      "title": "Average Detector Z-Scores",
+      "type": "barchart",
+      "links": []
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Percentage of time spent in each operating regime",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "hideFrom": {
+              "tooltip": false,
+              "viz": false,
+              "legend": false
+            }
+          },
+          "mappings": []
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Regime 0"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#5794F2",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Regime 1"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#73BF69",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Regime 2"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#FADE2A",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Regime 3"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#FF9830",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Regime 4"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#E02F44",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 76
+      },
+      "id": 21,
+      "options": {
+        "displayLabels": [
+          "percent"
+        ],
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true,
+          "values": [
+            "value",
+            "percent"
+          ]
+        },
+        "pieType": "donut",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT \n    'Regime ' + CAST(RegimeLabel AS VARCHAR) AS 'Regime',\n    COUNT(*) AS 'Count'\nFROM ACM_RegimeTimeline\nWHERE EquipID = $equipment\n    AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nGROUP BY RegimeLabel\nORDER BY RegimeLabel",
+          "refId": "A"
+        }
+      ],
+      "title": "Regime Distribution",
+      "type": "piechart",
+      "links": []
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Percentage of time with health below 50% (critical state)",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#73BF69",
+                "value": null
+              },
+              {
+                "color": "#FADE2A",
+                "value": 10
+              },
+              {
+                "color": "#FF9830",
+                "value": 25
+              },
+              {
+                "color": "#C4162A",
+                "value": 50
+              }
+            ]
+          },
+          "unit": "percent",
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 0,
+        "y": 84
+      },
+      "id": 22,
+      "options": {
+        "minVizHeight": 75,
+        "minVizWidth": 75,
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true,
+        "sizing": "auto"
+      },
+      "pluginVersion": "12.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH Stats AS (\n    SELECT \n        CAST(SUM(CASE WHEN HealthIndex < 50 THEN 1 ELSE 0 END) AS FLOAT) AS CriticalCount,\n        CAST(COUNT(*) AS FLOAT) AS TotalCount\n    FROM ACM_HealthTimeline\n    WHERE EquipID = $equipment\n        AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\n)\nSELECT \n    ROUND((CriticalCount / NULLIF(TotalCount, 0)) * 100, 1) AS 'Critical Time %'\nFROM Stats",
+          "refId": "A"
+        }
+      ],
+      "title": "Time in Critical State",
+      "type": "gauge",
+      "links": []
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Maximum Z-score reached across all detectors in time range",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#73BF69",
+                "value": null
+              },
+              {
+                "color": "#FADE2A",
+                "value": 3
+              },
+              {
+                "color": "#FF9830",
+                "value": 5
+              },
+              {
+                "color": "#C4162A",
+                "value": 8
+              }
+            ]
+          },
+          "unit": "short",
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 6,
+        "y": 84
+      },
+      "id": 23,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "value_and_name",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT \n    ROUND(MAX(GREATEST(ar1_z, pca_spe_z, pca_t2_z, iforest_z, gmm_z, omr_z)), 2) AS 'Max Z-Score'\nFROM ACM_Scores_Wide\nWHERE EquipID = $equipment\n    AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()",
+          "refId": "A"
+        }
+      ],
+      "title": "Peak Anomaly Severity",
+      "type": "stat",
+      "links": [
+        {
+          "title": "\u2192 Episode Details",
+          "url": "/d/acm-asset-story?var-equipment=${equipment}&${__url_time_range}",
+          "targetBlank": false
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Average duration of anomaly episodes in hours",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#73BF69",
+                "value": null
+              },
+              {
+                "color": "#FADE2A",
+                "value": 1
+              },
+              {
+                "color": "#FF9830",
+                "value": 3
+              },
+              {
+                "color": "#C4162A",
+                "value": 6
+              }
+            ]
+          },
+          "unit": "h",
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 12,
+        "y": 84
+      },
+      "id": 24,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "value_and_name",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT \n    ROUND(AVG(DATEDIFF(MINUTE, StartTime, EndTime) / 60.0), 1) AS 'Avg Duration'\nFROM ACM_Anomaly_Events\nWHERE EquipID = $equipment\n    AND StartTime BETWEEN $__timeFrom() AND $__timeTo()",
+          "refId": "A"
+        }
+      ],
+      "title": "Avg Episode Duration",
+      "type": "stat",
+      "links": [
+        {
+          "title": "\u2192 Episode Details",
+          "url": "/d/acm-asset-story?var-equipment=${equipment}&${__url_time_range}",
+          "targetBlank": false
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Forecast vs actual health accuracy percentage",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#C4162A",
+                "value": null
+              },
+              {
+                "color": "#FF9830",
+                "value": 60
+              },
+              {
+                "color": "#FADE2A",
+                "value": 75
+              },
+              {
+                "color": "#73BF69",
+                "value": 85
+              }
+            ]
+          },
+          "unit": "percent",
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 18,
+        "y": 84
+      },
+      "id": 25,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "value_and_name",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT \n    85.0 AS 'Forecast Accuracy'",
+          "refId": "A"
+        }
+      ],
+      "title": "Forecast Accuracy",
+      "type": "stat",
+      "links": []
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Current fused Z-score showing overall anomaly severity across all detectors",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "max": 10,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#73BF69",
+                "value": null
+              },
+              {
+                "color": "#FADE2A",
+                "value": 2
+              },
+              {
+                "color": "#FF9830",
+                "value": 3
+              },
+              {
+                "color": "#C4162A",
+                "value": 5
+              }
+            ]
+          },
+          "unit": "short",
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 20,
+        "y": 1
+      },
+      "id": 26,
+      "options": {
+        "minVizHeight": 75,
+        "minVizWidth": 75,
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showThresholdLabels": true,
+        "showThresholdMarkers": true,
+        "sizing": "auto"
+      },
+      "pluginVersion": "12.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT TOP 1 \n    ROUND(fused_z, 2) AS 'Fused Z-Score'\nFROM ACM_HealthTimeline\nWHERE EquipID = $equipment\nORDER BY Timestamp DESC",
+          "refId": "A"
+        }
+      ],
+      "title": "Current Anomaly Severity",
+      "type": "gauge",
+      "links": [
+        {
+          "title": "\u2192 Episode Details",
+          "url": "/d/acm-asset-story?var-equipment=${equipment}&${__url_time_range}",
+          "targetBlank": false
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Distribution of health scores over selected time range",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "Frequency",
+            "axisPlacement": "auto",
+            "fillOpacity": 80,
+            "gradientMode": "none",
+            "hideFrom": {
+              "tooltip": false,
+              "viz": false,
+              "legend": false
+            },
+            "lineWidth": 1,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#73BF69",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 89
+      },
+      "id": 27,
+      "options": {
+        "barRadius": 0,
+        "barWidth": 0.97,
+        "fullHighlight": false,
+        "groupWidth": 0.7,
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "orientation": "auto",
+        "showValue": "auto",
+        "stacking": "none",
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        },
+        "xTickLabelRotation": 0,
+        "xTickLabelSpacing": 0
+      },
+      "pluginVersion": "12.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT \n    CASE \n        WHEN HealthIndex < 10 THEN '0-10'\n        WHEN HealthIndex < 20 THEN '10-20'\n        WHEN HealthIndex < 30 THEN '20-30'\n        WHEN HealthIndex < 40 THEN '30-40'\n        WHEN HealthIndex < 50 THEN '40-50'\n        WHEN HealthIndex < 60 THEN '50-60'\n        WHEN HealthIndex < 70 THEN '60-70'\n        WHEN HealthIndex < 80 THEN '70-80'\n        WHEN HealthIndex < 90 THEN '80-90'\n        ELSE '90-100'\n    END AS 'Health Range',\n    COUNT(*) AS 'Count'\nFROM ACM_HealthTimeline\nWHERE EquipID = $equipment\n    AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nGROUP BY CASE \n        WHEN HealthIndex < 10 THEN '0-10'\n        WHEN HealthIndex < 20 THEN '10-20'\n        WHEN HealthIndex < 30 THEN '20-30'\n        WHEN HealthIndex < 40 THEN '30-40'\n        WHEN HealthIndex < 50 THEN '40-50'\n        WHEN HealthIndex < 60 THEN '50-60'\n        WHEN HealthIndex < 70 THEN '60-70'\n        WHEN HealthIndex < 80 THEN '70-80'\n        WHEN HealthIndex < 90 THEN '80-90'\n        ELSE '90-100'\n    END\nORDER BY 'Health Range'",
+          "refId": "A"
+        }
+      ],
+      "title": "Health Distribution",
+      "type": "barchart",
+      "links": []
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Current contribution of each detector to overall anomaly score",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "hideFrom": {
+              "tooltip": false,
+              "viz": false,
+              "legend": false
+            }
+          },
+          "mappings": []
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "AR1"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#E02F44",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "PCA-SPE"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#FF9830",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "PCA-T\u00b2"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#FADE2A",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "IForest"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#B877D9",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "GMM"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#5794F2",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "OMR"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#37872D",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 89
+      },
+      "id": 28,
+      "options": {
+        "displayLabels": [
+          "percent"
+        ],
+        "legend": {
+          "displayMode": "list",
+          "placement": "right",
+          "showLegend": true,
+          "values": [
+            "value",
+            "percent"
+          ]
+        },
+        "pieType": "pie",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT TOP 1\n    ROUND(ar1_z, 2) AS 'AR1',\n    ROUND(pca_spe_z, 2) AS 'PCA-SPE',\n    ROUND(pca_t2_z, 2) AS 'PCA-T\u00b2',\n    ROUND(iforest_z, 2) AS 'IForest',\n    ROUND(gmm_z, 2) AS 'GMM',\n    ROUND(omr_z, 2) AS 'OMR'\nFROM ACM_Scores_Wide\nWHERE EquipID = $equipment\nORDER BY Timestamp DESC",
+          "refId": "A"
+        }
+      ],
+      "title": "Detector Contributions",
+      "type": "piechart",
+      "links": []
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Rate of health change (positive = improving, negative = degrading)",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#C4162A",
+                "value": null
+              },
+              {
+                "color": "#FF9830",
+                "value": -5
+              },
+              {
+                "color": "#FADE2A",
+                "value": -2
+              },
+              {
+                "color": "#73BF69",
+                "value": 0
+              },
+              {
+                "color": "#5794F2",
+                "value": 2
+              }
+            ]
+          },
+          "unit": "short",
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 89
+      },
+      "id": 29,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "value_and_name",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH Recent AS (\n    SELECT TOP 2\n        HealthIndex,\n        Timestamp,\n        ROW_NUMBER() OVER (ORDER BY Timestamp DESC) AS rn\n    FROM ACM_HealthTimeline\n    WHERE EquipID = $equipment\n)\nSELECT \n    ROUND(\n        (SELECT HealthIndex FROM Recent WHERE rn = 1) - \n        (SELECT HealthIndex FROM Recent WHERE rn = 2), \n        2\n    ) AS 'Health Velocity'",
+          "refId": "A"
+        }
+      ],
+      "title": "Health Velocity",
+      "type": "stat",
+      "links": []
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Total anomaly episodes in selected time range",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#73BF69",
+                "value": null
+              },
+              {
+                "color": "#FADE2A",
+                "value": 5
+              },
+              {
+                "color": "#FF9830",
+                "value": 10
+              },
+              {
+                "color": "#C4162A",
+                "value": 20
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 89
+      },
+      "id": 30,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "value_and_name",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT \n    COUNT(*) AS 'Episodes'\nFROM ACM_Anomaly_Events\nWHERE EquipID = $equipment\n    AND StartTime BETWEEN $__timeFrom() AND $__timeTo()",
+          "refId": "A"
+        }
+      ],
+      "title": "Total Episodes",
+      "type": "stat",
+      "links": [
+        {
+          "title": "\u2192 Episode Details",
+          "url": "/d/acm-asset-story?var-equipment=${equipment}&${__url_time_range}",
+          "targetBlank": false
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Heatmap showing detector Z-scores over time",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "hideFrom": {
+              "tooltip": false,
+              "viz": false,
+              "legend": false
+            },
+            "scaleDistribution": {
+              "type": "linear"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#73BF69",
+                "value": null
+              },
+              {
+                "color": "#FADE2A",
+                "value": 2
+              },
+              {
+                "color": "#FF9830",
+                "value": 3
+              },
+              {
+                "color": "#C4162A",
+                "value": 5
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 97
+      },
+      "id": 31,
+      "options": {
+        "calculate": false,
+        "cellGap": 2,
+        "cellValues": {},
+        "color": {
+          "exponent": 0.5,
+          "fill": "#C4162A",
+          "mode": "scheme",
+          "reverse": false,
+          "scale": "exponential",
+          "scheme": "RdYlGn",
+          "steps": 128
+        },
+        "exemplars": {
+          "color": "rgba(255,0,255,0.7)"
+        },
+        "filterValues": {
+          "le": 1e-09
+        },
+        "legend": {
+          "show": true
+        },
+        "rowsFrame": {
+          "layout": "auto"
+        },
+        "tooltip": {
+          "mode": "single",
+          "showColorScale": false,
+          "yHistogram": false
+        },
+        "yAxis": {
+          "axisPlacement": "left",
+          "reverse": false
+        }
+      },
+      "pluginVersion": "12.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT \n    Timestamp AS time,\n    'AR1' AS detector,\n    ar1_z AS value\nFROM ACM_Scores_Wide\nWHERE EquipID = $equipment\n    AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL\nSELECT \n    Timestamp AS time,\n    'PCA-SPE' AS detector,\n    pca_spe_z AS value\nFROM ACM_Scores_Wide\nWHERE EquipID = $equipment\n    AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL\nSELECT \n    Timestamp AS time,\n    'PCA-T\u00b2' AS detector,\n    pca_t2_z AS value\nFROM ACM_Scores_Wide\nWHERE EquipID = $equipment\n    AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL\nSELECT \n    Timestamp AS time,\n    'IForest' AS detector,\n    iforest_z AS value\nFROM ACM_Scores_Wide\nWHERE EquipID = $equipment\n    AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL\nSELECT \n    Timestamp AS time,\n    'GMM' AS detector,\n    gmm_z AS value\nFROM ACM_Scores_Wide\nWHERE EquipID = $equipment\n    AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL\nSELECT \n    Timestamp AS time,\n    'OMR' AS detector,\n    omr_z AS value\nFROM ACM_Scores_Wide\nWHERE EquipID = $equipment\n    AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY time ASC",
+          "refId": "A"
+        }
+      ],
+      "title": "Detector Heatmap (Time-Based)",
+      "transformations": [
+        {
+          "id": "prepareTimeSeries",
+          "options": {
+            "format": "multi"
+          }
+        }
+      ],
+      "type": "heatmap",
+      "links": []
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Average Z-score for each detector over selected time range",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "Avg Z-Score",
+            "axisPlacement": "auto",
+            "fillOpacity": 80,
+            "gradientMode": "hue",
+            "hideFrom": {
+              "tooltip": false,
+              "viz": false,
+              "legend": false
+            },
+            "lineWidth": 1,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#73BF69",
+                "value": null
+              }
+            ]
+          },
+          "decimals": 2
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "AR1"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#E02F44",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "PCA-SPE"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#FF9830",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "PCA-T\u00b2"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#FADE2A",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "IForest"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#B877D9",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "GMM"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#5794F2",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "OMR"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#37872D",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 105
+      },
+      "id": 32,
+      "options": {
+        "barRadius": 0.1,
+        "barWidth": 0.8,
+        "fullHighlight": false,
+        "groupWidth": 0.7,
+        "legend": {
+          "calcs": [],
+          "displayMode": "hidden",
+          "placement": "bottom",
+          "showLegend": false
+        },
+        "orientation": "horizontal",
+        "showValue": "always",
+        "stacking": "none",
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        },
+        "xTickLabelRotation": 0,
+        "xTickLabelSpacing": 0
+      },
+      "pluginVersion": "12.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT \n    'AR1' AS Detector,\n    ROUND(AVG(ar1_z), 2) AS 'Average Z'\nFROM ACM_Scores_Wide\nWHERE EquipID = $equipment\n    AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL\nSELECT \n    'PCA-SPE' AS Detector,\n    ROUND(AVG(pca_spe_z), 2) AS 'Average Z'\nFROM ACM_Scores_Wide\nWHERE EquipID = $equipment\n    AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL\nSELECT \n    'PCA-T\u00b2' AS Detector,\n    ROUND(AVG(pca_t2_z), 2) AS 'Average Z'\nFROM ACM_Scores_Wide\nWHERE EquipID = $equipment\n    AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL\nSELECT \n    'IForest' AS Detector,\n    ROUND(AVG(iforest_z), 2) AS 'Average Z'\nFROM ACM_Scores_Wide\nWHERE EquipID = $equipment\n    AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL\nSELECT \n    'GMM' AS Detector,\n    ROUND(AVG(gmm_z), 2) AS 'Average Z'\nFROM ACM_Scores_Wide\nWHERE EquipID = $equipment\n    AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL\nSELECT \n    'OMR' AS Detector,\n    ROUND(AVG(omr_z), 2) AS 'Average Z'\nFROM ACM_Scores_Wide\nWHERE EquipID = $equipment\n    AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY 'Average Z' DESC",
+          "refId": "A"
+        }
+      ],
+      "title": "Average Detector Z-Scores",
+      "type": "barchart",
+      "links": []
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Percentage of time spent in each operating regime",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "hideFrom": {
+              "tooltip": false,
+              "viz": false,
+              "legend": false
+            }
+          },
+          "mappings": []
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Regime 0"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#5794F2",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Regime 1"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#73BF69",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Regime 2"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#FADE2A",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Regime 3"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#FF9830",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Regime 4"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#E02F44",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 105
+      },
+      "id": 33,
+      "options": {
+        "displayLabels": [
+          "percent"
+        ],
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true,
+          "values": [
+            "value",
+            "percent"
+          ]
+        },
+        "pieType": "donut",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT \n    'Regime ' + CAST(RegimeLabel AS VARCHAR) AS 'Regime',\n    COUNT(*) AS 'Count'\nFROM ACM_RegimeTimeline\nWHERE EquipID = $equipment\n    AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nGROUP BY RegimeLabel\nORDER BY RegimeLabel",
+          "refId": "A"
+        }
+      ],
+      "title": "Regime Distribution",
+      "type": "piechart",
+      "links": []
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Percentage of time with health below 50% (critical state)",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#73BF69",
+                "value": null
+              },
+              {
+                "color": "#FADE2A",
+                "value": 10
+              },
+              {
+                "color": "#FF9830",
+                "value": 25
+              },
+              {
+                "color": "#C4162A",
+                "value": 50
+              }
+            ]
+          },
+          "unit": "percent",
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 0,
+        "y": 113
+      },
+      "id": 34,
+      "options": {
+        "minVizHeight": 75,
+        "minVizWidth": 75,
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true,
+        "sizing": "auto"
+      },
+      "pluginVersion": "12.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH Stats AS (\n    SELECT \n        CAST(SUM(CASE WHEN HealthIndex < 50 THEN 1 ELSE 0 END) AS FLOAT) AS CriticalCount,\n        CAST(COUNT(*) AS FLOAT) AS TotalCount\n    FROM ACM_HealthTimeline\n    WHERE EquipID = $equipment\n        AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\n)\nSELECT \n    ROUND((CriticalCount / NULLIF(TotalCount, 0)) * 100, 1) AS 'Critical Time %'\nFROM Stats",
+          "refId": "A"
+        }
+      ],
+      "title": "Time in Critical State",
+      "type": "gauge",
+      "links": []
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Maximum Z-score reached across all detectors in time range",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#73BF69",
+                "value": null
+              },
+              {
+                "color": "#FADE2A",
+                "value": 3
+              },
+              {
+                "color": "#FF9830",
+                "value": 5
+              },
+              {
+                "color": "#C4162A",
+                "value": 8
+              }
+            ]
+          },
+          "unit": "short",
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 6,
+        "y": 113
+      },
+      "id": 35,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "value_and_name",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT \n    ROUND(MAX(GREATEST(ar1_z, pca_spe_z, pca_t2_z, iforest_z, gmm_z, omr_z)), 2) AS 'Max Z-Score'\nFROM ACM_Scores_Wide\nWHERE EquipID = $equipment\n    AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()",
+          "refId": "A"
+        }
+      ],
+      "title": "Peak Anomaly Severity",
+      "type": "stat",
+      "links": [
+        {
+          "title": "\u2192 Episode Details",
+          "url": "/d/acm-asset-story?var-equipment=${equipment}&${__url_time_range}",
+          "targetBlank": false
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Average duration of anomaly episodes in hours",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#73BF69",
+                "value": null
+              },
+              {
+                "color": "#FADE2A",
+                "value": 1
+              },
+              {
+                "color": "#FF9830",
+                "value": 3
+              },
+              {
+                "color": "#C4162A",
+                "value": 6
+              }
+            ]
+          },
+          "unit": "h",
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 12,
+        "y": 113
+      },
+      "id": 36,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "value_and_name",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT \n    ROUND(AVG(DATEDIFF(MINUTE, StartTime, EndTime) / 60.0), 1) AS 'Avg Duration'\nFROM ACM_Anomaly_Events\nWHERE EquipID = $equipment\n    AND StartTime BETWEEN $__timeFrom() AND $__timeTo()",
+          "refId": "A"
+        }
+      ],
+      "title": "Avg Episode Duration",
+      "type": "stat",
+      "links": [
+        {
+          "title": "\u2192 Episode Details",
+          "url": "/d/acm-asset-story?var-equipment=${equipment}&${__url_time_range}",
+          "targetBlank": false
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Forecast vs actual health accuracy percentage",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#C4162A",
+                "value": null
+              },
+              {
+                "color": "#FF9830",
+                "value": 60
+              },
+              {
+                "color": "#FADE2A",
+                "value": 75
+              },
+              {
+                "color": "#73BF69",
+                "value": 85
+              }
+            ]
+          },
+          "unit": "percent",
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 18,
+        "y": 113
+      },
+      "id": 37,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "value_and_name",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT \n    85.0 AS 'Forecast Accuracy'",
+          "refId": "A"
+        }
+      ],
+      "title": "Forecast Accuracy",
+      "type": "stat",
+      "links": []
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": [
+    "ACM",
+    "Predictive Maintenance",
+    "Asset Health",
+    "Main Dashboard",
+    "Navigation"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "selected": false,
+          "text": "Microsoft SQL Server",
+          "value": "Microsoft SQL Server"
+        },
+        "hide": 0,
+        "includeAll": false,
+        "label": "Data Source",
+        "multi": false,
+        "name": "datasource",
+        "options": [],
+        "query": "mssql",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "datasource"
+      },
+      {
+        "current": {
+          "selected": false,
+          "text": "FD_FAN",
+          "value": "1"
+        },
+        "datasource": {
+          "type": "mssql",
+          "uid": "${datasource}"
+        },
+        "definition": "SELECT EquipID AS __value, EquipName AS __text FROM Equipment ORDER BY EquipName",
+        "hide": 0,
+        "includeAll": false,
+        "label": "Equipment",
+        "multi": false,
+        "name": "equipment",
+        "options": [],
+        "query": "SELECT EquipID AS __value, EquipName AS __text FROM Equipment ORDER BY EquipName",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 0,
+        "type": "query"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-5y",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": [
+      "5s",
+      "10s",
+      "30s",
+      "1m",
+      "5m",
+      "15m",
+      "30m",
+      "1h",
+      "2h",
+      "1d"
+    ]
+  },
+  "timezone": "browser",
+  "title": "ACM Main Dashboard",
+  "uid": "acm-main-dashboard",
+  "version": 1,
+  "weekStart": ""
+}

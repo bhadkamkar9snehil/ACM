@@ -1,0 +1,1438 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "datasource",
+          "uid": "grafana"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "Executive Summary Dashboard - Top-level view for monitoring hundreds of equipment. Shows only the most critical KPIs and alerts. Start here.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [
+    {
+      "title": "📊 Executive Summary",
+      "url": "/d/acm-executive-summary",
+      "tooltip": "Current dashboard",
+      "icon": "star",
+      "tags": [],
+      "targetBlank": false,
+      "type": "link"
+    },
+    {
+      "title": "🏠 Fleet Overview",
+      "url": "/d/acm-fleet-overview",
+      "tooltip": "Detailed fleet view",
+      "icon": "home",
+      "tags": [],
+      "targetBlank": false,
+      "type": "link"
+    },
+    {
+      "asDropdown": true,
+      "icon": "apps",
+      "includeVars": true,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": false,
+      "title": "📈 Equipment Details",
+      "type": "dashboards",
+      "url": ""
+    }
+  ],
+  "liveNow": false,
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "panels": [],
+      "title": "🎯 Fleet Health at a Glance",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Total equipment being monitored by ACM across all sites",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#5794F2",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 3,
+        "x": 0,
+        "y": 1
+      },
+      "id": 2,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "textMode": "value_and_name"
+      },
+      "pluginVersion": "11.4.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "format": "table",
+          "rawSql": "SELECT COUNT(DISTINCT EquipID) AS 'Total Equipment'\nFROM Equipment\nWHERE EquipID > 0\n  AND Status = 1",
+          "refId": "A"
+        }
+      ],
+      "title": "Total Equipment",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Equipment in CRITICAL state (Health < 50%) requiring immediate attention",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#73BF69",
+                "value": null
+              },
+              {
+                "color": "#FADE2A",
+                "value": 1
+              },
+              {
+                "color": "#FF9830",
+                "value": 3
+              },
+              {
+                "color": "#C4162A",
+                "value": 5
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 3,
+        "x": 3,
+        "y": 1
+      },
+      "id": 3,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "textMode": "value_and_name"
+      },
+      "pluginVersion": "11.4.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "format": "table",
+          "rawSql": "SELECT COUNT(DISTINCT t.EquipID) AS 'Critical'\nFROM (\n  SELECT EquipID, HealthIndex\n  FROM ACM_HealthTimeline\n  WHERE Timestamp = (\n    SELECT MAX(Timestamp)\n    FROM ACM_HealthTimeline AS sub\n    WHERE sub.EquipID = ACM_HealthTimeline.EquipID\n  )\n) t\nWHERE t.HealthIndex < 50",
+          "refId": "A"
+        }
+      ],
+      "title": "🔴 Critical",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Equipment in WARNING state (Health 50-70%) requiring attention",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#73BF69",
+                "value": null
+              },
+              {
+                "color": "#FADE2A",
+                "value": 1
+              },
+              {
+                "color": "#FF9830",
+                "value": 3
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 3,
+        "x": 6,
+        "y": 1
+      },
+      "id": 4,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "textMode": "value_and_name"
+      },
+      "pluginVersion": "11.4.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "format": "table",
+          "rawSql": "SELECT COUNT(DISTINCT t.EquipID) AS 'Warning'\nFROM (\n  SELECT EquipID, HealthIndex\n  FROM ACM_HealthTimeline\n  WHERE Timestamp = (\n    SELECT MAX(Timestamp)\n    FROM ACM_HealthTimeline AS sub\n    WHERE sub.EquipID = ACM_HealthTimeline.EquipID\n  )\n) t\nWHERE t.HealthIndex >= 50 AND t.HealthIndex < 70",
+          "refId": "A"
+        }
+      ],
+      "title": "🟠 Warning",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Equipment in CAUTION state (Health 70-85%) - monitor closely",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#73BF69",
+                "value": null
+              },
+              {
+                "color": "#FADE2A",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 3,
+        "x": 9,
+        "y": 1
+      },
+      "id": 5,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "textMode": "value_and_name"
+      },
+      "pluginVersion": "11.4.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "format": "table",
+          "rawSql": "SELECT COUNT(DISTINCT t.EquipID) AS 'Caution'\nFROM (\n  SELECT EquipID, HealthIndex\n  FROM ACM_HealthTimeline\n  WHERE Timestamp = (\n    SELECT MAX(Timestamp)\n    FROM ACM_HealthTimeline AS sub\n    WHERE sub.EquipID = ACM_HealthTimeline.EquipID\n  )\n) t\nWHERE t.HealthIndex >= 70 AND t.HealthIndex < 85",
+          "refId": "A"
+        }
+      ],
+      "title": "🟡 Caution",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Equipment in HEALTHY state (Health ≥ 85%)",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#73BF69",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 3,
+        "x": 12,
+        "y": 1
+      },
+      "id": 6,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "textMode": "value_and_name"
+      },
+      "pluginVersion": "11.4.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "format": "table",
+          "rawSql": "SELECT COUNT(DISTINCT t.EquipID) AS 'Healthy'\nFROM (\n  SELECT EquipID, HealthIndex\n  FROM ACM_HealthTimeline\n  WHERE Timestamp = (\n    SELECT MAX(Timestamp)\n    FROM ACM_HealthTimeline AS sub\n    WHERE sub.EquipID = ACM_HealthTimeline.EquipID\n  )\n) t\nWHERE t.HealthIndex >= 85",
+          "refId": "A"
+        }
+      ],
+      "title": "🟢 Healthy",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Fleet-wide average health score across all monitored equipment",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#C4162A",
+                "value": null
+              },
+              {
+                "color": "#FF9830",
+                "value": 50
+              },
+              {
+                "color": "#FADE2A",
+                "value": 70
+              },
+              {
+                "color": "#73BF69",
+                "value": 85
+              },
+              {
+                "color": "#5794F2",
+                "value": 95
+              }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 9,
+        "x": 15,
+        "y": 1
+      },
+      "id": 7,
+      "options": {
+        "orientation": "auto",
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "showThresholdLabels": true,
+        "showThresholdMarkers": true
+      },
+      "pluginVersion": "11.4.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "format": "table",
+          "rawSql": "SELECT ROUND(AVG(t.HealthIndex), 1) AS 'Fleet Average Health'\nFROM (\n  SELECT EquipID, HealthIndex\n  FROM ACM_HealthTimeline\n  WHERE Timestamp = (\n    SELECT MAX(Timestamp)\n    FROM ACM_HealthTimeline AS sub\n    WHERE sub.EquipID = ACM_HealthTimeline.EquipID\n  )\n) t",
+          "refId": "A"
+        }
+      ],
+      "title": "Fleet Average Health",
+      "type": "gauge"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 7
+      },
+      "id": 8,
+      "panels": [],
+      "title": "🚨 Critical Equipment Requiring Immediate Action",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Equipment with Health < 50% OR RUL < 72 hours. Click equipment name to drill-down.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "align": "left",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Health"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "#C4162A",
+                      "value": null
+                    },
+                    {
+                      "color": "#FF9830",
+                      "value": 50
+                    },
+                    {
+                      "color": "#FADE2A",
+                      "value": 70
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "unit",
+                "value": "percent"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "RUL (h)"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "#C4162A",
+                      "value": null
+                    },
+                    {
+                      "color": "#FF9830",
+                      "value": 24
+                    },
+                    {
+                      "color": "#FADE2A",
+                      "value": 72
+                    },
+                    {
+                      "color": "#73BF69",
+                      "value": 168
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Equipment"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "View Equipment Details",
+                    "url": "/d/acm-main-dashboard?var-equipment=${__data.fields.EquipID}${__url_time_range}"
+                  }
+                ]
+              },
+              {
+                "id": "custom.width",
+                "value": 200
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "FusedZ"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "#73BF69",
+                      "value": null
+                    },
+                    {
+                      "color": "#FADE2A",
+                      "value": 2
+                    },
+                    {
+                      "color": "#FF9830",
+                      "value": 3
+                    },
+                    {
+                      "color": "#C4162A",
+                      "value": 5
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "EquipID"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 8
+      },
+      "id": 9,
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": false,
+            "displayName": "Health"
+          }
+        ]
+      },
+      "pluginVersion": "11.4.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "format": "table",
+          "rawSql": "SELECT TOP 50\n    e.EquipID,\n    e.EquipName AS 'Equipment',\n    e.Area,\n    e.Unit,\n    ROUND(h.HealthIndex, 1) AS 'Health',\n    ROUND(h.FusedZ, 2) AS 'FusedZ',\n    ROUND(COALESCE(r.RUL_Hours, 9999), 0) AS 'RUL (h)',\n    r.TopSensor1 AS 'Top Issue',\n    h.Timestamp AS 'Last Update'\nFROM Equipment e\nLEFT JOIN (\n    SELECT EquipID, HealthIndex, FusedZ, Timestamp\n    FROM ACM_HealthTimeline\n    WHERE Timestamp = (\n        SELECT MAX(Timestamp)\n        FROM ACM_HealthTimeline AS sub\n        WHERE sub.EquipID = ACM_HealthTimeline.EquipID\n    )\n) h ON e.EquipID = h.EquipID\nLEFT JOIN (\n    SELECT EquipID, RUL_Hours, TopSensor1\n    FROM ACM_RUL\n    WHERE CreatedAt = (\n        SELECT MAX(CreatedAt)\n        FROM ACM_RUL AS sub\n        WHERE sub.EquipID = ACM_RUL.EquipID\n    )\n) r ON e.EquipID = r.EquipID\nWHERE e.EquipID > 0\n  AND e.Status = 1\n  AND (h.HealthIndex < 50 OR r.RUL_Hours < 72)\nORDER BY h.HealthIndex ASC, r.RUL_Hours ASC",
+          "refId": "A"
+        }
+      ],
+      "title": "Critical Equipment (Health < 50% OR RUL < 72h)",
+      "type": "table"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 18
+      },
+      "id": 10,
+      "panels": [],
+      "title": "⚠️ Equipment Requiring Attention (Warning State)",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Equipment with Health 50-70% OR RUL 72-168 hours. Click equipment name to drill-down.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "align": "left",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Health"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "#C4162A",
+                      "value": null
+                    },
+                    {
+                      "color": "#FF9830",
+                      "value": 50
+                    },
+                    {
+                      "color": "#FADE2A",
+                      "value": 70
+                    },
+                    {
+                      "color": "#73BF69",
+                      "value": 85
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "unit",
+                "value": "percent"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "RUL (h)"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "#C4162A",
+                      "value": null
+                    },
+                    {
+                      "color": "#FF9830",
+                      "value": 24
+                    },
+                    {
+                      "color": "#FADE2A",
+                      "value": 72
+                    },
+                    {
+                      "color": "#73BF69",
+                      "value": 168
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Equipment"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "View Equipment Details",
+                    "url": "/d/acm-main-dashboard?var-equipment=${__data.fields.EquipID}${__url_time_range}"
+                  }
+                ]
+              },
+              {
+                "id": "custom.width",
+                "value": 200
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "FusedZ"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "#73BF69",
+                      "value": null
+                    },
+                    {
+                      "color": "#FADE2A",
+                      "value": 2
+                    },
+                    {
+                      "color": "#FF9830",
+                      "value": 3
+                    },
+                    {
+                      "color": "#C4162A",
+                      "value": 5
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "EquipID"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 19
+      },
+      "id": 11,
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": false,
+            "displayName": "Health"
+          }
+        ]
+      },
+      "pluginVersion": "11.4.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "format": "table",
+          "rawSql": "SELECT TOP 50\n    e.EquipID,\n    e.EquipName AS 'Equipment',\n    e.Area,\n    e.Unit,\n    ROUND(h.HealthIndex, 1) AS 'Health',\n    ROUND(h.FusedZ, 2) AS 'FusedZ',\n    ROUND(COALESCE(r.RUL_Hours, 9999), 0) AS 'RUL (h)',\n    r.TopSensor1 AS 'Top Issue',\n    h.Timestamp AS 'Last Update'\nFROM Equipment e\nLEFT JOIN (\n    SELECT EquipID, HealthIndex, FusedZ, Timestamp\n    FROM ACM_HealthTimeline\n    WHERE Timestamp = (\n        SELECT MAX(Timestamp)\n        FROM ACM_HealthTimeline AS sub\n        WHERE sub.EquipID = ACM_HealthTimeline.EquipID\n    )\n) h ON e.EquipID = h.EquipID\nLEFT JOIN (\n    SELECT EquipID, RUL_Hours, TopSensor1\n    FROM ACM_RUL\n    WHERE CreatedAt = (\n        SELECT MAX(CreatedAt)\n        FROM ACM_RUL AS sub\n        WHERE sub.EquipID = ACM_RUL.EquipID\n    )\n) r ON e.EquipID = r.EquipID\nWHERE e.EquipID > 0\n  AND e.Status = 1\n  AND (h.HealthIndex >= 50 AND h.HealthIndex < 70)\n   OR (r.RUL_Hours >= 72 AND r.RUL_Hours < 168)\nORDER BY h.HealthIndex ASC, r.RUL_Hours ASC",
+          "refId": "A"
+        }
+      ],
+      "title": "Warning Equipment (Health 50-70% OR RUL 72-168h)",
+      "type": "table"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 29
+      },
+      "id": 12,
+      "panels": [],
+      "title": "📊 Fleet Health Trends (24 Hours)",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Fleet-wide health trends over the last 24 hours. Average across all equipment.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "Health (%)",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "gradientMode": "none",
+            "hideFrom": {
+              "tooltip": false,
+              "viz": false,
+              "legend": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": 3600000,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "mappings": [],
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "transparent",
+                "value": null
+              },
+              {
+                "color": "#C4162A",
+                "value": 50
+              },
+              {
+                "color": "#FF9830",
+                "value": 70
+              },
+              {
+                "color": "#73BF69",
+                "value": 85
+              }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Fleet Average"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#5794F2",
+                  "mode": "fixed"
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 3
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 30
+      },
+      "id": 13,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "last"
+          ],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "pluginVersion": "11.4.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "format": "time_series",
+          "rawSql": "SELECT\n    Timestamp AS time,\n    ROUND(AVG(HealthIndex), 1) AS 'Fleet Average'\nFROM ACM_HealthTimeline\nWHERE Timestamp >= DATEADD(HOUR, -24, GETDATE())\nGROUP BY Timestamp\nORDER BY time ASC",
+          "refId": "A"
+        }
+      ],
+      "title": "Fleet Health Trend (24h Average)",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 39
+      },
+      "id": 14,
+      "panels": [],
+      "title": "📈 Fleet KPIs (Last 24 Hours)",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Total anomaly episodes detected across all equipment in the last 24 hours",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#73BF69",
+                "value": null
+              },
+              {
+                "color": "#FADE2A",
+                "value": 10
+              },
+              {
+                "color": "#FF9830",
+                "value": 25
+              },
+              {
+                "color": "#C4162A",
+                "value": 50
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 0,
+        "y": 40
+      },
+      "id": 15,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "textMode": "value_and_name"
+      },
+      "pluginVersion": "11.4.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "format": "table",
+          "rawSql": "SELECT COUNT(*) AS 'Episodes (24h)'\nFROM ACM_Anomaly_Events\nWHERE StartTime >= DATEADD(HOUR, -24, GETDATE())",
+          "refId": "A"
+        }
+      ],
+      "title": "Anomaly Episodes",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Equipment with worst average health in the last 24 hours",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#C4162A",
+                "value": null
+              },
+              {
+                "color": "#FF9830",
+                "value": 50
+              },
+              {
+                "color": "#FADE2A",
+                "value": 70
+              },
+              {
+                "color": "#73BF69",
+                "value": 85
+              }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 6,
+        "y": 40
+      },
+      "id": 16,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "textMode": "value_and_name"
+      },
+      "pluginVersion": "11.4.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "format": "table",
+          "rawSql": "SELECT TOP 1\n    ROUND(MIN(HealthIndex), 1) AS 'Lowest Health (24h)'\nFROM ACM_HealthTimeline\nWHERE Timestamp >= DATEADD(HOUR, -24, GETDATE())\nGROUP BY EquipID\nORDER BY MIN(HealthIndex) ASC",
+          "refId": "A"
+        }
+      ],
+      "title": "Lowest Health",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Average fused Z-score across fleet (anomaly severity indicator)",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#73BF69",
+                "value": null
+              },
+              {
+                "color": "#FADE2A",
+                "value": 2
+              },
+              {
+                "color": "#FF9830",
+                "value": 3
+              },
+              {
+                "color": "#C4162A",
+                "value": 5
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 12,
+        "y": 40
+      },
+      "id": 17,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "textMode": "value_and_name"
+      },
+      "pluginVersion": "11.4.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "format": "table",
+          "rawSql": "SELECT ROUND(AVG(FusedZ), 2) AS 'Avg FusedZ (24h)'\nFROM ACM_HealthTimeline\nWHERE Timestamp >= DATEADD(HOUR, -24, GETDATE())",
+          "refId": "A"
+        }
+      ],
+      "title": "Avg Anomaly Severity",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Equipment with RUL predictions less than 7 days (168 hours)",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#73BF69",
+                "value": null
+              },
+              {
+                "color": "#FADE2A",
+                "value": 1
+              },
+              {
+                "color": "#FF9830",
+                "value": 3
+              },
+              {
+                "color": "#C4162A",
+                "value": 5
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 18,
+        "y": 40
+      },
+      "id": 18,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "textMode": "value_and_name"
+      },
+      "pluginVersion": "11.4.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "format": "table",
+          "rawSql": "SELECT COUNT(DISTINCT EquipID) AS 'RUL < 7 Days'\nFROM ACM_RUL\nWHERE RUL_Hours < 168\n  AND CreatedAt = (\n    SELECT MAX(CreatedAt)\n    FROM ACM_RUL AS sub\n    WHERE sub.EquipID = ACM_RUL.EquipID\n  )",
+          "refId": "A"
+        }
+      ],
+      "title": "Short RUL Equipment",
+      "type": "stat"
+    }
+  ],
+  "refresh": "5m",
+  "schemaVersion": 39,
+  "tags": [
+    "acm",
+    "executive",
+    "summary",
+    "fleet",
+    "overview"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "selected": false,
+          "text": "ACM Database",
+          "value": "ACM Database"
+        },
+        "hide": 0,
+        "includeAll": false,
+        "label": "Datasource",
+        "multi": false,
+        "name": "datasource",
+        "options": [],
+        "query": "mssql",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "datasource"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": [
+      "5m",
+      "10m",
+      "30m",
+      "1h"
+    ]
+  },
+  "timezone": "",
+  "title": "ACM Executive Summary",
+  "uid": "acm-executive-summary",
+  "version": 1,
+  "weekStart": ""
+}
