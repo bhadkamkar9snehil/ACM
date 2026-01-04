@@ -1,4 +1,4 @@
-﻿"""
+"""
 Generate ACM installation SQL scripts from the current database state.
 
 Outputs:

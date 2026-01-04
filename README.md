@@ -6,6 +6,39 @@ ACM V11 is a multi-detector pipeline for autonomous asset condition monitoring. 
 
 For a complete, implementation-level walkthrough (architecture, modules, configs, operations, and reasoning), see `docs/ACM_SYSTEM_OVERVIEW.md`.
 
+---
+
+## 🚀 Quick Installation
+
+### Prerequisites (Install These First)
+1. **SQL Server** (any edition: Express, Developer, Standard, Enterprise)
+2. **Python 3.11 or later** - https://www.python.org/downloads/
+3. **SQL Server ODBC Driver 18** - https://learn.microsoft.com/en-us/sql/connect/odbc/download-odbc-driver-for-sql-server
+4. **Docker Desktop** (optional, for monitoring) - https://www.docker.com/products/docker-desktop
+
+### One-Command Installation (Windows)
+```powershell
+# Option 1: Interactive installer (easiest)
+cd install
+.\QuickInstall.bat
+
+# Option 2: Direct PowerShell (advanced)
+.\Install-ACM.ps1 -Server "localhost\SQLEXPRESS" -TrustedConnection
+```
+
+The installer will:
+- ✅ Verify prerequisites
+- ✅ Create Python virtual environment  
+- ✅ Install all dependencies
+- ✅ Create ACM database and schema
+- ✅ Configure connections
+- ✅ Start monitoring stack (optional)
+- ✅ Verify installation
+
+**See [install/README.md](install/README.md) for complete installation guide and troubleshooting.**
+
+---
+
 ### Recent Updates (Dec 2025)
 - **v11.0.0**: Major architecture refactor with typed contracts and lifecycle management:
   - **DataContract Validation**: Entry-point validation ensures data quality before processing

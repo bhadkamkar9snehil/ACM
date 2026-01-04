@@ -1,4 +1,4 @@
-﻿"""
+"""
 One-shot installer for ACM SQL schema.
 
 Runs the generated SQL scripts in install/sql in order:
