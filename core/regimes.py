@@ -1114,9 +1114,48 @@ def _fit_hdbscan_scaled(
     # BUGFIX v11.1.7: min_cluster_size was WAY too high (5% of data = 1649 samples)
     # For operating regimes, we want to detect clusters of 50-500 samples minimum
     # Using 1-2% of FIT data or 30-100 samples, whichever is larger
+    # 
+    # P0-FIX (v11.2.3): ANALYTICAL AUDIT FLAW #2 - Transient-aware clustering
+    # Industrial processes have transient regimes (startup, shutdown, trips) that
+    # occupy <1% of operational time but are critical for degradation tracking.
+    # Detect transient-rich data and reduce min_cluster_size accordingly.
+    # 
+    # Reference: Campello et al. (2013) HDBSCAN paper recommends min_cluster_size
+    # based on domain semantics, not data percentage. For industrial processes,
+    # 20-50 samples is sufficient for regime identification.
+    
     # min_cluster_size: minimum samples to form a cluster 
     # Default: max(30, min(100, 2% of fit data)) - reasonable for regime detection
     default_min_cluster = max(30, min(100, n_fit_samples // 50))
+    
+    # TRANSIENT DETECTION: Check for high rate-of-change signals
+    # If data contains many rapid transitions, use smaller min_cluster_size
+    transient_detected = False
+    if n_fit_samples >= 100:  # Only meaningful for sufficient data
+        # Compute rate of change across features
+        # Use median absolute difference as robust measure
+        feature_rocs = []
+        for feat_idx in range(min(X_fit.shape[1], 10)):  # Check first 10 features
+            feat_vals = X_fit[:, feat_idx]
+            if np.isfinite(feat_vals).sum() > 10:
+                diffs = np.abs(np.diff(feat_vals))
+                median_roc = np.nanmedian(diffs)
+                if np.isfinite(median_roc):
+                    feature_rocs.append(median_roc)
+        
+        if feature_rocs:
+            avg_roc = np.mean(feature_rocs)
+            roc_threshold = float(hdb_cfg.get("transient_roc_threshold", 0.15))
+            if avg_roc > roc_threshold:
+                transient_detected = True
+                # Reduce min_cluster_size to 0.5% of data or 20-50 samples
+                default_min_cluster = max(20, min(50, n_fit_samples // 200))
+                Console.info(
+                    f"Transient-rich data detected (ROC={avg_roc:.3f} > {roc_threshold:.3f}). "
+                    f"Reduced min_cluster_size to {default_min_cluster} for better transient capture.",
+                    component="REGIME", avg_roc=avg_roc, threshold=roc_threshold
+                )
+    
     min_cluster_size = int(hdb_cfg.get("min_cluster_size", default_min_cluster))
     # min_samples: samples in neighborhood for core point (controls noise sensitivity)
     # Default: smaller value to reduce noise sensitivity

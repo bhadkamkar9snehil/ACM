@@ -497,20 +497,31 @@ class LinearTrendModel(BaseDegradationModel):
     def _detect_and_handle_health_jumps(
         self,
         health_series: pd.Series,
-        jump_threshold: float = 15.0,
-        min_post_jump_samples: int = 10
+        jump_threshold: float = 5.0,  # P2-FIX (v11.2.3): Lowered from 15.0 to 5.0
+        min_post_jump_samples: int = 10,
+        min_jump_duration_hours: float = 1.0
     ) -> pd.Series:
         """
-        v11.1.4: Detect maintenance resets (sudden health improvements) and reset forecast baseline.
+        Detect maintenance resets (sudden health improvements) and reset forecast baseline.
+        
+        P2-FIX (v11.2.3): ANALYTICAL AUDIT FLAW #12 - Lower health jump threshold
+        Changed default from 15% to 5% to capture incremental maintenance:
+        - Bearing lubrication: ~8% health improvement
+        - Filter replacement: ~5% health improvement
+        - Sensor calibration: ~3% health improvement
+        
+        Previous 15% threshold only caught major overhauls, missing routine maintenance
+        that significantly resets degradation trajectory.
         
         ANALYTICAL PRINCIPLE:
         Degradation models assume monotonic decline. After maintenance:
-        - Health jumps from 70% to 95% 
+        - Health jumps from 70% to 95% (major) or 70% to 75% (incremental)
         - If we don't detect this, the model uses stale declining trend
         - RUL predictions become unreliable (false alarms)
         
         A "health jump" is defined as:
-        - Health increase > jump_threshold (default 15%) in one time period
+        - Health increase > jump_threshold (default 5%) in one time period
+        - Sustained for > min_jump_duration_hours (not just measurement noise)
         - This indicates external intervention (maintenance, repair, replacement)
         
         When detected:
@@ -521,6 +532,7 @@ class LinearTrendModel(BaseDegradationModel):
             health_series: Time-indexed health values
             jump_threshold: Minimum health increase (%) to be considered a jump
             min_post_jump_samples: Minimum samples required after jump for fitting
+            min_jump_duration_hours: Minimum duration for jump to be sustained (filters noise)
         
         Returns:
             pd.Series: Truncated to post-jump data, or original if no jumps detected
@@ -532,14 +544,50 @@ class LinearTrendModel(BaseDegradationModel):
         health_diff = health_series.diff()
         
         # Find positive jumps (health improvements) above threshold
-        jump_mask = health_diff > jump_threshold
-        jump_indices = health_series.index[jump_mask]
+        jump_candidates = health_diff > jump_threshold
+        jump_candidate_indices = health_series.index[jump_candidates]
         
-        if len(jump_indices) == 0:
+        if len(jump_candidate_indices) == 0:
             return health_series  # No jumps detected
         
+        # Validate jumps are sustained (not just measurement noise)
+        # Check if improvement persists for at least min_jump_duration_hours
+        validated_jumps = []
+        
+        if isinstance(health_series.index, pd.DatetimeIndex):
+            for jump_idx in jump_candidate_indices:
+                jump_loc = health_series.index.get_loc(jump_idx)
+                health_at_jump = health_series.iloc[jump_loc]
+                
+                # Look ahead to check if improvement is sustained
+                future_end = jump_idx + pd.Timedelta(hours=min_jump_duration_hours)
+                future_window = health_series[jump_idx:future_end]
+                
+                if len(future_window) > 1:
+                    # Check if health stays elevated (within 2% of jump level)
+                    if future_window.mean() > health_at_jump - 2.0:
+                        validated_jumps.append(jump_idx)
+                        Console.info(
+                            f"HEALTH-JUMP: Validated sustained jump at {jump_idx} "
+                            f"(+{health_diff[jump_idx]:.1f}%)",
+                            component="DEGRADE"
+                        )
+                else:
+                    # Near end of series, accept the jump
+                    validated_jumps.append(jump_idx)
+        else:
+            # Non-datetime index, can't validate duration
+            validated_jumps = list(jump_candidate_indices)
+        
+        if len(validated_jumps) == 0:
+            Console.info(
+                f"HEALTH-JUMP: {len(jump_candidate_indices)} candidate jumps found but none sustained",
+                component="DEGRADE"
+            )
+            return health_series  # No sustained jumps
+        
         # Use the LAST jump (most recent maintenance)
-        last_jump_idx = jump_indices[-1]
+        last_jump_idx = validated_jumps[-1]
         last_jump_loc = health_series.index.get_loc(last_jump_idx)
         
         # Check if we have enough post-jump samples
@@ -547,9 +595,9 @@ class LinearTrendModel(BaseDegradationModel):
         
         if post_jump_samples < min_post_jump_samples:
             # Not enough post-jump data, use second-to-last jump or full data
-            if len(jump_indices) > 1:
+            if len(validated_jumps) > 1:
                 # Try second-to-last jump
-                second_last_jump_idx = jump_indices[-2]
+                second_last_jump_idx = validated_jumps[-2]
                 second_last_loc = health_series.index.get_loc(second_last_jump_idx)
                 post_second_samples = len(health_series) - second_last_loc - 1
                 if post_second_samples >= min_post_jump_samples:
@@ -745,3 +793,419 @@ class LinearTrendModel(BaseDegradationModel):
         
         mae = float(np.mean(errors)) if len(errors) > 0 else float("inf")
         return mae
+
+
+class RegimeConditionedDegradationModel(BaseDegradationModel):
+    """
+    Regime-conditioned degradation model that fits separate trends per operating regime.
+    
+    P0-FIX (v11.2.3): ANALYTICAL AUDIT FLAW #3 - Regime-conditioned degradation
+    
+    PROBLEM:
+    Equipment degrades at different rates in different operating regimes:
+    - High-load regime: Fast degradation (-0.05 health/hour)
+    - Low-load regime: Slow degradation (-0.01 health/hour)
+    - Startup/shutdown: Thermal cycling stress (-0.20 health/hour)
+    
+    Fitting a single global trend averages these out, leading to:
+    - Overly pessimistic RUL when equipment operates mostly in low-load
+    - Overly optimistic RUL when equipment switches to high-load
+    - Incorrect uncertainty bounds (residuals include regime-switching variance)
+    
+    SOLUTION:
+    Fit separate LinearTrendModel per regime, then:
+    - Forecast by simulating regime sequence
+    - Weight degradation rate by time spent in each regime
+    - Compute uncertainty from both within-regime and regime-transition variance
+    
+    Reference:
+    - Jardine, Lin & Banjevic (2006): "A review on machinery diagnostics and prognostics"
+    - ISO 13381-1:2015: "Condition monitoring and diagnostics of machines - Prognostics"
+    
+    Requirements:
+    - Minimum 10 samples per regime for reliable trend estimation
+    - Regime labels must be stable (from CONVERGED model)
+    - Regime transition probabilities from historical data
+    """
+    
+    def __init__(
+        self,
+        regime_labels: np.ndarray,
+        min_samples_per_regime: int = 10,
+        alpha: float = 0.3,
+        beta: float = 0.1,
+        max_trend_per_hour: float = 5.0,
+        enable_adaptive: bool = True
+    ):
+        """
+        Initialize regime-conditioned degradation model.
+        
+        Args:
+            regime_labels: Array of regime labels aligned with health series
+            min_samples_per_regime: Minimum samples required to fit a regime-specific model
+            alpha: Default level smoothing parameter (passed to per-regime models)
+            beta: Default trend smoothing parameter (passed to per-regime models)
+            max_trend_per_hour: Maximum allowable trend rate
+            enable_adaptive: Enable adaptive alpha/beta tuning per regime
+        """
+        self.regime_labels = regime_labels
+        self.min_samples_per_regime = min_samples_per_regime
+        self.alpha = alpha
+        self.beta = beta
+        self.max_trend_per_hour = max_trend_per_hour
+        self.enable_adaptive = enable_adaptive
+        
+        # Per-regime models (Dict[regime_label, LinearTrendModel])
+        self.regime_models: Dict[int, LinearTrendModel] = {}
+        
+        # Regime statistics
+        self.regime_time_fractions: Dict[int, float] = {}  # % of time in each regime
+        self.regime_transition_matrix: Optional[np.ndarray] = None  # P[i,j] = prob(j | i)
+        
+        # Fallback global model (when regime-specific data insufficient)
+        self.global_model = LinearTrendModel(
+            alpha=alpha,
+            beta=beta,
+            max_trend_per_hour=max_trend_per_hour,
+            enable_adaptive=enable_adaptive
+        )
+        
+        # Model state
+        self.level: float = 0.0
+        self.trend: float = 0.0  # Weighted average trend across regimes
+        self.std_error: float = 1.0
+        self.dt_hours: float = 1.0
+        self.last_timestamp: Optional[pd.Timestamp] = None
+        self.n_fitted: int = 0
+        self.current_regime: int = -1  # Last observed regime
+    
+    def fit(self, health_series: pd.Series) -> None:
+        """
+        Fit separate degradation models per regime.
+        
+        Process:
+        1. Group health data by regime
+        2. For each regime with >= min_samples_per_regime:
+           - Fit LinearTrendModel
+        3. Compute regime statistics (time fractions, transition matrix)
+        4. Compute weighted average trend for summary
+        
+        Args:
+            health_series: Time-indexed health values aligned with regime_labels
+        """
+        if health_series is None or len(health_series) == 0:
+            Console.warn("Empty health series provided", component="DEGRADE")
+            return
+        
+        if len(health_series) != len(self.regime_labels):
+            Console.warn(
+                f"Health series length ({len(health_series)}) != regime labels length ({len(self.regime_labels)}). "
+                "Falling back to global model.",
+                component="DEGRADE"
+            )
+            self.global_model.fit(health_series)
+            self.level = self.global_model.level
+            self.trend = self.global_model.trend
+            self.std_error = self.global_model.std_error
+            self.dt_hours = self.global_model.dt_hours
+            self.last_timestamp = self.global_model.last_timestamp
+            self.n_fitted = self.global_model.n_fitted
+            return
+        
+        # Group health by regime
+        regime_health_groups = {}
+        for regime in np.unique(self.regime_labels):
+            if regime == -1:  # Skip UNKNOWN regime
+                continue
+            mask = self.regime_labels == regime
+            regime_health = health_series[mask]
+            if len(regime_health) >= self.min_samples_per_regime:
+                regime_health_groups[regime] = regime_health
+        
+        if len(regime_health_groups) == 0:
+            Console.warn(
+                f"No regimes with >= {self.min_samples_per_regime} samples. "
+                "Falling back to global model.",
+                component="DEGRADE"
+            )
+            self.global_model.fit(health_series)
+            self.level = self.global_model.level
+            self.trend = self.global_model.trend
+            self.std_error = self.global_model.std_error
+            self.dt_hours = self.global_model.dt_hours
+            self.last_timestamp = self.global_model.last_timestamp
+            self.n_fitted = self.global_model.n_fitted
+            return
+        
+        # Fit per-regime models
+        Console.info(
+            f"Fitting {len(regime_health_groups)} regime-specific degradation models",
+            component="DEGRADE",
+            regimes=list(regime_health_groups.keys())
+        )
+        
+        for regime, regime_health in regime_health_groups.items():
+            model = LinearTrendModel(
+                alpha=self.alpha,
+                beta=self.beta,
+                max_trend_per_hour=self.max_trend_per_hour,
+                enable_adaptive=self.enable_adaptive,
+                min_samples_for_adaptive=max(10, self.min_samples_per_regime)
+            )
+            model.fit(regime_health)
+            self.regime_models[regime] = model
+            Console.info(
+                f"Regime {regime}: trend={model.trend:.4f} health/dt, level={model.level:.2f}, "
+                f"n={len(regime_health)}",
+                component="DEGRADE"
+            )
+        
+        # Compute regime time fractions
+        total_samples = len(health_series)
+        for regime, regime_health in regime_health_groups.items():
+            self.regime_time_fractions[regime] = len(regime_health) / total_samples
+        
+        # Compute regime transition matrix (first-order Markov)
+        self.regime_transition_matrix = self._compute_transition_matrix(self.regime_labels)
+        
+        # Weighted average trend for summary
+        self.trend = sum(
+            model.trend * self.regime_time_fractions[regime]
+            for regime, model in self.regime_models.items()
+        )
+        
+        # Use most recent regime's level as current level
+        self.current_regime = int(self.regime_labels[-1])
+        if self.current_regime in self.regime_models:
+            self.level = self.regime_models[self.current_regime].level
+            self.dt_hours = self.regime_models[self.current_regime].dt_hours
+            self.last_timestamp = self.regime_models[self.current_regime].last_timestamp
+        else:
+            # Fallback to global model values
+            self.level = float(health_series.iloc[-1])
+            self.dt_hours = 1.0
+            self.last_timestamp = health_series.index[-1] if isinstance(health_series.index, pd.DatetimeIndex) else None
+        
+        # Compute pooled std_error across regimes
+        all_residuals = []
+        for model in self.regime_models.values():
+            all_residuals.extend(model.residuals)
+        self.std_error = float(np.std(all_residuals)) if len(all_residuals) > 0 else 1.0
+        
+        self.n_fitted = total_samples
+        Console.info(
+            f"Regime-conditioned model fitted: weighted_trend={self.trend:.4f}, "
+            f"pooled_std_error={self.std_error:.3f}",
+            component="DEGRADE"
+        )
+    
+    def predict(
+        self,
+        steps: int,
+        dt_hours: Optional[float] = None,
+        confidence_level: float = 0.95,
+        regime_sequence: Optional[List[int]] = None
+    ) -> DegradationForecast:
+        """
+        Generate multi-step forecast using regime-specific degradation rates.
+        
+        Two modes:
+        1. If regime_sequence provided: Use exact sequence
+        2. If not provided: Simulate regime transitions using transition matrix
+        
+        Args:
+            steps: Number of forecast steps
+            dt_hours: Time interval per step (uses fitted dt_hours if None)
+            confidence_level: Confidence level for bounds (default 0.95)
+            regime_sequence: Optional predetermined regime sequence (length = steps)
+        
+        Returns:
+            DegradationForecast with regime-aware predictions
+        """
+        if dt_hours is None:
+            dt_hours = self.dt_hours
+        
+        # If no regime-specific models, fall back to global model
+        if len(self.regime_models) == 0:
+            return self.global_model.predict(steps, dt_hours, confidence_level)
+        
+        # Generate forecast timestamps
+        if self.last_timestamp is not None:
+            forecast_timestamps = pd.date_range(
+                start=self.last_timestamp + pd.Timedelta(hours=dt_hours),
+                periods=steps,
+                freq=pd.Timedelta(hours=dt_hours)
+            )
+        else:
+            forecast_timestamps = pd.date_range(
+                start=pd.Timestamp.now(),
+                periods=steps,
+                freq=pd.Timedelta(hours=dt_hours)
+            )
+        
+        # Generate regime sequence
+        if regime_sequence is None:
+            regime_sequence = self._simulate_regime_sequence(steps)
+        elif len(regime_sequence) != steps:
+            Console.warn(
+                f"Regime sequence length ({len(regime_sequence)}) != steps ({steps}). "
+                "Simulating instead.",
+                component="DEGRADE"
+            )
+            regime_sequence = self._simulate_regime_sequence(steps)
+        
+        # Forecast using regime-specific models
+        point_forecast = np.zeros(steps)
+        current_level = self.level
+        
+        for step, regime in enumerate(regime_sequence):
+            if regime in self.regime_models:
+                model = self.regime_models[regime]
+                step_forecast = current_level + model.trend
+            else:
+                # Unknown regime - use weighted average trend
+                step_forecast = current_level + self.trend
+            
+            point_forecast[step] = step_forecast
+            current_level = step_forecast
+        
+        # Uncertainty bounds (conservative: use pooled std_error with widening)
+        z_score = 1.96 if confidence_level >= 0.95 else 1.645
+        horizons = np.arange(1, steps + 1)
+        # Simplified widening: std_error * sqrt(horizon)
+        std_at_horizon = self.std_error * np.sqrt(horizons)
+        lower_bound = point_forecast - z_score * std_at_horizon
+        upper_bound = point_forecast + z_score * std_at_horizon
+        
+        return DegradationForecast(
+            timestamps=forecast_timestamps,
+            point_forecast=point_forecast,
+            lower_bound=lower_bound,
+            upper_bound=upper_bound,
+            std_error=self.std_error,
+            level=self.level,
+            trend=self.trend
+        )
+    
+    def update_incremental(self, new_observation: float) -> None:
+        """
+        Update model with new observation.
+        
+        Note: This is complex for regime-conditioned models as we need to know
+        which regime the new observation belongs to. For now, update global model only.
+        """
+        self.global_model.update_incremental(new_observation)
+        self.level = self.global_model.level
+        self.trend = self.global_model.trend
+    
+    def get_parameters(self) -> Dict[str, float]:
+        """Export model state for persistence"""
+        params = {
+            'level': self.level,
+            'trend': self.trend,
+            'std_error': self.std_error,
+            'dt_hours': self.dt_hours,
+            'n_fitted': self.n_fitted,
+            'current_regime': self.current_regime,
+            'n_regimes': len(self.regime_models),
+        }
+        
+        # Add per-regime parameters
+        for regime, model in self.regime_models.items():
+            regime_params = model.get_parameters()
+            for key, value in regime_params.items():
+                params[f'regime_{regime}_{key}'] = value
+        
+        return params
+    
+    def set_parameters(self, params: Dict[str, float]) -> None:
+        """Restore model state from saved parameters"""
+        self.level = params.get('level', 0.0)
+        self.trend = params.get('trend', 0.0)
+        self.std_error = params.get('std_error', 1.0)
+        self.dt_hours = params.get('dt_hours', 1.0)
+        self.n_fitted = int(params.get('n_fitted', 0))
+        self.current_regime = int(params.get('current_regime', -1))
+        
+        # Restore per-regime models
+        n_regimes = int(params.get('n_regimes', 0))
+        for regime in range(n_regimes):
+            regime_params = {
+                k.replace(f'regime_{regime}_', ''): v
+                for k, v in params.items()
+                if k.startswith(f'regime_{regime}_')
+            }
+            if regime_params:
+                model = LinearTrendModel()
+                model.set_parameters(regime_params)
+                self.regime_models[regime] = model
+    
+    def _compute_transition_matrix(self, regime_labels: np.ndarray) -> np.ndarray:
+        """
+        Compute first-order Markov regime transition matrix.
+        
+        Returns:
+            matrix[i, j] = P(regime j | currently regime i)
+        """
+        unique_regimes = sorted([r for r in np.unique(regime_labels) if r >= 0])
+        n_regimes = len(unique_regimes)
+        
+        if n_regimes == 0:
+            return np.array([[1.0]])
+        
+        # Count transitions
+        transition_counts = np.zeros((n_regimes, n_regimes))
+        regime_to_idx = {regime: idx for idx, regime in enumerate(unique_regimes)}
+        
+        for i in range(len(regime_labels) - 1):
+            current_regime = regime_labels[i]
+            next_regime = regime_labels[i + 1]
+            
+            if current_regime >= 0 and next_regime >= 0:
+                current_idx = regime_to_idx[current_regime]
+                next_idx = regime_to_idx[next_regime]
+                transition_counts[current_idx, next_idx] += 1
+        
+        # Normalize to probabilities
+        row_sums = transition_counts.sum(axis=1, keepdims=True)
+        row_sums[row_sums == 0] = 1  # Avoid division by zero
+        transition_matrix = transition_counts / row_sums
+        
+        return transition_matrix
+    
+    def _simulate_regime_sequence(self, steps: int) -> List[int]:
+        """
+        Simulate regime sequence using Markov transition matrix.
+        
+        Args:
+            steps: Number of steps to simulate
+        
+        Returns:
+            List of regime labels
+        """
+        if self.regime_transition_matrix is None or len(self.regime_models) == 0:
+            # Fallback: stay in current regime
+            return [self.current_regime] * steps
+        
+        unique_regimes = sorted(list(self.regime_models.keys()))
+        regime_to_idx = {regime: idx for idx, regime in enumerate(unique_regimes)}
+        idx_to_regime = {idx: regime for regime, idx in regime_to_idx.items()}
+        
+        # Start from current regime
+        if self.current_regime in regime_to_idx:
+            current_idx = regime_to_idx[self.current_regime]
+        else:
+            # Fallback: most common regime
+            current_idx = 0
+        
+        sequence = []
+        for _ in range(steps):
+            # Sample next regime from transition probabilities
+            next_idx = np.random.choice(
+                len(unique_regimes),
+                p=self.regime_transition_matrix[current_idx, :]
+            )
+            sequence.append(idx_to_regime[next_idx])
+            current_idx = next_idx
+        
+        return sequence

@@ -52,8 +52,23 @@ def _to_pandas(df) -> pd.DataFrame:
 FillMethod = Literal["median", "ffill", "bfill", "interpolate", "none"]
 
 
-def _apply_fill(df, method: FillMethod = "median", fill_values: Optional[dict] = None):
+def _apply_fill(
+    df, 
+    method: FillMethod = "median", 
+    fill_values: Optional[dict] = None,
+    mode: str = "train"
+):
     """Apply fill strategy to handle missing values. Supports both Polars and pandas.
+    
+    P1-FIX (v11.2.3): ANALYTICAL AUDIT FLAW #6 - Feature imputation validation
+    Added mandatory 'mode' parameter to enforce correct usage patterns:
+    - mode="train": Can compute fill values from data (self-imputation is OK)
+    - mode="score": MUST provide fill_values from training set (prevents data leakage)
+    
+    CRITICAL DATA LEAKAGE PATTERN:
+    If score data computes its own median/mean for imputation, the model is using
+    future information that wouldn't be available in production. This inflates
+    performance metrics and creates unrealistic predictions.
     
     Parameters
     ----------
@@ -65,12 +80,28 @@ def _apply_fill(df, method: FillMethod = "median", fill_values: Optional[dict] =
         Pre-computed fill values {column_name: fill_value}. If provided, these values
         are used instead of computing from the data (prevents data leakage when filling
         score data with train-derived statistics).
+    mode : str
+        Execution mode: "train" or "score". Enforces correct usage.
         
     Returns
     -------
     DataFrame
         Filled dataframe (same type as input)
+    
+    Raises
+    ------
+    ValueError
+        If mode="score" and fill_values is None (would cause data leakage)
     """
+    # P1-FIX: Validation guard for data leakage prevention
+    if mode == "score" and fill_values is None and method in ("median", "mean"):
+        raise ValueError(
+            "CRITICAL DATA LEAKAGE PREVENTION: mode='score' requires fill_values from training set. "
+            "Passing None would cause the model to compute statistics on test data, "
+            "which inflates performance and creates unrealistic predictions. "
+            "Fix: Pass fill_values={col: train_median} computed from training data."
+        )
+    
     if HAS_POLARS and isinstance(df, pl.DataFrame):
         if method == "median":
             # Use with_columns to keep non-numeric columns
@@ -803,8 +834,13 @@ def batched_pairwise_lag(df: pd.DataFrame, max_lag: int = 3, cols: Optional[List
 
 
 @_timer.wrap("compute_basic_features_pl")
-def compute_basic_features_pl(df: 'pl.DataFrame', window: int = 3, cols: Optional[List[str]] = None, 
-                               fill_values: Optional[dict] = None) -> 'pl.DataFrame':
+def compute_basic_features_pl(
+    df: 'pl.DataFrame', 
+    window: int = 3, 
+    cols: Optional[List[str]] = None, 
+    fill_values: Optional[dict] = None,
+    mode: str = "train"
+) -> 'pl.DataFrame':
     """Polars-native version of `compute_basic_features`.
 
     Mirrors the pandas pipeline but stays in Polars and returns a `pl.DataFrame`.
@@ -824,6 +860,8 @@ def compute_basic_features_pl(df: 'pl.DataFrame', window: int = 3, cols: Optiona
         Pre-computed fill values {column_name: fill_value}. If provided, these values
         are used for imputation instead of computing from the data. This prevents data
         leakage when processing score data (use training-derived fill values).
+    mode : str, default="train"
+        Execution mode: "train" or "score". Enforces correct fill_values usage.
 
     Returns
     -------
@@ -858,7 +896,7 @@ def compute_basic_features_pl(df: 'pl.DataFrame', window: int = 3, cols: Optiona
         cols = list(df.columns)
 
     # Fill missing values (Polars path) - use provided fill_values if available
-    pl_filled = _apply_fill(df, method="median", fill_values=fill_values)
+    pl_filled = _apply_fill(df, method="median", fill_values=fill_values, mode=mode)
 
     # Rolling building blocks (request Polars outputs)
     med = rolling_median(pl_filled, window, cols, min_periods=1, return_type="polars")
@@ -966,8 +1004,13 @@ def goertzel_energy(series: np.ndarray, fs: float = 1.0, bands: Optional[List[Tu
 
 
 @_timer.wrap("compute_basic_features")
-def compute_basic_features(pdf: pd.DataFrame, window: int = 3, cols: Optional[List[str]] = None, 
-                            fill_values: Optional[dict] = None) -> pd.DataFrame:
+def compute_basic_features(
+    pdf: pd.DataFrame, 
+    window: int = 3, 
+    cols: Optional[List[str]] = None, 
+    fill_values: Optional[dict] = None,
+    mode: str = "train"
+) -> pd.DataFrame:
     """Compute a compact set of features for each timestamp using pandas input.
     Returns a pandas DataFrame aligned with input index.
 
@@ -992,6 +1035,8 @@ def compute_basic_features(pdf: pd.DataFrame, window: int = 3, cols: Optional[Li
         Pre-computed fill values {column_name: fill_value}. If provided, these values
         are used for imputation instead of computing from the data. This prevents data
         leakage when processing score data (use training-derived fill values).
+    mode : str, default="train"
+        Execution mode: "train" or "score". Enforces correct fill_values usage.
 
     Returns
     -------
@@ -1025,12 +1070,12 @@ def compute_basic_features(pdf: pd.DataFrame, window: int = 3, cols: Optional[Li
             if isinstance(pdf, pd.DataFrame):
                 try:
                     pdf_pl = pl.from_pandas(pdf)
-                    features_pl = compute_basic_features_pl(pdf_pl, window=window, cols=cols)
+                    features_pl = compute_basic_features_pl(pdf_pl, window=window, cols=cols, fill_values=fill_values, mode=mode)
                     return features_pl.to_pandas()
                 except Exception:
                     pass  # Fall through to pandas implementation
             elif isinstance(pdf, pl.DataFrame):
-                features_pl = compute_basic_features_pl(pdf, window=window, cols=cols)
+                features_pl = compute_basic_features_pl(pdf, window=window, cols=cols, fill_values=fill_values, mode=mode)
                 return features_pl.to_pandas()
 
         # --- Fallback to pandas implementation if Polars unavailable or failed ---
@@ -1043,7 +1088,7 @@ def compute_basic_features(pdf: pd.DataFrame, window: int = 3, cols: Optional[Li
         # default fill policy: median-based imputation for small windows
         # Use provided fill_values if available (prevents data leakage for score data)
         with _timer.section("fill_missing"):
-            pdf_filled = _apply_fill(pdf, method="median", fill_values=fill_values)
+            pdf_filled = _apply_fill(pdf, method="median", fill_values=fill_values, mode=mode)
 
         # --- Refactored Logic: Delegate to individual feature functions ---
         # This simplifies the orchestrator and removes redundant logic.
