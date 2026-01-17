@@ -1039,14 +1039,15 @@ class TestWindowsSQLServerIntegration:
     
     def test_odbc_driver_18_detection(self, installer_module):
         """Test ODBC Driver 18 detection on Windows."""
-        mock_drivers = MagicMock()
-        mock_drivers.return_value = [
+        # Mock pyodbc module with drivers function
+        mock_pyodbc = MagicMock()
+        mock_pyodbc.drivers.return_value = [
             'SQL Server',
             'ODBC Driver 17 for SQL Server',
             'ODBC Driver 18 for SQL Server',
         ]
         
-        with patch('pyodbc.drivers', mock_drivers):
+        with patch.dict('sys.modules', {'pyodbc': mock_pyodbc}):
             ok, driver = installer_module.check_odbc_driver()
             
             assert ok
@@ -1054,13 +1055,14 @@ class TestWindowsSQLServerIntegration:
     
     def test_odbc_driver_17_fallback(self, installer_module):
         """Test ODBC Driver 17 fallback when 18 not available."""
-        mock_drivers = MagicMock()
-        mock_drivers.return_value = [
+        # Mock pyodbc module with drivers function
+        mock_pyodbc = MagicMock()
+        mock_pyodbc.drivers.return_value = [
             'SQL Server',
             'ODBC Driver 17 for SQL Server',
         ]
         
-        with patch('pyodbc.drivers', mock_drivers):
+        with patch.dict('sys.modules', {'pyodbc': mock_pyodbc}):
             ok, driver = installer_module.check_odbc_driver()
             
             assert ok
