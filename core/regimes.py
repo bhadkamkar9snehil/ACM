@@ -2869,17 +2869,33 @@ def align_regime_labels(
 
     # Handle dimension mismatch (different k or feature space)
     if new_centers.shape[1] != prev_centers.shape[1]:
-        if new_model.meta.get("alignment_skip_reason") != "feature_dim_mismatch":
-            Console.warn(
-                f"[REGIME_ALIGN] Feature dimension mismatch: new={new_centers.shape[1]}, prev={prev_centers.shape[1]}. Skipping alignment.",
-                component="REGIME_ALIGN", new_dim=new_centers.shape[1], prev_dim=prev_centers.shape[1]
-            )
-        new_model.meta["alignment_skip_reason"] = "feature_dim_mismatch"
-        new_model.meta["alignment_skip_dims"] = {
-            "new_dim": int(new_centers.shape[1]),
-            "prev_dim": int(prev_centers.shape[1]),
-        }
-        return new_model
+        # v11.3.x: Fail fast instead of silent skip
+        # Regime model must be retrained when feature basis changes
+        error_msg = (
+            f"Cannot align regimes: feature dimension mismatch "
+            f"(new={new_centers.shape[1]}, prev={prev_centers.shape[1]}). "
+            f"Feature basis has changed - regime model must be retrained from scratch. "
+            f"This typically happens when: "
+            f"(1) Number of PCA components changed, "
+            f"(2) Raw sensor tags added/removed, "
+            f"(3) Feature engineering logic modified. "
+            f"Set 'regimes.alignment.fail_on_mismatch=False' to allow silent skip (not recommended)."
+        )
+        
+        alignment_cfg = _cfg_get(cfg or {}, "regimes.alignment", {}) or {}
+        fail_on_mismatch = bool(alignment_cfg.get("fail_on_mismatch", True))  # Default: True (fail fast)
+        
+        if fail_on_mismatch:
+            raise ValueError(error_msg)
+        else:
+            # Legacy behavior: warn and skip alignment
+            Console.warn(error_msg, component="REGIME_ALIGN")
+            new_model.meta["alignment_skip_reason"] = "feature_dim_mismatch"
+            new_model.meta["alignment_skip_dims"] = {
+                "new_dim": int(new_centers.shape[1]),
+                "prev_dim": int(prev_centers.shape[1]),
+            }
+            return new_model
     
     # Use Hungarian algorithm for optimal 1:1 assignment
     from scipy.optimize import linear_sum_assignment
@@ -3017,6 +3033,25 @@ def label(score_df, ctx: Dict[str, Any], score_out: Dict[str, Any], cfg: Dict[st
         score_labels, score_confidence, score_is_novel = predict_regime_with_confidence(
             regime_model, basis_score, cfg, training_distances=train_distances
         )
+        
+        # v11.3.x: Enforce minimum confidence threshold for regime assignments
+        # Low-confidence assignments are marked as UNKNOWN (-1) to reflect uncertainty
+        confidence_cfg = _cfg_get(cfg, "regimes.confidence", {}) or {}
+        min_confidence_threshold = float(confidence_cfg.get("min_threshold", 0.0))  # Default: 0.0 (disabled)
+        enforce_threshold = bool(confidence_cfg.get("enforce_threshold", False))  # Default: False (disabled)
+        
+        if enforce_threshold and min_confidence_threshold > 0.0:
+            low_confidence_mask = score_confidence < min_confidence_threshold
+            n_low_conf = int(np.sum(low_confidence_mask))
+            
+            if n_low_conf > 0:
+                # Mark low-confidence assignments as UNKNOWN
+                score_labels[low_confidence_mask] = UNKNOWN_REGIME_LABEL  # -1
+                Console.info(
+                    f"Marked {n_low_conf}/{len(score_labels)} assignments as UNKNOWN "
+                    f"due to confidence < {min_confidence_threshold:.2f}",
+                    component="REGIME", n_unknown=n_low_conf, threshold=min_confidence_threshold
+                )
         
         # Smoothing controls
         smooth_cfg = _cfg_get(cfg, "regimes.smoothing", {}) or {}

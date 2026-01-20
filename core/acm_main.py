@@ -1193,23 +1193,41 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
             # behavior can be separated into distinct regimes.
             try:
                 if basis_train is not None and basis_score is not None:
-                    # Prepare detector scores for health-state computation.
-                    detector_cols = {}
-                    if 'ar1_z' in train.columns:
-                        detector_cols['ar1_z'] = train['ar1_z'].values
-                    if 'pca_spe_z' in train.columns:
-                        detector_cols['pca_spe_z'] = train['pca_spe_z'].values
-                    if 'pca_t2_z' in train.columns:
-                        detector_cols['pca_t2_z'] = train['pca_t2_z'].values
+                    # v11.3.x: Health-state features are OPTIONAL (config: regimes.health_state_features.enabled)
+                    # WARNING: Adding health variables causes regime drift as equipment degrades
+                    # Recommendation: Keep disabled (default: False) for stable operating regimes
+                    health_state_enabled = cfg_dict.get("regimes.health_state_features.enabled", False)
                     
-                    # Only add health features if detector scores are available.
-                    if detector_cols:
-                        basis_train = regimes._add_health_state_features(basis_train, detector_cols)
-                        basis_score = regimes._add_health_state_features(basis_score, detector_cols)
-                        basis_meta["health_state_features_added"] = True
-                        Console.ok("Health-state features integrated into regime basis", component="REGIME")
+                    if health_state_enabled:
+                        # Prepare detector scores for health-state computation.
+                        detector_cols = {}
+                        if 'ar1_z' in train.columns:
+                            detector_cols['ar1_z'] = train['ar1_z'].values
+                        if 'pca_spe_z' in train.columns:
+                            detector_cols['pca_spe_z'] = train['pca_spe_z'].values
+                        if 'pca_t2_z' in train.columns:
+                            detector_cols['pca_t2_z'] = train['pca_t2_z'].values
+                        
+                        # Only add health features if detector scores are available.
+                        if detector_cols:
+                            basis_train = regimes._add_health_state_features(basis_train, detector_cols)
+                            basis_score = regimes._add_health_state_features(basis_score, detector_cols)
+                            basis_meta["health_state_features_added"] = True
+                            Console.warn(
+                                "Health-state features enabled in regime clustering. "
+                                "This may cause regime drift as equipment degrades. "
+                                "Consider disabling (regimes.health_state_features.enabled=False) for stable regimes.",
+                                component="REGIME"
+                            )
+                        else:
+                            basis_meta["health_state_features_added"] = False
                     else:
                         basis_meta["health_state_features_added"] = False
+                        Console.info(
+                            "Health-state features disabled (regimes.health_state_features.enabled=False). "
+                            "Regimes based on operating variables only for stability.",
+                            component="REGIME"
+                        )
             except Exception as health_e:
                 Console.warn(f"Health-state features failed (continuing with operating-only basis): {health_e}", 
                            component="REGIME", error=str(health_e)[:100])
