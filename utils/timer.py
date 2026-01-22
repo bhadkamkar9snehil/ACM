@@ -255,11 +255,17 @@ class Timer:
             extra = " ".join(f"{k}={v}" for k, v in kv.items())
             print(f"[{timestamp}] [INFO] [TIMER] {name:<20} {extra}".rstrip())
 
+    def total_elapsed(self) -> float:
+        """Return total elapsed time since Timer start."""
+        return time.perf_counter() - self._t0
+
     def _print_summary(self):
         """Print summary of all sections at exit."""
         if not self.enable: 
             return
-        total = time.perf_counter() - self._t0
+        total = self.total_elapsed()
+        accounted = sum(self.totals.values()) if self.totals else 0.0
+        unaccounted = max(total - accounted, 0.0)
         
         # Ensure observability is available (handles import order)
         _ensure_observability()
@@ -269,6 +275,12 @@ class Timer:
                 {"name": k, "duration_s": round(v, 3), "percent": round((v / total) * 100.0, 1)}
                 for k, v in sorted(self.totals.items(), key=lambda x: -x[1])
             ]
+            if unaccounted > 0:
+                sections.append({
+                    "name": "unaccounted",
+                    "duration_s": round(unaccounted, 3),
+                    "percent": round((unaccounted / total) * 100.0, 1)
+                })
             print(json.dumps({
                 "timestamp": datetime.utcnow().isoformat() + "Z",
                 "log_type": "timer_summary",
@@ -288,6 +300,11 @@ class Timer:
                         _log_timer_fn(section=k, duration_s=v, pct=pct, parent=parent, total_s=total)
                     # Console output only (status = no Loki)
                     _Console.status(f"{k:<30} {v:7.3f}s ({pct:5.1f}%)")
+                if unaccounted > 0:
+                    pct = (unaccounted / total) * 100.0 if total > 0 else 0.0
+                    if _log_timer_fn:
+                        _log_timer_fn(section="unaccounted", duration_s=unaccounted, pct=pct, parent="total_run", total_s=total)
+                    _Console.status(f"{'unaccounted':<30} {unaccounted:7.3f}s ({pct:5.1f}%)")
             # Log total run as structured timer
             if _log_timer_fn:
                 _log_timer_fn(section="total_run", duration_s=total, parent="total_run", total_s=total)
@@ -299,6 +316,9 @@ class Timer:
                 for k, v in sorted(self.totals.items(), key=lambda x: -x[1]):
                     pct = (v / total) * 100.0 if total > 0 else 0.0
                     print(f"[{timestamp}] [INFO] [TIMER] {k:<30} {v:7.3f}s ({pct:5.1f}%)")
+                if unaccounted > 0:
+                    pct = (unaccounted / total) * 100.0 if total > 0 else 0.0
+                    print(f"[{timestamp}] [INFO] [TIMER] {'unaccounted':<30} {unaccounted:7.3f}s ({pct:5.1f}%)")
             print(f"[{timestamp}] [INFO] [TIMER] total_run                      {total:7.3f}s")
 
 

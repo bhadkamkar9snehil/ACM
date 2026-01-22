@@ -125,65 +125,88 @@ class SmartColdstart:
     
     def detect_data_cadence(self, table_name: str, sample_hours: int = 24) -> Optional[int]:
         """
-        Auto-detect data cadence by analyzing timestamp intervals.
-        
-        Args:
-            table_name: Equipment data table name (e.g., 'FD_FAN_Data')
-            sample_hours: Hours of data to sample for cadence detection
-            
+        Detect cadence using RECENT data (not earliest). Uses last `sample_hours` of data
+        and computes the most common positive interval (mode) in seconds.
+
         Returns:
-            Detected cadence in seconds, or None if detection failed
+            cadence_seconds or None
         """
+        cur = None
         try:
             cur = self.sql_client.cursor()
-            
-            # Get sample of timestamps to detect cadence
-            query = f"""
-            SELECT TOP 100 EntryDateTime
-            FROM dbo.{table_name}
-            ORDER BY EntryDateTime
-            """
-            
-            cur.execute(query)
-            rows = cur.fetchall()
-            
-            if len(rows) < 10:
-                Console.warn(f"Insufficient data for cadence detection: {len(rows)} rows", component="COLDSTART", equip_id=self.equip_id, equip_name=self.equip_name, table=table_name, rows_found=len(rows), min_required=10)
+
+            # Find recent window anchored on MAX timestamp
+            cur.execute(f"SELECT MAX(EntryDateTime) FROM dbo.{table_name}")
+            row = cur.fetchone()
+            if not row or not row[0]:
+                Console.warn(
+                    "Cadence detection: no MAX timestamp found",
+                    component="COLDSTART", equip_id=self.equip_id, equip_name=self.equip_name, table=table_name
+                )
                 return None
-            
-            # Calculate intervals between consecutive timestamps
-            timestamps = [row[0] for row in rows]
+
+            max_ts = row[0]
+            min_ts = max_ts - timedelta(hours=int(sample_hours))
+
+            # Pull a dense sample from the recent window; DESC first then reverse
+            cur.execute(
+                f"""
+                SELECT TOP 500 EntryDateTime
+                FROM dbo.{table_name}
+                WHERE EntryDateTime >= ? AND EntryDateTime <= ?
+                ORDER BY EntryDateTime DESC
+                """,
+                (min_ts, max_ts)
+            )
+            rows = cur.fetchall()
+            if not rows or len(rows) < 10:
+                Console.warn(
+                    f"Cadence detection: insufficient recent rows ({len(rows) if rows else 0})",
+                    component="COLDSTART", equip_id=self.equip_id, equip_name=self.equip_name,
+                    table=table_name, sample_hours=sample_hours
+                )
+                return None
+
+            timestamps = [r[0] for r in rows][::-1]  # ascending
             intervals = []
             for i in range(1, len(timestamps)):
-                delta = (timestamps[i] - timestamps[i-1]).total_seconds()
-                if delta > 0:  # Skip duplicates
+                delta = (timestamps[i] - timestamps[i - 1]).total_seconds()
+                if delta > 0:
                     intervals.append(delta)
-            
+
             if not intervals:
                 return None
-            
-            # Find most common interval (mode)
+
             from collections import Counter
-            interval_counts = Counter(intervals)
-            most_common_interval = interval_counts.most_common(1)[0][0]
-            
-            Console.info(f"Detected data cadence: {most_common_interval} seconds ({most_common_interval/60:.1f} minutes)", component="COLDSTART")
-            
-            return int(most_common_interval)
-            
+            most_common = Counter(intervals).most_common(1)[0][0]
+            cadence_s = int(most_common)
+
+            Console.info(
+                f"Detected data cadence: {cadence_s} seconds ({cadence_s/60:.1f} minutes)",
+                component="COLDSTART", equip_id=self.equip_id, equip_name=self.equip_name, table=table_name
+            )
+            return cadence_s
+
         except Exception as e:
-            Console.error(f"Failed to detect cadence: {e}", component="COLDSTART", equip_id=self.equip_id, equip_name=self.equip_name, table=table_name, sample_hours=sample_hours, error_type=type(e).__name__, error=str(e)[:200])
+            Console.error(
+                f"Failed to detect cadence: {e}",
+                component="COLDSTART", equip_id=self.equip_id, equip_name=self.equip_name,
+                table=table_name, sample_hours=sample_hours, error_type=type(e).__name__, error=str(e)[:200]
+            )
             return None
         finally:
             try:
-                cur.close()
-            except:
+                if cur:
+                    cur.close()
+            except Exception:
                 pass
-    
+
+
+
     def calculate_optimal_window(self, 
-                                  current_window_end: datetime,
-                                  required_rows: int = 500,
-                                  data_cadence_seconds: Optional[int] = None) -> Tuple[datetime, datetime]:
+                                current_window_end: datetime,
+                                required_rows: int = 500,
+                                data_cadence_seconds: Optional[int] = None) -> Tuple[datetime, datetime]:
         """
         Calculate optimal lookback window to get required_rows of data.
         For coldstart, we want to load the EARLIEST available data, not recent data.
@@ -253,206 +276,146 @@ class SmartColdstart:
                 except:
                     pass
     
-    def load_with_retry(self, 
-                       output_manager,
-                       cfg: Dict[str, Any],
-                       initial_start: datetime,
-                       initial_end: datetime,
-                       max_attempts: int = 3,
-                       historical_replay: bool = False) -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame], Optional[Any], bool]:
+    def load_with_retry(
+        self,
+        cfg: Dict[str, Any],
+        equipment: str,
+        start_time: Optional[pd.Timestamp],
+        end_time: Optional[pd.Timestamp],
+    ) -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame], Optional[Any], bool]:
         """
-        Attempt to load data with intelligent retry and window expansion.
-        
-        Args:
-            output_manager: OutputManager instance for data loading
-            cfg: Configuration dictionary
-            initial_start: Initial window start time
-            initial_end: Initial window end time
-            max_attempts: Maximum retry attempts per job run
-            historical_replay: If True, expand window forward in time instead of backward
-            
-        Returns:
-            Tuple of (train_df, score_df, meta, coldstart_complete)
-            If coldstart not ready, returns (None, None, None, False)
+        Returns (train, score, meta, can_proceed).
+
+        Contract:
+        - can_proceed=True  => train/score/meta are valid and downstream scoring should run.
+        - can_proceed=False => NOOP. meta will contain meta.noop_reason (or dict key) describing why.
         """
-        min_rows = cfg.get("data", {}).get("min_train_samples", 500)
-        
-        # Detect data cadence for tick_minutes calculation
-        table_name = f"{self.equip_name}_Data"
-        data_cadence_seconds = self.detect_data_cadence(table_name)
-        detected_tick_minutes = None
-        if data_cadence_seconds:
-            detected_tick_minutes = int(data_cadence_seconds / 60)
-        
-        # Check coldstart status with detected tick_minutes
-        state = self.check_status(required_rows=min_rows, tick_minutes=detected_tick_minutes)
-        
+        # Determine coldstart need from model status
+        state = self.check_status(cfg, equipment)
+
+        # ONLINE path: models exist -> attempt load in non-coldstart mode
         if not state.needs_coldstart:
-            Console.info(f"Models exist for {self.equip_name}, coldstart not needed", component="COLDSTART")
-            # Load with original window for incremental scoring (ALL data goes to score)
-            # NOTE: If data insufficient for this batch window, gracefully return NOOP
             try:
-                train, score, meta, complete = self._load_data_window(output_manager, cfg, initial_start, initial_end, coldstart_complete=True, is_coldstart=False)
-                if train is None and score is None:
-                    # Insufficient data in this window - not an error, just skip this batch
-                    window_hours = (initial_end - initial_start).total_seconds() / 3600
-                    Console.warn(f"Insufficient data in {window_hours:.1f}h window - batch will NOOP (models exist but no new data)", component="COLDSTART", equip_id=self.equip_id, equip_name=self.equip_name, window_hours=round(window_hours, 1), start_time=str(initial_start), end_time=str(initial_end))
-                    return None, None, None, False
-                return train, score, meta, complete
+                train, score, meta, ok = self._load_data_window(
+                    cfg=cfg,
+                    equipment=equipment,
+                    start_time=start_time,
+                    end_time=end_time,
+                    is_coldstart=False
+                )
+                if ok and train is not None and score is not None:
+                    # Ensure meta exists
+                    if meta is None:
+                        meta = {}
+                    # Mark explicitly
+                    if isinstance(meta, dict):
+                        meta["noop_reason"] = ""
+                        meta["is_coldstart_run"] = False
+                    else:
+                        setattr(meta, "noop_reason", "")
+                        setattr(meta, "is_coldstart_run", False)
+                    return train, score, meta, True
+
+                # NOOP: models exist but no new/usable data
+                if meta is None:
+                    meta = {}
+                if isinstance(meta, dict):
+                    meta["noop_reason"] = "ONLINE_NO_DATA"
+                    meta["is_coldstart_run"] = False
+                else:
+                    setattr(meta, "noop_reason", "ONLINE_NO_DATA")
+                    setattr(meta, "is_coldstart_run", False)
+                return None, None, meta, False
+
             except ValueError as e:
-                # Data insufficient - expected when batch windows are smaller than min samples
-                window_hours = (initial_end - initial_start).total_seconds() / 3600
-                Console.warn(f"Insufficient data in {window_hours:.1f}h window: {e}", component="COLDSTART", equip_id=self.equip_id, equip_name=self.equip_name, window_hours=round(window_hours, 1), error=str(e)[:200])
-                Console.info(f"Batch will NOOP (models exist but no new data to score)", component="COLDSTART")
+                # Expected: no data / insufficient data
+                meta = {"noop_reason": "ONLINE_NO_DATA", "detail": str(e)[:200], "is_coldstart_run": False}
+                return None, None, meta, False
+
+        # Coldstart path
+        try:
+            train, score, meta, ok = self._load_data_window(
+                cfg=cfg,
+                equipment=equipment,
+                start_time=start_time,
+                end_time=end_time,
+                is_coldstart=True
+            )
+            if ok and train is not None and score is not None:
+                if meta is None:
+                    meta = {}
+                if isinstance(meta, dict):
+                    meta["noop_reason"] = ""
+                    meta["is_coldstart_run"] = True
+                else:
+                    setattr(meta, "noop_reason", "")
+                    setattr(meta, "is_coldstart_run", True)
+                return train, score, meta, True
+
+            meta = {"noop_reason": "COLDSTART_DEFERRED", "is_coldstart_run": True}
+            return None, None, meta, False
+
+        except ValueError as e:
+            meta = {"noop_reason": "COLDSTART_DEFERRED", "detail": str(e)[:200], "is_coldstart_run": True}
+            return None, None, meta, False
+
+
+        def _load_data_window(self, output_manager, cfg, start, end, coldstart_complete=False, is_coldstart=False):
+            """
+            Helper to load a specific window.
+
+            IMPORTANT:
+            - Expected "no data"/"insufficient data" errors must be WARN (not ERROR),
+            because they are valid NOOP conditions in ONLINE mode.
+            """
+            try:
+                train, score, meta = output_manager._load_data_from_sql(
+                    cfg, self.equip_name, start, end, is_coldstart=is_coldstart
+                )
+                return train, score, meta, coldstart_complete
+
+            except ValueError as e:
+                msg = str(e)
+                # Treat expected empties as WARN
+                Console.warn(
+                    f"Data window not usable: {msg}",
+                    component="COLDSTART", equip_id=self.equip_id, equip_name=self.equip_name,
+                    start_time=str(start), end_time=str(end), is_coldstart=is_coldstart
+                )
+                return None, None, None, False
+
+            except Exception as e:
+                # True unexpected failures remain ERROR
+                Console.error(
+                    f"Failed to load data window: {e}",
+                    component="COLDSTART", equip_id=self.equip_id, equip_name=self.equip_name,
+                    start_time=str(start), end_time=str(end), is_coldstart=is_coldstart,
+                    error_type=type(e).__name__, error=str(e)[:200]
+                )
                 return None, None, None, False
         
-        Console.info(f"Coldstart state: ready={state.is_ready()}, attempts={state.attempt_count}, rows={state.accumulated_rows}/{state.required_rows}", 
-                     component="COLDSTART", equip_id=self.equip_id, ready=state.is_ready(), 
-                     attempts=state.attempt_count, accumulated=state.accumulated_rows, required=state.required_rows)
-        
-        # Calculate optimal window based on min_rows, but use the LARGER of:
-        # 1. The batch runner's provided window (initial_start, initial_end)
-        # 2. The calculated optimal window (for min_rows with cadence)
-        # This ensures we don't shrink a large window that batch runner already calculated
-        if state.attempt_count == 0:
-            Console.info(f"First coldstart attempt - calculating optimal window", component="COLDSTART")
-        else:
-            Console.info(f"Resuming coldstart (previous attempts: {state.attempt_count})", component="COLDSTART")
-        
-        # Calculate optimal window that should contain enough data
-        optimal_start, optimal_end = self.calculate_optimal_window(
-            current_window_end=initial_end,
-            required_rows=min_rows,
-            data_cadence_seconds=data_cadence_seconds
-        )
-        
-        # Compare batch runner's window with calculated optimal window
-        # Use the LARGER window to ensure we get enough data
-        batch_window_minutes = (initial_end - initial_start).total_seconds() / 60
-        optimal_window_minutes = (optimal_end - optimal_start).total_seconds() / 60
-        
-        if batch_window_minutes >= optimal_window_minutes:
-            # Batch runner's window is larger - use it
-            attempt_start = initial_start
-            attempt_end = initial_end
-            Console.info(f"Using batch window ({batch_window_minutes:.0f}m) instead of optimal ({optimal_window_minutes:.0f}m)", component="COLDSTART")
-        else:
-            # Optimal window is larger - use it
-            attempt_start = optimal_start
-            attempt_end = optimal_end
-            Console.info(f"Using optimal window ({optimal_window_minutes:.0f}m) - larger than batch ({batch_window_minutes:.0f}m)", component="COLDSTART")
-        
-        for attempt in range(1, max_attempts + 1):
+        def _update_progress(self, 
+                            rows_received: int,
+                            data_start: datetime,
+                            data_end: datetime,
+                            error_message: Optional[str] = None,
+                            success: bool = False):
+            """Update coldstart progress in database."""
             try:
-                window_hours = (attempt_end - attempt_start).total_seconds() / 3600
-                Console.info(f"Attempt {attempt}/{max_attempts}: Loading {window_hours:.1f} hours [{attempt_start} to {attempt_end}]", component="COLDSTART")
-                
-                # Try to load data WITH COLDSTART SPLIT
-                train, score, meta = output_manager._load_data_from_sql(
-                    cfg, self.equip_name, attempt_start, attempt_end, is_coldstart=True
+                cur = self.sql_client.cursor()
+                cur.execute(
+                    "EXEC dbo.usp_ACM_UpdateColdstartProgress @EquipID=?, @Stage=?, @RowsReceived=?, "
+                    "@DataStartTime=?, @DataEndTime=?, @ErrorMessage=?, @Success=?",
+                    (self.equip_id, self.stage, rows_received, data_start, data_end, error_message, success)
                 )
-                
-                rows_loaded = len(train) + len(score) if train is not None and score is not None else 0
-                
-                # Update progress in database
-                self._update_progress(
-                    rows_received=rows_loaded,
-                    data_start=attempt_start,
-                    data_end=attempt_end,
-                    success=(rows_loaded >= min_rows)
-                )
-                
-                if rows_loaded >= min_rows:
-                    Console.info(f"SUCCESS! Loaded {rows_loaded} rows (required: {min_rows})", component="COLDSTART")
-                    return train, score, meta, True
-                
-                else:
-                    Console.warn(f"Insufficient data: {rows_loaded} rows (required: {min_rows})", component="COLDSTART", equip_id=self.equip_id, equip_name=self.equip_name, rows_loaded=rows_loaded, min_required=min_rows, attempt=attempt, max_attempts=max_attempts)
-                    
-                    # Expand window for next attempt
-                    if attempt < max_attempts:
-                        # Exponential expansion: double the window
-                        window_size = (attempt_end - attempt_start).total_seconds() / 60
-                        new_window_size = window_size * 2
-                        if historical_replay:
-                            # Historical replay: expand forward in time
-                            attempt_end = attempt_start + timedelta(minutes=new_window_size)
-                        else:
-                            # Live mode: expand backward in time
-                            attempt_start = attempt_end - timedelta(minutes=new_window_size)
-                        Console.info(f"Expanding window to {new_window_size:.0f} minutes ({new_window_size/60:.1f} hours) for retry", component="COLDSTART")
-                
-            except ValueError as e:
-                # Data insufficient error - expected during coldstart
-                error_msg = str(e)
-                Console.warn(f"Attempt {attempt} failed: {error_msg}", component="COLDSTART", equip_id=self.equip_id, equip_name=self.equip_name, attempt=attempt, max_attempts=max_attempts, error_type="ValueError", error=error_msg[:200])
-                
-                self._update_progress(
-                    rows_received=0,
-                    data_start=attempt_start,
-                    data_end=attempt_end,
-                    error_message=error_msg
-                )
-                
-                # Expand window for next attempt
-                if attempt < max_attempts:
-                    window_size = (attempt_end - attempt_start).total_seconds() / 60
-                    new_window_size = window_size * 2
-                    if historical_replay:
-                        # Historical replay: expand forward in time
-                        attempt_end = attempt_start + timedelta(minutes=new_window_size)
-                    else:
-                        # Live mode: expand backward in time
-                        attempt_start = attempt_end - timedelta(minutes=new_window_size)
-                
+                self.sql_client.conn.commit()
             except Exception as e:
-                # Unexpected error
-                Console.error(f"Unexpected error on attempt {attempt}: {e}", component="COLDSTART", equip_id=self.equip_id, equip_name=self.equip_name, attempt=attempt, max_attempts=max_attempts, error_type=type(e).__name__, error=str(e)[:200])
-                self._update_progress(
-                    rows_received=0,
-                    data_start=attempt_start,
-                    data_end=attempt_end,
-                    error_message=str(e)
-                )
-                break
-        
-        # All attempts failed - defer to next job run
-        Console.info(f"Deferred - will retry on next job run (attempt {state.attempt_count + 1})", component="COLDSTART")
-        Console.info(f"Progress: {state.accumulated_rows}/{state.required_rows} rows accumulated", component="COLDSTART")
-        
-        return None, None, None, False
-    
-    def _load_data_window(self, output_manager, cfg, start, end, coldstart_complete=False, is_coldstart=False):
-        """Helper to load data for a specific window."""
-        try:
-            train, score, meta = output_manager._load_data_from_sql(cfg, self.equip_name, start, end, is_coldstart=is_coldstart)
-            return train, score, meta, coldstart_complete
-        except Exception as e:
-            Console.error(f"Failed to load data window: {e}", component="COLDSTART", equip_id=self.equip_id, equip_name=self.equip_name, start_time=str(start), end_time=str(end), is_coldstart=is_coldstart, error_type=type(e).__name__, error=str(e)[:200])
-            return None, None, None, False
-    
-    def _update_progress(self, 
-                        rows_received: int,
-                        data_start: datetime,
-                        data_end: datetime,
-                        error_message: Optional[str] = None,
-                        success: bool = False):
-        """Update coldstart progress in database."""
-        try:
-            cur = self.sql_client.cursor()
-            cur.execute(
-                "EXEC dbo.usp_ACM_UpdateColdstartProgress @EquipID=?, @Stage=?, @RowsReceived=?, "
-                "@DataStartTime=?, @DataEndTime=?, @ErrorMessage=?, @Success=?",
-                (self.equip_id, self.stage, rows_received, data_start, data_end, error_message, success)
-            )
-            self.sql_client.conn.commit()
-        except Exception as e:
-            Console.error(f"Failed to update progress: {e}", component="COLDSTART", equip_id=self.equip_id, stage=self.stage, rows_received=rows_received, error_type=type(e).__name__, error=str(e)[:200])
-        finally:
-            try:
-                cur.close()
-            except:
-                pass
+                Console.error(f"Failed to update progress: {e}", component="COLDSTART", equip_id=self.equip_id, stage=self.stage, rows_received=rows_received, error_type=type(e).__name__, error=str(e)[:200])
+            finally:
+                try:
+                    cur.close()
+                except:
+                    pass
 
 
 # =============================================================================

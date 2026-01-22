@@ -3433,13 +3433,34 @@ def write_pca_artifacts(
         if var_ratio is not None:
             csum = np.cumsum(var_ratio)
             var90_n = int(np.searchsorted(csum, 0.90) + 1)
+        components_json = []
+        if var_ratio is not None:
+            cum = np.cumsum(var_ratio)
+            for i, ratio in enumerate(var_ratio):
+                components_json.append({
+                    "name": f"PC{i + 1}",
+                    "type": "variance_ratio",
+                    "value": float(ratio),
+                    "cumulative": float(cum[i])
+                })
+
+        # Include score stats alongside component variance details
+        if var90_n is not None:
+            components_json.append({"name": "PCA", "type": "var90_n", "value": float(var90_n)})
+        if spe_p95 is not None:
+            components_json.append({"name": "PCA", "type": "spe_p95_score", "value": float(spe_p95)})
+        if t2_p95 is not None:
+            components_json.append({"name": "PCA", "type": "t2_p95_score", "value": float(t2_p95)})
+
         df_metrics = pd.DataFrame([{
             "RunID": run_id or "",
-            "EntryDateTime": now_utc,
-            "Var90_N": var90_n,
-            "ReconRMSE": None,
-            "P95_ReconRMSE": spe_p95,
-            "Notes": json.dumps({"SPE_P95_score": spe_p95, "T2_P95_score": t2_p95})
+            "EquipID": int(equip_id),
+            "NComponents": int(getattr(pca_model, "n_components_", getattr(pca_model, "n_components", 0))),
+            "ExplainedVariance": float(np.sum(var_ratio)) if var_ratio is not None else None,
+            "ComponentsJson": json.dumps(components_json) if components_json else None,
+            "MetricType": "pca_fit",
+            "TrainSamples": int(len(train)) if train is not None else None,
+            "TrainFeatures": int(train.shape[1]) if train is not None else None
         }])
         rows_pca_metrics = output_manager.write_pca_metrics(df=df_metrics, run_id=run_id or "")
     except Exception as e:

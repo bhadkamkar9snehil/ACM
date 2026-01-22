@@ -484,16 +484,32 @@ class SQLBatchRunner:
                     f"window=[{started_at},{completed_at})",
                     component="QA", equip_id=equip_id, run_id=str(run_id)
                 )
-                tables_to_check: List[Tuple[str, bool]] = [
-                    ("ACM_HealthTimeline", True),
-                    ("ACM_SensorHotspots", True),
-                    ("ACM_DefectTimeline", True),
-                    ("ACM_HealthForecast", True),
-                    ("ACM_FailureForecast", True),
-                    ("ACM_RUL", True),
-                    ("ACM_EpisodeMetrics", True),
+                tables_to_check: List[Tuple[str, bool, bool]] = [
+                    # (table, has_run_id, critical)
+                    ("ACM_Scores_Wide", True, True),
+                    ("ACM_HealthTimeline", True, True),
+                    ("ACM_RegimeTimeline", True, True),
+                    ("ACM_EpisodeDiagnostics", True, True),
+                    ("ACM_Episodes", True, False),
+                    ("ACM_EpisodeMetrics", True, False),
+                    ("ACM_SensorNormalized_TS", True, True),
+                    ("ACM_SensorCorrelations", True, False),
+                    ("ACM_DetectorCorrelation", True, False),
+                    ("ACM_SeasonalPatterns", True, False),
+                    ("ACM_HealthForecast", True, True),
+                    ("ACM_FailureForecast", True, True),
+                    ("ACM_RUL", True, True),
+                    ("ACM_DriftController", True, False),
+                    ("ACM_RegimeDefinitions", True, False),
+                    ("ACM_RegimeOccupancy", True, False),
+                    ("ACM_Run_Stats", True, False),
+                    ("ACM_PCA_Models", True, False),
+                    ("ACM_PCA_Loadings", True, False),
+                    ("ACM_PCA_Metrics", True, False),
+                    ("ACM_SensorHotspots", True, False),
+                    ("ACM_SensorDefects", True, False),
                 ]
-                for table_name, has_run in tables_to_check:
+                for table_name, has_run, critical in tables_to_check:
                     try:
                         if has_run:
                             cur.execute(
@@ -516,6 +532,11 @@ class SQLBatchRunner:
                             f"{'(RunID scoped)' if has_run else ''}",
                             component="QA", table=table_name, count=count_val, equip_id=equip_id
                         )
+                        if critical and count_val == 0:
+                            Console.warn(
+                                f"QA check failed: {table_name} has 0 rows for EquipID={equip_id} (RunID scoped)",
+                                component="QA", table=table_name, equip_id=equip_id, run_id=str(run_id)
+                            )
                     except Exception as tbl_err:
                         Console.warn(f"Skipped {table_name}: {tbl_err}", component="QA", table=table_name, error=str(tbl_err), error_type=type(tbl_err).__name__)
         except Exception as e:

@@ -219,27 +219,28 @@ class DataLoader:
     ) -> Tuple[pd.DataFrame, pd.DataFrame, DataMeta]:
         """
         Load training and scoring data from SQL historian using stored procedure.
-        
-        Args:
-            cfg: Configuration dictionary
-            equipment_name: Equipment name (e.g., 'FD_FAN', 'GAS_TURBINE')
-            start_utc: Start time for query window
-            end_utc: End time for query window
-            is_coldstart: If True, split data for coldstart training. If False, use all data for scoring.
-        
-        Returns:
-            Tuple of (train_df, score_df, DataMeta)
+
+        Key behavioral rules:
+        - If no rows returned: raise ValueError("No data returned...") (caller may NOOP).
+        - In ONLINE scoring (is_coldstart=False): allow scoring with small batches.
+        Use data.min_score_samples (default 1) instead of min_train_samples//10.
+        - In COLDSTART (is_coldstart=True): enforce min_train_samples.
         """
-        data_cfg = cfg.get("data", {})
+        data_cfg = cfg.get("data", {}) or {}
         ts_col = _cfg_get(data_cfg, "timestamp_col", "EntryDateTime")
-        min_train_samples = int(_cfg_get(data_cfg, "min_train_samples", 10))
-        
+
+        # NOTE: Keep min_train_samples consistent; do NOT overwrite it later.
+        min_train_samples = int(_cfg_get(data_cfg, "min_train_samples", 500))
+
+        # NEW: explicit minimum rows for online scoring
+        min_score_samples = int(_cfg_get(data_cfg, "min_score_samples", 1))
+        min_score_samples = max(1, min_score_samples)
+
         # SQL mode requires explicit time windows
         if not start_utc or not end_utc:
             raise ValueError("SQL mode requires start_utc and end_utc parameters")
-        
-        # COLD-02: Configurable cold-start split ratio (default 0.6 = 60% train, 40% score)
-        # Only used during coldstart - regular batch mode uses ALL data for scoring
+
+        # COLDSTART split ratio (only used when is_coldstart=True)
         cold_start_split_ratio = float(_cfg_get(data_cfg, "cold_start_split_ratio", 0.6))
         if not (0.1 <= cold_start_split_ratio <= 0.9):
             Console.warn(
@@ -247,38 +248,31 @@ class DataLoader:
                 component="DATA", invalid_value=cold_start_split_ratio, equipment=equipment_name
             )
             cold_start_split_ratio = 0.6
-        
-        min_train_samples = int(_cfg_get(data_cfg, "min_train_samples", 500))
-        
+
         Console.info(f"Loading from SQL historian: {equipment_name}", component="DATA")
         Console.info(f"Time range: {start_utc} to {end_utc}", component="DATA")
-        
-        # Call stored procedure to get all data for time range
-        # Pass EquipmentName directly - SP will resolve to correct data table (e.g., FD_FAN_Data)
+
         cur = None
         try:
             if self.sql_client is None:
                 raise ValueError("SQL mode requested but no SQL client available")
+
             cur = cast(Any, self.sql_client).cursor()
-            # Pass EquipmentName to stored procedure (SP resolves to {EquipmentName}_Data table)
             cur.execute(
                 "EXEC dbo.usp_ACM_GetHistorianData_TEMP @StartTime=?, @EndTime=?, @EquipmentName=?",
                 (start_utc, end_utc, equipment_name)
             )
-            
-            # Fetch all rows
+
             rows = cur.fetchall()
             if not rows:
+                # This is the canonical "NO DATA" signal; caller can treat as NOOP.
                 raise ValueError(f"No data returned from SQL historian for {equipment_name} in time range")
-            
-            # Get column names from cursor description
+
             columns = [desc[0] for desc in cur.description]
-            
-            # Convert to DataFrame
             df_all = pd.DataFrame.from_records(rows, columns=columns)
-            
+
             Console.info(f"Retrieved {len(df_all)} rows from SQL historian", component="DATA")
-            
+
         except Exception as e:
             Console.error(
                 f"Failed to load from SQL historian: {e}",
@@ -291,111 +285,112 @@ class DataLoader:
                     cur.close()
             except Exception:
                 pass
-        
-        # Validate sufficient data
-        # For coldstart, enforce minimum. For incremental scoring, allow smaller batches.
-        required_minimum = min_train_samples if is_coldstart else max(10, min_train_samples // 10)
-        if len(df_all) < required_minimum:
-            raise ValueError(f"Insufficient data from SQL historian: {len(df_all)} rows (minimum {required_minimum} required)")
 
-        # Robust timestamp handling for SQL historian: if configured column is missing
-        # but the standard EntryDateTime column is present, fall back to it.
+        # Validate sufficient data:
+        # - Coldstart: enforce min_train_samples
+        # - Online scoring: enforce min_score_samples (default 1)
+        required_minimum = min_train_samples if is_coldstart else min_score_samples
+        if len(df_all) < required_minimum:
+            raise ValueError(
+                f"Insufficient data from SQL historian: {len(df_all)} rows "
+                f"(minimum {required_minimum} required; is_coldstart={is_coldstart})"
+            )
+
+        # Robust timestamp column fallback
         if ts_col not in df_all.columns and "EntryDateTime" in df_all.columns:
             Console.warn(
-                f"Timestamp column '{ts_col}' not found in SQL historian results; "
-                "falling back to 'EntryDateTime'.",
+                f"Timestamp column '{ts_col}' not found; falling back to 'EntryDateTime'.",
                 component="DATA", configured_col=ts_col, fallback_col="EntryDateTime", equipment=equipment_name
             )
             ts_col = "EntryDateTime"
-        
-        # Split into train/score based on mode
+
+        # Split train/score
         if is_coldstart:
-            # COLDSTART MODE: Split data for initial model training
-            split_idx = int(len(df_all) * cold_start_split_ratio)
-            train_raw = df_all.iloc[:split_idx].copy()
-            score_raw = df_all.iloc[split_idx:].copy()
-            
-            # Warn if training samples below minimum
-            if len(train_raw) < min_train_samples:
+            total = len(df_all)
+            if total < min_train_samples:
                 Console.warn(
-                    f"Training data ({len(train_raw)} rows) is below recommended minimum ({min_train_samples} rows)",
-                    component="DATA", actual_rows=len(train_raw), min_required=min_train_samples, equipment=equipment_name
+                    f"Coldstart total rows below minimum: {total} < {min_train_samples}",
+                    component="DATA", equipment=equipment_name
                 )
-                Console.warn(
-                    f"Model quality may be degraded. Consider: wider time window, higher split_ratio (current: {cold_start_split_ratio:.2f})",
-                    component="DATA", split_ratio=cold_start_split_ratio, equipment=equipment_name
+                # Let caller decide retry strategy
+                meta = DataMeta(
+                    timestamp_col=ts_col,
+                    cadence_ok=False,
+                    kept_cols=[],
+                    dropped_cols=[],
+                    start_ts=pd.Timestamp.now(),
+                    end_ts=pd.Timestamp.now(),
+                    n_rows=0,
+                    sampling_seconds=0.0,
+                    tz_stripped=0,
+                    future_rows_dropped=0,
+                    dup_timestamps_removed=0
                 )
-            
+                return pd.DataFrame(), pd.DataFrame(), meta
+
+            # Ensure train has at least min_train_samples
+            train_n = max(min_train_samples, int(total * cold_start_split_ratio))
+            train_n = min(train_n, total)  # safety
+
+            # If train_n consumes all rows, keep at least 1 for scoring if possible
+            if train_n == total and total > min_train_samples:
+                train_n = total - 1
+
+            train_raw = df_all.iloc[:train_n].copy()
+            score_raw = df_all.iloc[train_n:].copy()
             Console.info(
-                f"COLDSTART Split ({cold_start_split_ratio:.1%}): {len(train_raw)} train rows, {len(score_raw)} score rows",
-                component="DATA"
+                f"COLDSTART Split: {len(train_raw)} train rows, {len(score_raw)} score rows (required train: {min_train_samples})",
+                component="DATA", equipment=equipment_name
             )
         else:
-            # REGULAR BATCH MODE: Use ALL data for scoring, load baseline from cache
-            train_raw = pd.DataFrame()  # Empty train, will be loaded from baseline_buffer
+            train_raw = pd.DataFrame()
             score_raw = df_all.copy()
             Console.info(
                 f"BATCH MODE: All {len(score_raw)} rows allocated to scoring (baseline from cache)",
                 component="DATA"
             )
-        
+
         # Parse timestamps / index
-        # Handle empty train in batch mode
         if len(train_raw) == 0 and not is_coldstart:
-            # Create empty DataFrame with DatetimeIndex matching score columns
             train = pd.DataFrame(columns=train_raw.columns)
             train.index = pd.DatetimeIndex([], name=ts_col)
         else:
             train = parse_ts_index(train_raw, ts_col)
-        
+
         score = parse_ts_index(score_raw, ts_col)
-        
+
         # Filter future timestamps
         now_cutoff = _future_cutoff_ts(cfg)
         train, tz_stripped_train, future_train = coerce_local_and_filter_future(train, "TRAIN", now_cutoff)
         score, tz_stripped_score, future_score = coerce_local_and_filter_future(score, "SCORE", now_cutoff)
         tz_stripped_total = tz_stripped_train + tz_stripped_score
         future_rows_total = future_train + future_score
-        
-        # Validate training sample count (skip in batch mode - train comes from baseline_buffer)
-        if len(train) < min_train_samples and is_coldstart:
-            Console.warn(
-                f"Training data ({len(train)} rows) is below recommended minimum ({min_train_samples} rows)",
-                component="DATA", actual_rows=len(train), min_required=min_train_samples, equipment=equipment_name, mode="coldstart"
-            )
-        
-        # Keep numeric only (same set across train/score)
+
+        # Keep numeric only
         if len(train) == 0 and not is_coldstart:
-            # BATCH MODE: Train is empty, use all score columns
-            # Train will be loaded from baseline_buffer later in acm_main.py
             score_num = infer_numeric_cols(score)
             kept = sorted(score_num)
             dropped = [c for c in score.columns if c not in kept]
-            train = pd.DataFrame(columns=kept)  # Empty train with correct columns
-            score = score[kept]
-            score = score.astype(np.float32)
+            train = pd.DataFrame(columns=kept)
+            score = score[kept].astype(np.float32)
             Console.info(
-                f"BATCH MODE: Train empty (will load from baseline_buffer), using all {len(kept)} score columns",
+                f"BATCH MODE: Train empty (baseline_buffer later), using {len(kept)} score columns",
                 component="DATA"
             )
         else:
-            # COLDSTART MODE or TRAIN EXISTS: Use intersection of train/score columns
             train_num = infer_numeric_cols(train)
             score_num = infer_numeric_cols(score)
             kept = sorted(list(set(train_num).intersection(score_num)))
             dropped = [c for c in train.columns if c not in kept]
-            train = train[kept]
-            score = score[kept]
-            train = train.astype(np.float32)
-            score = score.astype(np.float32)
-        
+            train = train[kept].astype(np.float32)
+            score = score[kept].astype(np.float32)
+
         Console.info(f"Kept {len(kept)} numeric columns, dropped {len(dropped)} non-numeric", component="DATA")
-        
+
+        # Cadence / resample logic unchanged
         Console.status(f"Checking cadence and resampling for {len(score)} score rows...")
-        
-        # Cadence check + resampling (same logic as CSV mode)
+
         _sampling = data_cfg.get("sampling_secs", 1)
-        # Treat empty/invalid values as "auto" (let cadence be inferred)
         try:
             if _sampling in (None, "", "auto", "null"):
                 sampling_secs: Optional[int] = None
@@ -403,44 +398,38 @@ class DataLoader:
                 sampling_secs = int(_sampling)
         except (TypeError, ValueError):
             sampling_secs = None
-        
+
         allow_resample = bool(_cfg_get(data_cfg, "allow_resample", True))
         resample_strict = bool(_cfg_get(data_cfg, "resample_strict", False))
         interp_method = str(_cfg_get(data_cfg, "interp_method", "linear"))
         max_fill_ratio = float(_cfg_get(data_cfg, "max_fill_ratio", _cfg_get(cfg, "runtime.max_fill_ratio", 0.20)))
-        
+
         Console.status("  Checking train cadence...")
         cad_ok_train = check_cadence(cast(pd.DatetimeIndex, train.index), sampling_secs)
         Console.status("  Checking score cadence...")
         cad_ok_score = check_cadence(cast(pd.DatetimeIndex, score.index), sampling_secs)
         cadence_ok = bool(cad_ok_train and cad_ok_score)
         Console.status(f"  Cadence check complete: train={cad_ok_train}, score={cad_ok_score}")
-        
-        # v11.5.0: CRITICAL ANTI-UPSAMPLE GUARD
-        # Upsampling (creating more rows than exist natively) is NEVER allowed.
-        # It creates fake data via interpolation, inflates row counts 10x, and
-        # corrupts all downstream calibration and anomaly detection.
+
         native_train = native_cadence_secs(cast(pd.DatetimeIndex, train.index))
         native_score = native_cadence_secs(cast(pd.DatetimeIndex, score.index))
         native_cadence = min(
             native_train if math.isfinite(native_train) else float('inf'),
             native_score if math.isfinite(native_score) else float('inf')
         )
-        
+
         if sampling_secs is not None and math.isfinite(native_cadence):
-            if sampling_secs < native_cadence * 0.9:  # 10% tolerance
-                # NEVER upsample - use native cadence instead
+            if sampling_secs < native_cadence * 0.9:
                 Console.warn(
-                    f"ANTI-UPSAMPLE: Requested resample ({sampling_secs}s) < native cadence ({native_cadence:.1f}s). "
-                    f"Using native cadence to prevent data inflation.",
+                    f"ANTI-UPSAMPLE: Requested ({sampling_secs}s) < native ({native_cadence:.1f}s). Using native.",
                     component="DATA", requested_secs=sampling_secs, native_secs=native_cadence, equipment=equipment_name
                 )
-                # Set to None to skip resampling entirely (preserve native data)
                 sampling_secs = None
-                cadence_ok = True  # Native data is always considered valid cadence
-        
+                cadence_ok = True
+
         Console.info(
-            f"Cadence: native={native_cadence:.1f}s, requested={sampling_secs or 'auto'}, will_resample={sampling_secs is not None and not cadence_ok}",
+            f"Cadence: native={native_cadence:.1f}s, requested={sampling_secs or 'auto'}, "
+            f"will_resample={sampling_secs is not None and not cadence_ok}",
             component="DATA", native_cadence=native_cadence, equipment=equipment_name
         )
 
@@ -449,7 +438,7 @@ class DataLoader:
         else:
             base_secs = native_cadence if math.isfinite(native_cadence) else 1.0
         max_gap_secs = int(_cfg_get(data_cfg, "max_gap_secs", base_secs * 3))
-        
+
         explode_guard_factor = float(_cfg_get(data_cfg, "explode_guard_factor", 2.0))
         will_resample = allow_resample and (not cadence_ok) and (sampling_secs is not None)
         if will_resample:
@@ -458,17 +447,15 @@ class DataLoader:
             approx_rows = int(span_secs / max(1.0, safe_sampling)) + 1
             if len(train) and approx_rows > explode_guard_factor * len(train):
                 Console.warn(
-                    f"Resample would expand rows from {len(train)} -> ~{approx_rows} (>x{explode_guard_factor:.1f}). Skipping resample.",
+                    f"Resample would expand rows {len(train)} -> ~{approx_rows} (>x{explode_guard_factor:.1f}). Skipping.",
                     component="DATA"
                 )
                 will_resample = False
 
         if will_resample:
             assert sampling_secs is not None
-            train = resample_df(train, int(sampling_secs), interp_method, resample_strict, max_gap_secs, max_fill_ratio)
-            score = resample_df(score, int(sampling_secs), interp_method, resample_strict, max_gap_secs, max_fill_ratio)
-            train = train.astype(np.float32)
-            score = score.astype(np.float32)
+            train = resample_df(train, int(sampling_secs), interp_method, resample_strict, max_gap_secs, max_fill_ratio).astype(np.float32)
+            score = resample_df(score, int(sampling_secs), interp_method, resample_strict, max_gap_secs, max_fill_ratio).astype(np.float32)
             cadence_ok = True
 
         meta = DataMeta(
@@ -484,7 +471,7 @@ class DataLoader:
             future_rows_dropped=future_rows_total,
             dup_timestamps_removed=0
         )
-        
+
         Console.info(
             f"SQL historian load complete: {len(train)} train + {len(score)} score = {len(train) + len(score)} total rows",
             component="DATA"

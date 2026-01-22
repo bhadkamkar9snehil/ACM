@@ -58,19 +58,6 @@ REGIME_MODEL_VERSION = "4.0"  # v11.4.0: RAW SENSORS ONLY - removed health-state
 # check for -1, but new code should never produce it.
 UNKNOWN_REGIME_LABEL = -1  # DEPRECATED: Do not produce this value
 
-# =============================================================================
-# TAG TAXONOMY: Explicit classification of sensor types for regime clustering
-# =============================================================================
-# RULE R1: Regime clustering inputs = operating variables ONLY
-# RULE R2: Condition variables may be used for health scoring, NEVER for regime definition
-#
-# WHY THIS MATTERS:
-# If bearing temp or vibration participates in clustering, a degrading asset
-# "creates a new regime" simply because it's hotter/noisier than before at the
-# same load. This breaks the regime concept: you no longer have stable operating
-# states; you have a mixture of operating_state + health_drift.
-# =============================================================================
-
 # OPERATING_TAG_KEYWORDS: Variables that define the operating mode/regime
 # These represent controllable or process-driven operating conditions
 OPERATING_TAG_KEYWORDS = [
@@ -141,7 +128,7 @@ def _parse_semver(version: str) -> Tuple[int, int, int]:
     patch = int(parts[2]) if len(parts) > 2 else 0
     return (major, minor, patch)
 
-
+# To-DO Is this required? What is the basis for versioning. Need clarity on this.
 def _is_version_compatible(cached_version: str, expected_version: str) -> bool:
     """
     Check if cached model version is compatible with expected version.
@@ -169,6 +156,7 @@ def _is_version_compatible(cached_version: str, expected_version: str) -> bool:
     except Exception:
         # If parsing fails, fall back to exact match
         return cached_version == expected_version
+# TO-DO This is not needed. Need to remove this properly.
 _HEALTH_PRIORITY = {
     "healthy": 0,
     "suspect": 1,
@@ -2234,7 +2222,7 @@ def build_summary_dataframe(model: RegimeModel) -> pd.DataFrame:
             df[col] = float("nan")
     return df[desired_cols].sort_values("regime").reset_index(drop=True)
 
-
+# TO-DO Remove this.
 def smooth_labels(
     labels: np.ndarray,
     passes: int = 1,
@@ -2405,7 +2393,7 @@ def smooth_labels(
         smoothed[unknown_mask] = UNKNOWN_REGIME_LABEL
         
     return smoothed
-
+# TO-DO Remove health priority usage from here
 def smooth_transitions(
     labels: np.ndarray,
     timestamps: Optional[pd.Index] = None,
@@ -2527,7 +2515,7 @@ def _to_datetime_mixed(s):
         return pd.to_datetime(s, format="mixed", errors="coerce")
     except TypeError:
         return pd.to_datetime(s, errors="coerce")
-
+# TO-DO Rewrite and rename this function to completely remove and forget about csv loading altogether.
 def _read_episodes_csv(p: Path, sql_client=None, equip_id: Optional[int] = None, run_id: Optional[str] = None) -> pd.DataFrame:
     """
     Read episodes from SQL (preferred) or CSV fallback.
@@ -2630,6 +2618,7 @@ def _read_episodes_csv(p: Path, sql_client=None, equip_id: Optional[int] = None,
     
     return df
 
+# TO-DO Rewrite and rename this function to completely remove and forget about csv loading altogether.
 def _read_scores_csv(p: Path, sql_client=None, equip_id: Optional[int] = None, run_id: Optional[str] = None, 
                     start_ts: Optional[pd.Timestamp] = None, end_ts: Optional[pd.Timestamp] = None) -> pd.DataFrame:
     """
@@ -2727,6 +2716,7 @@ def _read_scores_csv(p: Path, sql_client=None, equip_id: Optional[int] = None, r
 # -----------------------------------
 # Core: fit auto-k with safe heuristics (v11.1.0: Uses GMM, not K-Means)
 # DEPRECATED: Legacy path - use fit_regime_model() instead
+# TO-DO Remove this deprecated function from code altogether.
 # -----------------------------------
 def _fit_auto_k(
     X: np.ndarray,
@@ -2977,7 +2967,7 @@ def regime_state_to_model(
     
     return model
 
-
+# TO-DO Probably is causing issues
 def align_regime_labels(
     new_model: RegimeModel,
     prev_model: RegimeModel
@@ -3101,7 +3091,7 @@ def align_regime_labels(
     
     return new_model
 
-
+# TO-DO See if this is still needed like this
 # ------------------------------------------------
 # Public API: label(score_df, ctx, score_out, cfg)
 # ------------------------------------------------
@@ -3259,7 +3249,7 @@ def label(score_df, ctx: Dict[str, Any], score_out: Dict[str, Any], cfg: Dict[st
         return _legacy_label(score_df, ctx, out, cfg)
     raise RuntimeError("Regime model unavailable and legacy path disabled (regimes.allow_legacy_label=False)")
 
-
+# TO-DO Why is this needed and why is _fit_auto_k used here?
 def _legacy_label(score_df, ctx: Dict[str, Any], out: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, Any]:
     k_min = _cfg_get(cfg, "regimes.auto_k.k_min", 2)
     k_max = _cfg_get(cfg, "regimes.auto_k.k_max", 6)
@@ -3493,39 +3483,39 @@ def run(ctx: Any) -> Dict[str, Any]:
         if transitions_df is not None and not transitions_df.empty:
             regime_metrics["transition_total"] = int(transitions_df["count"].sum())
 
-        # Consolidated report JSON
-        report_payload = {
-            "generated_at": pd.Timestamp.utcnow().isoformat(),
-            "quality": {
-                "best_k": best_k,
-                "score": fit_score,
-                "metric": fit_metric,
-                "quality_ok": bool(quality_ok) if quality_ok is not None else False,
-                "quality_notes": quality_notes,
-                "pca_variance_ratio": pca_ratio,
-                "pca_variance_min": meta.get("pca_variance_min"),
-                "pca_coverage_ok": pca_coverage_ok,
-                "pca_warning": pca_warning,
-            },
-            "summary": summary_df.to_dict(orient="records") if summary_df is not None else [],
-            "feature_importance": feature_importance_df.to_dict(orient="records") if feature_importance_df is not None else [],
-            "transitions": transitions_df.to_dict(orient="records") if transitions_df is not None else [],
-        }
-
-        def _json_default(obj: Any) -> Any:
-            if isinstance(obj, np.generic):
-                if np.issubdtype(obj.dtype, np.floating):
-                    return float(obj)
-                if np.issubdtype(obj.dtype, np.integer):
-                    return int(obj)
-                if np.issubdtype(obj.dtype, np.bool_):
-                    return bool(obj)
-            return obj
-
-        report_path = ctx.tables_dir / "regime_report.json"
-        with report_path.open("w", encoding="utf-8") as f:
-            json.dump(report_payload, f, indent=2, default=_json_default)
-        tables.append({"name":"regime_report","path":str(report_path)})
+        # Consolidated report JSON (DISABLED: reporting now handled via SQL tables)
+        # report_payload = {
+        #     "generated_at": pd.Timestamp.utcnow().isoformat(),
+        #     "quality": {
+        #         "best_k": best_k,
+        #         "score": fit_score,
+        #         "metric": fit_metric,
+        #         "quality_ok": bool(quality_ok) if quality_ok is not None else False,
+        #         "quality_notes": quality_notes,
+        #         "pca_variance_ratio": pca_ratio,
+        #         "pca_variance_min": meta.get("pca_variance_min"),
+        #         "pca_coverage_ok": pca_coverage_ok,
+        #         "pca_warning": pca_warning,
+        #     },
+        #     "summary": summary_df.to_dict(orient="records") if summary_df is not None else [],
+        #     "feature_importance": feature_importance_df.to_dict(orient="records") if feature_importance_df is not None else [],
+        #     "transitions": transitions_df.to_dict(orient="records") if transitions_df is not None else [],
+        # }
+        #
+        # def _json_default(obj: Any) -> Any:
+        #     if isinstance(obj, np.generic):
+        #         if np.issubdtype(obj.dtype, np.floating):
+        #             return float(obj)
+        #         if np.issubdtype(obj.dtype, np.integer):
+        #             return int(obj)
+        #         if np.issubdtype(obj.dtype, np.bool_):
+        #             return bool(obj)
+        #     return obj
+        #
+        # report_path = ctx.tables_dir / "regime_report.json"
+        # with report_path.open("w", encoding="utf-8") as f:
+        #     json.dump(report_payload, f, indent=2, default=_json_default)
+        # tables.append({"name":"regime_report","path":str(report_path)})
     else:
         # Fallback: preserve existing summary file if already generated elsewhere
         summary_path = ctx.tables_dir / "regime_summary.csv"
@@ -3533,26 +3523,24 @@ def run(ctx: Any) -> Dict[str, Any]:
             summary_df = pd.read_csv(summary_path)
             tables.append({"name":"regime_summary","path":str(summary_path)})
 
+    # plots = []
+    # Plot generation is now handled in Grafana. The following code is obsolete and has been disabled.
+    # To visualize fused score with episode overlays, use Grafana with the following SQL queries:
+    #
+    # -- Fused Score Time Series --
+    # SELECT Timestamp AS time, fused_z AS value
+    # FROM ACM_Scores_Wide
+    # WHERE EquipID = $equipment
+    #   AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()
+    # ORDER BY time ASC
+    #
+    # -- Episode Windows (for annotation/overlay) --
+    # SELECT StartTime AS time, EndTime, 1 AS value, 'Episode' AS metric
+    # FROM ACM_Anomaly_Events
+    # WHERE EquipID = $equipment
+    #   AND StartTime BETWEEN $__timeFrom() AND $__timeTo()
+    # ORDER BY StartTime ASC
     plots = []
-    # REG-CSV-03: Skip plotting in SQL-only production mode (for dev/debug only)
-    # Plotting now uses SQL-backed _read_scores_csv (from REG-CSV-01)
-    plots_dir = getattr(ctx, "plots_dir", None)
-    if plots_dir is not None:
-        # REG-CSV-01: Try SQL scores first, fall back to CSV, allow plotting if data available
-        sc = _read_scores_csv(sc_path, sql_client=sql_client, equip_id=equip_id, run_id=run_id)
-        if not sc.empty:
-            if "fused" in sc.columns and len(sc) > 0 and len(eps) > 0:
-                fig = plt.figure(figsize=(12,4)); ax = plt.gca()
-                sc["fused"].plot(ax=ax, linewidth=1)
-                for _, r in eps.iterrows():
-                    if pd.notna(r["start_ts"]) and pd.notna(r["end_ts"]):
-                        ax.axvspan(r["start_ts"], r["end_ts"], alpha=0.15, color="red")
-                ax.set_title("Fused score with episode windows")
-                ax.set_xlabel("")
-                plt.tight_layout()
-                p = plots_dir / "regime_overlay.png"
-                fig.savefig(p, dpi=144, bbox_inches="tight"); plt.close(fig)
-                plots.append({"title":"Episodes overlay","path":str(p),"caption":"Shaded = episodes"})
 
     # simple regime stability via episode durations
     eps = eps.sort_values(["start_ts","end_ts"])
@@ -3581,7 +3569,7 @@ def run(ctx: Any) -> Dict[str, Any]:
 # Model Persistence Functions
 # ----------------------------
 
-def save_regime_model(model: RegimeModel, models_dir: Path) -> None:
+def save_regime_model(model: RegimeModel, models_dir: Path) -> None:  
     """
     Save regime model with joblib persistence for sklearn objects.
     

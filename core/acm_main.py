@@ -560,6 +560,51 @@ def _build_features(
     Console.info(f"Features built: train={train_feat.shape}, score={score_feat.shape}", component="FEAT")
     return train_feat, score_feat
 
+# ========================================================================
+# New Helper added to clasify the noop reason since there are multiple cases and need proper identification of each
+# Added on 22-01-2026
+# ========================================================================
+
+
+def classify_noop_reason(
+    train: Optional[pd.DataFrame],
+    score: Optional[pd.DataFrame],
+    meta: Optional[Any] = None,
+    coldstart_complete: Optional[bool] = None,
+) -> str:
+    """
+    Deterministic NOOP classification.
+
+    Priority order:
+    1) meta.noop_reason / meta["noop_reason"] if present
+    2) fallback inference from train/score and coldstart_complete
+    """
+    # 1) Explicit reason from meta
+    if meta is not None:
+        try:
+            if isinstance(meta, dict):
+                r = str(meta.get("noop_reason", "")).strip()
+            else:
+                r = str(getattr(meta, "noop_reason", "")).strip()
+            if r:
+                return r
+        except Exception:
+            pass
+
+    # 2) Fallback inference
+    if train is None or score is None:
+        # If caller says coldstart was not possible/complete, treat as coldstart deferred
+        if coldstart_complete is False:
+            return "COLDSTART_DEFERRED"
+        return "ONLINE_NO_DATA"
+
+    if hasattr(score, "__len__") and len(score) == 0:
+        return "ONLINE_NO_DATA"
+
+    return "UNKNOWN_NOOP"
+
+
+
 
 # ========================================================================
 # Extracted helpers (now owned by dedicated modules)
@@ -890,10 +935,15 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
             )
             
             if not coldstart_complete:
-                Console.info("Coldstart deferred - insufficient data, will retry next run", component="COLDSTART")
+                reason = classify_noop_reason(train, score, meta=meta, coldstart_complete=coldstart_complete)
+
+                if reason == "ONLINE_NO_DATA":
+                    Console.info("ONLINE NOOP - no new data in historian window (models exist)", component="COLDSTART")
+                else:
+                    Console.info("Coldstart deferred - insufficient history for training, will retry next run", component="COLDSTART")
+
                 if sql_client and run_id:
-                    sql_client.finalize_run(run_id=run_id, outcome="NOOP", 
-                                    rows_read=0, rows_written=0, err_json=None)
+                    sql_client.finalize_run(run_id=run_id, outcome="NOOP", rows_read=0, rows_written=0, err_json=None)
                 return
             
             record_coldstart(equip)
@@ -907,8 +957,42 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
 
             # DataContract validation at pipeline entry.
             with T.section("data.contract"):
-                is_initial_coldstart = len(train) > 0
-                min_rows_threshold = 10 if is_initial_coldstart else 100
+                # NOTE:
+                # - "train" may be empty in ONLINE batch scoring by design (baseline from cache).
+                # - Coldstart should be detected by the pipeline stage/mode, not by len(train)>0.
+                # - ONLINE must tolerate small windows (or NOOP cleanly).
+
+                # Decide thresholds (pull from cfg if you have it; otherwise keep sane defaults)
+                try:
+                    min_score_samples = int(cfg.get("data", {}).get("min_score_samples", 1))
+                except Exception:
+                    min_score_samples = 1
+                min_score_samples = max(1, min_score_samples)
+
+                try:
+                    min_train_samples = int(cfg.get("data", {}).get("min_train_samples", 500))
+                except Exception:
+                    min_train_samples = 500
+                min_train_samples = max(10, min_train_samples)
+
+                try:
+                    min_offline_rows = int(cfg.get("data", {}).get("min_offline_rows", 100))
+                except Exception:
+                    min_offline_rows = 100
+
+                # Use PIPELINE_MODE for mode detection
+                is_online = (PIPELINE_MODE == PipelineMode.ONLINE)
+                is_offline = not is_online
+                # Use coldstart_complete from loader
+                is_coldstart = bool(coldstart_complete)
+
+                if is_online:
+                    min_rows_threshold = min_score_samples
+                    validation_df = score
+                else:
+                    min_rows_threshold = min_train_samples if is_coldstart else min_offline_rows
+                    validation_df = train
+
                 contract = DataContract(
                     required_sensors=[],
                     optional_sensors=list(meta.kept_cols) if hasattr(meta, 'kept_cols') else [],
@@ -918,8 +1002,8 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
                     equip_id=equip_id,
                     equip_code=equip,
                 )
-                validation = contract.validate(score)
-                
+                validation = contract.validate(validation_df)
+
                 # Write validation result to SQL (success or failure).
                 if output_manager:
                     try:
@@ -935,15 +1019,36 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
                     except Exception as e:
                         if validation.passed:
                             Console.warn(f"Failed to write DataContract validation: {e}", component="DATA")
-                
+
                 if not validation.passed:
+                    # ONLINE: if the only problem is "Insufficient rows", treat as NOOP and finalize run
+                    only_insufficient = False
+                    try:
+                        only_insufficient = bool(validation.issues) and all("Insufficient rows" in str(x) for x in validation.issues)
+                    except Exception:
+                        only_insufficient = False
+
+                    if is_online and only_insufficient:
+                        Console.warn(
+                            f"ONLINE NOOP: {validation.issues} (rows={len(score)} min_rows={min_rows_threshold})",
+                            component="DATA", equip=equip, run_id=run_id
+                        )
+                        if sql_client and run_id:
+                            sql_client.finalize_run(run_id=run_id, outcome="NOOP", rows_read=0, rows_written=0, err_json=None)
+                        return
+
                     error_msg = f"DataContract validation FAILED: {validation.issues}"
                     Console.error(error_msg, component="DATA", equip=equip, run_id=run_id, issues=validation.issues)
                     raise ValueError(error_msg)
-                    
-                if validation.warnings:
-                    Console.warn(f"DataContract: {len(validation.warnings)} warnings | {validation.warnings[0] if validation.warnings else ''}", component="DATA")
 
+                if validation.warnings:
+                    Console.warn(
+                        f"DataContract: {len(validation.warnings)} warnings | {validation.warnings[0] if validation.warnings else ''}",
+                        component="DATA"
+                    )
+
+
+            # Stop Here    
             if len(score) == 0:
                 Console.warn("SCORE window empty after cleaning; marking run as NOOP", component="DATA",
                              equip=equip, run_id=run_id)
@@ -2450,12 +2555,18 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
             try:
                 # Log a summary of all timed sections (console-only, not to Loki).
                 Console.section("Performance Summary")
-                total_time = T.totals.get("total_run", 0.0)
+                total_time = T.total_elapsed() if hasattr(T, "total_elapsed") else sum(T.totals.values())
+                accounted = sum(T.totals.values())
                 for section, duration in T.totals.items():
                     Console.status(f"{section}: {duration:.4f}s")
                     # Also emit to Loki for Grafana timer panel.
                     pct = (duration / total_time * 100) if total_time > 0 else 0
                     log_timer(section=section, duration_s=duration, pct=pct, total_s=total_time)
+                unaccounted = max(total_time - accounted, 0.0)
+                if unaccounted > 0:
+                    pct = (unaccounted / total_time * 100) if total_time > 0 else 0
+                    Console.status(f"unaccounted: {unaccounted:.4f}s")
+                    log_timer(section="unaccounted", duration_s=unaccounted, pct=pct, total_s=total_time)
 
             except Exception:
                 pass
