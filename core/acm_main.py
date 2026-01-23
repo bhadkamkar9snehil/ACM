@@ -925,13 +925,17 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
             # Historical replay: expand windows forward when start_time is explicit.
             historical_replay = bool(args.start_time)
             
+            # Access coldstart config using dict-style access to avoid AttributeError
+            coldstart_cfg = cfg.get("coldstart", {})
+            max_attempts = int(coldstart_cfg.get("max_attempts", 3))  # Default to 3 if not set
             train, score, meta, coldstart_complete = coldstart_manager.load_with_retry(
+                cfg=cfg,  # must be dict-like (supports .get)
                 output_manager=output_manager,
-                cfg=cfg,
-                initial_start=win_start,
-                initial_end=win_end,
-                max_attempts=3,
-                historical_replay=historical_replay
+                start_time=win_start,
+                end_time=win_end,
+                max_attempts=max_attempts,
+                historical_replay=historical_replay,
+                equipment=equip,
             )
             
             if not coldstart_complete:
@@ -956,87 +960,78 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
             meta.dup_timestamps_removed = int(train_dups + score_dups)
 
             # DataContract validation at pipeline entry.
+            # ------------------------------------------------------------
+            # DATA CONTRACT VALIDATION
+            # ------------------------------------------------------------
+            # Purpose:
+            #   - Coldstart (offline + train present): validate TRAIN dataframe against min_train_samples
+            #   - Online scoring (train empty): validate SCORE dataframe against min_score_samples (NOT 100)
+            #   - Offline non-coldstart scoring: validate SCORE dataframe against min_offline_rows
+            #
+            # Notes:
+            #   - Do NOT use `coldstart_complete` as "is_coldstart". That means "models exist", not "this run is training".
+            #   - Always write the validation row to SQL (pass or fail).
+            # ------------------------------------------------------------
             with T.section("data.contract"):
-                # NOTE:
-                # - "train" may be empty in ONLINE batch scoring by design (baseline from cache).
-                # - Coldstart should be detected by the pipeline stage/mode, not by len(train)>0.
-                # - ONLINE must tolerate small windows (or NOOP cleanly).
-
-                # Decide thresholds (pull from cfg if you have it; otherwise keep sane defaults)
-                try:
-                    min_score_samples = int(cfg.get("data", {}).get("min_score_samples", 1))
-                except Exception:
-                    min_score_samples = 1
-                min_score_samples = max(1, min_score_samples)
-
-                try:
-                    min_train_samples = int(cfg.get("data", {}).get("min_train_samples", 500))
-                except Exception:
-                    min_train_samples = 500
-                min_train_samples = max(10, min_train_samples)
-
-                try:
-                    min_offline_rows = int(cfg.get("data", {}).get("min_offline_rows", 100))
-                except Exception:
-                    min_offline_rows = 100
-
-                # Use PIPELINE_MODE for mode detection
+                # Derive is_online from PIPELINE_MODE (set at startup)
                 is_online = (PIPELINE_MODE == PipelineMode.ONLINE)
-                is_offline = not is_online
-                # Use coldstart_complete from loader
-                is_coldstart = bool(coldstart_complete)
+                
+                # DataContract is now primarily a guardrail for ONLINE scoring paths.
+                # For OFFLINE initial coldstart and model refits, we allow smaller training blocks.
+                is_initial_coldstart = bool(coldstart_complete)
+                is_warm_refit = bool(refit_requested)
+                is_offline = (not is_online)
 
+                # Minimum rows logic:
+                # - ONLINE scoring should match your expected tick/cadence window to avoid false failures
+                # - OFFLINE: allow smaller chunks for training and for refit workflows
                 if is_online:
-                    min_rows_threshold = min_score_samples
-                    validation_df = score
+                    min_rows_threshold = int(min_score_samples)
                 else:
-                    min_rows_threshold = min_train_samples if is_coldstart else min_offline_rows
-                    validation_df = train
+                    # OFFLINE training/refit can be smaller than online scoring windows.
+                    # Use training minimum when we are actually training/refitting, else fall back to offline minimum.
+                    if is_initial_coldstart or is_warm_refit:
+                        min_rows_threshold = int(min_train_samples)
+                    else:
+                        min_rows_threshold = int(min_offline_rows)
+
+                # Choose DF to validate:
+                # - ONLINE: validate the score DF (post-cleaning), because that is what flows downstream
+                # - OFFLINE training/refit: validate train (since score may be empty early)
+                validation_df = score if (is_online or (score is not None and len(score) > 0)) else train
 
                 contract = DataContract(
                     required_sensors=[],
-                    optional_sensors=list(meta.kept_cols) if hasattr(meta, 'kept_cols') else [],
-                    timestamp_col=meta.timestamp_col if hasattr(meta, 'timestamp_col') else 'Timestamp',
+                    optional_sensors=list(meta.kept_cols) if hasattr(meta, "kept_cols") else [],
+                    timestamp_col=meta.timestamp_col if hasattr(meta, "timestamp_col") else "Timestamp",
                     min_rows=min_rows_threshold,
                     max_null_fraction=0.5,
                     equip_id=equip_id,
                     equip_code=equip,
                 )
+
                 validation = contract.validate(validation_df)
 
                 # Write validation result to SQL (success or failure).
                 if output_manager:
                     try:
-                        sig = contract.signature() if hasattr(contract, 'signature') and callable(contract.signature) else None
-                        output_manager.write_data_contract_validation({
-                            'Passed': validation.passed,
-                            'RowsValidated': len(score),
-                            'ColumnsValidated': len(score.columns),
-                            'IssuesJSON': json.dumps(validation.issues) if validation.issues else None,
-                            'WarningsJSON': json.dumps(validation.warnings) if validation.warnings else None,
-                            'ContractSignature': sig,
-                        })
+                        sig = contract.signature() if hasattr(contract, "signature") and callable(contract.signature) else None
+                        output_manager.write_data_contract_validation(
+                            {
+                                "Passed": validation.passed,
+                                "RowsValidated": len(validation_df) if validation_df is not None else 0,
+                                "ColumnsValidated": len(validation_df.columns) if validation_df is not None else 0,
+                                "IssuesJSON": json.dumps(validation.issues) if validation.issues else None,
+                                "WarningsJSON": json.dumps(validation.warnings) if validation.warnings else None,
+                                "ContractSignature": sig,
+                            }
+                        )
                     except Exception as e:
+                        # Only warn if validation passed; if validation failed, failing to write is less important.
                         if validation.passed:
                             Console.warn(f"Failed to write DataContract validation: {e}", component="DATA")
 
                 if not validation.passed:
-                    # ONLINE: if the only problem is "Insufficient rows", treat as NOOP and finalize run
-                    only_insufficient = False
-                    try:
-                        only_insufficient = bool(validation.issues) and all("Insufficient rows" in str(x) for x in validation.issues)
-                    except Exception:
-                        only_insufficient = False
-
-                    if is_online and only_insufficient:
-                        Console.warn(
-                            f"ONLINE NOOP: {validation.issues} (rows={len(score)} min_rows={min_rows_threshold})",
-                            component="DATA", equip=equip, run_id=run_id
-                        )
-                        if sql_client and run_id:
-                            sql_client.finalize_run(run_id=run_id, outcome="NOOP", rows_read=0, rows_written=0, err_json=None)
-                        return
-
                     error_msg = f"DataContract validation FAILED: {validation.issues}"
                     Console.error(error_msg, component="DATA", equip=equip, run_id=run_id, issues=validation.issues)
                     raise ValueError(error_msg)
@@ -1044,9 +1039,8 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
                 if validation.warnings:
                     Console.warn(
                         f"DataContract: {len(validation.warnings)} warnings | {validation.warnings[0] if validation.warnings else ''}",
-                        component="DATA"
+                        component="DATA",
                     )
-
 
             # Stop Here    
             if len(score) == 0:

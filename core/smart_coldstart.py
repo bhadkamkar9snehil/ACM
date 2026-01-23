@@ -206,7 +206,8 @@ class SmartColdstart:
     def calculate_optimal_window(self, 
                                 current_window_end: datetime,
                                 required_rows: int = 500,
-                                data_cadence_seconds: Optional[int] = None) -> Tuple[datetime, datetime]:
+                                data_cadence_seconds: Optional[int] = None,
+                                expansion_factor: float = 1.0) -> Tuple[datetime, datetime]:
         """
         Calculate optimal lookback window to get required_rows of data.
         For coldstart, we want to load the EARLIEST available data, not recent data.
@@ -215,6 +216,7 @@ class SmartColdstart:
             current_window_end: End time for the data window (batch end time) - not used for coldstart
             required_rows: Target number of rows needed
             data_cadence_seconds: Detected data cadence, or None to auto-detect
+            expansion_factor: Multiplier to expand window (>1.0 for retries with sparse data)
             
         Returns:
             Tuple of (start_time, end_time) for expanded window
@@ -231,10 +233,14 @@ class SmartColdstart:
         
         # Calculate how many minutes needed to get required_rows
         cadence_minutes = data_cadence_seconds / 60
+        # Formula: if cadence is 30min per row, need 500 rows * 30min = 15000 minutes
         required_minutes = required_rows * cadence_minutes
         
         # Add 20% buffer for safety
         required_minutes = int(required_minutes * 1.2)
+        
+        # Apply expansion factor (for retries with sparse data)
+        required_minutes = int(required_minutes * expansion_factor)
         
         # For coldstart, get the EARLIEST data available
         # Query the database for the earliest timestamp
@@ -275,13 +281,16 @@ class SmartColdstart:
                     cur.close()
                 except:
                     pass
-    
+    # Start Load with retry here
     def load_with_retry(
         self,
         cfg: Dict[str, Any],
         equipment: str,
         start_time: Optional[pd.Timestamp],
         end_time: Optional[pd.Timestamp],
+        output_manager,
+        max_attempts: int = 3,
+        historical_replay: bool = False,
     ) -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame], Optional[Any], bool]:
         """
         Returns (train, score, meta, can_proceed).
@@ -290,111 +299,209 @@ class SmartColdstart:
         - can_proceed=True  => train/score/meta are valid and downstream scoring should run.
         - can_proceed=False => NOOP. meta will contain meta.noop_reason (or dict key) describing why.
         """
-        # Determine coldstart need from model status
-        state = self.check_status(cfg, equipment)
+        required_rows = int(cfg.get("runtime", {}).get("coldstart_required_rows", 500))
+        tick_minutes = cfg.get("runtime", {}).get("tick_minutes")
 
+        state = self.check_status(required_rows=required_rows, tick_minutes=tick_minutes)
+
+        # ---------------------------------------------------------------------
         # ONLINE path: models exist -> attempt load in non-coldstart mode
+        # ---------------------------------------------------------------------
         if not state.needs_coldstart:
-            try:
-                train, score, meta, ok = self._load_data_window(
-                    cfg=cfg,
-                    equipment=equipment,
-                    start_time=start_time,
-                    end_time=end_time,
-                    is_coldstart=False
-                )
-                if ok and train is not None and score is not None:
-                    # Ensure meta exists
-                    if meta is None:
-                        meta = {}
-                    # Mark explicitly
-                    if isinstance(meta, dict):
-                        meta["noop_reason"] = ""
-                        meta["is_coldstart_run"] = False
-                    else:
-                        setattr(meta, "noop_reason", "")
-                        setattr(meta, "is_coldstart_run", False)
-                    return train, score, meta, True
-
-                # NOOP: models exist but no new/usable data
-                if meta is None:
-                    meta = {}
-                if isinstance(meta, dict):
-                    meta["noop_reason"] = "ONLINE_NO_DATA"
-                    meta["is_coldstart_run"] = False
-                else:
-                    setattr(meta, "noop_reason", "ONLINE_NO_DATA")
-                    setattr(meta, "is_coldstart_run", False)
-                return None, None, meta, False
-
-            except ValueError as e:
-                # Expected: no data / insufficient data
-                meta = {"noop_reason": "ONLINE_NO_DATA", "detail": str(e)[:200], "is_coldstart_run": False}
-                return None, None, meta, False
-
-        # Coldstart path
-        try:
             train, score, meta, ok = self._load_data_window(
+                output_manager=output_manager,
                 cfg=cfg,
-                equipment=equipment,
-                start_time=start_time,
-                end_time=end_time,
-                is_coldstart=True
+                start=start_time,
+                end=end_time,
+                is_coldstart=False,
             )
             if ok and train is not None and score is not None:
                 if meta is None:
                     meta = {}
                 if isinstance(meta, dict):
                     meta["noop_reason"] = ""
+                    meta["is_coldstart_run"] = False
+                else:
+                    setattr(meta, "noop_reason", "")
+                    setattr(meta, "is_coldstart_run", False)
+                return train, score, meta, True
+
+            # NOOP: models exist but no usable data
+            if meta is None:
+                meta = {}
+            if isinstance(meta, dict):
+                meta["noop_reason"] = "ONLINE_NO_DATA"
+                meta["is_coldstart_run"] = False
+            else:
+                setattr(meta, "noop_reason", "ONLINE_NO_DATA")
+                setattr(meta, "is_coldstart_run", False)
+            return None, None, meta, False
+
+        # ---------------------------------------------------------------------
+        # COLDSTART path: Sequential windowing respecting batch windows
+        # Load data WITHIN the provided time window, accumulating across batches
+        # When max_batches is set, each batch processes one sequential chunk
+        # Do NOT go back to earliest data - use the provided window!
+        # ---------------------------------------------------------------------
+        
+        # Rows still needed to complete coldstart
+        rows_needed = max(0, required_rows - (state.accumulated_rows or 0))
+        
+        # Use the BATCH WINDOW provided, not earliest-based calculation
+        # The batch runner already divided data into chunks; respect that!
+        cs_start = start_time
+        cs_end = end_time
+        
+        if cs_start is None or cs_end is None:
+            # Fallback if no window provided
+            window_end_dt = (
+                end_time.to_pydatetime()
+                if isinstance(end_time, pd.Timestamp)
+                else pd.Timestamp.utcnow().to_pydatetime()
+            )
+            cs_start_dt, cs_end_dt = self.calculate_optimal_window(
+                current_window_end=window_end_dt,
+                required_rows=required_rows,
+                data_cadence_seconds=None,
+                expansion_factor=1.0,
+            )
+            cs_start = pd.Timestamp(cs_start_dt)
+            cs_end = pd.Timestamp(cs_end_dt)
+        else:
+            # Convert to datetime for _update_progress
+            cs_start_dt = cs_start.to_pydatetime() if isinstance(cs_start, pd.Timestamp) else cs_start
+            cs_end_dt = cs_end.to_pydatetime() if isinstance(cs_end, pd.Timestamp) else cs_end
+
+        for attempt in range(1, max_attempts + 1):
+            # On retry within same batch window, use progressively looser matching
+            # But stay within the batch window bounds
+            cs_start = start_time
+            cs_end = end_time
+
+            train, score, meta, ok = self._load_data_window(
+                output_manager=output_manager,
+                cfg=cfg,
+                start=cs_start,
+                end=cs_end,
+                is_coldstart=True,
+            )
+
+            # If load failed (expected NOOP or unexpected failure), record and defer
+            if not ok or train is None or score is None:
+                # We cannot reliably know rows if loader raised; treat as 0 for this attempt
+                self._update_progress(
+                    rows_received=0,
+                    data_start=cs_start_dt,
+                    data_end=cs_end_dt,
+                    error_message="COLDSTART_WINDOW_NOT_USABLE",
+                    success=False,
+                )
+                meta_out = {"noop_reason": "COLDSTART_DEFERRED", "is_coldstart_run": True}
+                return None, None, meta_out, False
+
+            # Rows observed in the current horizon
+            rows_in_window = int(len(train) + len(score))
+
+            # Update progress with DELTA to avoid double counting if horizon overlaps
+            delta_rows = max(0, rows_in_window - int(state.accumulated_rows or 0))
+            self._update_progress(
+                rows_received=delta_rows,
+                data_start=cs_start_dt,
+                data_end=cs_end_dt,
+                error_message=None if rows_in_window >= required_rows else "INSUFFICIENT_ROWS",
+                success=(rows_in_window >= required_rows),
+            )
+
+            if rows_in_window >= required_rows:
+                # Coldstart ready
+                if meta is None:
+                    meta = {}
+                if isinstance(meta, dict):
+                    meta["noop_reason"] = ""
                     meta["is_coldstart_run"] = True
+                    meta["coldstart_rows"] = rows_in_window
+                    meta["coldstart_required_rows"] = required_rows
+                    meta["coldstart_window_start"] = str(cs_start)
+                    meta["coldstart_window_end"] = str(cs_end)
                 else:
                     setattr(meta, "noop_reason", "")
                     setattr(meta, "is_coldstart_run", True)
                 return train, score, meta, True
 
-            meta = {"noop_reason": "COLDSTART_DEFERRED", "is_coldstart_run": True}
-            return None, None, meta, False
+            # Not enough yet -> defer
+            meta_out = {
+                "noop_reason": "COLDSTART_DEFERRED",
+                "is_coldstart_run": True,
+                "coldstart_rows": rows_in_window,
+                "coldstart_required_rows": required_rows,
+                "coldstart_window_start": str(cs_start),
+                "coldstart_window_end": str(cs_end),
+            }
+            return None, None, meta_out, False
+
+        # Fallback (should not usually hit because we return inside loop)
+        meta_out = {"noop_reason": "COLDSTART_DEFERRED", "is_coldstart_run": True}
+        return None, None, meta_out, False
+
+    # End Load with retry here
+
+    # Here
+    def _load_data_window(
+        self,
+        output_manager,
+        cfg: Dict[str, Any],
+        start: Optional[pd.Timestamp],
+        end: Optional[pd.Timestamp],
+        is_coldstart: bool = False,
+    ) -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame], Optional[Any], bool]:
+        """
+        Helper to load a specific window.
+
+        Returns (train, score, meta, ok) where:
+        - ok=True  => load succeeded and train/score/meta are present
+        - ok=False => expected NOOP (no data / insufficient data) OR unexpected failure
+
+        IMPORTANT:
+        - Expected "no data"/"insufficient data" should be WARN (not ERROR),
+        because they are valid NOOP conditions in ONLINE/COLDSTART.
+        """
+        try:
+            train, score, meta = output_manager._load_data_from_sql(
+                cfg, self.equip_name, start, end, is_coldstart=is_coldstart
+            )
+            return train, score, meta, True
 
         except ValueError as e:
-            meta = {"noop_reason": "COLDSTART_DEFERRED", "detail": str(e)[:200], "is_coldstart_run": True}
-            return None, None, meta, False
+            # Expected: no data / insufficient data in this window
+            msg = str(e)
+            Console.warn(
+                f"Data window not usable: {msg}",
+                component="COLDSTART",
+                equip_id=self.equip_id,
+                equip_name=self.equip_name,
+                start_time=str(start),
+                end_time=str(end),
+                is_coldstart=is_coldstart,
+            )
+            return None, None, None, False
 
+        except Exception as e:
+            # Unexpected: real failure
+            Console.error(
+                f"Failed to load data window: {e}",
+                component="COLDSTART",
+                equip_id=self.equip_id,
+                equip_name=self.equip_name,
+                start_time=str(start),
+                end_time=str(end),
+                is_coldstart=is_coldstart,
+                error_type=type(e).__name__,
+                error=str(e)[:200],
+            )
+            return None, None, None, False
 
-        def _load_data_window(self, output_manager, cfg, start, end, coldstart_complete=False, is_coldstart=False):
-            """
-            Helper to load a specific window.
-
-            IMPORTANT:
-            - Expected "no data"/"insufficient data" errors must be WARN (not ERROR),
-            because they are valid NOOP conditions in ONLINE mode.
-            """
-            try:
-                train, score, meta = output_manager._load_data_from_sql(
-                    cfg, self.equip_name, start, end, is_coldstart=is_coldstart
-                )
-                return train, score, meta, coldstart_complete
-
-            except ValueError as e:
-                msg = str(e)
-                # Treat expected empties as WARN
-                Console.warn(
-                    f"Data window not usable: {msg}",
-                    component="COLDSTART", equip_id=self.equip_id, equip_name=self.equip_name,
-                    start_time=str(start), end_time=str(end), is_coldstart=is_coldstart
-                )
-                return None, None, None, False
-
-            except Exception as e:
-                # True unexpected failures remain ERROR
-                Console.error(
-                    f"Failed to load data window: {e}",
-                    component="COLDSTART", equip_id=self.equip_id, equip_name=self.equip_name,
-                    start_time=str(start), end_time=str(end), is_coldstart=is_coldstart,
-                    error_type=type(e).__name__, error=str(e)[:200]
-                )
-                return None, None, None, False
-        
-        def _update_progress(self, 
+    #End Load Data Window Here    
+    def _update_progress(self, 
                             rows_received: int,
                             data_start: datetime,
                             data_end: datetime,
