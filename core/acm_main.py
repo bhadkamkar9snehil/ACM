@@ -959,6 +959,26 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
             score, score_dups = deduplicate_index(score, "SCORE", equip)
             meta.dup_timestamps_removed = int(train_dups + score_dups)
 
+            # Load validation thresholds from config (with sensible defaults)
+            data_cfg = cfg.get("data", {}) or {}
+            try:
+                min_score_samples = int(data_cfg.get("min_score_samples", 1))
+                min_score_samples = max(1, min_score_samples)
+            except (TypeError, ValueError):
+                min_score_samples = 1
+                
+            try:
+                min_train_samples = int(data_cfg.get("min_train_samples", 500))
+                min_train_samples = max(10, min_train_samples)
+            except (TypeError, ValueError):
+                min_train_samples = 500
+                
+            try:
+                min_offline_rows = int(data_cfg.get("min_offline_rows", 100))
+                min_offline_rows = max(1, min_offline_rows)
+            except (TypeError, ValueError):
+                min_offline_rows = 100
+
             # DataContract validation at pipeline entry.
             # ------------------------------------------------------------
             # DATA CONTRACT VALIDATION
@@ -1185,8 +1205,14 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
             refit_requested_but_deferred = True  # Track for potential use in metrics
         else:
             refit_requested_but_deferred = False
+        
+        # v11.6.2 FIX: In COLDSTART/LEARNING mode, always train fresh models (don't use cache).
+        # Coldstart means no models exist yet - trying to load from cache will fail.
+        # Only use cache in CONVERGED mode or when explicitly disabled refit.
+        is_coldstart_phase = coldstart_complete  # True if this is a coldstart batch run
+        should_skip_cache_for_coldstart = is_coldstart_phase  # Force fresh training in coldstart
             
-        use_cache = cfg.get("models", {}).get("use_cache", True) and (not refit_requested or not ALLOWS_MODEL_REFIT) and not force_retraining
+        use_cache = cfg.get("models", {}).get("use_cache", True) and (not refit_requested or not ALLOWS_MODEL_REFIT) and not force_retraining and not should_skip_cache_for_coldstart
         
         with T.section("models.load"):
             if use_cache and detector_cache is None:
