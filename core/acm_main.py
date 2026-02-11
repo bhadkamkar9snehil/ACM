@@ -1016,9 +1016,20 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
                         min_rows_threshold = int(min_offline_rows)
 
                 # Choose DF to validate:
+                # v11.6.3 FIX: For coldstart, validate TRAIN not SCORE (score split is only 40%)
                 # - ONLINE: validate the score DF (post-cleaning), because that is what flows downstream
-                # - OFFLINE training/refit: validate train (since score may be empty early)
-                validation_df = score if (is_online or (score is not None and len(score) > 0)) else train
+                # - OFFLINE coldstart/refit: validate TRAIN (score is too small for training thresholds)
+                # - OFFLINE normal: prefer score if available, else train
+                if is_online:
+                    validation_df = score
+                elif is_initial_coldstart or is_warm_refit:
+                    # v11.6.3: Coldstart split is 60% train / 40% score
+                    # If we validate score, we'll always fail (403 < 500 min)
+                    # Validate TRAIN instead (has 603 rows, passes 500 min)
+                    validation_df = train
+                else:
+                    # Normal OFFLINE: prefer score if available, else train
+                    validation_df = score if (score is not None and len(score) > 0) else train
 
                 contract = DataContract(
                     required_sensors=[],
@@ -1206,13 +1217,13 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
         else:
             refit_requested_but_deferred = False
         
-        # v11.6.2 FIX: In COLDSTART/LEARNING mode, always train fresh models (don't use cache).
-        # Coldstart means no models exist yet - trying to load from cache will fail.
-        # Only use cache in CONVERGED mode or when explicitly disabled refit.
-        is_coldstart_phase = coldstart_complete  # True if this is a coldstart batch run
-        should_skip_cache_for_coldstart = is_coldstart_phase  # Force fresh training in coldstart
-            
-        use_cache = cfg.get("models", {}).get("use_cache", True) and (not refit_requested or not ALLOWS_MODEL_REFIT) and not force_retraining and not should_skip_cache_for_coldstart
+        # v11.6.4 FIX: In COLDSTART batches, always train fresh models (don't load from cache).
+        # The meta dict has 'is_coldstart_run' flag to distinguish coldstart vs online modes.
+        # - is_coldstart_run=True  => coldstart batch accumulating data, must train fresh
+        # - is_coldstart_run=False => online mode with existing models, should use cache
+        is_coldstart_batch = meta.get('is_coldstart_run', False) if isinstance(meta, dict) else getattr(meta, 'is_coldstart_run', False)
+
+        use_cache = cfg.get("models", {}).get("use_cache", True) and (not refit_requested or not ALLOWS_MODEL_REFIT) and not force_retraining and not is_coldstart_batch
         
         with T.section("models.load"):
             if use_cache and detector_cache is None:

@@ -662,21 +662,31 @@ class SQLBatchRunner:
             cur.close()
             conn.close()
             
-            # Coldstart complete if models exist
-            if model_count >= 3:
-                Console.info(f"{equip_name}: Detected existing models in ModelRegistry (count={model_count})", component="COLDSTART", equipment=equip_name, model_count=model_count)
+            # v11.6.4 FIX: Coldstart complete ONLY if BOTH:
+            # 1. Models exist in ModelRegistry (actual proof models were trained)
+            # 2. Status = COMPLETE in ACM_ColdstartState (accumulated rows >= required)
+            # If Status=COMPLETE but NO models, coldstart actually failed (batch error)
+            if model_count >= 3 and row and row[0] == 'COMPLETE':
+                Console.info(f"{equip_name}: Detected existing models in ModelRegistry (count={model_count}) and Status=COMPLETE", component="COLDSTART", equipment=equip_name, model_count=model_count)
                 return True, 0, 0
+            
+            # If Status=COMPLETE but NO models, log warning and treat as incomplete
+            if row and row[0] == 'COMPLETE' and model_count < 3:
+                Console.warn(
+                    f"{equip_name}: Status=COMPLETE but only {model_count}/3 models in cache - coldstart batch likely failed",
+                    component="COLDSTART", equipment=equip_name, model_count=model_count
+                )
             
             # Determine required rows: prefer ColdstartState.RequiredRows, else config data.min_train_samples (default 500)
             min_required = self._get_config_int(equip_id, 'data.min_train_samples', 500)
             if row:
                 status, accum_rows, req_rows = row
                 required = req_rows or min_required
-                is_complete = status == 'COMPLETE'
+                is_complete = status == 'COMPLETE' and model_count >= 3  # Must have both!
                 Console.info(
                     f"{equip_name}: Status={status}, "
-                    f"AccumulatedRows={accum_rows or 0}, RequiredRows={required}",
-                    component="COLDSTART", equipment=equip_name, status=status, accumulated=accum_rows or 0, required=required
+                    f"AccumulatedRows={accum_rows or 0}, RequiredRows={required}, Models={model_count}/3",
+                    component="COLDSTART", equipment=equip_name, status=status, accumulated=accum_rows or 0, required=required, model_count=model_count
                 )
                 return is_complete, accum_rows or 0, required
             Console.info(f"{equip_name}: No ACM_ColdstartState row; using default minimum rows={min_required}", component="COLDSTART", equipment=equip_name, min_required=min_required)

@@ -1079,6 +1079,9 @@ class OutputManager:
             return 0
             
         try:
+            # v11.7.0 DEBUG
+            Console.info(f"write_pca_metrics called: pca_detector={pca_detector is not None}, df={df is not None and len(df) if df is not None else False}", component="OUTPUT")
+            
             # New style: extract metrics from PCA detector
             if pca_detector is not None:
                 # PCA may be None if insufficient samples (< 2) during fit - this is expected
@@ -1120,9 +1123,12 @@ class OutputManager:
                 sql_df = pd.DataFrame(metrics_rows)
             # Legacy style: use provided dataframe
             elif df is not None:
-                # Legacy path: DataFrame must have ComponentName and MetricType columns
-                if 'ComponentName' not in df.columns or 'MetricType' not in df.columns:
-                    Console.warn(f"write_pca_metrics legacy path requires ComponentName and MetricType columns. Provided: {list(df.columns)}", component="OUTPUT")
+                # Check if this is the new format (has NComponents, ExplainedVariance, ComponentsJson)
+                # vs legacy format (has ComponentName, MetricType, Value)
+                is_new_format = 'NComponents' in df.columns or 'ExplainedVariance' in df.columns or 'ComponentsJson' in df.columns
+                if not is_new_format and ('ComponentName' not in df.columns or 'MetricType' not in df.columns):
+                    # True legacy path - must have these columns
+                    Console.warn(f"write_pca_metrics format unrecognized. Expected either new format (NComponents, ExplainedVariance, ComponentsJson) or legacy format (ComponentName, MetricType, Value). Provided: {list(df.columns)}", component="OUTPUT")
                     return 0
                 sql_df = df.copy()
             else:
@@ -1325,6 +1331,13 @@ class OutputManager:
             
             # Vectorized row preparation - filter out rows with null EquipID
             valid_records = [r for r in df.to_dict('records') if r.get('EquipID') is not None]
+            
+            # v11.7.0 DEBUG: Log what we're about to insert
+            if valid_records:
+                Console.info(f"_upsert_pca_metrics: {len(valid_records)} valid records. Sample record keys: {list(valid_records[0].keys())}", component="OUTPUT")
+                if 'ExplainedVariance' in valid_records[0]:
+                    Console.info(f"Sample ExplainedVariance value: {valid_records[0]['ExplainedVariance']}", component="OUTPUT")
+            
             rows_to_insert = [
                 (
                     str(row['RunID']),
@@ -1338,6 +1351,10 @@ class OutputManager:
                 )
                 for row in valid_records
             ]
+            
+            # v11.7.0 DEBUG: Log ExplainedVariance values being inserted
+            if rows_to_insert:
+                Console.info(f"_upsert_pca_metrics insert: {len(rows_to_insert)} rows. Sample tuple[3] (ExplainedVariance)={rows_to_insert[0][3]}", component="OUTPUT")
             
             if rows_to_insert:
                 cursor.fast_executemany = True
@@ -3452,11 +3469,16 @@ def write_pca_artifacts(
         if t2_p95 is not None:
             components_json.append({"name": "PCA", "type": "t2_p95_score", "value": float(t2_p95)})
 
+        # Calculate total explained variance as Python float
+        explained_var_val = None
+        if var_ratio is not None and len(var_ratio) > 0:
+            explained_var_val = float(np.sum(var_ratio))
+            
         df_metrics = pd.DataFrame([{
             "RunID": run_id or "",
             "EquipID": int(equip_id),
             "NComponents": int(getattr(pca_model, "n_components_", getattr(pca_model, "n_components", 0))),
-            "ExplainedVariance": float(np.sum(var_ratio)) if var_ratio is not None else None,
+            "ExplainedVariance": explained_var_val,
             "ComponentsJson": json.dumps(components_json) if components_json else None,
             "MetricType": "pca_fit",
             "TrainSamples": int(len(train)) if train is not None else None,
