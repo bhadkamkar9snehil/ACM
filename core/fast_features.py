@@ -910,16 +910,23 @@ def compute_basic_features_pl(df: 'pl.DataFrame', window: int = 3, cols: Optiona
     combined_df = pl.concat([pl_filled, *parts], how="horizontal")
 
     # Now build and apply robust z expressions
+    # FIX: Match Pandas behavior - create rz columns even if med/mad missing (use fallback values)
     eps = 1e-9
     rz_exprs = []
     for c in cols:
         med_col = f"{c}_med"
         mad_col = f"{c}_mad"
+        # Check if columns exist, otherwise use fallback values
         if med_col in combined_df.columns and mad_col in combined_df.columns:
+            # Normal case: both med and mad exist
             denom = (pl.col(mad_col) * 1.4826)
             denom_safe = pl.when(denom > eps).then(denom).otherwise(eps)
             rz = ((pl.col(c) - pl.col(med_col)) / (denom_safe + eps)).clip(-1e2, 1e2).alias(f"{c}_rz")
-            rz_exprs.append(rz)
+        else:
+            # Fallback case: med or mad missing - create zero-valued rz column to match Pandas
+            # This ensures deterministic feature count across Polars/Pandas implementations
+            rz = pl.lit(0.0).alias(f"{c}_rz")
+        rz_exprs.append(rz)
 
     # Select all original feature columns and the new rz columns
     final_cols = [p.columns for p in parts]
@@ -997,8 +1004,7 @@ def goertzel_energy(series: np.ndarray, fs: float = 1.0, bands: Optional[List[Tu
     return np.array(energies, dtype=float)
 
 
-@_timer.wrap("compute_basic_features")
-def compute_basic_features(pdf: pd.DataFrame, window: int = 3, cols: Optional[List[str]] = None, 
+def compute_basic_features(pdf: pd.DataFrame, window: int = 3, cols: Optional[List[str]] = None,
                             fill_values: Optional[dict] = None) -> pd.DataFrame:
     """Compute a compact set of features for each timestamp using pandas input.
     Returns a pandas DataFrame aligned with input index.
@@ -1047,75 +1053,48 @@ def compute_basic_features(pdf: pd.DataFrame, window: int = 3, cols: Optional[Li
     >>> # Show robust z-scores for spiky series
     >>> features['spiky_rz']  # Should highlight outliers
     """
-    with Span("features.compute", n_samples=len(pdf), n_features=pdf.shape[1] if len(pdf) > 0 else 0, window=window):
-        # =================================================================================
-        # OPTIMIZATION: Use Polars-native implementation for all inputs when available.
-        # Auto-convert pandas to Polars for significant performance gains (5-10x faster).
-        # =================================================================================
-        if HAS_POLARS:
-            # Convert pandas to Polars if needed
-            if isinstance(pdf, pd.DataFrame):
-                try:
-                    pdf_pl = pl.from_pandas(pdf)
-                    features_pl = compute_basic_features_pl(pdf_pl, window=window, cols=cols)
-                    return features_pl.to_pandas()
-                except Exception:
-                    pass  # Fall through to pandas implementation
-            elif isinstance(pdf, pl.DataFrame):
-                features_pl = compute_basic_features_pl(pdf, window=window, cols=cols)
-                return features_pl.to_pandas()
+    # =================================================================================
+    # POLARS-ONLY IMPLEMENTATION: No Pandas fallback to ensure deterministic behavior.
+    # All feature generation uses Polars for consistency and performance (5-10x faster).
+    # =================================================================================
+    # NOTE: Timer removed from wrapper - timing happens in compute_basic_features_pl()
+    # =================================================================================
+    if not HAS_POLARS:
+        raise RuntimeError(
+            "Polars is required for feature generation but not installed. "
+            "Install with: pip install polars"
+        )
 
-        # --- Fallback to pandas implementation if Polars unavailable or failed ---
-        pdf = _to_pandas(pdf)
-        if cols is None:
-            cols = list(pdf.columns)
-        
-        _timer.log("feature_params", window=window, n_cols=len(cols), n_rows=len(pdf))
-        
-        # default fill policy: median-based imputation for small windows
-        # Use provided fill_values if available (prevents data leakage for score data)
-        with _timer.section("fill_missing"):
-            pdf_filled = _apply_fill(pdf, method="median", fill_values=fill_values)
+    # Convert pandas to Polars if needed
+    if isinstance(pdf, pd.DataFrame):
+        pdf_pl = pl.from_pandas(pdf)
+    elif isinstance(pdf, pl.DataFrame):
+        pdf_pl = pdf
+    else:
+        raise TypeError(f"Expected pd.DataFrame or pl.DataFrame, got {type(pdf)}")
 
-        # --- Refactored Logic: Delegate to individual feature functions ---
-        # This simplifies the orchestrator and removes redundant logic.
-        med = rolling_median(pdf_filled, window, cols, min_periods=1, return_type="pandas")
-        mad = rolling_mad(pdf_filled, window, cols, min_periods=1, return_type="pandas")
-        ms = rolling_mean_std(pdf_filled, window, cols, min_periods=1, return_type="pandas")
-        slopes = rolling_ols_slope(pdf_filled, window, cols, min_periods=1, return_type="pandas")
-        sk = rolling_skew_kurt(pdf_filled, window, cols, min_periods=1, return_type="pandas")
-        se = rolling_spectral_energy(pdf_filled, window, cols, min_periods=1, return_type="pandas")
+    # Compute features using Polars (timing happens inside)
+    features_pl = compute_basic_features_pl(pdf_pl, window=window, cols=cols)
+    return features_pl.to_pandas()
 
-        # robust z: (x - rolling_median) / (rolling_mad + eps)
-        eps = 1e-9
 
-        rz_df = pd.DataFrame(index=pdf_filled.index)
+# REMOVED: Pandas fallback implementation (lines 1075-1125)
+# This ensures deterministic feature generation - no silent path switching.
+# All feature engineering now uses Polars exclusively.
 
-        for c in cols:
-            m = med[f"{c}_med"] if f"{c}_med" in med.columns else 0.0
-            md = mad[f"{c}_mad"] if f"{c}_mad" in mad.columns else pd.Series(np.full(len(pdf_filled), eps), index=pdf_filled.index)
-            # clamp mad to avoid division by zero
-            md_clamped = md.copy()
-            md_clamped = md_clamped.where(md_clamped.abs() > eps, other=eps)
-            # scale MAD to approximate std
-            md_scaled = md_clamped * 1.4826
-            # compute robust z and clamp
-            rz = (pdf_filled[c] - m) / (md_scaled + eps)
-            rz = rz.clip(lower=-1e2, upper=1e2)
-            # replace infs/nans
-            rz = rz.replace([np.inf, -np.inf], np.nan).fillna(0.0)
-            rz_df[c + "_rz"] = rz
+def _DEPRECATED_pandas_compute_basic_features(pdf, window, cols, fill_values=None):
+    """
+    DEPRECATED: This Pandas implementation has been removed to ensure deterministic behavior.
+    The Polars-Pandas divergence caused non-deterministic feature counts (630 vs 632).
+    Use compute_basic_features_pl() exclusively via compute_basic_features().
 
-        # Concatenate all feature parts
-        parts = [p for p in [med, mad, ms, slopes, sk, se, rz_df] if p is not None and not p.empty]
-        if not parts:
-            return pd.DataFrame(index=pdf.index)
+    Historical reference only - DO NOT USE.
+    """
+    raise NotImplementedError(
+        "Pandas implementation deprecated. Use Polars-only compute_basic_features()."
+    )
 
-        out = pd.concat(parts, axis=1)
-        # ensure no infs/nans in final feature table
-        out = out.replace([np.inf, -np.inf], np.nan)
-        out = out.fillna(0.0)
-        return out
+# Old Pandas implementation REMOVED - see _DEPRECATED_pandas_compute_basic_features() above
 
 
 # =============================================================================

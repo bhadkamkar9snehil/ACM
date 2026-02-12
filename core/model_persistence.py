@@ -1352,8 +1352,41 @@ def load_cached_models_with_validation(
         )
         cached_models, cached_manifest = model_manager.load_models()
         Console.info(f"Load result: models={bool(cached_models)}, manifest={bool(cached_manifest)}", component="MODEL-LOAD")
-        
+
         if cached_models and cached_manifest:
+            # v11.7.0 FIX: Validate manifest-model consistency
+            # Check if manifest's train_sensors count matches actual model n_features_in_
+            # This prevents using corrupted cache where manifest and models are desynchronized
+            manifest_feature_count = len(cached_manifest.get("train_sensors", []))
+
+            # Check PCA model feature count (if exists)
+            if "pca_model" in cached_models:
+                pca_model = cached_models["pca_model"]
+                if hasattr(pca_model, 'pca') and hasattr(pca_model.pca, 'n_features_in_'):
+                    pca_features = pca_model.pca.n_features_in_
+                    if manifest_feature_count != pca_features:
+                        Console.error(
+                            f"Manifest-model desync: manifest={manifest_feature_count}, PCA model={pca_features}",
+                            component="MODEL-LOAD",
+                            equip=equip,
+                            hint="Cache corrupted - delete models and retrain"
+                        )
+                        return None, None
+
+            # Check IForest model feature count (if exists)
+            if "iforest_model" in cached_models:
+                iforest_model = cached_models["iforest_model"]
+                if hasattr(iforest_model, 'model') and hasattr(iforest_model.model, 'n_features_in_'):
+                    iforest_features = iforest_model.model.n_features_in_
+                    if manifest_feature_count != iforest_features:
+                        Console.error(
+                            f"Manifest-model desync: manifest={manifest_feature_count}, IForest model={iforest_features}",
+                            component="MODEL-LOAD",
+                            equip=equip,
+                            hint="Cache corrupted - delete models and retrain"
+                        )
+                        return None, None
+
             # Validate cache
             current_config_sig = cfg.get("_signature", "unknown")
             current_sensors = train_columns
