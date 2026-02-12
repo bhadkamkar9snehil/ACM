@@ -1204,26 +1204,17 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
         gmm_enabled = det_flags["gmm_enabled"]
         omr_enabled = det_flags["omr_enabled"]
         
-        # v11.6.1 FIX: In ONLINE mode, ignore refit_requested and always try to load cached models.
-        # Reason: ONLINE mode CANNOT refit (ALLOWS_MODEL_REFIT=False), so if we skip cache loading
-        # due to a refit request, the pipeline crashes with "models not found in cache".
-        # The refit will happen on the next OFFLINE run, so ONLINE runs must use existing models.
-        if refit_requested and not ALLOWS_MODEL_REFIT:
-            Console.info(
-                "Refit requested but ONLINE mode cannot refit - will load cached models anyway",
-                component="MODEL", mode="ONLINE", refit_deferred=True
-            )
-            refit_requested_but_deferred = True  # Track for potential use in metrics
-        else:
-            refit_requested_but_deferred = False
+        # v11.7.0 ADAPTIVE LEARNING: Simplified refit logic
+        # If refit requested (from quality triggers), we'll honor it during quality assessment
+        # No deferred refit - if quality says retrain, we retrain
+        refit_requested_but_deferred = False  # Legacy flag, always False now
         
-        # v11.6.4 FIX: In COLDSTART batches, always train fresh models (don't load from cache).
-        # The meta dict has 'is_coldstart_run' flag to distinguish coldstart vs online modes.
-        # - is_coldstart_run=True  => coldstart batch accumulating data, must train fresh
-        # - is_coldstart_run=False => online mode with existing models, should use cache
+        # v11.7.0 ADAPTIVE LEARNING: Simplified cache logic
+        # Use cache unless this is a coldstart batch (fresh training required)
+        # Quality assessment will determine if loaded models need retraining
         is_coldstart_batch = meta.get('is_coldstart_run', False) if isinstance(meta, dict) else getattr(meta, 'is_coldstart_run', False)
 
-        use_cache = cfg.get("models", {}).get("use_cache", True) and (not refit_requested or not ALLOWS_MODEL_REFIT) and not force_retraining and not is_coldstart_batch
+        use_cache = cfg.get("models", {}).get("use_cache", True) and not is_coldstart_batch
         
         with T.section("models.load"):
             if use_cache and detector_cache is None:
@@ -1350,16 +1341,15 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
             pca_detector or not pca_enabled,
             iforest_detector or not iforest_enabled,
         ])
-        
-        if detectors_missing and not ALLOWS_MODEL_REFIT:
-            Console.error(
-                "ONLINE mode requires pre-trained models but none found in cache",
-                component="MODEL", equip=equip, mode="ONLINE",
-                hint="Run in OFFLINE mode first, or check ModelRegistry"
-            )
-            raise RuntimeError(f"Required detector models not found in cache for {equip}")
-        
+
+        # v11.7.0 ADAPTIVE LEARNING: No mode check - if models missing or invalid, retrain automatically
+        # This enables quality-driven retraining without manual mode switching
         if detectors_missing:
+            Console.info(
+                f"Required models missing or invalid - training fresh models",
+                component="MODEL", equip=equip,
+                reason="missing_detectors" if not cached_models else "validation_failed"
+            )
             with T.section("train.detector_fit"):
                 fit_result = fit_all_detectors(
                     train=train, cfg=cfg, **det_flags,
@@ -1675,11 +1665,12 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
 
         # ===== Model quality assessment: check if retraining is needed =====
         # Runs after first scoring so cached model performance can be evaluated.
-        # v11.7.0 FIX: Only assess quality for retraining if in OFFLINE mode
+        # v11.7.0 ADAPTIVE LEARNING: Always assess quality (no mode guard)
+        # Quality-driven retraining happens automatically when triggers fire
         force_retrain = False
         quality_report = None
 
-        if cached_models and ALLOWS_MODEL_REFIT and cfg.get("models", {}).get("auto_retrain", True):
+        if cached_models and cfg.get("models", {}).get("auto_retrain", True):
             with T.section("models.quality_check"):
                 try:
                     from core.model_evaluation import assess_model_quality

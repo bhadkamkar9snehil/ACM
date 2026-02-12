@@ -576,7 +576,11 @@ class ForecastEngine:
             regime_df['Timestamp'] = pd.to_datetime(regime_df['Timestamp'])
             regime_df = regime_df.sort_values('Timestamp').drop_duplicates(subset=['Timestamp'], keep='last')
 
-            health_times = pd.DataFrame({'Timestamp': pd.to_datetime(health_df['Timestamp'])})
+            # Extract timestamps as values (not Series) to avoid index alignment issues
+            # Using .values ensures clean DataFrame construction without shape mismatch
+            health_times = pd.DataFrame({
+                'Timestamp': pd.to_datetime(health_df['Timestamp'].values)
+            })
             # Remove duplicate timestamps to prevent merge_asof shape mismatch
             health_times = health_times.drop_duplicates(subset=['Timestamp'], keep='last')
             max_regime_gap = float(forecast_config.get('forecast.regime_conditioned.max_regime_gap_hours', 0.0))
