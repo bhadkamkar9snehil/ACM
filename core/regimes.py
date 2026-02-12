@@ -3102,26 +3102,16 @@ def label(score_df, ctx: Dict[str, Any], score_out: Dict[str, Any], cfg: Dict[st
     regime_model: Optional[RegimeModel] = ctx.get("regime_model")
     basis_hash: Optional[int] = ctx.get("regime_basis_hash")  # v11.1.1: Now SCHEMA hash, not data hash
     
-    # v11.4.0: DEPRECATED - allow_discovery flag replaced by MaturityState-based logic
-    # Discovery is now controlled by model lifecycle:
+    # v11.8.0: Discovery controlled by MaturityState only
     # - COLDSTART/LEARNING: discovery allowed (model is still learning)
-    # - CONVERGED/DEPRECATED: discovery NOT allowed (use existing model)
-    # The flag is kept for backward compatibility but should not be used in new code.
-    allow_discovery_flag: bool = ctx.get("allow_discovery", True)  # Legacy flag
-    model_maturity: Optional[str] = ctx.get("model_maturity")  # v11.4.0: MaturityState string
-    
-    # v11.4.0: Determine discovery eligibility from MaturityState (preferred) or flag (fallback)
-    if model_maturity is not None:
-        # MaturityState controls discovery - CONVERGED models don't rediscover
-        discovery_allowed = model_maturity in ("COLDSTART", "LEARNING", None)
-        if not discovery_allowed and allow_discovery_flag:
-            Console.info(
-                f"Model maturity is {model_maturity} - regime discovery disabled (using existing model)",
-                component="REGIME"
-            )
-    else:
-        # Fallback to legacy flag if no maturity state provided
-        discovery_allowed = allow_discovery_flag
+    # - CONVERGED: discovery NOT allowed (use existing model)
+    model_maturity: Optional[str] = ctx.get("model_maturity")
+    discovery_allowed = model_maturity in ("COLDSTART", "LEARNING", None)
+    if not discovery_allowed:
+        Console.info(
+            f"Model maturity is {model_maturity} - regime discovery disabled (using existing model)",
+            component="REGIME"
+        )
 
     out = dict(score_out or {})
     frame = out.get("frame")

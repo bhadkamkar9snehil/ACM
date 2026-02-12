@@ -576,13 +576,17 @@ class ForecastEngine:
             regime_df['Timestamp'] = pd.to_datetime(regime_df['Timestamp'])
             regime_df = regime_df.sort_values('Timestamp').drop_duplicates(subset=['Timestamp'], keep='last')
 
-            # Extract timestamps as values (not Series) to avoid index alignment issues
-            # Using .values ensures clean DataFrame construction without shape mismatch
+            # Build clean DataFrames with reset indices for merge_asof
+            # merge_asof requires sorted keys and clean integer indices
             health_times = pd.DataFrame({
                 'Timestamp': pd.to_datetime(health_df['Timestamp'].values)
             })
-            # Remove duplicate timestamps to prevent merge_asof shape mismatch
-            health_times = health_times.drop_duplicates(subset=['Timestamp'], keep='last')
+            health_times = (health_times
+                .drop_duplicates(subset=['Timestamp'], keep='last')
+                .sort_values('Timestamp')
+                .reset_index(drop=True))
+            regime_df = regime_df.reset_index(drop=True)
+
             max_regime_gap = float(forecast_config.get('forecast.regime_conditioned.max_regime_gap_hours', 0.0))
             tolerance_hours = max(2.0 * float(dt_hours), 0.0)
             if max_regime_gap > 0:
@@ -590,7 +594,7 @@ class ForecastEngine:
             tolerance = pd.Timedelta(hours=tolerance_hours)
 
             aligned = pd.merge_asof(
-                health_times.sort_values('Timestamp'),
+                health_times,
                 regime_df,
                 on='Timestamp',
                 direction='backward',
@@ -1487,26 +1491,33 @@ class ForecastEngine:
                 
                 try:
                     if USE_EXPONENTIAL_SMOOTHING:
-                        # V11 FIX: Set explicit frequency to suppress statsmodels warning
-                        # "No frequency information was provided, so inferred frequency X will be used"
-                        # Infer frequency from data cadence or use 30min as default (ACM standard)
+                        # V11.8.0 FIX: Set explicit frequency for statsmodels
+                        # Use resample().mean() instead of asfreq() to avoid introducing NaN
+                        # when data cadence doesn't match the target frequency exactly.
                         if series.index.freq is None:
                             inferred_freq = pd.infer_freq(series.index)
                             if inferred_freq:
-                                series = series.asfreq(inferred_freq)
+                                series = series.resample(inferred_freq).mean().dropna()
                             else:
-                                # Fallback: calculate median time delta and round to nearest standard freq
+                                # Fallback: resample to the actual median cadence
                                 time_diffs = series.index.to_series().diff().dropna()
                                 if len(time_diffs) > 0:
-                                    median_diff = time_diffs.median()
-                                    # Round to nearest standard frequency (30min, 1h, etc.)
-                                    if median_diff <= pd.Timedelta(minutes=45):
-                                        series = series.asfreq('30min')
-                                    elif median_diff <= pd.Timedelta(hours=1.5):
-                                        series = series.asfreq('1h')
+                                    median_secs = time_diffs.median().total_seconds()
+                                    # Round to nearest clean interval
+                                    if median_secs <= 120:
+                                        freq_str = f"{max(1, round(median_secs / 60))}min"
+                                    elif median_secs <= 2700:  # <= 45 min
+                                        freq_str = f"{max(5, round(median_secs / 300) * 5)}min"
+                                    elif median_secs <= 5400:  # <= 90 min
+                                        freq_str = "1h"
                                     else:
-                                        series = series.asfreq('1h')  # Default fallback
-                        
+                                        freq_str = f"{max(1, round(median_secs / 3600))}h"
+                                    series = series.resample(freq_str).mean().dropna()
+
+                        # Guard: resample may have reduced the series below minimum
+                        if len(series) < 24:
+                            continue
+
                         # Fit exponential smoothing with trend (Holt's method)
                         model = ExponentialSmoothing(
                             series,

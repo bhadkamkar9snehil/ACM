@@ -230,15 +230,15 @@ PHASE 7: FEATURE ENGINEERING [features.build + features.impute]
 ├── Compute feature hash for model cache validation
 └── Output: train_features, score_features DataFrames
 
-PHASE 8: MODEL TRAINING [train.detector_fit] (OFFLINE mode only)
+PHASE 8: MODEL TRAINING [train.detector_fit] (adaptive)
 ├── Check ModelRegistry for cached models matching feature hash
-├── If cache miss or OFFLINE mode:
+├── If cache miss, quality trigger, or --force-retrain:
 │   ├── Fit AR1 detector: per-sensor autoregressive residuals
 │   ├── Fit PCA detector: principal components, compute loadings
 │   ├── Fit IForest detector: isolation forest ensemble
 │   ├── Fit GMM detector: Gaussian mixture with BIC k-selection
 │   └── Fit OMR detector: cross-sensor regression residuals
-├── If ONLINE mode: load all detectors from cache
+├── If cache hit and quality OK: load all detectors from cache
 ├── Validate loaded models against current feature columns
 │   └── If mismatch: force retrain (v11.3.2 compatibility fix)
 └── Output: trained detector objects
@@ -1281,41 +1281,40 @@ docker ps --format "table {{.Names}}\t{{.Status}}"
 
 ---
 
-## 14. Entry Points and Runtime Modes
+## 14. Entry Points and Adaptive Learning
 
-### 14.1 Pipeline Mode Architecture (v11.5.0)
+### 14.1 Adaptive Pipeline Architecture (v11.8.0)
 
-ACM operates in two pipeline modes that determine model behavior:
+ACM uses a single adaptive pipeline - no manual ONLINE/OFFLINE mode selection.
+The system automatically decides whether to train or score based on model state
+and quality metrics:
 
 ```
-PIPELINE MODE SELECTION
-=======================
+ADAPTIVE PIPELINE DECISION TREE
+================================
 
-OFFLINE MODE (Training)              ONLINE MODE (Scoring)
------------------------              --------------------
-Train all detector models            Use cached models only
-Discover operating regimes           Apply existing regimes
-Calibrate thresholds from data       Use cached thresholds
-Full feature engineering             Score incoming data
-Write refit requests if needed       NO refit requests allowed
+1. CHECK: Do cached models exist?
+   ├─ NO  → Train fresh models (coldstart)
+   └─ YES → Continue to step 2
 
-BATCH MODE AUTOMATIC SELECTION (sql_batch_runner.py)
-----------------------------------------------------
-Coldstart batch (batch=0, no models)  -->  OFFLINE (train once)
-Post-coldstart batches                -->  ONLINE (score only)
-Explicit --mode CLI override          -->  Uses specified mode
+2. CHECK: Are cached models valid? (feature count match, not corrupt)
+   ├─ NO  → Retrain automatically
+   └─ YES → Continue to step 3
 
-CRITICAL (v11.5.0 FIX):
-Previous versions used OFFLINE for ALL batches, causing:
-  1. Models retrained every batch (never stabilize)
-  2. Refit requests created perpetual refit loop
-  3. Models never promoted from LEARNING to CONVERGED
+3. SCORE: Run detectors with cached models
 
-Current behavior:
-  1. First batch trains models in OFFLINE mode
-  2. Subsequent batches score in ONLINE mode
-  3. Refit requests only written in OFFLINE mode
-  4. Models stabilize and can promote to CONVERGED
+4. ASSESS: Evaluate quality after scoring
+   - Silhouette score, anomaly rate, drift score
+   - Feature count match, model age
+
+5. DECIDE: Should retrain?
+   ├─ YES → Retrain models, save new cache
+   └─ NO  → Continue with current models
+
+MODEL LIFECYCLE (quality-driven, no manual modes):
+  COLDSTART → LEARNING → CONVERGED
+  - Promotion based on: 5+ runs, silhouette >= 0.40, stability >= 0.75
+  - Retraining triggered by quality degradation, not manual mode switch
 ```
 
 ### 14.2 Anti-Upsample Guard (v11.5.0)
@@ -1357,7 +1356,6 @@ python scripts/sql_batch_runner.py \
 | `--resume` | Continue from last run |
 | `--start-from-beginning` | Full reset (coldstart) |
 | `--max-batches` | Limit batches (testing) |
-| `--mode` | Force mode: offline (train), online (score) |
 
 ### 14.4 Testing: acm_main.py
 
@@ -1365,8 +1363,7 @@ python scripts/sql_batch_runner.py \
 python -m core.acm_main \
     --equip FD_FAN \
     --start-time "2024-01-01T00:00:00" \
-    --end-time "2024-01-31T23:59:59" \
-    --mode offline
+    --end-time "2024-01-31T23:59:59"
 ```
 
 | Argument | Description |
@@ -1374,16 +1371,19 @@ python -m core.acm_main \
 | `--equip` | Equipment code |
 | `--start-time` | ISO 8601 start |
 | `--end-time` | ISO 8601 end |
-| `--mode` | offline (train), online (score), auto |
-| `--clear-cache` | Force detector retrain |
+| `--force-retrain` | Force model retraining regardless of cache/quality |
+| `--clear-cache` | Clear cached models before run |
 
-### 14.5 Mode Decision
+### 14.5 Adaptive Training Decisions
 
-| Mode | When Used | Behavior |
-|------|-----------|----------|
-| OFFLINE | Coldstart, cache miss, --clear-cache | Full training of all detectors |
-| ONLINE | Post-coldstart batches, cache hit | Scoring only, no retraining |
-| AUTO | Default for acm_main.py | Check cache, decide automatically |
+| Condition | Behavior |
+|-----------|----------|
+| Coldstart (no cached models) | Full training of all detectors |
+| Cache hit + quality OK | Load cached models, scoring only |
+| Quality trigger (silhouette < 0.30, drift > 3.0, etc.) | Automatic retraining |
+| Feature hash mismatch | Force retrain (compatibility) |
+| `--force-retrain` CLI flag | Force full retraining |
+| `--clear-cache` CLI flag | Clear cache, then retrain |
 
 ---
 
@@ -1394,11 +1394,11 @@ python -m core.acm_main \
 ```
 core/
 ├── acm_main.py          # Pipeline orchestrator (6000+ lines)
-├── acm.py               # Mode-aware router
+├── acm.py               # Unified entry point
 ├── output_manager.py    # All SQL/CSV writes
 ├── sql_client.py        # pyodbc wrapper
 ├── observability.py     # Console, Span, Metrics
-├── pipeline_types.py    # DataContract, PipelineMode
+├── pipeline_types.py    # DataContract, ValidationResult
 │
 ├── fast_features.py     # Feature engineering (pandas/Polars)
 ├── seasonality.py       # FFT pattern detection
@@ -1537,6 +1537,7 @@ This invalidates all cached regime models.
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
+| v11.8.0 | 2026-02-12 | Adaptive pipeline: remove ONLINE/OFFLINE modes entirely |
 | v11.4.0 | 2026-01-21 | Regime clustering: raw sensors only (architectural fix) |
 | v11.3.4 | 2026-01-20 | RUL validation guards |
 | v11.3.3 | 2026-01-18 | Contamination filtering for calibration |

@@ -305,7 +305,7 @@ class SmartColdstart:
         state = self.check_status(required_rows=required_rows, tick_minutes=tick_minutes)
 
         # ---------------------------------------------------------------------
-        # ONLINE path: models exist -> attempt load in non-coldstart mode
+        # Scoring path: models exist -> load data for scoring (not coldstart)
         # ---------------------------------------------------------------------
         if not state.needs_coldstart:
             train, score, meta, ok = self._load_data_window(
@@ -330,10 +330,10 @@ class SmartColdstart:
             if meta is None:
                 meta = {}
             if isinstance(meta, dict):
-                meta["noop_reason"] = "ONLINE_NO_DATA"
+                meta["noop_reason"] = "SCORING_NO_DATA"
                 meta["is_coldstart_run"] = False
             else:
-                setattr(meta, "noop_reason", "ONLINE_NO_DATA")
+                setattr(meta, "noop_reason", "SCORING_NO_DATA")
                 setattr(meta, "is_coldstart_run", False)
             return None, None, meta, False
 
@@ -463,7 +463,7 @@ class SmartColdstart:
 
         IMPORTANT:
         - Expected "no data"/"insufficient data" should be WARN (not ERROR),
-        because they are valid NOOP conditions in ONLINE/COLDSTART.
+        because they are valid NOOP conditions during scoring/coldstart.
         """
         try:
             train, score, meta = output_manager._load_data_from_sql(

@@ -17,11 +17,47 @@ Release Management:
 - Production deployments use specific tags (never merge commits)
 """
 
-__version__ = "11.6.1"
-__version_date__ = "2026-01-21"
+__version__ = "11.8.0"
+__version_date__ = "2026-02-12"
 __version_author__ = "ACM Development Team"
 
-# v11.6.1: ONLINE MODE CACHE FIX (Critical Hotfix)
+# v11.8.0: ADAPTIVE PIPELINE - Remove ONLINE/OFFLINE Modes Entirely
+#
+# PHILOSOPHY: "The entire offline and online distinction is a mistake."
+# ACM is a universal unsupervised Asset Condition Monitor. Training and scoring
+# decisions are driven by model state (COLDSTART/LEARNING/CONVERGED) and quality
+# metrics - never by manual mode flags.
+#
+# CHANGES:
+# 1. Removed PipelineMode enum (ONLINE/OFFLINE) from pipeline_types.py
+# 2. Removed --mode CLI argument from acm.py, acm_main.py, sql_batch_runner.py
+# 3. Removed mode-based gating: ALLOWS_MODEL_REFIT and ALLOWS_REGIME_DISCOVERY
+#    are now always True - quality metrics and maturity state decide
+# 4. Unified DataContract validation: single is_training_phase path replaces
+#    three-way ONLINE/OFFLINE-coldstart/OFFLINE-normal branching
+# 5. Simplified model_evaluation.py: allow_refit_requests always True
+# 6. Simplified regimes.py: discovery controlled by MaturityState only
+# 7. acm.py rewritten: single unified execution path (no mode routing)
+# 8. sql_batch_runner.py: removed mode auto-selection (OFFLINE for coldstart,
+#    ONLINE for post-coldstart) - pipeline decides adaptively
+#
+# NEW CLI:
+# - --force-retrain: Force model retraining regardless of cache/quality
+# - --clear-cache: Clear cached models (unchanged)
+#
+# ADAPTIVE RETRAINING TRIGGERS (replace manual --mode offline):
+# - Coldstart: no cached models exist
+# - Quality: silhouette < 0.30, anomaly rate > 25%, drift > 3.0
+# - Compatibility: feature hash mismatch
+# - Age: model > 30 days without refit
+# - Manual: --force-retrain CLI flag
+#
+# MIGRATION:
+# - Remove any --mode arguments from scripts/cron jobs
+# - Replace --mode offline with --force-retrain where manual retraining needed
+# - No database migration required
+
+# v11.6.1: ONLINE MODE CACHE FIX (Critical Hotfix) [SUPERSEDED by v11.8.0]
 #
 # ISSUE: ONLINE batches crashed with "Required detector models not found in cache"
 #

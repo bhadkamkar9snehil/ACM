@@ -63,15 +63,14 @@ class SQLBatchRunner:
                  max_coldstart_attempts: int = 10,
                  max_batches: Optional[int] = None,
                  start_from_beginning: bool = False,
-                 mode: Optional[str] = None):
+                 ):
         """Initialize batch runner.
-        
+
         Args:
             sql_conn_string: SQL Server connection string
             artifact_root: Root directory for artifacts
             tick_minutes: Window size in minutes (default: 30)
             max_coldstart_attempts: Max attempts to complete coldstart (default: 10)
-            mode: Pipeline mode: 'online', 'offline', or None for auto-detect
         """
         self.sql_conn_string = sql_conn_string
         self.artifact_root = artifact_root
@@ -80,7 +79,6 @@ class SQLBatchRunner:
         self.progress_file = artifact_root / ".sql_batch_progress.json"
         self.max_batches = max_batches
         self.start_from_beginning = start_from_beginning
-        self.mode = mode  # V11: Pipeline mode (online/offline/None)
 
     def _log_historian_overview(self, equip_name: str) -> bool:
         """Preflight: Log historian table coverage and return True when data exists.
@@ -710,20 +708,11 @@ class SQLBatchRunner:
         Returns:
             Tuple of (success, outcome) where outcome is 'OK', 'NOOP', or 'FAIL'
             
-        v11.5.0: CRITICAL FIX - Mode Selection
-        ======================================
-        The pipeline mode controls whether models are retrained or just used for scoring:
-        - OFFLINE mode: Full refit - trains new detector/regime models
-        - ONLINE mode: Score-only - uses cached models, no retraining
-        
-        Previous bug: self.mode was None by default, causing acm_main.py to default
-        to 'offline' mode for ALL batches. This caused models to retrain every batch,
-        preventing convergence and creating the refit feedback loop.
-        
-        Correct behavior:
-        - Coldstart batches (first batch when no models exist): OFFLINE (train models)
-        - Post-coldstart batches (historical replay after models exist): ONLINE (score only)
-        - Explicit --mode override from CLI takes precedence
+        v11.8.0: ADAPTIVE - No mode selection needed
+        =============================================
+        The pipeline automatically determines behavior based on model state and
+        quality metrics. No ONLINE/OFFLINE mode distinction - acm_main decides
+        adaptively whether to train or score.
         """
         cmd = [
             sys.executable, "-m", "core.acm_main",
@@ -735,23 +724,7 @@ class SQLBatchRunner:
         if end_time:
             cmd.extend(["--end-time", end_time.isoformat()])
         
-        # v11.5.0: Determine correct pipeline mode based on batch context
-        # Priority: 1) Explicit CLI override, 2) Context-based selection
-        effective_mode: Optional[str] = self.mode
-        
-        if effective_mode is None:
-            # No explicit override - determine mode from batch context
-            is_coldstart_batch = not is_post_coldstart and batch_num == 0
-            if is_coldstart_batch:
-                # Coldstart: Use offline mode to train initial models
-                effective_mode = "offline"
-            else:
-                # Post-coldstart scoring: Use online mode (score-only, no refit)
-                effective_mode = "online"
-        
-        if effective_mode is not None:
-            cmd.extend(["--mode", effective_mode])
-        
+        # v11.8.0: No mode argument - acm_main decides adaptively
         printable = " ".join(cmd)
         if dry_run:
             Console.info(f"{printable}", mode="dry-run", component="DRY")
@@ -1206,17 +1179,7 @@ def main() -> int:
                         help="Resume from last successful batch")
     parser.add_argument("--dry-run", action="store_true",
                         help="Print commands without running")
-    parser.add_argument("--mode", choices=["online", "offline", "auto"], default=None,
-                        help="Pipeline mode: online (scoring only), offline (full training), "
-                             "auto (detect based on cached models). Default: auto-detect")
-
     args = parser.parse_args()
-
-    # Validate contradictory flags
-    if args.mode == "online" and args.start_from_beginning:
-        parser.error("--mode online cannot be used with --start-from-beginning. "
-                     "Online mode requires cached models, but --start-from-beginning deletes them. "
-                     "Use --mode offline or --mode auto for fresh starts.")
 
     # Build SQL connection string (login timeout is controlled via pyodbc.connect timeout)
     sql_conn_string = (
@@ -1259,7 +1222,6 @@ def main() -> int:
         max_coldstart_attempts=args.max_coldstart_attempts,
         max_batches=args.max_batches,
         start_from_beginning=args.start_from_beginning,
-        mode=args.mode,  # V11: Pipeline mode (online/offline/None)
     )
 
     max_workers = max(1, args.max_workers)
@@ -1272,7 +1234,7 @@ def main() -> int:
     Console.info(f"Max Workers: {max_workers}", component="MAIN", max_workers=max_workers)
     Console.info(f"Resume: {args.resume}", component="MAIN", resume=args.resume)
     Console.info(f"Dry Run: {args.dry_run}", component="MAIN", dry_run=args.dry_run)
-    Console.info(f"Pipeline Mode: {args.mode or 'auto'}", component="MAIN", mode=args.mode or "auto")
+    Console.info(f"Pipeline Mode: adaptive", component="MAIN", mode="adaptive")
     Console.status("="*60)
 
     import time

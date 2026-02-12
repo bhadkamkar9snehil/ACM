@@ -1,74 +1,25 @@
 # core/pipeline_types.py
 """
-ACM Pipeline Types - v11.0.0
+ACM Pipeline Types - v11.8.0
 
 Central type definitions for the ACM pipeline.
 These types establish contracts between pipeline stages and ensure
-clean separation between ONLINE (real-time) and OFFLINE (batch) modes.
+consistent data flow through the adaptive learning pipeline.
 
 Phase 1 Implementation Items:
-- P1.1: PipelineMode enum (ONLINE/OFFLINE)
 - P1.2: DataContract dataclass
 - P1.3: SensorValidator (basic structure)
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum, auto
-from typing import Dict, List, Optional, Set, Any, Tuple
+from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime
 import hashlib
 import json
 
 import numpy as np
 import pandas as pd
-
-
-# =============================================================================
-# P1.1 - PipelineMode Enum
-# =============================================================================
-
-class PipelineMode(Enum):
-    """
-    Defines the execution mode for the ACM pipeline.
-    
-    ONLINE: Real-time streaming processing
-        - Single observation at a time
-        - No batch aggregations
-        - Incremental model updates only
-        - Lower latency requirements
-        
-    OFFLINE: Batch processing mode  
-        - Multiple observations processed together
-        - Full batch aggregations allowed
-        - Full model refit allowed
-        - Higher throughput focus
-    """
-    ONLINE = auto()
-    OFFLINE = auto()
-    
-    @classmethod
-    def from_config(cls, cfg: Dict[str, Any]) -> "PipelineMode":
-        """Detect pipeline mode from configuration."""
-        mode_str = cfg.get("pipeline", {}).get("mode", "offline").lower()
-        if mode_str == "online":
-            return cls.ONLINE
-        return cls.OFFLINE
-    
-    @property
-    def allows_batch_aggregation(self) -> bool:
-        """Whether this mode allows batch-level aggregations."""
-        return self == PipelineMode.OFFLINE
-    
-    @property
-    def allows_model_refit(self) -> bool:
-        """Whether this mode allows full model refit."""
-        return self == PipelineMode.OFFLINE
-    
-    @property
-    def max_latency_ms(self) -> int:
-        """Maximum acceptable latency for this mode."""
-        return 100 if self == PipelineMode.ONLINE else 300000  # 100ms vs 5min
 
 
 # =============================================================================
@@ -626,8 +577,7 @@ def run_data_guardrails(
 # =============================================================================
 
 __all__ = [
-    "PipelineMode",
-    "DataContract", 
+    "DataContract",
     "ValidationResult",
     "SensorMeta",
     "SensorValidator",

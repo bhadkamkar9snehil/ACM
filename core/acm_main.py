@@ -14,8 +14,7 @@ from __future__ import annotations
 #   → regimes → calibration → fusion → drift → persistence → analytics → forecast.
 # - Output: Writes run artifacts and metrics to SQL via `OutputManager` and
 #   emits observability signals when available.
-# - Modes: OFFLINE (full discovery) and ONLINE (scoring only) are enforced
-#   through `PipelineMode` and model cache validation.
+# - Adaptive: Quality-driven model retraining replaces manual ONLINE/OFFLINE modes.
 # =============================================================================
 
 # ============================
@@ -69,7 +68,7 @@ from core.config_history_writer import log_auto_tune_changes
 from core.output_manager import OutputManager, write_sql_artifacts
 from core.run_metadata_writer import write_run_metadata, extract_run_metadata_from_scores, extract_data_quality_score
 from core.episode_culprits_writer import write_episode_culprits_enhanced
-from core.pipeline_types import DataContract, ValidationResult, PipelineMode
+from core.pipeline_types import DataContract, ValidationResult
 from core.seasonality import SeasonalPattern  # detect_and_adjust imported inline
 from core.sensor_attribution import build_contribution_timeline
 from core.adaptive_thresholds import calculate_and_persist_thresholds
@@ -256,19 +255,8 @@ class RuntimeContext:
     CONTINUOUS_LEARNING: bool
     config_signature: str
     run_start_time: datetime
-    pipeline_mode: PipelineMode = PipelineMode.OFFLINE  # Online/offline pipeline mode.
     tracer: Optional[Any] = None
     root_span: Optional[Any] = None
-    
-    @property
-    def allows_model_refit(self) -> bool:
-        """Return True when the current mode allows model fitting/retraining."""
-        return self.pipeline_mode == PipelineMode.OFFLINE
-    
-    @property
-    def allows_regime_discovery(self) -> bool:
-        """Return True when the current mode allows new regime discovery."""
-        return self.pipeline_mode == PipelineMode.OFFLINE
 
 
 @dataclass
@@ -596,10 +584,10 @@ def classify_noop_reason(
         # If caller says coldstart was not possible/complete, treat as coldstart deferred
         if coldstart_complete is False:
             return "COLDSTART_DEFERRED"
-        return "ONLINE_NO_DATA"
+        return "SCORING_NO_DATA"
 
     if hasattr(score, "__len__") and len(score) == 0:
-        return "ONLINE_NO_DATA"
+        return "SCORING_NO_DATA"
 
     return "UNKNOWN_NOOP"
 
@@ -641,8 +629,7 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
     ap.add_argument("--equip", required=True, help="Equipment name (e.g., FD_FAN, GAS_TURBINE)")
-    ap.add_argument("--mode", choices=["online", "offline"], default="offline",
-                    help="Pipeline mode: online (scoring only, requires model), offline (full discovery)")
+    ap.add_argument("--force-retrain", action="store_true", help="Force model retraining regardless of quality (for testing/reset)")
     ap.add_argument("--clear-cache", action="store_true", help="Force re-training by deleting the cached model for this equipment.")
     ap.add_argument("--log-level", choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"], help="Override global log level.")
     ap.add_argument("--log-format", choices=["text", "json"], help="Override log output format.")
@@ -738,24 +725,22 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
     config_signature = compute_config_signature(cfg)
     cfg["_signature"] = config_signature
 
-    # Pipeline mode from CLI (online=scoring only, offline=full discovery).
-    pipeline_mode_str = getattr(args, "mode", "offline")
-    PIPELINE_MODE = PipelineMode.ONLINE if pipeline_mode_str == "online" else PipelineMode.OFFLINE
-    ALLOWS_MODEL_REFIT = PIPELINE_MODE == PipelineMode.OFFLINE
-    ALLOWS_REGIME_DISCOVERY = PIPELINE_MODE == PipelineMode.OFFLINE
-    
+    # v11.8.0 ADAPTIVE: No ONLINE/OFFLINE mode distinction. System decides
+    # adaptively based on model state and quality metrics.
+    ALLOWS_MODEL_REFIT = True      # Always allow - quality metrics decide
+    ALLOWS_REGIME_DISCOVERY = True  # Always allow - maturity state decides
+
     # Continuous learning is controlled exclusively by config.
     CONTINUOUS_LEARNING = _continuous_learning_enabled(cfg)
-    
+
     # Continuous learning settings.
     cl_cfg = cfg.get("continuous_learning", {})
     model_update_interval = int(cl_cfg.get("model_update_interval", 1))  # Default: update every batch
     threshold_update_interval = int(cl_cfg.get("threshold_update_interval", 1))  # Default: update every batch
-    
-    # v11.6.1 FIX: Only force retraining in OFFLINE mode, not ONLINE
-    # ONLINE mode cannot retrain (ALLOWS_MODEL_REFIT=False), so force_retraining must be False
-    # This prevents the case where continuous_learning=True + ONLINE causes use_cache=False
-    force_retraining = CONTINUOUS_LEARNING and ALLOWS_MODEL_REFIT
+
+    # v11.8.0: Force retraining via CLI flag or continuous learning config
+    force_retrain_cli = getattr(args, "force_retrain", False)
+    force_retraining = CONTINUOUS_LEARNING or force_retrain_cli
     
     # Validate interval settings to avoid zero/negative values in production.
     invalid_intervals = []
@@ -788,13 +773,10 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
     if "runtime" not in cfg:
         cfg["runtime"] = {}
     cfg["runtime"]["run_count"] = run_count
-    # v11.5.0: Store pipeline mode in config for downstream access (e.g., model_evaluation)
-    cfg["runtime"]["pipeline_mode"] = pipeline_mode_str
-
     # Consolidated startup log.
-    pipeline_info = f"mode={pipeline_mode_str.upper()} | refit={ALLOWS_MODEL_REFIT} | discovery={ALLOWS_REGIME_DISCOVERY}"
+    adaptive_info = f"adaptive | continuous_learning={CONTINUOUS_LEARNING} | force_retrain={force_retraining}"
     intervals_info = f" | intervals=model:{model_update_interval},thresh:{threshold_update_interval}" if CONTINUOUS_LEARNING else ""
-    Console.info(f"Run #{run_count + 1} | {equip} | {pipeline_info}{intervals_info}", component="RUN")
+    Console.info(f"Run #{run_count + 1} | {equip} | {adaptive_info}{intervals_info}", component="RUN")
 
     # Initialize cross-phase state variables.
     detector_cache: Optional[Dict[str, Any]] = None
@@ -941,8 +923,8 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
             if not coldstart_complete:
                 reason = classify_noop_reason(train, score, meta=meta, coldstart_complete=coldstart_complete)
 
-                if reason == "ONLINE_NO_DATA":
-                    Console.info("ONLINE NOOP - no new data in historian window (models exist)", component="COLDSTART")
+                if reason == "SCORING_NO_DATA":
+                    Console.info("NOOP - no new data in historian window (models exist)", component="COLDSTART")
                 else:
                     Console.info("Coldstart deferred - insufficient history for training, will retry next run", component="COLDSTART")
 
@@ -973,62 +955,34 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
             except (TypeError, ValueError):
                 min_train_samples = 500
                 
-            try:
-                min_offline_rows = int(data_cfg.get("min_offline_rows", 100))
-                min_offline_rows = max(1, min_offline_rows)
-            except (TypeError, ValueError):
-                min_offline_rows = 100
-
             # DataContract validation at pipeline entry.
             # ------------------------------------------------------------
             # DATA CONTRACT VALIDATION
             # ------------------------------------------------------------
             # Purpose:
-            #   - Coldstart (offline + train present): validate TRAIN dataframe against min_train_samples
-            #   - Online scoring (train empty): validate SCORE dataframe against min_score_samples (NOT 100)
-            #   - Offline non-coldstart scoring: validate SCORE dataframe against min_offline_rows
-            #
-            # Notes:
-            #   - Do NOT use `coldstart_complete` as "is_coldstart". That means "models exist", not "this run is training".
+            #   - Training phase (coldstart/refit): validate TRAIN against min_train_samples
+            #   - Scoring phase: validate SCORE against min_score_samples
             #   - Always write the validation row to SQL (pass or fail).
             # ------------------------------------------------------------
             with T.section("data.contract"):
-                # Derive is_online from PIPELINE_MODE (set at startup)
-                is_online = (PIPELINE_MODE == PipelineMode.ONLINE)
-                
-                # DataContract is now primarily a guardrail for ONLINE scoring paths.
-                # For OFFLINE initial coldstart and model refits, we allow smaller training blocks.
+                # v11.8.0 ADAPTIVE: Unified validation - no ONLINE/OFFLINE branching.
+                # Decision based on what we're doing: training or scoring.
                 is_initial_coldstart = bool(coldstart_complete)
                 is_warm_refit = bool(refit_requested)
-                is_offline = (not is_online)
+                is_training_phase = is_initial_coldstart or is_warm_refit
 
-                # Minimum rows logic:
-                # - ONLINE scoring should match your expected tick/cadence window to avoid false failures
-                # - OFFLINE: allow smaller chunks for training and for refit workflows
-                if is_online:
-                    min_rows_threshold = int(min_score_samples)
+                # Minimum rows: training phases allow smaller blocks
+                if is_training_phase:
+                    min_rows_threshold = int(min_train_samples)
                 else:
-                    # OFFLINE training/refit can be smaller than online scoring windows.
-                    # Use training minimum when we are actually training/refitting, else fall back to offline minimum.
-                    if is_initial_coldstart or is_warm_refit:
-                        min_rows_threshold = int(min_train_samples)
-                    else:
-                        min_rows_threshold = int(min_offline_rows)
+                    min_rows_threshold = int(min_score_samples)
 
                 # Choose DF to validate:
-                # v11.6.3 FIX: For coldstart, validate TRAIN not SCORE (score split is only 40%)
-                # - ONLINE: validate the score DF (post-cleaning), because that is what flows downstream
-                # - OFFLINE coldstart/refit: validate TRAIN (score is too small for training thresholds)
-                # - OFFLINE normal: prefer score if available, else train
-                if is_online:
-                    validation_df = score
-                elif is_initial_coldstart or is_warm_refit:
-                    # v11.6.3: Coldstart split is 60% train / 40% score
-                    # If we validate score, we'll always fail (403 < 500 min)
-                    # Validate TRAIN instead (has 603 rows, passes 500 min)
+                # - Training phase (coldstart/refit): validate TRAIN (score split is only 40%)
+                # - Scoring phase: prefer score if available, else train
+                if is_training_phase:
                     validation_df = train
                 else:
-                    # Normal OFFLINE: prefer score if available, else train
                     validation_df = score if (score is not None and len(score) > 0) else train
 
                 contract = DataContract(
@@ -1505,8 +1459,7 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
                 "regime_model": regime_model,  # Pass through; no sentinel checks.
                 "regime_basis_hash": regime_basis_hash,
                 "X_train": train,
-                "allow_discovery": ALLOWS_REGIME_DISCOVERY,  # DEPRECATED: kept for backward compat
-                "model_maturity": current_model_maturity,  # v11.4.0: MaturityState controls discovery
+                "model_maturity": current_model_maturity,  # MaturityState controls discovery
             }
             regime_out = regimes.label(score, regime_ctx, {"frame": frame}, cfg)
             frame = regime_out.get("frame", frame)

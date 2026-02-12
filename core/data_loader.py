@@ -222,9 +222,9 @@ class DataLoader:
 
         Key behavioral rules:
         - If no rows returned: raise ValueError("No data returned...") (caller may NOOP).
-        - In ONLINE scoring (is_coldstart=False): allow scoring with small batches.
-        Use data.min_score_samples (default 1) instead of min_train_samples//10.
-        - In COLDSTART (is_coldstart=True): enforce min_train_samples.
+        - Scoring with cached models (is_coldstart=False): allow small batches
+          using data.min_score_samples (default 1).
+        - Coldstart training (is_coldstart=True): enforce min_train_samples.
         """
         data_cfg = cfg.get("data", {}) or {}
         ts_col = _cfg_get(data_cfg, "timestamp_col", "EntryDateTime")
