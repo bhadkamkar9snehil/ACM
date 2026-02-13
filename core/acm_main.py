@@ -738,9 +738,11 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
     model_update_interval = int(cl_cfg.get("model_update_interval", 1))  # Default: update every batch
     threshold_update_interval = int(cl_cfg.get("threshold_update_interval", 1))  # Default: update every batch
 
-    # v11.8.0: Force retraining via CLI flag or continuous learning config
+    # v11.8.0: Force retraining only via explicit CLI flag.
+    # CONTINUOUS_LEARNING controls quality-based retraining evaluation downstream,
+    # not forced retraining every batch.
     force_retrain_cli = getattr(args, "force_retrain", False)
-    force_retraining = CONTINUOUS_LEARNING or force_retrain_cli
+    force_retraining = force_retrain_cli
     
     # Validate interval settings to avoid zero/negative values in production.
     invalid_intervals = []
@@ -967,7 +969,10 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
             with T.section("data.contract"):
                 # v11.8.0 ADAPTIVE: Unified validation - no ONLINE/OFFLINE branching.
                 # Decision based on what we're doing: training or scoring.
-                is_initial_coldstart = bool(coldstart_complete)
+                is_initial_coldstart = bool(
+                    meta.get('is_coldstart_run', False) if isinstance(meta, dict)
+                    else getattr(meta, 'is_coldstart_run', False)
+                )
                 is_warm_refit = bool(refit_requested)
                 is_training_phase = is_initial_coldstart or is_warm_refit
 
