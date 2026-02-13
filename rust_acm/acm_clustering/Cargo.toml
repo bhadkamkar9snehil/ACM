@@ -1,0 +1,14 @@
+[package]
+name = "acm_clustering"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+pyo3.workspace = true
+numpy.workspace = true
+ndarray.workspace = true
+smartcore.workspace = true
+rayon.workspace = true
+
+[dev-dependencies]
+approx = "0.5"

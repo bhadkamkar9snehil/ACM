@@ -1,0 +1,102 @@
+# ACM Rust Workspace
+# 
+# This workspace contains high-performance Rust implementations of compute-intensive
+# ACM components. Python remains the orchestrator via PyO3 FFI bindings.
+#
+# Build Instructions:
+#   maturin develop --release     # Development build
+#   maturin build --release       # Production wheel
+#
+# Windows Requirements:
+#   - Rust toolchain (rustup.rs)
+#   - MSVC build tools
+#   - Python 3.11+
+
+[workspace]
+members = [
+    "acm_features",
+    "acm_detectors",
+    "acm_clustering",
+    "acm_linalg",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["ACM Development Team"]
+license = "Proprietary"
+rust-version = "1.75"
+
+[workspace.dependencies]
+# PyO3 - Python bindings
+pyo3 = { version = "0.20", features = ["extension-module", "abi3-py311"] }
+numpy = "0.20"
+
+# Array operations
+ndarray = { version = "0.15", features = ["rayon"] }
+ndarray-stats = "0.5"
+
+# Numerical libraries
+num-traits = "0.2"
+statrs = "0.16"
+
+# Linear algebra
+nalgebra = "0.32"
+
+# Parallel processing
+rayon = "1.8"
+
+# Machine learning
+smartcore = { version = "0.3", features = ["serde"] }
+
+# FFT operations
+rustfft = "6.1"
+
+# Serialization (for model persistence)
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+bincode = "1.3"
+
+[package]
+name = "acm_rs"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lib]
+name = "acm_rs"
+crate-type = ["cdylib"]  # Python extension module
+
+[dependencies]
+pyo3.workspace = true
+numpy.workspace = true
+
+# Internal crates
+acm_features = { path = "./acm_features" }
+acm_detectors = { path = "./acm_detectors" }
+acm_clustering = { path = "./acm_clustering" }
+acm_linalg = { path = "./acm_linalg" }
+
+[profile.release]
+opt-level = 3              # Maximum optimization
+lto = "fat"                # Link-time optimization
+codegen-units = 1          # Better optimization (slower build)
+strip = true               # Strip debug symbols
+panic = "abort"            # Smaller binary size
+
+[profile.dev]
+opt-level = 1              # Some optimization for testing
+overflow-checks = true     # Runtime overflow checks
+
+[profile.bench]
+inherits = "release"
+debug = true               # Keep debug symbols for profiling
+
+# Platform-specific configurations
+[target.'cfg(windows)'.dependencies]
+# Windows-specific dependencies (if needed)
+
+[target.'cfg(unix)'.dependencies]
+# Linux/macOS-specific dependencies (if needed)

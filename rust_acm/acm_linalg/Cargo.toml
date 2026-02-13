@@ -1,0 +1,13 @@
+[package]
+name = "acm_linalg"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+pyo3.workspace = true
+numpy.workspace = true
+ndarray.workspace = true
+nalgebra.workspace = true
+
+[dev-dependencies]
+approx = "0.5"

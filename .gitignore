@@ -49,3 +49,12 @@ ACM_V6_BACKUP_*/
 /*.sql
 /*.tsv
 /*.pdf
+
+## Rust build artifacts
+rust_acm/target/
+rust_acm/Cargo.lock
+rust_acm/dist/
+rust_acm/**/*.pyd
+rust_acm/**/*.so
+rust_acm/**/*.dylib
+rust_acm/**/*.dll

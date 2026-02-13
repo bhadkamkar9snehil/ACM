@@ -1,0 +1,57 @@
+# Maturin configuration for building Python wheels
+[build-system]
+requires = ["maturin>=1.4,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "acm-rs"
+version = "0.1.0"
+description = "Rust-accelerated compute kernels for ACM predictive maintenance"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+authors = [
+    { name = "ACM Development Team" }
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: Other/Proprietary License",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Rust",
+    "Topic :: Scientific/Engineering",
+]
+
+dependencies = [
+    "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-benchmark>=4.0",
+    "maturin>=1.4",
+]
+
+[tool.maturin]
+# Python source folder
+python-source = "../rust_bridge"
+# Module name (must match Cargo.toml lib.name)
+module-name = "acm_rs"
+# Build features
+features = ["pyo3/extension-module", "pyo3/abi3-py311"]
+# Compatibility
+compatibility = "linux"  # Can be "manylinux", "musllinux", "windows", "macos"
+# Strip debug symbols in release
+strip = true
+
+[tool.pytest.ini_options]
+testpaths = ["../tests"]
+python_files = ["test_rust_*.py"]
+markers = [
+    "rust: Tests requiring Rust extension",
+    "benchmark: Performance benchmark tests",
+]
