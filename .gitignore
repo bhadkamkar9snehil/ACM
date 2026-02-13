@@ -49,3 +49,5 @@ ACM_V6_BACKUP_*/
 /*.sql
 /*.tsv
 /*.pdf
+.claude/settings.local.json
+nul
