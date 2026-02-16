@@ -578,8 +578,15 @@ class ForecastEngine:
 
             # Build clean DataFrames with reset indices for merge_asof
             # merge_asof requires sorted keys and clean integer indices
+            
+            # Robust extraction of Timestamp values - handle potential duplicate columns
+            ts_values = health_df['Timestamp']
+            if isinstance(ts_values, pd.DataFrame):
+                # If duplicate columns exist, take the first one
+                ts_values = ts_values.iloc[:, 0]
+            
             health_times = pd.DataFrame({
-                'Timestamp': pd.to_datetime(health_df['Timestamp'].values)
+                'Timestamp': pd.to_datetime(ts_values.values)
             })
             health_times = (health_times
                 .drop_duplicates(subset=['Timestamp'], keep='last')
@@ -602,6 +609,8 @@ class ForecastEngine:
             )
 
             regime_series = aligned['RegimeLabel']
+            if isinstance(regime_series, pd.DataFrame):
+                regime_series = regime_series.iloc[:, 0]
             coverage = float(regime_series.notna().mean()) if len(regime_series) > 0 else 0.0
             current_regime = None
             if regime_series.notna().any():
@@ -620,7 +629,16 @@ class ForecastEngine:
 
             return regime_series, coverage, current_regime
         except Exception as e:
-            Console.warn(f"Failed to align regime series: {e}",
+            # Enhanced debug logging for alignment failures
+            debug_info = {
+                'health_df_shape': health_df.shape if health_df is not None else 'None',
+                'health_df_cols': health_df.columns.tolist() if health_df is not None else 'None',
+                'regime_df_shape': regime_df.shape if 'regime_df' in locals() else 'Not created',
+                'rows_count': len(rows) if 'rows' in locals() and rows else 0,
+                'ts_values_type': type(ts_values) if 'ts_values' in locals() else 'Not created',
+                'ts_values_shape': getattr(ts_values, 'shape', 'No shape') if 'ts_values' in locals() else 'N/A'
+            }
+            Console.warn(f"Failed to align regime series: {e} | Debug: {debug_info}",
                          component="FORECAST", equip_id=self.equip_id)
             return None, 0.0, None
 
