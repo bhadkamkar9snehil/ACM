@@ -640,9 +640,9 @@ class ForecastEngine:
                 'ts_values_type': type(ts_values) if 'ts_values' in locals() else 'Not created',
                 'ts_values_shape': getattr(ts_values, 'shape', 'No shape') if 'ts_values' in locals() else '`N/A`'
             }
-            `Console.warn`(f"Failed to align regime series: {e} | Debug: {debug_info}",
-                        component="FORECAST", equip_id=`self.equip_id`)
-            return None, `0.0`, None
+            Console.warn(f"Failed to align regime series: {e} | Debug: {debug_info}",
+                        component="FORECAST", equip_id=self.equip_id)
+            return None, 0.0, None
 
     # End load regime series for health here
     def _build_regime_transition_context(
