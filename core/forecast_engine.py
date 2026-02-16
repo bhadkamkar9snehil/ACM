@@ -543,6 +543,8 @@ class ForecastEngine:
         )
         
         return config
+    # Start load regime series for health Here
+
 
     def _load_regime_series_for_health(
         self,
@@ -594,7 +596,7 @@ class ForecastEngine:
                 .reset_index(drop=True))
             regime_df = regime_df.reset_index(drop=True)
 
-            max_regime_gap = float(forecast_config.get('forecast.regime_conditioned.max_regime_gap_hours', 0.0))
+            max_regime_gap = float(forecast_config.get('`forecast.regime_conditioned.max_regime_gap_hours`', 0.0))
             tolerance_hours = max(2.0 * float(dt_hours), 0.0)
             if max_regime_gap > 0:
                 tolerance_hours = min(tolerance_hours, max_regime_gap)
@@ -616,7 +618,7 @@ class ForecastEngine:
             if regime_series.notna().any():
                 current_regime = int(regime_series.dropna().iloc[-1])
 
-            min_coverage = float(forecast_config.get('forecast.regime_conditioned.min_regime_coverage', 0.80))
+            min_coverage = float(forecast_config.get('`forecast.regime_conditioned.min_regime_coverage`', 0.80))
             if coverage < min_coverage:
                 Console.warn(
                     "Regime coverage below threshold; using global degradation model",
@@ -636,12 +638,13 @@ class ForecastEngine:
                 'regime_df_shape': regime_df.shape if 'regime_df' in locals() else 'Not created',
                 'rows_count': len(rows) if 'rows' in locals() and rows else 0,
                 'ts_values_type': type(ts_values) if 'ts_values' in locals() else 'Not created',
-                'ts_values_shape': getattr(ts_values, 'shape', 'No shape') if 'ts_values' in locals() else 'N/A'
+                'ts_values_shape': getattr(ts_values, 'shape', 'No shape') if 'ts_values' in locals() else '`N/A`'
             }
-            Console.warn(f"Failed to align regime series: {e} | Debug: {debug_info}",
-                         component="FORECAST", equip_id=self.equip_id)
-            return None, 0.0, None
+            `Console.warn`(f"Failed to align regime series: {e} | Debug: {debug_info}",
+                        component="FORECAST", equip_id=`self.equip_id`)
+            return None, `0.0`, None
 
+    # End load regime series for health here
     def _build_regime_transition_context(
         self,
         regime_series: Optional[pd.Series],
