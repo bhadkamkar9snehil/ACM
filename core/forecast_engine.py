@@ -574,7 +574,11 @@ class ForecastEngine:
             if not rows:
                 return None, 0.0, None
 
-            regime_df = pd.DataFrame(rows, columns=['Timestamp', 'RegimeLabel'])
+            # Explicit tuple extraction to avoid pyodbc Row shape ambiguity
+            regime_df = pd.DataFrame(
+                [(row[0], row[1]) for row in rows],
+                columns=['Timestamp', 'RegimeLabel']
+            )
             regime_df['Timestamp'] = pd.to_datetime(regime_df['Timestamp'])
             regime_df = regime_df.sort_values('Timestamp').drop_duplicates(subset=['Timestamp'], keep='last')
 
@@ -1517,23 +1521,28 @@ class ForecastEngine:
                         # when data cadence doesn't match the target frequency exactly.
                         if series.index.freq is None:
                             inferred_freq = pd.infer_freq(series.index)
-                            if inferred_freq:
-                                series = series.resample(inferred_freq).mean().dropna()
-                            else:
-                                # Fallback: resample to the actual median cadence
+                            if not inferred_freq:
+                                # Fallback: compute median cadence
                                 time_diffs = series.index.to_series().diff().dropna()
                                 if len(time_diffs) > 0:
                                     median_secs = time_diffs.median().total_seconds()
-                                    # Round to nearest clean interval
                                     if median_secs <= 120:
-                                        freq_str = f"{max(1, round(median_secs / 60))}min"
+                                        inferred_freq = f"{max(1, round(median_secs / 60))}min"
                                     elif median_secs <= 2700:  # <= 45 min
-                                        freq_str = f"{max(5, round(median_secs / 300) * 5)}min"
+                                        inferred_freq = f"{max(5, round(median_secs / 300) * 5)}min"
                                     elif median_secs <= 5400:  # <= 90 min
-                                        freq_str = "1h"
+                                        inferred_freq = "1h"
                                     else:
-                                        freq_str = f"{max(1, round(median_secs / 3600))}h"
-                                    series = series.resample(freq_str).mean().dropna()
+                                        inferred_freq = f"{max(1, round(median_secs / 3600))}h"
+                            if inferred_freq:
+                                # Resample and interpolate internal gaps to preserve freq
+                                series = series.resample(inferred_freq).mean()
+                                series = series.interpolate(method='linear')
+                                # Trim leading/trailing NaN only
+                                first_valid = series.first_valid_index()
+                                last_valid = series.last_valid_index()
+                                if first_valid is not None and last_valid is not None:
+                                    series = series.loc[first_valid:last_valid]
 
                         # Guard: resample may have reduced the series below minimum
                         if len(series) < 24:
