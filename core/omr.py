@@ -202,10 +202,13 @@ class OMRDetector:
         Returns:
             (cleaned_array, feature_names)
         """
-        # Drop columns with excessive missingness
+        # Drop columns with excessive missingness.
+        # Vectorised: compute notna fraction across all columns at once via numpy
+        # to avoid 632 per-column Series.__init__ / notna() calls (major bottleneck).
         if self.missingness_drop > 0:
-            keep_cols = [c for c in X.columns if X[c].notna().mean() >= (1.0 - self.missingness_drop)]
-            X = X[keep_cols]
+            notna_frac = X.notna().mean()  # single vectorised pass over the whole frame
+            keep_mask = notna_frac >= (1.0 - self.missingness_drop)
+            X = X.loc[:, keep_mask]
         # Use provided medians or compute
         medians_to_use = medians if medians is not None else X.median()
         X_clean = X.fillna(medians_to_use)
@@ -506,14 +509,27 @@ class OMRDetector:
             X_index = X.index
             feature_names = self.model.feature_names
             
-            # Align columns to training feature order and mask
+            # Align columns to training feature order and mask.
+            # Use numpy directly for imputation to avoid repeated pd.Series construction:
+            # train_medians is already a numpy array aligned to feature_names.
             if feature_names:
                 X = X.reindex(feature_names, axis=1)
-            X_clean, _ = self._prepare_data(
-                X,
-                medians=pd.Series(self.model.train_medians, index=feature_names) if self.model.train_medians is not None else None,
-                var_mask=self.model.var_mask
-            )
+            if self.model.train_medians is not None:
+                # Fast path: fill NaNs using precomputed numpy medians (no Series alloc).
+                X_arr = X.to_numpy(dtype=float, na_value=np.nan)
+                nan_mask = np.isnan(X_arr)
+                if nan_mask.any():
+                    medians_arr = self.model.train_medians  # aligned to feature_names
+                    X_arr = np.where(nan_mask, medians_arr[np.newaxis, :], X_arr)
+                # Apply variance mask
+                var_mask = self.model.var_mask
+                if var_mask is not None and len(var_mask) == X_arr.shape[1]:
+                    X_arr = X_arr[:, var_mask]
+                X_clean = X_arr
+                del X, X_arr
+            else:
+                X_clean, _ = self._prepare_data(X, medians=None, var_mask=self.model.var_mask)
+                del X
             # Free X since we have X_clean now
             del X
             

@@ -543,6 +543,33 @@ def run_data_guardrails(
                 f"{len(low_var)} low-variance sensor(s) in TRAIN (std<{low_var_threshold:g}): {preview}",
                 component="DATA", equip=equip, low_var_count=len(low_var), threshold=low_var_threshold
             )
+            # Persist low-variance sensors for future exclusion
+            try:
+                import os
+                import json
+                
+                exclusion_dir = f"artifacts/equip_{equip_id}"
+                os.makedirs(exclusion_dir, exist_ok=True)
+                exclusion_file = os.path.join(exclusion_dir, "low_variance_sensors.json")
+                
+                existing_sensors = set()
+                if os.path.exists(exclusion_file):
+                    with open(exclusion_file, 'r') as f:
+                        try:
+                            existing_sensors.update(json.load(f))
+                        except json.JSONDecodeError:
+                            pass # Ignore corrupted file, it will be overwritten
+
+                new_sensors = set(result.low_var_features)
+                combined_sensors = sorted(list(existing_sensors.union(new_sensors)))
+                
+                with open(exclusion_file, 'w') as f:
+                    json.dump(combined_sensors, f, indent=2)
+                    
+                Console.info(f"Persisted {len(new_sensors - existing_sensors)} new low-variance sensors for permanent exclusion.", component="DATA")
+                
+            except Exception as persist_err:
+                Console.warn(f"Failed to persist low-variance sensor list: {persist_err}", component="DATA")
     
     # 3) Data quality records -> SQL:ACM_DataQuality
     try:

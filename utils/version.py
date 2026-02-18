@@ -17,9 +17,56 @@ Release Management:
 - Production deployments use specific tags (never merge commits)
 """
 
-__version__ = "11.11.0"
+__version__ = "11.12.0"
 __version_date__ = "2026-02-18"
 __version_author__ = "ACM Development Team"
+
+# v11.12.0: METRIC-AWARE REGIME QUALITY + PERF FIXES
+#
+# 1. BUG: DBCV retrain trigger loop (acm_main.py)
+#    - `quality_ok=False` for dbcv metrics was triggering endless retrains even
+#      when the raw DBCV score (e.g. 0.324) exceeded the threshold (0.0).
+#    - Fix: retrain trigger is now metric-type-aware:
+#      silhouette → compare score vs min_regime_quality (0.3)
+#      dbcv/persistence → compare score vs min_dbcv_quality (0.0)
+#      BOOLEAN_ONLY (BIC, calinski_harabasz) → never trigger retrain
+#      unknown metric → fall back to quality_ok boolean only
+#
+# 2. BUG: PROMOTION stuck due to BIC/DBCV metric mismatch (model_lifecycle.py)
+#    - ModelState now carries regime_quality_metric and regime_quality_ok fields.
+#    - check_promotion_eligibility() is metric-aware: silhouette threshold,
+#      DBCV threshold, or boolean-only gate depending on the metric used.
+#    - Backward-compat: silhouette_score property aliases regime_quality_score.
+#
+# 3. PERF: OMR scorer bottleneck (core/omr.py)
+#    - _prepare_data(): replaced per-column `notna().mean()` loop (632 Series.__init__
+#      calls) with a single vectorised `X.notna().mean()` pass.
+#    - score(): eliminated pd.Series allocation per call; uses precomputed numpy
+#      medians array directly with np.isnan / np.where for imputation.
+#
+# 4. PERF: OutputManager NaN cleaning bottleneck (core/output_manager.py)
+#    - _bulk_insert_sql(): replaced chained DataFrame.replace() calls (triggered
+#      111 times, 430s CPU) with a single vectorised numpy path:
+#      - object cols: set-membership mask for NA strings
+#      - float cols: numpy isfinite/abs to clamp extremes and Inf in one array pass
+#      - final: astype(object).where() for NaN→None
+#
+# 5. PERF: Adaptive smoothing grid reduced (core/degradation_model.py)
+#    - _adaptive_smoothing(): 2-phase grid (4×4 + 3×3 = 25 combos, 10 folds) →
+#      single-phase 3×3 = 9 combos, 5 folds. Sufficient accuracy, ~3× faster.
+#    - _simple_grid_search(): same compact grid (was 10×10 = 100 combos).
+#    - Added _detect_and_handle_data_gaps() to truncate series before large gaps.
+#    - Warm-start models skip adaptive smoothing (already has good params).
+#
+# 6. OBSERVABILITY: Consolidated Batch Analytics Summary (acm_main.py finally block)
+#    - Single human-readable block per batch: health P10/50/90, anomaly rate, RUL,
+#      episodes, regime state, drift, model maturity, data volume, top-5 timings.
+#    - Timer section renamed models.quality_check → models.auto_retrain (includes fit).
+#    - Performance timers now Loki-only (no redundant console output).
+#
+# 7. LOW-VAR SENSOR PERSISTENCE (core/pipeline_types.py + data_loader.py)
+#    - Low-variance sensors detected during guardrails are persisted to
+#      artifacts/equip_{id}/low_variance_sensors.json for permanent exclusion.
 
 # v11.11.0: FORECASTING PERFORMANCE (563s → <5s)
 #

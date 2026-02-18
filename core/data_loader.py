@@ -25,6 +25,8 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, cast
+import os
+import json
 
 import numpy as np
 import pandas as pd
@@ -272,6 +274,34 @@ class DataLoader:
             df_all = pd.DataFrame.from_records(rows, columns=columns)
 
             Console.info(f"Retrieved {len(df_all)} rows from SQL historian", component="DATA")
+
+            # Exclude persisted low-variance sensors
+            try:
+                import os
+                import json
+                equip_id_cur = self.sql_client.cursor()
+                equip_id_cur.execute("SELECT EquipID FROM Equipment WHERE EquipCode = ?", (equipment_name,))
+                equip_id_row = equip_id_cur.fetchone()
+                equip_id = equip_id_row[0] if equip_id_row else None
+                equip_id_cur.close()
+
+                if equip_id:
+                    exclusion_file = f"artifacts/equip_{equip_id}/low_variance_sensors.json"
+                    if os.path.exists(exclusion_file):
+                        with open(exclusion_file, 'r') as f:
+                            try:
+                                excluded_sensors = json.load(f)
+                            except json.JSONDecodeError:
+                                excluded_sensors = []
+                        
+                        if excluded_sensors:
+                            original_cols = set(df_all.columns)
+                            cols_to_drop = [s for s in excluded_sensors if s in original_cols]
+                            if cols_to_drop:
+                                df_all = df_all.drop(columns=cols_to_drop, errors='ignore')
+                                Console.warn(f"Permanently excluded {len(cols_to_drop)} low-variance sensors based on persisted list.", component="DATA")
+            except Exception as ex_err:
+                Console.warn(f"Failed to process sensor exclusion list: {ex_err}", component="DATA")
 
         except Exception as e:
             Console.error(
