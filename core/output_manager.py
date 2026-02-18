@@ -935,7 +935,7 @@ class OutputManager:
                                 (self.run_id,)
                             ).rowcount
                         if rows_deleted and rows_deleted > 0:
-                            Console.info("" + f"Deleted {rows_deleted} existing rows from {table_name} for RunID={self.run_id}, EquipID={self.equip_id}", component="OUTPUT")
+                            Console.info(f"SQL delete from {table_name}: {rows_deleted} rows", component="OUTPUT")
                 except Exception as del_ex:
                     Console.warn(f"Standard pre-delete for {table_name} failed: {del_ex}", component="OUTPUT", table=table_name, equip_id=self.equip_id, run_id=self.run_id, error_type=type(del_ex).__name__)
 
@@ -1026,7 +1026,7 @@ class OutputManager:
                 Console.error(f"SQL commit failed for {table_name}: {e}", component="OUTPUT", table=table_name, equip_id=self.equip_id, run_id=self.run_id, error_type=type(e).__name__, error=str(e)[:200])
                 raise
 
-        Console.info("" + f"SQL insert to {table_name}: {inserted} rows", component="OUTPUT")
+        Console.info(f"SQL insert to {table_name}: {inserted} rows", component="OUTPUT")
         
         # P1: Track SQL ops for observability metrics
         if _OBSERVABILITY_AVAILABLE and record_sql_op:
@@ -1067,7 +1067,7 @@ class OutputManager:
         """
         cached = self._artifact_cache.get(table_name)
         if cached is not None:
-            Console.info("" + f"Retrieved {table_name} from artifact cache ({len(cached)} rows)", component="OUTPUT")
+            Console.info(f"SQL cache hit {table_name}: {len(cached)} rows", component="OUTPUT")
             return cached.copy()  # Return copy to prevent mutation
         else:
             Console.warn(f"Table {table_name} not found in artifact cache", component="OUTPUT", table=table_name, available_tables=list(self._artifact_cache.keys())[:5])
@@ -2635,7 +2635,7 @@ class OutputManager:
                     float(regime_quality) if regime_quality is not None else None,
                 ))
                 
-            Console.info("SQL refit request recorded in ACM_RefitRequests", component="OUTPUT")
+            Console.info("SQL insert to ACM_RefitRequests: 1 rows", component="OUTPUT")
             return 1
         except Exception as e:
             Console.warn(f"write_refit_request failed: {e}", component="OUTPUT", error=str(e)[:200])
@@ -2716,8 +2716,7 @@ class OutputManager:
                 cur.executemany(insert_sql, insert_records)
             self.sql_client.conn.commit()
             
-            Console.info(f"Saved fusion metrics -> SQL:ACM_RunMetrics ({len(insert_records)} records)", 
-                         component="OUTPUT", equip=self.equipment)
+            Console.info(f"SQL insert to ACM_RunMetrics: {len(insert_records)} rows", component="OUTPUT")
             return len(insert_records)
             
         except Exception as e:
@@ -2866,7 +2865,7 @@ class OutputManager:
                     cur.fast_executemany = True
                     cur.executemany(insert_sql, baseline_records)
                 self.sql_client.conn.commit()
-                Console.info(f"Wrote {len(baseline_records)} records to ACM_BaselineBuffer ({write_reason})", component="BASELINE")
+                Console.info(f"SQL insert to ACM_BaselineBuffer: {len(baseline_records)} rows ({write_reason})", component="OUTPUT")
                 
                 # Run cleanup procedure
                 try:

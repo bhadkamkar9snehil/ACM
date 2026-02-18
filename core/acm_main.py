@@ -2593,7 +2593,7 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
             _eq   = equip if 'equip' in locals() else "?"
             _ws   = win_start.strftime("%Y-%m-%d %H:%M") if 'win_start' in locals() and win_start is not None else "?"
             _we   = win_end.strftime("%H:%M") if 'win_end' in locals() and win_end is not None else "?"
-            Console.header(f"BATCH SUMMARY  {_eq}  [{_ws} → {_we}]")
+            Console.header(f"BATCH SUMMARY  {_eq}  [{_ws} - {_we}]")
 
             # -- Health --
             if 'frame' in locals() and isinstance(frame, pd.DataFrame) and 'fused' in frame.columns:
