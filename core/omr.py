@@ -530,8 +530,6 @@ class OMRDetector:
             else:
                 X_clean, _ = self._prepare_data(X, medians=None, var_mask=self.model.var_mask)
                 del X
-            # Free X since we have X_clean now
-            del X
             
             # Scale directly (returns a view or copy depending on sklearn)
             X_scaled = self.model.scaler.transform(X_clean)

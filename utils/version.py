@@ -17,9 +17,15 @@ Release Management:
 - Production deployments use specific tags (never merge commits)
 """
 
-__version__ = "11.12.1"
+__version__ = "11.12.2"
 __version_date__ = "2026-02-18"
 __version_author__ = "ACM Development Team"
+
+# v11.12.2: FIX OMR SCORE CRASH
+#
+# - BUG: `del X` on line 534 of omr.py was a duplicate — X was already deleted
+#   inside both if/else branches (line 529/532). Caused UnboundLocalError crash
+#   on every score() call after the v11.12.0 numpy fast-path refactor.
 
 # v11.12.1: CLEANUP
 #
