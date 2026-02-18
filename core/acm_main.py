@@ -1644,24 +1644,18 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
                     # Build temporary episodes for quality check (before fusion/episodes).
                     temp_episodes = pd.DataFrame()  # Will be populated after fusion
                     
-                    # Regime quality metrics.
-                    regime_quality_metrics = {
-                        "silhouette": score_out.get("silhouette", 0.0),
-                        "quality_ok": regime_quality_ok
-                    }
-                    
                     # Assess quality (full assessment happens after fusion; check config now).
                     config_changed = False
                     if cached_manifest:
                         cached_sig = cached_manifest.get("config_signature", "")
                         current_sig = cfg.get("_signature", "unknown")
                         config_changed = (cached_sig != current_sig)
-                    
+
                     # Auto-retrain config for SQL-mode data-driven triggers.
                     auto_retrain_cfg = cfg.get("models", {}).get("auto_retrain", {})
                     if isinstance(auto_retrain_cfg, bool):
                         auto_retrain_cfg = {}  # Convert legacy boolean to dict
-                    
+
                     # Check model age (temporal validation).
                     model_age_trigger = False
                     model_age_hours = 0.0
@@ -1678,14 +1672,25 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
                                     model_age_trigger = True
                             except Exception:
                                 pass
-                    
+
                     # Check regime quality (data-driven trigger).
+                    # BUG FIX: score_out uses "regime_score"/"regime_metric" keys, not "silhouette".
+                    # The old code always read 0.0 (missing key default) → perpetual retraining.
+                    # Also: min_regime_quality threshold (0.3) is silhouette-scaled. HDBSCAN returns
+                    # DBCV/persistence scores on a different scale, so we only apply the threshold
+                    # for silhouette-based metrics; for others, trust regime_quality_ok from regimes.py.
                     regime_quality_trigger = False
-                    min_silhouette = auto_retrain_cfg.get("min_regime_quality", 0.3)
-                    current_silhouette = regime_quality_metrics.get("silhouette", 0.0)
-                    if not regime_quality_ok or current_silhouette < min_silhouette:
+                    current_regime_score = score_out.get("regime_score", 0.0)
+                    regime_metric_name = score_out.get("regime_metric", "silhouette")
+                    min_regime_quality = auto_retrain_cfg.get("min_regime_quality", 0.3)
+                    if not regime_quality_ok:
                         regime_quality_trigger = True
-                    
+                    elif regime_metric_name in ("silhouette", "silhouette_non_noise", "calinski_harabasz"):
+                        # Silhouette-scale metrics can be compared against min_regime_quality
+                        if current_regime_score < min_regime_quality:
+                            regime_quality_trigger = True
+                    # HDBSCAN metrics (dbcv, persistence): trust regime_quality_ok from regimes.py
+
                     # Aggregate triggers and log a consolidated retraining reason.
                     if config_changed or model_age_trigger or regime_quality_trigger:
                         reasons = []
@@ -1694,7 +1699,7 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
                         if model_age_trigger:
                             reasons.append(f"age={model_age_hours:.0f}h>{max_age_hours}h")
                         if regime_quality_trigger:
-                            reasons.append(f"silhouette={current_silhouette:.3f}<{min_silhouette}")
+                            reasons.append(f"{regime_metric_name}={current_regime_score:.3f}<{min_regime_quality}")
                         Console.warn(f"Forcing retraining: {' | '.join(reasons)}", component="MODEL", equip=equip)
                         force_retrain = True
                     
