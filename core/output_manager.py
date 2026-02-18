@@ -2615,13 +2615,14 @@ class OutputManager:
                     END
                 """)
                 
-                # Insert request
+                # Insert request - use datetime.now() so RequestedAt matches log timestamps (both local time)
                 cur.execute("""
                     INSERT INTO [dbo].[ACM_RefitRequests]
-                        (EquipID, Reason, AnomalyRate, DriftScore, RegimeQuality)
-                    VALUES (?, ?, ?, ?, ?)
+                        (EquipID, RequestedAt, Reason, AnomalyRate, DriftScore, RegimeQuality)
+                    VALUES (?, ?, ?, ?, ?, ?)
                 """, (
                     int(self.equip_id or 0),
+                    datetime.now(),
                     "; ".join(reasons) if reasons else None,
                     float(anomaly_rate) if anomaly_rate is not None else None,
                     float(drift_score) if drift_score is not None else None,
@@ -2750,7 +2751,7 @@ class OutputManager:
                                  equip=self.equipment, refit_request_id=row[0])
                     # Acknowledge refit so it is not re-used next run
                     cur.execute(
-                        "UPDATE [dbo].[ACM_RefitRequests] SET Acknowledged = 1, AcknowledgedAt = SYSUTCDATETIME() WHERE RequestID = ?",
+                        "UPDATE [dbo].[ACM_RefitRequests] SET Acknowledged = 1, AcknowledgedAt = SYSDATETIME() WHERE RequestID = ?",
                         (int(row[0]),),
                     )
                     self.sql_client.conn.commit()

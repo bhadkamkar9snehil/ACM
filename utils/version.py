@@ -17,9 +17,49 @@ Release Management:
 - Production deployments use specific tags (never merge commits)
 """
 
-__version__ = "11.9.0"
+__version__ = "11.10.0"
 __version_date__ = "2026-02-18"
 __version_author__ = "ACM Development Team"
+
+# v11.10.0: FUSION CLEANUP + TIMESTAMP FIX
+#
+# FIX #1: REFIT REQUEST TIMESTAMP MISMATCH (core/output_manager.py)
+# - PROBLEM: ACM_RefitRequests.RequestedAt stored as SYSUTCDATETIME() (UTC),
+#   but all log timestamps use datetime.now() (local time). Result: "SQL refit
+#   request found: id=460 at 04:51" logged at 10:24 — 5.5 hour apparent gap.
+# - FIX: INSERT now explicitly passes datetime.now() for RequestedAt so stored
+#   timestamps match log timestamps (both local). AcknowledgedAt switched to
+#   SYSDATETIME() for consistency.
+#
+# FIX #2: CONSTANT INPUT WARNING IN CORRELATION DISCOUNTING (core/fuse.py)
+# - PROBLEM: scipy spearmanr raises ConstantInputWarning + returns NaN when
+#   one detector array is all-constant (zeros in early batches).
+# - FIX: Pre-check np.unique(arr).size < 2 before calling spearmanr; skip pair.
+#   pairs_checked moved after the constant-check for accurate log counts.
+#
+# REFACTOR #1: DELETE combine() WRAPPER (core/fuse.py)
+# - combine() was a vestigial thin wrapper over run_fusion_pipeline().
+#   It provided one Span but was not called anywhere except run_fusion_pipeline().
+# - FIX: Deleted combine(). Three passes now inlined in run_fusion_pipeline()
+#   with semantically named Spans: fusion.baseline, fusion.train, fusion.score.
+#   episodes.detect appears as a child span inside fusion.score.
+# - BREAKING (internal): Fuser.fuse() discounted_weights is now a required
+#   parameter — no Optional fallback to self.weights. Callers must pass it.
+#
+# FIX #3: TRIPLE TIMER SUMMARY (core/fast_features.py)
+# - PROBLEM: Three Timer() instances each register atexit callbacks:
+#   (1) T = Timer() in main() [correct], (2) _timer = Timer() at module level
+#   in fast_features.py [spurious], (3) second main() Timer (now gone).
+# - FIX: Removed module-level _timer = Timer() and @_timer.wrap decorator from
+#   fast_features.py. Removed from utils.timer import Timer (now unused there).
+#   Result: exactly ONE timer summary per subprocess.
+#
+# FIX #4: DUPLICATE main() IN acm_main.py (core/acm_main.py)
+# - PROBLEM: acm_main.py had grown to 5408 lines with TWO def main() (at
+#   lines 617 and 3320) plus duplicate imports/classes/helpers between them.
+#   Only the second main() was reachable (Python shadows first definition).
+# - FIX: User removed duplicate block; file cleaned to 2705 lines, single
+#   main() at line 617. UTF-8 BOM (from Windows editor) also stripped.
 
 # v11.9.0: FUSION STABILITY - Cross-Batch Health Score Comparability
 #
