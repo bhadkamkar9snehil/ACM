@@ -417,9 +417,7 @@ class DataLoader:
 
         Console.info(f"Kept {len(kept)} numeric columns, dropped {len(dropped)} non-numeric", component="DATA")
 
-        # Cadence / resample logic unchanged
-        Console.status(f"Checking cadence and resampling for {len(score)} score rows...")
-
+        # Cadence / resample
         _sampling = data_cfg.get("sampling_secs", 1)
         try:
             if _sampling in (None, "", "auto", "null"):
@@ -434,12 +432,9 @@ class DataLoader:
         interp_method = str(_cfg_get(data_cfg, "interp_method", "linear"))
         max_fill_ratio = float(_cfg_get(data_cfg, "max_fill_ratio", _cfg_get(cfg, "runtime.max_fill_ratio", 0.20)))
 
-        Console.status("  Checking train cadence...")
         cad_ok_train = check_cadence(cast(pd.DatetimeIndex, train.index), sampling_secs)
-        Console.status("  Checking score cadence...")
         cad_ok_score = check_cadence(cast(pd.DatetimeIndex, score.index), sampling_secs)
         cadence_ok = bool(cad_ok_train and cad_ok_score)
-        Console.status(f"  Cadence check complete: train={cad_ok_train}, score={cad_ok_score}")
 
         native_train = native_cadence_secs(cast(pd.DatetimeIndex, train.index))
         native_score = native_cadence_secs(cast(pd.DatetimeIndex, score.index))

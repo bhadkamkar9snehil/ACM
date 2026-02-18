@@ -288,27 +288,18 @@ class Timer:
                 "sections": sections
             }))
         elif _Console:
-            if self.totals:
-                # Console-only section header (not logged to Loki)
-                _Console.section("Timer Summary")
+            # Push structured timers to Loki (console output handled by Batch Summary in acm_main.py)
+            if self.totals and _log_timer_fn:
                 for k, v in sorted(self.totals.items(), key=lambda x: -x[1]):
                     pct = (v / total) * 100.0 if total > 0 else 0.0
                     parts = k.split(".")
                     parent = parts[0] if parts else k
-                    # Push structured timer to Loki (skip console's Loki push to avoid duplicates)
-                    if _log_timer_fn:
-                        _log_timer_fn(section=k, duration_s=v, pct=pct, parent=parent, total_s=total)
-                    # Console output only (status = no Loki)
-                    _Console.status(f"{k:<30} {v:7.3f}s ({pct:5.1f}%)")
+                    _log_timer_fn(section=k, duration_s=v, pct=pct, parent=parent, total_s=total)
                 if unaccounted > 0:
                     pct = (unaccounted / total) * 100.0 if total > 0 else 0.0
-                    if _log_timer_fn:
-                        _log_timer_fn(section="unaccounted", duration_s=unaccounted, pct=pct, parent="total_run", total_s=total)
-                    _Console.status(f"{'unaccounted':<30} {unaccounted:7.3f}s ({pct:5.1f}%)")
-            # Log total run as structured timer
+                    _log_timer_fn(section="unaccounted", duration_s=unaccounted, pct=pct, parent="total_run", total_s=total)
             if _log_timer_fn:
                 _log_timer_fn(section="total_run", duration_s=total, parent="total_run", total_s=total)
-            _Console.status(f"total_run                      {total:7.3f}s")
         else:
             timestamp = self._get_timestamp()
             if self.totals:

@@ -290,6 +290,9 @@ def init(
         if sql_client is not None:
             _sql_sink = _SqlLogSink(sql_client, run_id, equip_id)
         
+        # Collect enabled services for a single consolidated log line
+        _otel_services: list[str] = []
+
         # Loki log pusher (native Loki API, not OTLP)
         if enable_loki:
             _loki_pusher = _LokiPusher(
@@ -301,7 +304,7 @@ def init(
                 },
             )
             if _loki_pusher._connected:
-                Console.ok(f"Loki logs -> {loki_endpoint}", component="OTEL")
+                _otel_services = [f"loki={loki_endpoint}"]
             else:
                 Console.warn(f"Loki not connected at {loki_endpoint}", component="OTEL", endpoint=loki_endpoint, service="loki")
         
@@ -331,7 +334,7 @@ def init(
                     profile_types = ["cpu (yappi)"]
                     if TRACEMALLOC_AVAILABLE:
                         profile_types.append("memory (tracemalloc)")
-                    Console.ok(f"Profiling -> {pyroscope_endpoint} [{', '.join(profile_types)}]", component="OTEL")
+                    _otel_services.append(f"profiling={pyroscope_endpoint}")
                 else:
                     Console.warn(f"Pyroscope not reachable at {pyroscope_endpoint} - profiling disabled", component="OTEL", endpoint=pyroscope_endpoint, service="pyroscope")
             except Exception as e:
@@ -341,13 +344,17 @@ def init(
         
         # OpenTelemetry setup for tracing
         if not OTEL_AVAILABLE or not OTEL_EXPORTERS_AVAILABLE:
+            if _otel_services:
+                Console.ok(f"OTEL: {', '.join(_otel_services)}", component="OTEL")
             _initialized = True
             return
-        
+
         # Pre-check OTLP endpoint connectivity to avoid noisy export errors
         otlp_reachable = _check_endpoint_reachable(otlp_endpoint)
         if not otlp_reachable:
             Console.warn(f"OTLP endpoint not reachable at {otlp_endpoint} - tracing/metrics disabled", component="OTEL", endpoint=otlp_endpoint, service="otlp")
+            if _otel_services:
+                Console.ok(f"OTEL: {', '.join(_otel_services)}", component="OTEL")
             _initialized = True
             return
         
@@ -364,7 +371,7 @@ def init(
             otel_trace.set_tracer_provider(trace_provider)
             _tracer = otel_trace.get_tracer(service_name)
             
-            Console.ok(f"Traces -> {otlp_endpoint}/v1/traces", component="OTEL")
+            _otel_services.append(f"traces={otlp_endpoint}")
         
         # Metrics via OTLP
         if enable_metrics:
@@ -557,10 +564,12 @@ def init(
                     description="Total disk write in MB",
                 )
                 
-                Console.ok(f"Metrics -> {otlp_endpoint}/v1/metrics", component="OTEL")
+                _otel_services.append(f"metrics={otlp_endpoint}")
             except Exception as e:
                 Console.warn(f"Metrics setup failed: {e}", component="OTEL", endpoint=otlp_endpoint, service="metrics", error_type=type(e).__name__, error=str(e)[:200])
         
+        if _otel_services:
+            Console.ok(f"OTEL: {', '.join(_otel_services)}", component="OTEL")
         _initialized = True
         atexit.register(shutdown)
 

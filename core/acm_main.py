@@ -117,7 +117,6 @@ try:
         record_regime,
         record_data_quality,
         record_model_refit,
-        log_timer,
         start_profiling,
         stop_profiling,
         enable_sql_logging,  # v11.6.0: Late-bind SQL log persistence
@@ -165,7 +164,6 @@ except ImportError:
     def record_regime(*args, **kwargs): pass
     def record_data_quality(*args, **kwargs): pass
     def record_model_refit(*args, **kwargs): pass
-    def log_timer(*args, **kwargs): pass
     def start_profiling(): pass
     def stop_profiling(): pass
     def shutdown_observability(): pass
@@ -1119,7 +1117,6 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
         # ===== Feature construction (detectors require engineered features) =====
         with T.section("features.build"):
             train, score = _build_features(train, score, cfg, equip)
-            Console.info(f"Features built: train={train.shape}, score={score.shape}", component="FEAT")
 
         # ===== Impute missing values in feature space (detectors require clean data) =====
         with T.section("features.impute"):
@@ -2704,20 +2701,7 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
         except Exception:
             pass  # Summary is best-effort; never suppress pipeline errors
 
-        # === Perf: emit all timer sections to Loki for Grafana timer panel ===
-        if 'T' in locals() and hasattr(T, 'totals') and T.totals:
-            try:
-                total_time = T.total_elapsed() if hasattr(T, "total_elapsed") else sum(T.totals.values())
-                accounted = sum(T.totals.values())
-                for section, duration in T.totals.items():
-                    pct = (duration / total_time * 100) if total_time > 0 else 0
-                    log_timer(section=section, duration_s=duration, pct=pct, total_s=total_time)
-                unaccounted = max(total_time - accounted, 0.0)
-                if unaccounted > 0:
-                    pct = (unaccounted / total_time * 100) if total_time > 0 else 0
-                    log_timer(section="unaccounted", duration_s=unaccounted, pct=pct, total_s=total_time)
-            except Exception:
-                pass
+        # Timer Loki push is handled by Timer._print_summary() at atexit
 
         if sql_log_sink:
             try:

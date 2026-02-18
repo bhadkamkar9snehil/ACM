@@ -17,9 +17,29 @@ Release Management:
 - Production deployments use specific tags (never merge commits)
 """
 
-__version__ = "11.12.2"
+__version__ = "11.13.0"
 __version_date__ = "2026-02-18"
 __version_author__ = "ACM Development Team"
+
+# v11.13.0: LOG CLEANUP - reduce noise, improve readability
+#
+# 1. Duplicate "Features built" line removed (acm_main.py)
+#    - Was logged inside _build_features() AND at the call site.
+#
+# 2. Cadence debug prints removed (data_loader.py)
+#    - 4 verbose Console.status() lines. Info already in structured [DATA] Cadence: line.
+#
+# 3. OTEL init condensed to 1 line (observability.py)
+#    - Was 4 separate SUCCESS lines. Now single "OTEL: loki=..., profiling=..., ..." line.
+#
+# 4. Timer Summary removed from console (timer.py)
+#    - Was ~15 lines. Replaced by Batch Summary top-5. Loki push preserved.
+#
+# 5. Stdout re-dump on failure truncated to last 20 lines (sql_batch_runner.py)
+#    - Was dumping entire stdout (~50+ lines, duplicating the full run).
+#
+# 6. Removed duplicate Loki timer push from acm_main.py finally block
+#    - Timer._print_summary() at atexit already handles this.
 
 # v11.12.2: FIX OMR SCORE CRASH
 #
