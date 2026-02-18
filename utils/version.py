@@ -17,9 +17,53 @@ Release Management:
 - Production deployments use specific tags (never merge commits)
 """
 
-__version__ = "11.8.0"
-__version_date__ = "2026-02-12"
+__version__ = "11.9.0"
+__version_date__ = "2026-02-18"
 __version_author__ = "ACM Development Team"
+
+# v11.9.0: FUSION STABILITY - Cross-Batch Health Score Comparability
+#
+# PROBLEM: Health scores were incomparable across batches:
+#   - Batch 1 (coldstart): Health = 39%, RUL = 0h
+#   - Batch 2 (same data): Health = 94%, RUL = 168h
+#   - Fusion took 26 minutes on 4301 samples
+#
+# ROOT CAUSE: Fuser._zscore() re-normalized already-calibrated z-scores against
+# the CURRENT BATCH distribution. ScoreCalibrator already produces training-anchored
+# z-scores (median/MAD normalization), but fusion then destroyed this anchoring by
+# re-centering and re-scaling per batch.
+#
+# FIX #1: REMOVE DOUBLE Z-SCORING (core/fuse.py)
+# - Replaced Fuser._zscore() with _sanitize() (NaN/inf handling only)
+# - Calibrated z-scores are now passed through to fusion unchanged
+# - Health scores are now training-anchored and comparable across batches
+#
+# FIX #2: SKIP REDUNDANT EPISODE DETECTION (core/fuse.py)
+# - run_fusion_pipeline() called combine() 3 times, each with full episode detection
+# - Only the final pass result was kept; first 2 were discarded
+# - Added skip_episodes parameter to combine()
+# - Auto-tune and train passes now skip episode detection (~3x fusion speedup)
+#
+# FIX #3: PERSIST CALIBRATION PARAMS (4 files)
+# - core/fuse.py: Added ScoreCalibrator.to_dict() / from_dict() for serialization
+# - core/model_persistence.py: Added save_calibration_params() to ModelVersionManager
+#   Calibration saved as separate INSERT to same model version (runs after model save)
+# - core/detector_orchestrator.py: calibrate_all_detectors() accepts cached_calibration_params
+#   When present, rebuilds calibrators from cache instead of refitting
+# - core/acm_main.py: Wired save/load of calibration params in pipeline
+#   Load: extracts calibration_params from cached_models dict
+#   Save: persists calibrators_dict to SQL after calibration completes
+#   Scoring batches reuse training-time normalization for consistency
+#
+# DATA FLOW:
+#   Batch 1 (coldstart): fit detectors → save models → calibrate (fit) → save cal → fuse
+#   Batch 2+ (scoring):  load models + cal_params → calibrate (cached transform) → fuse
+#
+# IMPACT:
+# - Health scores stable across batches (no more 39% → 94% flip-flop)
+# - Fusion ~3x faster (episode detection only on final pass)
+# - Calibration state persists in SQL ModelRegistry
+# - True continuous learning: scoring batches reuse training-time baselines
 
 # v11.8.0: ADAPTIVE PIPELINE - Remove ONLINE/OFFLINE Modes Entirely
 #

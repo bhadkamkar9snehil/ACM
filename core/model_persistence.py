@@ -688,6 +688,52 @@ class ModelVersionManager:
         # WFA_TURBINE_22 had 171 copies of each model type due to no retention
         self._cleanup_old_versions(keep_n=5)
 
+    def save_calibration_params(self, calibrators_dict: Dict[str, Any], version: int):
+        """Append calibration params to an existing model version.
+
+        v11.9.0: Calibration runs AFTER model save in the pipeline, so we
+        persist calibration as a separate INSERT to the same version.
+        This ensures scoring batches reuse training-time normalization.
+        """
+        if not calibrators_dict or not self.sql_client or not self.sql_client.conn:
+            return
+        try:
+            from core.fuse import ScoreCalibrator
+            cal_dict = {}
+            for name, cal in calibrators_dict.items():
+                if isinstance(cal, ScoreCalibrator):
+                    cal_dict[name] = cal.to_dict()
+                elif isinstance(cal, dict):
+                    cal_dict[name] = cal
+            if not cal_dict:
+                return
+
+            buffer = BytesIO()
+            joblib.dump(cal_dict, buffer)
+            cal_bytes = buffer.getvalue()
+
+            cursor = self.sql_client.conn.cursor()
+            # Remove old calibration_params for this version (if re-running)
+            cursor.execute(
+                "DELETE FROM ModelRegistry WHERE EquipID = ? AND Version = ? AND ModelType = 'calibration_params'",
+                (self.equip_id, version),
+            )
+            cursor.execute(
+                """INSERT INTO ModelRegistry
+                   (ModelType, EquipID, Version, EntryDateTime, ParamsJSON, StatsJSON, ModelBytes, RunID)
+                   VALUES ('calibration_params', ?, ?, SYSUTCDATETIME(), NULL, NULL, ?, NULL)""",
+                (self.equip_id, version, cal_bytes),
+            )
+            self.sql_client.conn.commit()
+            Console.info(f"Saved calibration params ({len(cal_dict)} detectors, {len(cal_bytes):,} bytes) to v{version}", component="CAL")
+        except Exception as e:
+            Console.warn(f"Failed to save calibration params: {e}", component="CAL",
+                         equip=self.equip, error=str(e)[:200])
+            try:
+                self.sql_client.conn.rollback()
+            except Exception:
+                pass
+
     def _cleanup_old_versions(self, keep_n: int = 5) -> int:
         """
         Delete old model versions to prevent unbounded accumulation.
@@ -1443,6 +1489,7 @@ def save_trained_models(
     regime_quality_ok: bool,
     timing_sections: Optional[Dict[str, Any]] = None,
     run_id: str = "",
+    calibrators_dict: Optional[Dict[str, Any]] = None,
 ) -> Optional[int]:
     """Save all trained models with versioning and metadata.
     
@@ -1490,6 +1537,10 @@ def save_trained_models(
             "omr_model": omr_detector.to_dict() if omr_detector and omr_detector._is_fitted else None,
             "regime_model": regime_model,  # Full RegimeModel object, not just .model
             "feature_medians": col_meds,
+            # v11.9.0: Persist calibration params so scoring batches reuse training-time normalization
+            "calibration_params": {
+                name: cal.to_dict() for name, cal in calibrators_dict.items()
+            } if calibrators_dict else None,
         }
         
         # Calculate training duration from timing sections

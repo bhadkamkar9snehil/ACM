@@ -1174,7 +1174,8 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
         is_coldstart_batch = meta.get('is_coldstart_run', False) if isinstance(meta, dict) else getattr(meta, 'is_coldstart_run', False)
 
         use_cache = cfg.get("models", {}).get("use_cache", True) and not is_coldstart_batch
-        
+        cached_calibration_params = None  # v11.9.0: Will be set if loaded from cache
+
         with T.section("models.load"):
             if use_cache and detector_cache is None:
                 current_sensors = list(train.columns) if hasattr(train, 'columns') else []
@@ -1258,7 +1259,12 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
                     omr_detector = rebuild_result["omr_detector"]
                     regime_model = rebuild_result.get("regime_model")
                     col_meds = rebuild_result.get("feature_medians")
-                    
+
+                    # v11.9.0: Extract cached calibration params for cross-batch consistency
+                    cached_calibration_params = cached_models.get("calibration_params")
+                    if cached_calibration_params:
+                        Console.info(f"Loaded cached calibration params ({len(cached_calibration_params)} detectors)", component="CAL")
+
                     # AUDIT FIX: Log validation warnings if any
                     if rebuild_result.get("validation_warnings"):
                         for warn in rebuild_result["validation_warnings"]:
@@ -1725,10 +1731,11 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
         # `detectors_fitted_this_run` reflects actual fitting activity.
         detectors_fitted_this_run = (not cached_models and detector_cache is None) or force_retrain
         models_were_trained = detectors_fitted_this_run  # Clearer: save only if fitted this run
+        saved_model_version = None  # v11.9.0: Track version for calibration params save
         if models_were_trained:
             with T.section("models.persistence.save"):
                 col_meds_value = col_meds  # Initialized at function scope.
-                save_trained_models(
+                saved_model_version = save_trained_models(
                     equip=equip,
                     sql_client=sql_client,
                     equip_id=equip_id,
@@ -1958,6 +1965,7 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
             frame["per_regime_active"] = 1 if quality_ok else 0
             
             # Delegate to detector_orchestrator.calibrate_all_detectors().
+            # v11.9.0: Pass cached calibration params for cross-batch consistency
             frame, calibrators_dict = calibrate_all_detectors(
                 train_frame=train_frame,
                 score_frame=frame,
@@ -1966,8 +1974,19 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
                 fit_regimes=fit_regimes,
                 transform_regimes=transform_regimes,
                 omr_enabled=omr_enabled,
+                cached_calibration_params=cached_calibration_params,
             )
-            
+
+            # v11.9.0: Persist calibration params for future scoring batches
+            if saved_model_version is not None and calibrators_dict:
+                try:
+                    from core.model_persistence import ModelVersionManager
+                    cal_manager = ModelVersionManager(equip=equip, sql_client=sql_client, equip_id=equip_id)
+                    cal_manager.save_calibration_params(calibrators_dict, version=saved_model_version)
+                except Exception as e:
+                    Console.warn(f"Failed to persist calibration params: {e}", component="CAL",
+                                 equip=equip, error=str(e)[:200])
+
             # Extract calibrators for later use.
             cal_ar = calibrators_dict.get("ar1_z")
             cal_pca_spe = calibrators_dict.get("pca_spe_z")
@@ -3858,7 +3877,8 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
         is_coldstart_batch = meta.get('is_coldstart_run', False) if isinstance(meta, dict) else getattr(meta, 'is_coldstart_run', False)
 
         use_cache = cfg.get("models", {}).get("use_cache", True) and not is_coldstart_batch
-        
+        cached_calibration_params = None  # v11.9.0: Will be set if loaded from cache
+
         with T.section("models.load"):
             if use_cache and detector_cache is None:
                 current_sensors = list(train.columns) if hasattr(train, 'columns') else []
@@ -3942,7 +3962,12 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
                     omr_detector = rebuild_result["omr_detector"]
                     regime_model = rebuild_result.get("regime_model")
                     col_meds = rebuild_result.get("feature_medians")
-                    
+
+                    # v11.9.0: Extract cached calibration params for cross-batch consistency
+                    cached_calibration_params = cached_models.get("calibration_params")
+                    if cached_calibration_params:
+                        Console.info(f"Loaded cached calibration params ({len(cached_calibration_params)} detectors)", component="CAL")
+
                     # AUDIT FIX: Log validation warnings if any
                     if rebuild_result.get("validation_warnings"):
                         for warn in rebuild_result["validation_warnings"]:
@@ -4411,10 +4436,11 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
         # `detectors_fitted_this_run` reflects actual fitting activity.
         detectors_fitted_this_run = (not cached_models and detector_cache is None) or force_retrain
         models_were_trained = detectors_fitted_this_run  # Clearer: save only if fitted this run
+        saved_model_version = None  # v11.9.0: Track version for calibration params save
         if models_were_trained:
             with T.section("models.persistence.save"):
                 col_meds_value = col_meds  # Initialized at function scope.
-                save_trained_models(
+                saved_model_version = save_trained_models(
                     equip=equip,
                     sql_client=sql_client,
                     equip_id=equip_id,
@@ -4644,6 +4670,7 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
             frame["per_regime_active"] = 1 if quality_ok else 0
             
             # Delegate to detector_orchestrator.calibrate_all_detectors().
+            # v11.9.0: Pass cached calibration params for cross-batch consistency
             frame, calibrators_dict = calibrate_all_detectors(
                 train_frame=train_frame,
                 score_frame=frame,
@@ -4652,8 +4679,19 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
                 fit_regimes=fit_regimes,
                 transform_regimes=transform_regimes,
                 omr_enabled=omr_enabled,
+                cached_calibration_params=cached_calibration_params,
             )
-            
+
+            # v11.9.0: Persist calibration params for future scoring batches
+            if saved_model_version is not None and calibrators_dict:
+                try:
+                    from core.model_persistence import ModelVersionManager
+                    cal_manager = ModelVersionManager(equip=equip, sql_client=sql_client, equip_id=equip_id)
+                    cal_manager.save_calibration_params(calibrators_dict, version=saved_model_version)
+                except Exception as e:
+                    Console.warn(f"Failed to persist calibration params: {e}", component="CAL",
+                                 equip=equip, error=str(e)[:200])
+
             # Extract calibrators for later use.
             cal_ar = calibrators_dict.get("ar1_z")
             cal_pca_spe = calibrators_dict.get("pca_spe_z")

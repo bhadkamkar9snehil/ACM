@@ -1032,6 +1032,28 @@ class ScoreCalibrator:
         # v11.3.3: Track contamination filtering diagnostics
         self.contamination_filter_result_: Optional[ContaminationFilterResult] = None
 
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize calibration params for persistence across batches (v11.9.0)."""
+        return {
+            "med": self.med, "scale": self.scale, "mad": self.mad,
+            "q": self.q, "q_z": self.q_z, "q_thresh": self.q_thresh,
+            "regime_params": {str(k): list(v) for k, v in self.regime_params_.items()},
+            "regime_thresh": {str(k): v for k, v in self.regime_thresh_.items()},
+        }
+
+    @classmethod
+    def from_dict(cls, params: Dict[str, Any], name: str = "detector") -> "ScoreCalibrator":
+        """Rebuild calibrator from persisted params (v11.9.0)."""
+        cal = cls(q=params.get("q", 0.98), name=name)
+        cal.med = float(params["med"])
+        cal.scale = float(params["scale"])
+        cal.mad = float(params.get("mad", cal.scale / 1.4826))
+        cal.q_z = float(params["q_z"])
+        cal.q_thresh = float(params["q_thresh"])
+        cal.regime_params_ = {int(k): tuple(v) for k, v in params.get("regime_params", {}).items()}
+        cal.regime_thresh_ = {int(k): float(v) for k, v in params.get("regime_thresh", {}).items()}
+        return cal
+
     def fit(self, x: np.ndarray, regime_labels: Optional[np.ndarray] = None) -> "ScoreCalibrator":
         """
         Fit calibration parameters from training data.
@@ -1305,25 +1327,16 @@ class Fuser:
         self.ep = ep
 
     @staticmethod
-    def _zscore(s: np.ndarray) -> np.ndarray:
-        """Compute z-scores using ROBUST statistics (median/MAD).
-        
-        Uses median as center and MAD (Median Absolute Deviation) as spread.
-        This makes fusion robust to training data containing faults.
-        MAD * 1.4826 approximates std for normal distributions.
+    def _sanitize(s: np.ndarray) -> np.ndarray:
+        """Clean calibrated z-scores for fusion (NaN/inf handling only).
+
+        v11.9.0: Input z-scores are already training-anchored via ScoreCalibrator.
+        Do NOT re-center or re-scale — that destroys cross-batch comparability.
+        Previous _zscore() re-normalized against the current batch, making health
+        scores incomparable between batches (e.g., 39% vs 94% on same data).
         """
         s = np.asarray(s, dtype=float)
-        mask = np.isfinite(s)
-        if not mask.any():
-            return np.zeros_like(s, dtype=float)
-        # ROBUST: Use median instead of mean
-        mu = float(np.nanmedian(s))
-        # ROBUST: Use MAD instead of std
-        mad = float(np.nanmedian(np.abs(s - mu)))
-        sd = mad * 1.4826  # Scale MAD to std-equivalent
-        sd = sd if np.isfinite(sd) and sd > 1e-9 else 1.0
-        z = (s - mu) / sd
-        return np.nan_to_num(z, nan=0.0, posinf=0.0, neginf=0.0)
+        return np.nan_to_num(s, nan=0.0, posinf=10.0, neginf=-10.0)
 
     @staticmethod
     def _get_base_sensor(feature_name: str) -> str:
@@ -1348,7 +1361,7 @@ class Fuser:
         for k in keys:
             arr = np.asarray(streams[k], dtype=float)
             lengths.append(len(arr))
-            zs[k] = self._zscore(arr)
+            zs[k] = self._sanitize(arr)
         n = min(lengths) if lengths else 0
         if len(original_features.index) > 0:
             n = min(n, len(original_features.index))
@@ -1768,12 +1781,13 @@ class Fuser:
             return pd.DataFrame(rows)
 
 
-def combine(streams: Dict[str, np.ndarray], weights: Dict[str, float], cfg: Dict[str, Any], original_features: pd.DataFrame, regime_labels: Optional[np.ndarray] = None) -> Tuple[pd.Series, pd.DataFrame]:
+def combine(streams: Dict[str, np.ndarray], weights: Dict[str, float], cfg: Dict[str, Any], original_features: pd.DataFrame, regime_labels: Optional[np.ndarray] = None, skip_episodes: bool = False) -> Tuple[pd.Series, pd.DataFrame]:
     """
     Combine detector streams into fused score and detect episodes.
-    
+
     v10.1.0: Added regime_labels parameter for episode-regime correlation.
-    Episodes now include regime context for filtering false positives during transitions.
+    v11.9.0: Added skip_episodes to avoid expensive episode detection in
+             auto-tune and train passes where episodes are discarded.
     """
     with Span("fusion.combine", n_detectors=len(streams), n_samples=len(original_features)):
         epcfg = (cfg or {}).get("episodes", {})
@@ -1865,7 +1879,10 @@ def combine(streams: Dict[str, np.ndarray], weights: Dict[str, float], cfg: Dict
         )
         fuser = Fuser(weights=weights, ep=params)
         fused = fuser.fuse(streams, original_features)
-        episodes = fuser.detect_episodes(fused, streams, original_features, regime_labels=regime_labels)
+        if skip_episodes:
+            episodes = pd.DataFrame()
+        else:
+            episodes = fuser.detect_episodes(fused, streams, original_features, regime_labels=regime_labels)
         return fused, episodes
 
 
@@ -2131,7 +2148,7 @@ def run_fusion_pipeline(
     tuning_diagnostics = None
     effective_cfg: Dict[str, Any] = cfg if cfg is not None else {}
     try:
-        fused_baseline, _ = combine(present, weights, effective_cfg, original_features=score_data, regime_labels=None)
+        fused_baseline, _ = combine(present, weights, effective_cfg, original_features=score_data, regime_labels=None, skip_episodes=True)
         fused_baseline_np = np.asarray(fused_baseline, dtype=np.float32).reshape(-1)
         
         tuned, diagnostics = tune_detector_weights(
@@ -2162,7 +2179,8 @@ def run_fusion_pipeline(
             try:
                 train_fused_series, _ = combine(
                     train_present, weights, effective_cfg,
-                    original_features=train_data, regime_labels=train_regime_labels
+                    original_features=train_data, regime_labels=train_regime_labels,
+                    skip_episodes=True
                 )
                 train_fused = np.asarray(train_fused_series, dtype=np.float32).reshape(-1)
             except Exception as e:

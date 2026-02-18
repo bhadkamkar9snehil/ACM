@@ -115,10 +115,15 @@ def calibrate_all_detectors(
     fit_regimes: Optional[np.ndarray],
     transform_regimes: Optional[np.ndarray],
     omr_enabled: bool = True,
+    cached_calibration_params: Optional[Dict[str, Any]] = None,
 ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
     """
     Fit calibrators on TRAIN data and transform SCORE data.
-    
+
+    v11.9.0: If cached_calibration_params is provided, rebuild calibrators from
+    persisted params instead of refitting. This ensures scoring batches use the
+    same normalization baseline as the training batch.
+
     Args:
         train_frame: DataFrame with raw scores from train data
         score_frame: DataFrame with raw scores from score data (will be modified)
@@ -127,12 +132,13 @@ def calibrate_all_detectors(
         fit_regimes: Regime labels for training (or None)
         transform_regimes: Regime labels for scoring (or None)
         omr_enabled: Whether OMR detector is enabled
-    
+        cached_calibration_params: Persisted calibrator params from previous training
+
     Returns:
         Tuple of (score_frame with z-scores added, dict of calibrators)
     """
     calibrators = {}
-    
+
     # Define calibration mappings: (raw_col, z_col, name)
     calibration_spec = [
         ("ar1_raw", "ar1_z", "ar1_z"),
@@ -143,7 +149,25 @@ def calibrate_all_detectors(
     ]
     if omr_enabled:
         calibration_spec.append(("omr_raw", "omr_z", "omr_z"))
-    
+
+    # v11.9.0: Reuse cached calibration when available (scoring batches)
+    if cached_calibration_params:
+        restored = 0
+        for raw_col, z_col, name in calibration_spec:
+            if name in cached_calibration_params and raw_col in score_frame.columns:
+                cal = fuse.ScoreCalibrator.from_dict(cached_calibration_params[name], name=name)
+                score_frame[z_col] = cal.transform(
+                    score_frame[raw_col].to_numpy(copy=False), regime_labels=transform_regimes
+                )
+                calibrators[name] = cal
+                restored += 1
+        if restored > 0:
+            Console.info(
+                f"Using cached calibration for {restored} detectors (training-anchored)",
+                component="CAL"
+            )
+            return score_frame, calibrators
+
     for raw_col, z_col, name in calibration_spec:
         if raw_col in train_frame.columns and raw_col in score_frame.columns:
             cal = fuse.ScoreCalibrator(q=cal_q, self_tune_cfg=self_tune_cfg, name=name).fit(
@@ -153,7 +177,7 @@ def calibrate_all_detectors(
                 score_frame[raw_col].to_numpy(copy=False), regime_labels=transform_regimes
             )
             calibrators[name] = cal
-    
+
     return score_frame, calibrators
 
 

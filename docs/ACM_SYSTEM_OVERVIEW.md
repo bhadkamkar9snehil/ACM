@@ -1537,6 +1537,7 @@ This invalidates all cached regime models.
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
+| v11.9.0 | 2026-02-18 | Fusion stability: cross-batch health comparability, calibration persistence, 3x fusion speedup |
 | v11.8.0 | 2026-02-12 | Adaptive pipeline: remove ONLINE/OFFLINE modes entirely |
 | v11.4.0 | 2026-01-21 | Regime clustering: raw sensors only (architectural fix) |
 | v11.3.4 | 2026-01-20 | RUL validation guards |
