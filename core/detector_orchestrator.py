@@ -268,7 +268,7 @@ def fit_all_detectors(
         result["pca_train_spe"], result["pca_train_t2"] = result["pca_detector"].score(train)
         fitted_detectors.append(f"PCA({pca_components}c)")
         if output_manager is not None:
-            output_manager.write_pca_metrics(pca_detector=result["pca_detector"])
+            output_manager.write_pca_metrics(pca_detector=result["pca_detector"], train=train)
     
     # Isolation Forest Detector
     if iforest_enabled and result["iforest_detector"] is None:

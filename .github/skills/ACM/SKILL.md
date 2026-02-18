@@ -26,7 +26,7 @@ The user MUST see every single line of output. Filtering output hides critical e
 
 **The ONLY ways to test/diagnose ACM are:**
 
-1. **Run ACM in batch mode** - `python scripts/sql_batch_runner.py --equip <EQUIP> --tick-minutes 1440 --max-batches 2`
+1. **Run ACM in batch mode** - `python scripts/sql_batch_runner.py --equip <EQUIP> --max-batches 2`
 2. **Check SQL tables** - `sqlcmd -S "server\instance" -d ACM -E -Q "SELECT ..."`
 3. **Check ACM_RunLogs** - For error diagnosis
 4. **Read console output** - Problems are diagnosed through logging

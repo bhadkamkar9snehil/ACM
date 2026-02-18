@@ -18,7 +18,6 @@ import pandas as pd
 # Suppress NumPy divide-by-zero warnings from correlation calculations on constant columns
 # These are expected when sensors have zero variance (constant values) and produce NaN correlations
 warnings.filterwarnings("ignore", message="invalid value encountered in divide", category=RuntimeWarning)
-from utils.timer import Timer
 from core.observability import Span, Console
 
 # Try polars
@@ -32,10 +31,6 @@ if HAS_POLARS:
     _ROLLING_SUPPORTS_MIN_SAMPLES = "min_samples" in inspect.signature(pl.Expr.rolling_median).parameters
 else:
     _ROLLING_SUPPORTS_MIN_SAMPLES = False
-
-# Module-level timer for tracking performance
-_timer = Timer()
-
 
 def _rolling_kwargs(min_periods: int) -> Dict[str, int]:
     return {"min_samples": min_periods} if _ROLLING_SUPPORTS_MIN_SAMPLES else {"min_periods": min_periods}
@@ -834,7 +829,6 @@ def batched_pairwise_lag(df: pd.DataFrame, max_lag: int = 3, cols: Optional[List
         return out
 
 
-@_timer.wrap("compute_basic_features_pl")
 def compute_basic_features_pl(df: 'pl.DataFrame', window: int = 3, cols: Optional[List[str]] = None, 
                                fill_values: Optional[dict] = None) -> 'pl.DataFrame':
     """Polars-native version of `compute_basic_features`.

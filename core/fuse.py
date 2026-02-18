@@ -1345,17 +1345,30 @@ class Fuser:
         parts = feature_name.split('_')
         return parts[0]
 
-    def fuse(self, streams: Dict[str, np.ndarray], original_features: pd.DataFrame) -> pd.Series:
+    def fuse(
+        self,
+        streams: Dict[str, np.ndarray],
+        original_features: pd.DataFrame,
+        discounted_weights: Dict[str, float],
+    ) -> pd.Series:
+        """Fuse detector streams into a single weighted z-score series.
+
+        Args:
+            streams: Dict of detector_name -> z-score array.
+            original_features: Score-window feature DataFrame (provides index).
+            discounted_weights: Pre-computed correlation-discounted weights from
+                compute_discounted_weights(). Compute once upstream and pass in —
+                never compute inside fuse() per call.
+        """
         # ANA-03: normalize weights over PRESENT keys only (robust to missing detectors)
         keys = [k for k, v in streams.items() if v is not None]
         if not keys:
             return pd.Series(dtype=float)
-        
-        # Track which detectors from config are missing
+
         missing = [k for k in self.weights.keys() if k not in keys]
         if missing:
             Console.info(f"{len(missing)} detector(s) absent at fusion time: {missing}", component="FUSE")
-        
+
         lengths = []
         zs: Dict[str, np.ndarray] = {}
         for k in keys:
@@ -1368,76 +1381,10 @@ class Fuser:
         if n == 0:
             return pd.Series(dtype=float)
 
-        # Truncate to common length to avoid shape mismatches
         zs = {k: v[:n] for k, v in zs.items()}
-        
-        # FLAW-4 FIX (v11.1.4): GENERALIZED correlation-aware weight adjustment
-        # Any pair of detectors with correlation > 0.5 gets down-weighted
-        # This prevents double-counting of correlated information (e.g., PCA-SPE/T²)
-        # Statistical basis: Effective degrees of freedom = n / (1 + avg_corr)
-        w_raw = {k: float(self.weights.get(k, 0.0)) for k in keys}
-        
-        # BUGFIX v11.1.5: Track correlation degree per detector to normalize discount
-        # Problem: If detector A is correlated with B and C, A got discounted twice
-        # while B and C each got discounted once (asymmetric).
-        # Fix: Track correlation count per detector, normalize discount by degree.
-        correlation_count: Dict[str, int] = {k: 0 for k in keys}  # How many pairs each detector is in
-        correlation_sum: Dict[str, float] = {k: 0.0 for k in keys}  # Total correlation per detector
-        pairs_checked = 0
-        pairs_correlated = 0
-        
-        if len(keys) >= 2:
-            try:
-                # Build detector correlation matrix and track per-detector correlations
-                sorted_keys = sorted(keys)
-                for i, k1 in enumerate(sorted_keys):
-                    for k2 in sorted_keys[i+1:]:
-                        arr1 = zs[k1]
-                        arr2 = zs[k2]
-                        valid_mask = np.isfinite(arr1) & np.isfinite(arr2)
-                        if valid_mask.sum() > 10:
-                            pairs_checked += 1
-                            # P3-FIX (v11.1.6): Use Spearman instead of Pearson
-                            # Spearman is more robust to outliers and captures monotonic relationships
-                            # which is more appropriate for detector redundancy detection
-                            spearman_result = spearmanr(arr1[valid_mask], arr2[valid_mask])
-                            corr = float(spearman_result.correlation)  # type: ignore[union-attr]
-                            if np.isfinite(corr) and abs(corr) > 0.5:
-                                pairs_correlated += 1
-                                # Track correlations per detector
-                                correlation_count[k1] += 1
-                                correlation_count[k2] += 1
-                                correlation_sum[k1] += abs(corr)
-                                correlation_sum[k2] += abs(corr)
-                                Console.debug(
-                                    f"Detector Spearman correlation {k1}<->{k2}: {corr:.2f}",
-                                    component="FUSE"
-                                )
-                
-                # Apply normalized discount based on average correlation per detector
-                for k in keys:
-                    if correlation_count[k] > 0:
-                        # Average correlation this detector has with others
-                        avg_corr = correlation_sum[k] / correlation_count[k]
-                        # Single discount based on average correlation (not multiplicative)
-                        # At avg_corr=0.8, discount = 15%
-                        discount_factor = min(0.3, (avg_corr - 0.5) * 0.5)
-                        w_raw[k] *= (1 - discount_factor)
-                        Console.debug(
-                            f"Detector {k}: correlated with {correlation_count[k]} others, "
-                            f"avg_corr={avg_corr:.2f}, discount={discount_factor:.1%}",
-                            component="FUSE"
-                        )
-                
-                if pairs_correlated > 0:
-                    Console.info(
-                        f"{pairs_correlated}/{pairs_checked} detector pairs correlated, "
-                        f"weight adjustments applied",
-                        component="FUSE", pairs_checked=pairs_checked, pairs_correlated=pairs_correlated
-                    )
-            except Exception as ce:
-                Console.debug(f"Correlation adjustment failed: {ce}", component="FUSE")
-        
+
+        w_raw = {k: float(discounted_weights.get(k, self.weights.get(k, 0.0))) for k in keys}
+
         wsum = sum(w_raw.values())
         if wsum <= 0:
             w = {k: 1.0 / len(keys) for k in keys}
@@ -1781,109 +1728,174 @@ class Fuser:
             return pd.DataFrame(rows)
 
 
-def combine(streams: Dict[str, np.ndarray], weights: Dict[str, float], cfg: Dict[str, Any], original_features: pd.DataFrame, regime_labels: Optional[np.ndarray] = None, skip_episodes: bool = False) -> Tuple[pd.Series, pd.DataFrame]:
+def compute_episode_params(streams: Dict[str, np.ndarray], cfg: Dict[str, Any]) -> EpisodeParams:
+    """Compute CUSUM episode detection parameters from current stream statistics.
+
+    Computed once in run_fusion_pipeline() and shared across the baseline, train,
+    and score passes — avoiding redundant computation and triplicated log output.
+
+    Logs CUSUM tuning at INFO level (intended to appear exactly once per pipeline run).
     """
-    Combine detector streams into fused score and detect episodes.
+    epcfg = (cfg or {}).get("episodes", {})
+    cpd = epcfg.get("cpd", {}) if isinstance(epcfg, dict) else {}
 
-    v10.1.0: Added regime_labels parameter for episode-regime correlation.
-    v11.9.0: Added skip_episodes to avoid expensive episode detection in
-             auto-tune and train passes where episodes are discarded.
+    base_k_sigma = float(cpd.get("k_sigma", 0.5))
+    base_h_sigma = float(cpd.get("h_sigma", 5.0))
+    k_sigma = base_k_sigma
+    h_sigma = base_h_sigma
+
+    min_len = int(epcfg.get("min_len", 3))
+    gap_merge = int(epcfg.get("gap_merge", 5))
+    min_duration_s = float(epcfg.get("min_duration_s", 60.0))
+    z_on = float(epcfg.get("z_on", 2.0))
+    z_off = float(epcfg.get("z_off", 1.0))
+    min_onset = int(epcfg.get("min_onset", 2))
+    min_release = int(epcfg.get("min_release", 3))
+
+    auto_tune_cfg = cpd.get("auto_tune", {})
+    auto_tune_enabled = auto_tune_cfg.get("enabled", False)
+
+    if auto_tune_enabled:
+        try:
+            all_values = []
+            for stream in streams.values():
+                finite_mask = np.isfinite(stream)
+                if finite_mask.any():
+                    all_values.append(stream[finite_mask])
+
+            statistic_vals = np.concatenate(all_values) if all_values else np.array([], dtype=float)
+
+            if statistic_vals.size:
+                # v11.1.3: Use MAD * 1.4826 instead of std for robustness
+                statistic_median = float(np.nanmedian(statistic_vals))
+                statistic_mad = float(np.nanmedian(np.abs(statistic_vals - statistic_median)))
+                std = max(statistic_mad * 1.4826, 1e-3)
+                p50 = float(np.nanpercentile(statistic_vals, 50))
+                p95 = float(np.nanpercentile(statistic_vals, 95))
+                spread = max(p95 - p50, 1e-3)
+
+                # P0-FIX (v11.1.6): k_factor and h_factor ARE the dimensionless multipliers.
+                # DO NOT multiply by std or spread — detect_episodes() does that.
+                k_factor = float(auto_tune_cfg.get("k_factor", 0.5))
+                h_factor = float(auto_tune_cfg.get("h_factor", 5.0))
+                k_min = float(auto_tune_cfg.get("k_min", 0.25))
+                k_max = float(auto_tune_cfg.get("k_max", max(base_k_sigma, 2.0)))
+                h_min = float(auto_tune_cfg.get("h_min", 3.0))
+                h_max = float(auto_tune_cfg.get("h_max", max(base_h_sigma, 10.0)))
+
+                spread_ratio = spread / std if std > 1e-6 else 1.0
+                adaptive_h_factor = h_factor * min(1.5, max(0.8, spread_ratio / 2.0))
+                k_sigma = float(np.clip(k_factor, k_min, k_max))
+                h_sigma = float(np.clip(adaptive_h_factor, h_min, h_max))
+
+                Console.info(
+                    f"CUSUM auto-tuned: k_sigma={base_k_sigma:.3f}->{k_sigma:.3f}, "
+                    f"h_sigma={base_h_sigma:.3f}->{h_sigma:.3f} (spread_ratio={spread_ratio:.2f})",
+                    component="FUSE",
+                )
+            else:
+                Console.warn(
+                    "CUSUM auto-tune skipped: no finite stream values",
+                    component="FUSE",
+                    n_streams=len(streams),
+                )
+        except Exception as tune_e:
+            Console.warn(
+                f"CUSUM auto-tune failed: {tune_e}",
+                component="FUSE", error_type=type(tune_e).__name__, error=str(tune_e)[:200],
+            )
+
+    return EpisodeParams(
+        k_sigma=k_sigma,
+        h_sigma=h_sigma,
+        min_len=min_len,
+        gap_merge=gap_merge,
+        min_duration_s=min_duration_s,
+        z_on=z_on,
+        z_off=z_off,
+        min_onset=min_onset,
+        min_release=min_release,
+    )
+
+
+def compute_discounted_weights(
+    weights: Dict[str, float],
+    streams: Dict[str, np.ndarray],
+) -> Dict[str, float]:
+    """Apply Spearman-based correlation discount to detector weights.
+
+    Detectors that are strongly correlated (|r| > 0.5) with others receive
+    a downward weight adjustment to prevent double-counting of redundant signal.
+
+    Computed once in run_fusion_pipeline() and passed into Fuser.fuse() —
+    never computed inside fuse() per-call.
+
+    Returns a new dict of (unnormalized) discounted weights keyed by detector name.
+    Normalization happens inside Fuser.fuse() over the detectors actually present.
     """
-    with Span("fusion.combine", n_detectors=len(streams), n_samples=len(original_features)):
-        epcfg = (cfg or {}).get("episodes", {})
-        cpd = epcfg.get("cpd", {}) if isinstance(epcfg, dict) else {}
-        
-        # FUSE-06: Auto-tune k_sigma and h_sigma based on training data statistics
-        auto_tune_cfg = cpd.get("auto_tune", {})
-        auto_tune_enabled = auto_tune_cfg.get("enabled", False)
-        
-        base_k_sigma = float(cpd.get("k_sigma", 0.5))
-        base_h_sigma = float(cpd.get("h_sigma", 5.0))
-    
-        k_sigma = base_k_sigma
-        h_sigma = base_h_sigma
-    
-        min_len = int(epcfg.get("min_len", 3))
-        gap_merge = int(epcfg.get("gap_merge", 5))
-        min_duration_s = float(epcfg.get("min_duration_s", 60.0))
+    keys = [k for k in streams if streams[k] is not None]
+    w_raw = {k: float(weights.get(k, 0.0)) for k in keys}
 
-        if auto_tune_enabled:
-            try:
-                # PERF-OPT: Skip preview fusion - compute statistics directly from streams
-                # The preview was only used to get std/p50/p95 which can be computed from streams directly
-                stats_source = "detectors"
-                all_values = []
-                for stream in streams.values():
-                    finite_mask = np.isfinite(stream)
-                    if finite_mask.any():
-                        all_values.append(stream[finite_mask])
-            
-                if all_values:
-                    statistic_vals = np.concatenate(all_values)
-                else:
-                    statistic_vals = np.array([], dtype=float)
+    if len(keys) < 2:
+        return w_raw
 
-                if statistic_vals.size:
-                    # v11.1.3: Use MAD * 1.4826 instead of std for robustness
-                    statistic_median = float(np.nanmedian(statistic_vals))
-                    statistic_mad = float(np.nanmedian(np.abs(statistic_vals - statistic_median)))
-                    std = statistic_mad * 1.4826  # Scale MAD to be consistent with std
-                    std = max(std, 1e-3)
-                    p50 = float(np.nanpercentile(statistic_vals, 50))
-                    p95 = float(np.nanpercentile(statistic_vals, 95))
-                    spread = max(p95 - p50, 1e-3)
+    correlation_count: Dict[str, int] = {k: 0 for k in keys}
+    correlation_sum: Dict[str, float] = {k: 0.0 for k in keys}
+    pairs_checked = 0
+    pairs_correlated = 0
 
-                    # P0-FIX (v11.1.6): k_factor and h_factor ARE the dimensionless multipliers
-                    # DO NOT multiply by std or spread - detect_episodes() will do that
-                    # This fixes the units² bug where thresholds scaled incorrectly
-                    k_factor = float(auto_tune_cfg.get("k_factor", 0.5))
-                    h_factor = float(auto_tune_cfg.get("h_factor", 5.0))
-                    k_min = float(auto_tune_cfg.get("k_min", 0.25))
-                    k_max = float(auto_tune_cfg.get("k_max", max(base_k_sigma, 2.0)))
-                    h_min = float(auto_tune_cfg.get("h_min", 3.0))
-                    h_max = float(auto_tune_cfg.get("h_max", max(base_h_sigma, 10.0)))
+    try:
+        zs = {k: Fuser._sanitize(np.asarray(streams[k], dtype=float)) for k in keys}
+        sorted_keys = sorted(keys)
+        for i, k1 in enumerate(sorted_keys):
+            for k2 in sorted_keys[i + 1:]:
+                arr1, arr2 = zs[k1], zs[k2]
+                valid_mask = np.isfinite(arr1) & np.isfinite(arr2)
+                if valid_mask.sum() > 10:
+                    # P3-FIX (v11.1.6): Spearman over Pearson — robust to outliers
+                    # Skip constant arrays — Spearman is undefined and scipy raises
+                    # ConstantInputWarning. Correlation simply doesn't apply here.
+                    valid_1, valid_2 = arr1[valid_mask], arr2[valid_mask]
+                    if np.unique(valid_1).size < 2 or np.unique(valid_2).size < 2:
+                        continue
+                    pairs_checked += 1
+                    spearman_result = spearmanr(valid_1, valid_2)
+                    corr = float(spearman_result.correlation)  # type: ignore[union-attr]
+                    if np.isfinite(corr) and abs(corr) > 0.5:
+                        pairs_correlated += 1
+                        correlation_count[k1] += 1
+                        correlation_count[k2] += 1
+                        correlation_sum[k1] += abs(corr)
+                        correlation_sum[k2] += abs(corr)
+                        Console.debug(
+                            f"Detector Spearman correlation {k1}<->{k2}: {corr:.2f}",
+                            component="FUSE",
+                        )
 
-                    # Adaptive multiplier based on data spread characteristics
-                    # If spread is large relative to std, increase h_factor slightly
-                    spread_ratio = spread / std if std > 1e-6 else 1.0
-                    adaptive_h_factor = h_factor * min(1.5, max(0.8, spread_ratio / 2.0))
-                
-                    # Clip to valid ranges - these are MULTIPLIERS, not absolute values
-                    k_sigma = float(np.clip(k_factor, k_min, k_max))
-                    h_sigma = float(np.clip(adaptive_h_factor, h_min, h_max))
+        for k in keys:
+            if correlation_count[k] > 0:
+                avg_corr = correlation_sum[k] / correlation_count[k]
+                # At avg_corr=0.8, discount=15%; capped at 30%
+                discount_factor = min(0.3, (avg_corr - 0.5) * 0.5)
+                w_raw[k] *= (1 - discount_factor)
+                Console.debug(
+                    f"Detector {k}: correlated with {correlation_count[k]} others, "
+                    f"avg_corr={avg_corr:.2f}, discount={discount_factor:.1%}",
+                    component="FUSE",
+                )
 
-                    Console.info("Auto-tuned CUSUM parameters (source=%s):" % stats_source, component="FUSE")
-                    Console.info(f"  k_sigma: {base_k_sigma:.3f} -> {k_sigma:.3f} (dimensionless multiplier)", component="FUSE")
-                    Console.info(f"  h_sigma: {base_h_sigma:.3f} -> {h_sigma:.3f} (spread_ratio={spread_ratio:.2f})", component="FUSE")
-                else:
-                    Console.warn("Auto-tune skipped: insufficient data for statistics", component="FUSE", stats_source=stats_source, n_samples=sum(len(v) for v in all_values) if all_values else 0)
-            except Exception as tune_e:
-                Console.warn(f"Auto-tune failed: {tune_e}", component="FUSE", error_type=type(tune_e).__name__, error=str(tune_e)[:200])
-    
-        # v11.1.6: Read hysteresis parameters from config
-        z_on = float(epcfg.get("z_on", 2.0))
-        z_off = float(epcfg.get("z_off", 1.0))
-        min_onset = int(epcfg.get("min_onset", 2))
-        min_release = int(epcfg.get("min_release", 3))
-    
-        params = EpisodeParams(
-            k_sigma=k_sigma,
-            h_sigma=h_sigma,
-            min_len=min_len,
-            gap_merge=gap_merge,
-            min_duration_s=min_duration_s,
-            z_on=z_on,
-            z_off=z_off,
-            min_onset=min_onset,
-            min_release=min_release,
-        )
-        fuser = Fuser(weights=weights, ep=params)
-        fused = fuser.fuse(streams, original_features)
-        if skip_episodes:
-            episodes = pd.DataFrame()
-        else:
-            episodes = fuser.detect_episodes(fused, streams, original_features, regime_labels=regime_labels)
-        return fused, episodes
+        if pairs_correlated > 0:
+            Console.info(
+                f"{pairs_correlated}/{pairs_checked} detector pairs correlated, "
+                f"weight adjustments applied",
+                component="FUSE",
+                pairs_checked=pairs_checked,
+                pairs_correlated=pairs_correlated,
+            )
+    except Exception as ce:
+        Console.debug(f"Correlation adjustment failed: {ce}", component="FUSE")
+
+    return w_raw
 
 
 # ============================================================================
@@ -2142,25 +2154,35 @@ def run_fusion_pipeline(
     present, weights, missing = prepare_fusion_inputs(frame, cfg)
     if missing:
         Console.warn(f"Missing streams: {missing}", component="FUSE", equip=equip)
-    
-    # 2. Auto-tune weights (optional)
+
+    effective_cfg: Dict[str, Any] = cfg if cfg is not None else {}
+
+    # 2. Pre-compute episode params and correlation-discounted weights ONCE.
+    episode_params = compute_episode_params(present, effective_cfg)
+    discounted_weights = compute_discounted_weights(weights, present)
+
+    # 3. Auto-tune detector weights (optional — quick baseline fuse pass, no episodes)
     auto_tuned = False
     tuning_diagnostics = None
-    effective_cfg: Dict[str, Any] = cfg if cfg is not None else {}
     try:
-        fused_baseline, _ = combine(present, weights, effective_cfg, original_features=score_data, regime_labels=None, skip_episodes=True)
+        with Span("fusion.baseline", n_detectors=len(present), n_samples=len(score_data)):
+            fused_baseline = Fuser(weights=weights, ep=episode_params).fuse(
+                present, score_data, discounted_weights=discounted_weights
+            )
         fused_baseline_np = np.asarray(fused_baseline, dtype=np.float32).reshape(-1)
-        
+
         tuned, diagnostics = tune_detector_weights(
             streams=present, fused=fused_baseline_np,
-            current_weights=weights, cfg=cfg
+            current_weights=weights, cfg=cfg,
         )
-        
+
         if diagnostics.get("enabled"):
             weights = tuned
             auto_tuned = True
             tuning_diagnostics = diagnostics
-            
+            # Recompute discounted weights with the newly tuned base weights
+            discounted_weights = compute_discounted_weights(weights, present)
+
             if output_manager:
                 output_manager.write_fusion_metrics(
                     fusion_weights=weights,
@@ -2169,30 +2191,34 @@ def run_fusion_pipeline(
                 )
     except Exception as e:
         Console.warn(f"Auto-tuning failed: {e}", component="FUSE", equip=equip)
-    
-    # 3. Calculate fusion on train data (for threshold baseline)
+
+    # 4. Fuse training data (for threshold baseline — no episodes needed)
     train_fused = None
     if train_frame is not None and train_data is not None and not train_data.empty:
-        train_present = {k: train_frame[k].to_numpy(copy=False) 
+        train_present = {k: train_frame[k].to_numpy(copy=False)
                         for k in present.keys() if k in train_frame.columns}
         if train_present:
             try:
-                train_fused_series, _ = combine(
-                    train_present, weights, effective_cfg,
-                    original_features=train_data, regime_labels=train_regime_labels,
-                    skip_episodes=True
-                )
+                # Train uses its own discounted weights — Spearman correlations may
+                # differ on the training population vs the current scoring window.
+                train_discounted = compute_discounted_weights(weights, train_present)
+                with Span("fusion.train", n_detectors=len(train_present), n_samples=len(train_data)):
+                    train_fused_series = Fuser(weights=weights, ep=episode_params).fuse(
+                        train_present, train_data, discounted_weights=train_discounted
+                    )
                 train_fused = np.asarray(train_fused_series, dtype=np.float32).reshape(-1)
             except Exception as e:
                 Console.warn(f"Train fusion failed: {e}", component="FUSE", equip=equip)
-    
-    # 4. Final fusion on score data
-    fused, episodes = combine(
-        present, weights, effective_cfg,
-        original_features=score_data, regime_labels=score_regime_labels
-    )
+
+    # 5. Score fusion with episode detection
+    with Span("fusion.score", n_detectors=len(present), n_samples=len(score_data)):
+        score_fuser = Fuser(weights=weights, ep=episode_params)
+        fused = score_fuser.fuse(present, score_data, discounted_weights=discounted_weights)
+        episodes = score_fuser.detect_episodes(
+            fused, present, score_data, regime_labels=score_regime_labels
+        )
     fused_np = np.asarray(fused, dtype=np.float32).reshape(-1)
-    
+
     if fused_np.shape[0] != len(frame.index):
         raise RuntimeError(f"Fused length {fused_np.shape[0]} != frame length {len(frame.index)}")
     

@@ -727,8 +727,11 @@ class ModelVersionManager:
             self.sql_client.conn.commit()
             Console.info(f"Saved calibration params ({len(cal_dict)} detectors, {len(cal_bytes):,} bytes) to v{version}", component="CAL")
         except Exception as e:
-            Console.warn(f"Failed to save calibration params: {e}", component="CAL",
-                         equip=self.equip, error=str(e)[:200])
+            Console.error(
+                f"Failed to save calibration params: {e}",
+                component="CAL", equip=self.equip,
+                error_type=type(e).__name__, error=str(e)[:300],
+            )
             try:
                 self.sql_client.conn.rollback()
             except Exception:

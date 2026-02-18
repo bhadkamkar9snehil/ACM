@@ -1067,79 +1067,90 @@ class OutputManager:
             Console.warn(f"Table {table_name} not found in artifact cache", component="OUTPUT", table=table_name, available_tables=list(self._artifact_cache.keys())[:5])
             return None
     
-    def write_pca_metrics(self, pca_detector=None, df=None, run_id=None) -> int:
-        """Write PCA metrics to ACM_PCA_Metrics table (SQL-only).
-        
+    def write_pca_metrics(self, pca_detector=None, df=None, run_id=None, train=None) -> int:
+        """Write PCA fit metrics to ACM_PCA_Metrics table (SQL-only).
+
+        Two calling conventions:
+
+        1. ``pca_detector=<PCASubspaceDetector>`` — called immediately after model fitting
+           (detector_orchestrator.py).  Extracts all metrics directly from the fitted object.
+           Pass ``train=<DataFrame>`` to populate TrainSamples/TrainFeatures.
+
+        2. ``df=<DataFrame>`` — called by write_pca_artifacts after scoring.  The DataFrame
+           must already be in new-format (NComponents, ExplainedVariance, ComponentsJson,
+           MetricType, TrainSamples, TrainFeatures).  Score statistics (SPE/T2 percentiles)
+           are appended to ComponentsJson before this call, so the second write supersedes
+           the first.
+
         Args:
-            pca_detector: PCASubspaceDetector instance (new style)
-            df: Pre-built DataFrame (legacy style, optional)
-            run_id: Run ID for legacy style
+            pca_detector: PCASubspaceDetector instance.
+            df: Pre-built new-format DataFrame.
+            run_id: Run ID override (falls back to self.run_id).
+            train: Training DataFrame used to fit the detector.  Provides TrainSamples and
+                TrainFeatures when pca_detector is supplied.
         """
         if not self._check_sql_health():
             return 0
-            
+
         try:
-            # v11.7.0 DEBUG
-            Console.info(f"write_pca_metrics called: pca_detector={pca_detector is not None}, df={df is not None and len(df) if df is not None else False}", component="OUTPUT")
-            
-            # New style: extract metrics from PCA detector
             if pca_detector is not None:
-                # PCA may be None if insufficient samples (< 2) during fit - this is expected
+                # PCA may be None if insufficient samples (< 2) during fit - expected, not an error
                 if not hasattr(pca_detector, 'pca') or pca_detector.pca is None:
-                    # Silently skip - not an error, just insufficient training data
                     return 0
-                    
-                # Build metrics in long format for SQL schema:
-                # RunID, EquipID, ComponentName, MetricType, Value, Timestamp
-                metrics_rows = []
-                timestamp = datetime.now()
+
+                pca = pca_detector.pca
                 run_id_val = run_id or self.run_id
-                
-                metrics_rows.append({
+                var_ratio = getattr(pca, 'explained_variance_ratio_', None)
+
+                # Build per-component JSON matching the write_pca_artifacts format
+                components_json = None
+                if var_ratio is not None and len(var_ratio) > 0:
+                    cum = np.cumsum(var_ratio)
+                    components_json = json.dumps([
+                        {
+                            'name': f'PC{i + 1}',
+                            'type': 'variance_ratio',
+                            'value': float(r),
+                            'cumulative': float(cum[i]),
+                        }
+                        for i, r in enumerate(var_ratio)
+                    ])
+
+                sql_df = pd.DataFrame([{
                     'RunID': run_id_val,
                     'EquipID': self.equip_id,
-                    'ComponentName': 'PCA',
-                    'MetricType': 'n_components',
-                    'Value': float(pca_detector.pca.n_components_),
-                    'Timestamp': timestamp
-                })
-                metrics_rows.append({
-                    'RunID': run_id_val,
-                    'EquipID': self.equip_id,
-                    'ComponentName': 'PCA',
-                    'MetricType': 'variance_explained',
-                    'Value': float(pca_detector.pca.explained_variance_ratio_.sum()),
-                    'Timestamp': timestamp
-                })
-                metrics_rows.append({
-                    'RunID': run_id_val,
-                    'EquipID': self.equip_id,
-                    'ComponentName': 'PCA',
-                    'MetricType': 'n_features',
-                    'Value': float(len(pca_detector.keep_cols)),
-                    'Timestamp': timestamp
-                })
-                
-                sql_df = pd.DataFrame(metrics_rows)
-            # Legacy style: use provided dataframe
+                    'NComponents': int(pca.n_components_),
+                    'ExplainedVariance': float(var_ratio.sum()) if var_ratio is not None else None,
+                    'ComponentsJson': components_json,
+                    'MetricType': 'pca_fit',
+                    'TrainSamples': int(len(train)) if train is not None else None,
+                    'TrainFeatures': len(pca_detector.keep_cols) if hasattr(pca_detector, 'keep_cols') else None,
+                }])
+
             elif df is not None:
-                # Check if this is the new format (has NComponents, ExplainedVariance, ComponentsJson)
-                # vs legacy format (has ComponentName, MetricType, Value)
-                is_new_format = 'NComponents' in df.columns or 'ExplainedVariance' in df.columns or 'ComponentsJson' in df.columns
-                if not is_new_format and ('ComponentName' not in df.columns or 'MetricType' not in df.columns):
-                    # True legacy path - must have these columns
-                    Console.warn(f"write_pca_metrics format unrecognized. Expected either new format (NComponents, ExplainedVariance, ComponentsJson) or legacy format (ComponentName, MetricType, Value). Provided: {list(df.columns)}", component="OUTPUT")
+                if df.empty:
                     return 0
                 sql_df = df.copy()
+                if 'RunID' not in sql_df.columns:
+                    sql_df['RunID'] = run_id or self.run_id
+                if 'EquipID' not in sql_df.columns:
+                    sql_df['EquipID'] = self.equip_id
+
             else:
-                Console.warn("write_pca_metrics called without pca_detector or df", component="OUTPUT", equip_id=self.equip_id, run_id=self.run_id)
+                Console.warn(
+                    "write_pca_metrics called without pca_detector or df",
+                    component="OUTPUT", equip_id=self.equip_id, run_id=self.run_id,
+                )
                 return 0
-            
-            # Use MERGE upsert to handle duplicate keys gracefully
+
             return self._upsert_pca_metrics(sql_df)
-            
+
         except Exception as e:
-            Console.warn(f"write_pca_metrics failed: {e}", component="OUTPUT", equip_id=self.equip_id, error_type=type(e).__name__, error=str(e)[:200])
+            Console.warn(
+                f"write_pca_metrics failed: {e}",
+                component="OUTPUT", equip_id=self.equip_id,
+                error_type=type(e).__name__, error=str(e)[:200],
+            )
             return 0
 
     def write_pca_loadings(self, df: pd.DataFrame, run_id: str = None) -> int:
@@ -1226,118 +1237,50 @@ class OutputManager:
 
     def _upsert_pca_metrics(self, df: pd.DataFrame) -> int:
         """Upsert PCA metrics using DELETE + INSERT pattern.
-        
-        Actual table schema (from INFORMATION_SCHEMA):
-        - ID (identity)
-        - RunID (required)
-        - EquipID (required) 
-        - NComponents (nullable)
-        - ExplainedVariance (nullable - total explained variance ratio)
-        - ComponentsJson (nullable - JSON array of per-component details)
-        - MetricType (nullable - e.g., 'pca_fit')
-        - TrainSamples (nullable)
-        - TrainFeatures (nullable)
-        - CreatedAt (default)
-        
-        Input df may have either:
-        - Legacy format: ComponentName, MetricType, Value (aggregate to new format)
-        - New format: NComponents, ExplainedVariance, ComponentsJson, etc.
+
+        Expects a new-format DataFrame with columns matching ACM_PCA_Metrics:
+          - RunID           (required, UNIQUEIDENTIFIER)
+          - EquipID         (required, INT)
+          - NComponents     (nullable, INT)
+          - ExplainedVariance (nullable, FLOAT — cumulative variance ratio)
+          - ComponentsJson  (nullable, NVARCHAR — JSON array of per-component entries)
+          - MetricType      (nullable, e.g. 'pca_fit')
+          - TrainSamples    (nullable, INT)
+          - TrainFeatures   (nullable, INT)
+          - CreatedAt       (server default)
         """
         if df.empty or self.sql_client is None:
             return 0
-        
+
         try:
             conn = self.sql_client.conn
             cursor = conn.cursor()
-            
-            # Check if this is legacy format (ComponentName, MetricType, Value)
-            is_legacy_format = 'Value' in df.columns and ('ComponentName' in df.columns or 'MetricType' in df.columns)
-            
-            if is_legacy_format:
-                # Convert legacy format to new format
-                df = df.copy()
-                
-                # Group by RunID, EquipID and aggregate
-                if 'RunID' not in df.columns:
-                    df['RunID'] = self.run_id
-                if 'EquipID' not in df.columns:
-                    df['EquipID'] = self.equip_id
-                    
-                grouped = df.groupby(['RunID', 'EquipID'])
-                
-                pivot_data = []
-                for (run_id, equip_id), group in grouped:
-                    row_dict = {'RunID': run_id, 'EquipID': equip_id, 'MetricType': 'pca_fit'}
-                    
-                    # Extract n_components if present
-                    n_comp_mask = group['MetricType'].str.lower().str.contains('n_components|ncomponents', na=False)
-                    if n_comp_mask.any():
-                        try:
-                            row_dict['NComponents'] = int(group.loc[n_comp_mask, 'Value'].iloc[0])
-                        except (ValueError, TypeError):
-                            row_dict['NComponents'] = None
-                    
-                    # Extract total explained variance
-                    var_mask = group['MetricType'].str.lower().str.contains('explained.*variance|total.*variance', na=False)
-                    if var_mask.any():
-                        try:
-                            row_dict['ExplainedVariance'] = float(group.loc[var_mask, 'Value'].iloc[0])
-                        except (ValueError, TypeError):
-                            row_dict['ExplainedVariance'] = None
-                    
-                    # Build ComponentsJson from individual PC entries
-                    if 'ComponentName' in group.columns:
-                        pc_mask = group['ComponentName'].str.startswith('PC', na=False)
-                        if pc_mask.any():
-                            components = []
-                            for _, pc_row in group[pc_mask].iterrows():
-                                components.append({
-                                    'name': str(pc_row['ComponentName']),
-                                    'type': str(pc_row.get('MetricType', '')),
-                                    'value': float(pc_row['Value']) if pd.notna(pc_row['Value']) else None
-                                })
-                            if components:
-                                row_dict['ComponentsJson'] = json.dumps(components)
-                    
-                    pivot_data.append(row_dict)
-                
-                if not pivot_data:
-                    Console.debug("No PCA metrics to write after legacy conversion", component="OUTPUT")
-                    return 0
-                    
-                df = pd.DataFrame(pivot_data)
-            
+
             # Ensure RunID and EquipID are present
             if 'RunID' not in df.columns:
+                df = df.copy()
                 df['RunID'] = self.run_id
             if 'EquipID' not in df.columns:
+                df = df.copy()
                 df['EquipID'] = self.equip_id
-            
-            # DELETE existing rows for this RunID+EquipID - single batch delete
+
+            # DELETE existing rows for this RunID+EquipID before re-inserting
             run_equip_pairs = df[['RunID', 'EquipID']].drop_duplicates()
             for run_id, equip_id in run_equip_pairs.values:
                 if equip_id is None:
-                    continue  # Skip rows with no EquipID
+                    continue
                 cursor.execute(
                     "DELETE FROM ACM_PCA_Metrics WHERE RunID = ? AND EquipID = ?",
                     (str(run_id), int(equip_id))
                 )
-            
-            # Prepare bulk insert using the actual schema columns
+
             insert_sql = """
-            INSERT INTO ACM_PCA_Metrics (RunID, EquipID, NComponents, ExplainedVariance, ComponentsJson, MetricType, TrainSamples, TrainFeatures)
+            INSERT INTO ACM_PCA_Metrics
+                (RunID, EquipID, NComponents, ExplainedVariance, ComponentsJson, MetricType, TrainSamples, TrainFeatures)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """
-            
-            # Vectorized row preparation - filter out rows with null EquipID
+
             valid_records = [r for r in df.to_dict('records') if r.get('EquipID') is not None]
-            
-            # v11.7.0 DEBUG: Log what we're about to insert
-            if valid_records:
-                Console.info(f"_upsert_pca_metrics: {len(valid_records)} valid records. Sample record keys: {list(valid_records[0].keys())}", component="OUTPUT")
-                if 'ExplainedVariance' in valid_records[0]:
-                    Console.info(f"Sample ExplainedVariance value: {valid_records[0]['ExplainedVariance']}", component="OUTPUT")
-            
             rows_to_insert = [
                 (
                     str(row['RunID']),
@@ -1347,24 +1290,24 @@ class OutputManager:
                     str(row['ComponentsJson']) if pd.notna(row.get('ComponentsJson')) else None,
                     str(row.get('MetricType', 'pca_fit')) if pd.notna(row.get('MetricType')) else 'pca_fit',
                     int(row['TrainSamples']) if pd.notna(row.get('TrainSamples')) else None,
-                    int(row['TrainFeatures']) if pd.notna(row.get('TrainFeatures')) else None
+                    int(row['TrainFeatures']) if pd.notna(row.get('TrainFeatures')) else None,
                 )
                 for row in valid_records
             ]
-            
-            # v11.7.0 DEBUG: Log ExplainedVariance values being inserted
-            if rows_to_insert:
-                Console.info(f"_upsert_pca_metrics insert: {len(rows_to_insert)} rows. Sample tuple[3] (ExplainedVariance)={rows_to_insert[0][3]}", component="OUTPUT")
-            
+
             if rows_to_insert:
                 cursor.fast_executemany = True
                 cursor.executemany(insert_sql, rows_to_insert)
-            
+
             conn.commit()
             return len(rows_to_insert)
-            
+
         except Exception as e:
-            Console.warn(f"_upsert_pca_metrics failed: {e}", component="OUTPUT", table="ACM_PCA_Metrics", rows=len(df), equip_id=self.equip_id, error_type=type(e).__name__, error=str(e)[:200])
+            Console.warn(
+                f"_upsert_pca_metrics failed: {e}",
+                component="OUTPUT", table="ACM_PCA_Metrics", rows=len(df),
+                equip_id=self.equip_id, error_type=type(e).__name__, error=str(e)[:200],
+            )
             if self.sql_client and self.sql_client.conn:
                 try:
                     self.sql_client.conn.rollback()

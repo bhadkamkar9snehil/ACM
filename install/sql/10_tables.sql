@@ -1594,7 +1594,7 @@ GO
 IF OBJECT_ID('dbo.[ModelRegistry]','U') IS NULL
 BEGIN
     CREATE TABLE dbo.[ModelRegistry] (
-        [ModelType] VARCHAR(16) NOT NULL,
+        [ModelType] VARCHAR(32) NOT NULL,
         [EquipID] INT NOT NULL,
         [Version] INT NOT NULL,
         [EntryDateTime] DATETIME2(3) NOT NULL CONSTRAINT [DF_ModelRegistry_Entry] DEFAULT (sysutcdatetime()),
