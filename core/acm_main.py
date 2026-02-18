@@ -1059,18 +1059,9 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
         )
         T.log("data_split_complete", train_rows=train.shape[0], train_cols=train.shape[1], score_rows=score.shape[0], score_cols=score.shape[1])
         
-        # Debug checkpoint: confirms data load completed before baseline seeding.
-        Console.status("CHECKPOINT 1: Data loading complete, about to start baseline seeding")
-        import sys
-        sys.stdout.flush()
-
         # ===== Adaptive rolling baseline (cold-start helper) =====
         with T.section("baseline.seed"):
-            Console.status(f"CHECKPOINT 2: Entering baseline.seed section for {equip}...")
-            sys.stdout.flush()
             try:
-                Console.status(f"CHECKPOINT 3: About to call seed_baseline() function")
-                sys.stdout.flush()
                 train, score, baseline_source = seed_baseline(
                     train.copy(), 
                     score.copy(), 

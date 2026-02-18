@@ -17,9 +17,14 @@ Release Management:
 - Production deployments use specific tags (never merge commits)
 """
 
-__version__ = "11.12.0"
+__version__ = "11.12.1"
 __version_date__ = "2026-02-18"
 __version_author__ = "ACM Development Team"
+
+# v11.12.1: CLEANUP
+#
+# - Removed debug CHECKPOINT console prints and redundant `import sys` from
+#   acm_main.py (left over from cold-start baseline debugging).
 
 # v11.12.0: METRIC-AWARE REGIME QUALITY + PERF FIXES
 #
