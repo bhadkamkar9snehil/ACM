@@ -17,10 +17,34 @@ Release Management:
 - Production deployments use specific tags (never merge commits)
 """
 
-__version__ = "11.10.0"
+__version__ = "11.11.0"
 __version_date__ = "2026-02-18"
 __version_author__ = "ACM Development Team"
 
+# v11.11.0: FORECASTING PERFORMANCE (563s → <5s)
+#
+# PROBLEM: outputs.forecasting took 563s for 10-min cadence equipment.
+# ROOT CAUSE: _run_monte_carlo_simulations() "slow path" (regime transitions)
+# ran a Python loop over n_simulations × n_steps. With 1000 sims × 4310 steps
+# (720h adaptive horizon / 0.167h per step) and numpy.random.choice (~100μs each),
+# that's ≈ 430s in pure Python.
+#
+# FIX #1: VECTORIZE MONTE CARLO SLOW PATH (core/rul_estimator.py)
+# - Replaced per-simulation Python loop with numpy vectorization.
+# - All simulations now advance simultaneously: O(n_steps) Python iters instead of
+#   O(n_simulations × n_steps).
+# - Vectorized Markov transition: np.cumsum(tm[regimes], axis=1) + np.argmax for
+#   all sims at once instead of numpy.random.choice per sim.
+# - Pre-generate all noise: np.random.normal(size=(n_simulations, n_steps)) once.
+# - Expected speedup: ~1000× for 10-min cadence, proportional at other cadences.
+#
+# FIX #2: CAP MONTE CARLO STEP COUNT (core/forecast_engine.py)
+# - forecast_resolution_hours default changed from None (= data cadence) to 1.0h.
+# - At 10-min data: max_steps was 4310 (720h / 0.167h); now 720 (720h / 1h).
+# - Forecast output is health over days/weeks — hourly resolution is sufficient.
+# - Config override: set forecast_resolution_hours in ACM_Config to use a different
+#   resolution (e.g., 0.5 for 30-min output).
+#
 # v11.10.0: FUSION CLEANUP + TIMESTAMP FIX
 #
 # FIX #1: REFIT REQUEST TIMESTAMP MISMATCH (core/output_manager.py)

@@ -1,4 +1,4 @@
-﻿"""
+"""
 RUL Estimator with Monte Carlo Simulation (v10.1.0)
 
 Remaining Useful Life estimation via Monte Carlo degradation simulations.
@@ -280,50 +280,72 @@ class RULEstimator:
             
             return simulation_times.astype(float)
         
-        # SLOW PATH: With regime transitions (requires per-simulation loop)
-        simulation_times = []
-        
-        for _ in range(self.n_simulations):
-            # Initialize regime for this simulation
-            sim_regime = current_regime if current_regime is not None else 0
-            
-            # Add stochastic noise to baseline forecast
-            noise = np.random.normal(0, model_std, len(baseline_forecast))
-            health_trajectory = np.zeros_like(baseline_forecast, dtype=float)
-            start_health = current_health if current_health is not None else float(baseline_forecast[0])
-            health_trajectory[0] = float(start_health) + float(noise[0])
-            
-            # Simulate with regime transitions if model provided
-            if regime_transition_matrix is not None and regime_degradation_rates is not None and n_regimes > 0:
-                for t in range(1, len(health_trajectory)):
-                    # Apply regime-specific degradation adjustment
-                    regime_rate = regime_degradation_rates.get(sim_regime, 0.0)
-                    baseline_rate = (baseline_forecast[t] - baseline_forecast[t - 1]) / dt_hours
+        # VECTORIZED PATH: With regime transitions.
+        # Instead of a Python loop over n_simulations × n_steps (was O(N*S) ≈ 4M iterations
+        # for 1000 sims × 4310 steps at 10-min cadence → ~430s), we simulate all regimes
+        # simultaneously: only O(n_steps) Python iterations, numpy does the cross-simulation work.
+        n_steps = len(baseline_forecast)
+        start_health = float(current_health) if current_health is not None else float(baseline_forecast[0])
+        init_regime = int(current_regime) if current_regime is not None else 0
 
-                    # Use regime rate when available; fall back to baseline rate
-                    applied_rate = regime_rate if abs(regime_rate) > 1e-6 else baseline_rate
-                    health_trajectory[t] = health_trajectory[t - 1] + applied_rate * dt_hours + noise[t]
+        # Build rate lookup array indexed by regime label
+        rates_arr = np.array([
+            regime_degradation_rates.get(r, 0.0) for r in range(n_regimes)
+        ], dtype=float)
 
-                    # Sample regime transition (semi-Markov)
-                    if sim_regime < n_regimes:
-                        transition_probs = regime_transition_matrix[sim_regime]
-                        sim_regime = np.random.choice(n_regimes, p=transition_probs)
-            else:
-                health_trajectory = baseline_forecast + noise
-            
-            # Clamp health trajectory to valid range [0, 100]
-            health_trajectory = np.clip(health_trajectory, 0.0, 100.0)
-            
-            # Find time-to-failure (first crossing of threshold)
-            time_to_failure = self._find_time_to_failure(
-                health_trajectory,
-                dt_hours,
-                max_steps
+        # Baseline increments per step (fallback when regime rate is near-zero)
+        baseline_increments = np.empty(n_steps, dtype=float)
+        baseline_increments[0] = 0.0
+        baseline_increments[1:] = np.diff(baseline_forecast) / dt_hours  # rate in health/hour
+
+        # Pre-generate all noise: (n_simulations, n_steps)
+        noise_matrix = np.random.normal(0, model_std, size=(self.n_simulations, n_steps))
+
+        # Cumulative health increments: (n_simulations, n_steps)
+        # health_increments[sim, t] = applied_rate[sim, t] * dt_hours + noise[sim, t]
+        health_increments = np.empty((self.n_simulations, n_steps), dtype=float)
+        health_increments[:, 0] = noise_matrix[:, 0]  # step 0: just noise
+
+        # Simulate regime chains for all simulations simultaneously.
+        # At each step t, regimes[:] holds the CURRENT regime for each simulation;
+        # we apply its rate, then sample the next regime (transition after rate applied).
+        regimes = np.full(self.n_simulations, init_regime, dtype=np.int32)
+        tm = np.asarray(regime_transition_matrix, dtype=float)  # (n_regimes, n_regimes)
+
+        for t in range(1, n_steps):
+            # Regime rate for each simulation's current regime
+            regime_rates_t = rates_arr[regimes]  # (n_simulations,)
+
+            # Fallback to baseline rate where regime rate is near-zero
+            applied_rates_t = np.where(
+                np.abs(regime_rates_t) > 1e-6,
+                regime_rates_t,
+                baseline_increments[t]
             )
-            
-            simulation_times.append(time_to_failure)
-        
-        return np.array(simulation_times)
+            health_increments[:, t] = applied_rates_t * dt_hours + noise_matrix[:, t]
+
+            # Vectorized Markov transition: cumulative CDF sampling
+            # tm[regimes] → (n_simulations, n_regimes) transition probs
+            cum_probs = np.cumsum(tm[regimes], axis=1)  # (n_simulations, n_regimes)
+            u = np.random.uniform(size=(self.n_simulations, 1))
+            # argmax finds first regime where cumulative prob >= u
+            regimes = np.argmax(cum_probs >= u, axis=1).astype(np.int32)
+            regimes = np.clip(regimes, 0, n_regimes - 1)
+
+        # Build health trajectories via cumulative sum of increments
+        health_trajectories = start_health + np.cumsum(health_increments, axis=1)
+        health_trajectories = np.clip(health_trajectories, 0.0, 100.0)
+
+        # Vectorized time-to-failure (same as fast path)
+        below_threshold = health_trajectories < self.failure_threshold
+        has_failure = np.any(below_threshold, axis=1)
+        first_failure_idx = np.argmax(below_threshold, axis=1)
+        simulation_times = np.where(
+            has_failure,
+            (first_failure_idx + 1) * dt_hours,
+            max_steps * dt_hours
+        )
+        return simulation_times.astype(float)
     
     def _find_time_to_failure(
         self,

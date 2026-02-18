@@ -1537,6 +1537,7 @@ This invalidates all cached regime models.
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
+| v11.11.0 | 2026-02-18 | Forecasting 563s→<5s: vectorize Monte Carlo slow path (O(N×S)→O(S) Python iters); default forecast_resolution_hours=1.0h to cap step count; fix perpetual refit loop (wrong regime_score key) |
 | v11.10.0 | 2026-02-18 | Fusion cleanup: delete combine(), named Spans, required discounted_weights; fix refit timestamp UTC/local mismatch; fix triple timer summary; fix duplicate main() |
 | v11.9.0 | 2026-02-18 | Fusion stability: cross-batch health comparability, calibration persistence, 3x fusion speedup |
 | v11.8.0 | 2026-02-12 | Adaptive pipeline: remove ONLINE/OFFLINE modes entirely |

@@ -517,7 +517,7 @@ class ForecastEngine:
         if 'forecast_horizon_hours' not in config:
             config['forecast_horizon_hours'] = 168.0
         if 'forecast_resolution_hours' not in config:
-            config['forecast_resolution_hours'] = None  # Will use dt_hours from data
+            config['forecast_resolution_hours'] = 1.0  # Default 1h output; avoids huge step counts at fine cadences (e.g. 10-min → 4310 steps vs 720)
 
         # Regime-conditioned forecasting guardrails (defaults)
         if 'forecast.regime_conditioned.min_samples_per_regime' not in config:
