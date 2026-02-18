@@ -17,9 +17,18 @@ Release Management:
 - Production deployments use specific tags (never merge commits)
 """
 
-__version__ = "11.13.0"
+__version__ = "11.13.1"
 __version_date__ = "2026-02-18"
 __version_author__ = "ACM Development Team"
+
+# v11.13.1: REMOVE DEAD SQL LOG SINK
+#
+# - _SqlLogSink class was created but never wired into Console — no log records
+#   were ever queued, so ACM_RunLogs table was always empty.
+# - Removed: _SqlLogSink class, enable_sql_logging(), _sql_sink global,
+#   sql_log_sink variable in main(), Console.remove_sink/add_sink calls
+#   (which didn't exist), and _configure_logging sql_logging flag.
+# - Loki + Grafana remain the sole log persistence path.
 
 # v11.13.0: LOG CLEANUP - reduce noise, improve readability
 #

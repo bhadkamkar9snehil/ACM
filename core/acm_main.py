@@ -119,7 +119,6 @@ try:
         record_model_refit,
         start_profiling,
         stop_profiling,
-        enable_sql_logging,  # v11.6.0: Late-bind SQL log persistence
     )
     _OBSERVABILITY_AVAILABLE = True
 except ImportError:
@@ -127,7 +126,6 @@ except ImportError:
     OTEL_AVAILABLE = False
     obs_log = None
     def init_observability(*args, **kwargs): pass
-    def enable_sql_logging(*args, **kwargs): pass  # v11.6.0
     def get_tracer(): return None
     def get_meter(): return None
     def set_acm_context(*args, **kwargs): pass
@@ -303,21 +301,10 @@ class FusionContext:
 
 def _configure_logging(logging_cfg, args):
     """Apply CLI/config logging overrides and return effective flags."""
-    enable_sql_logging_cfg = (logging_cfg or {}).get("enable_sql_sink")
-    if enable_sql_logging_cfg is False:
-        Console.warn("SQL sink disable flag in config is ignored; SQL logging is always enabled in SQL mode.", component="LOG",
-                     config_flag=enable_sql_logging_cfg)
-    enable_sql_logging = True
-
-    # ACMLog does not support dynamic level/format yet; keep placeholders for future work.
-
     log_file = args.log_file or (logging_cfg or {}).get("file")
     if log_file:
         Console.warn(f"File logging disabled in SQL-only mode (ignoring --log-file={log_file})", component="CONFIG",
                      log_file=str(log_file))
-
-    # Module-specific levels are not supported yet.
-    return {"enable_sql_logging": enable_sql_logging}
 
 
 def _get_equipment_id(equipment_name: str, sql_client: Any) -> int:
@@ -704,21 +691,12 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
         cfg = copy.deepcopy(cfg)
         
         logging_cfg = (cfg.get("logging") or {})
-    logging_settings = _configure_logging(logging_cfg, args)
-    should_enable_sql_logging = logging_settings.get("enable_sql_logging", True)
-    
+    _configure_logging(logging_cfg, args)
+
     # Get equipment ID from SQL (already resolved during config loading)
     equip_id = _get_equipment_id(equip, sql_client)
     if not hasattr(cfg, '_equip_id') or cfg._equip_id == 0:
         cfg._equip_id = equip_id
-    
-    # v11.6.0 FIX #4: Enable SQL log persistence AFTER connection established
-    # This allows early logging to console/Loki while still capturing to ACM_RunLogs
-    if _OBSERVABILITY_AVAILABLE:
-        try:
-            enable_sql_logging(sql_client, run_id="pending", equip_id=equip_id)
-        except Exception as e:
-            Console.warn(f"SQL logging init failed (non-fatal): {e}", component="OTEL")
     
     # Compute and store config signature for cache validation.
     config_signature = compute_config_signature(cfg)
@@ -793,7 +771,6 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
     cache_payload: Optional[Dict[str, Any]] = None
     regime_quality_ok: bool = True
     refit_requested: bool = False
-    sql_log_sink: Optional[Any] = None  # SQL log sink for cleanup in finally block
 
     # Heuristic ETAs (configurable).
     eta_load = float((cfg.get("hints") or {}).get("eta_load_sec", 30))
@@ -2703,14 +2680,6 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
 
         # Timer Loki push is handled by Timer._print_summary() at atexit
 
-        if sql_log_sink:
-            try:
-                Console.remove_sink(sql_log_sink)
-                sql_log_sink.close()
-            except Exception:
-                pass
-            sql_log_sink = None
-        
         # === Finalize run in SQL ===
         if sql_client and run_id:
             try:

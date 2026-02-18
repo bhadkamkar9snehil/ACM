@@ -189,7 +189,6 @@ _pyroscope_enabled: bool = False
 _pyroscope_pusher: Optional["_PyroscopePusher"] = None
 _initialized: bool = False
 _shutdown_called: bool = False
-_sql_sink: Optional["_SqlLogSink"] = None
 _metrics: Dict[str, Any] = {}
 _init_lock = threading.Lock()
 
@@ -260,7 +259,7 @@ def init(
         enable_profiling: Enable continuous profiling with Pyroscope
         enable_loki: Enable log push to Loki
     """
-    global _initialized, _tracer, _meter, _sql_sink, _loki_pusher, _config, _metrics
+    global _initialized, _tracer, _meter, _loki_pusher, _config, _metrics
     
     # Handle legacy tempo_endpoint param
     if tempo_endpoint is not None:
@@ -285,10 +284,6 @@ def init(
             equip_id=equip_id,
             run_id=run_id,
         )
-        
-        # SQL log sink
-        if sql_client is not None:
-            _sql_sink = _SqlLogSink(sql_client, run_id, equip_id)
         
         # Collect enabled services for a single consolidated log line
         _otel_services: list[str] = []
@@ -574,39 +569,9 @@ def init(
         atexit.register(shutdown)
 
 
-def enable_sql_logging(sql_client: Any, run_id: str, equip_id: int) -> None:
-    """
-    Enable SQL log persistence after SQL connection is established.
-    
-    v11.6.0 FIX #4: Late-binding SQL sink
-    =====================================
-    The observability stack is initialized BEFORE SQL connection for early
-    logging. This function enables SQL log persistence AFTER the connection
-    is established.
-    
-    Args:
-        sql_client: SQLClient instance with active connection
-        run_id: Current run identifier
-        equip_id: Equipment ID
-    """
-    global _sql_sink
-    
-    if _sql_sink is not None:
-        return  # Already enabled
-    
-    try:
-        _sql_sink = _SqlLogSink(sql_client, run_id, equip_id)
-        Console.ok("SQL log persistence enabled -> ACM_RunLogs", component="OTEL")
-    except Exception as e:
-        Console.warn(
-            f"Failed to enable SQL log persistence: {e}",
-            component="OTEL", error_type=type(e).__name__
-        )
-
-
 def shutdown() -> None:
     """Flush and shutdown all providers."""
-    global _sql_sink, _loki_pusher, _shutdown_called, _pyroscope_enabled, _pyroscope_pusher
+    global _loki_pusher, _shutdown_called, _pyroscope_enabled, _pyroscope_pusher
     
     # Prevent double shutdown (atexit may call again)
     if _shutdown_called:
@@ -646,9 +611,6 @@ def shutdown() -> None:
         except Exception:
             pass  # Best effort flush
     
-    if _sql_sink:
-        _sql_sink.close()
-        _sql_sink = None
     if _loki_pusher:
         _loki_pusher.close()
         _loki_pusher = None
@@ -2442,129 +2404,6 @@ class _PyroscopePusher:
                     Console.warn(f"Pyroscope push failed: {e.code}", component="PROFILE", profile_type=profile_type, endpoint=self._endpoint, http_status=e.code)
         except Exception as e:
             Console.warn(f"Pyroscope push error: {e}", component="PROFILE", profile_type=profile_type, endpoint=self._endpoint, error_type=type(e).__name__, error=str(e)[:200])
-
-
-# =============================================================================
-# SQL LOG SINK
-# =============================================================================
-
-class _SqlLogSink:
-    """Batched SQL log sink for ACM_RunLogs table.
-    
-    v11.1.6: Fixed context serialization (now JSON) and error handling.
-    """
-    
-    def __init__(self, sql_client, run_id: str, equip_id: int, batch_size: int = 50):
-        self._sql_client = sql_client
-        self._run_id = run_id
-        self._equip_id = equip_id
-        self._batch_size = batch_size
-        self._queue: queue.Queue = queue.Queue()
-        self._stop = threading.Event()
-        self._written = 0
-        self._failures = 0  # v11.1.6: Track insert failures
-        self._last_failure_warn = 0.0  # Rate-limit warnings
-        
-        # Background flush thread
-        self._thread = threading.Thread(target=self._flush_loop, daemon=True)
-        self._thread.start()
-    
-    def log(self, level: str, message: str, **context) -> None:
-        """Queue a log record with trace context."""
-        # Capture trace context for correlation
-        trace_id = None
-        span_id = None
-        if OTEL_AVAILABLE and otel_trace is not None:
-            try:
-                current_span = otel_trace.get_current_span()
-                if current_span is not None:
-                    span_ctx = current_span.get_span_context()
-                    if span_ctx is not None and span_ctx.is_valid:
-                        trace_id = format(span_ctx.trace_id, '032x')
-                        span_id = format(span_ctx.span_id, '016x')
-            except Exception:
-                pass
-        
-        record = {
-            "timestamp": datetime.now().isoformat(),
-            "level": level,
-            "message": message[:4000],
-            "context": context,
-            "trace_id": trace_id,
-            "span_id": span_id,
-        }
-        self._queue.put(record)
-    
-    def _flush_loop(self) -> None:
-        """Background thread that flushes logs to SQL."""
-        while not self._stop.is_set():
-            self._flush_batch()
-            time.sleep(2.0)
-        self._flush_batch()  # Final flush
-    
-    def _flush_batch(self) -> None:
-        """Flush queued logs to SQL with proper JSON serialization."""
-        import json
-        
-        batch = []
-        while len(batch) < self._batch_size:
-            try:
-                batch.append(self._queue.get_nowait())
-            except queue.Empty:
-                break
-        
-        if not batch:
-            return
-        
-        try:
-            with self._sql_client.cursor() as cur:
-                for record in batch:
-                    # Include trace context in the context dict for correlation
-                    ctx = dict(record.get("context", {}))
-                    if record.get("trace_id"):
-                        ctx["trace_id"] = record["trace_id"]
-                    if record.get("span_id"):
-                        ctx["span_id"] = record["span_id"]
-                    
-                    # v11.1.6: Serialize as JSON, not str() - enables proper parsing/querying
-                    try:
-                        ctx_json = json.dumps(ctx, ensure_ascii=False, default=str)[:4000]
-                    except Exception:
-                        ctx_json = "{}"
-                    
-                    cur.execute(
-                        """INSERT INTO ACM_RunLogs 
-                           (RunID, EquipID, LoggedAt, Level, Message, Context)
-                           VALUES (?, ?, ?, ?, ?, ?)""",
-                        (
-                            self._run_id,
-                            self._equip_id,
-                            record["timestamp"],
-                            record["level"],
-                            record["message"],
-                            ctx_json,
-                        )
-                    )
-            self._written += len(batch)
-        except Exception as e:
-            # v11.1.6: Don't silently swallow - track failures and warn periodically
-            self._failures += len(batch)
-            now = time.time()
-            # Rate-limit warnings to once per 30 seconds
-            if now - self._last_failure_warn > 30.0:
-                Console.warn(
-                    f"SQL log sink: {self._failures} total failures (latest: {e})", 
-                    component="LOG",
-                    error_type=type(e).__name__,
-                    total_failures=self._failures,
-                )
-                self._last_failure_warn = now
-    
-    def close(self) -> None:
-        """Stop background thread and flush remaining logs."""
-        self._stop.set()
-        if self._thread.is_alive():
-            self._thread.join(timeout=5.0)
 
 
 # =============================================================================
