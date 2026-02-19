@@ -1,6 +1,6 @@
 # ACM - Automated Condition Monitoring
 
-[![Version](https://img.shields.io/badge/version-11.5.0-blue)](#) [![Status](https://img.shields.io/badge/status-Production-brightgreen)](#) [![Python](https://img.shields.io/badge/python-3.11+-blue)](#) [![SQL Server](https://img.shields.io/badge/SQL%20Server-2019%2B-blue)](#)
+[![Version](https://img.shields.io/badge/version-11.14.0-blue)](#) [![Status](https://img.shields.io/badge/status-Production-brightgreen)](#) [![Python](https://img.shields.io/badge/python-3.11+-blue)](#) [![SQL Server](https://img.shields.io/badge/SQL%20Server-2019%2B-blue)](#)
 
 **Predictive Maintenance for Industrial Equipment**
 
@@ -519,7 +519,8 @@ Combines detector outputs with learned weights:
 │   Weight Tuning:                                                 │
 │   • Primary method: Episode separability (maximize AUROC)        │
 │   • Fallback: Statistical diversity (variance + correlation)    │
-│   • Correlation discount: Reduce weight for correlated pairs     │
+│   • Correlation discount: Spearman |r| > 0.5 triggers weight    │
+│     reduction (capped at 30%) to prevent double-counting        │
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -535,13 +536,16 @@ Combines detector outputs with learned weights:
 │                    HEALTH INDEX (0-100%)                         │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                  │
-│   Formula:                                                       │
-│   ──────────                                                     │
-│   health_raw = 100 × exp(-fused_z / scale)                       │
+│   Formula (v10.1.0 sigmoid):                                     │
+│   ──────────────────────────                                     │
+│   normalized = (|fused_z| - z_thresh/2) / (z_thresh/4)           │
+│   sigmoid = 1 / (1 + exp(-normalized × steepness))               │
+│   health = 100 × (1 - sigmoid)                                   │
 │                                                                  │
 │   Where:                                                         │
 │   • fused_z = weighted combination of detector z-scores          │
-│   • scale = calibration parameter (default: 3.0)                 │
+│   • z_thresh = threshold (default: 5.0)                          │
+│   • steepness = slope control (default: 1.5)                     │
 │                                                                  │
 │   Smoothing:                                                     │
 │   ───────────                                                    │
@@ -1038,6 +1042,14 @@ ACM/
 
 ## Changelog
 
+### v11.14.0 (2026-02-19) - Log Quality & Batch Summary Overhaul
+- **FIX**: Eliminated duplicate FUSE Spearman correlation logs (12-15 lines per batch)
+- **FIX**: Degradation model logs now tagged `[global]` / `[regime-N]` — no more ambiguous duplicates
+- **FIX**: Batch summary now shows real health index (0-100%) instead of raw Z-scores
+- **FIX**: Batch summary uses `Console.info(component="SUMMARY")` — pushed to Loki, searchable
+- **FIX**: Forecast log `top_sensors` truncation bug — was showing `sen` instead of full sensor names
+- **REMOVED**: `>>>` prefix from batch summary (replaced `Console.status` with `Console.info`)
+
 ### v11.4.0 (2026-01-21) - Regime Clustering Architectural Fix
 **BREAKING CHANGE**: Regime clustering now uses **RAW SENSOR VALUES ONLY**
 
@@ -1120,6 +1132,6 @@ ACM/
 
 ---
 
-**Version**: 11.4.0 | **Updated**: January 21, 2026
+**Version**: 11.14.0 | **Updated**: February 19, 2026
 
 *For implementation details, see [docs/ACM_SYSTEM_OVERVIEW.md](docs/ACM_SYSTEM_OVERVIEW.md)*

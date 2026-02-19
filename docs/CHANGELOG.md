@@ -6,6 +6,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [11.14.0] - 2026-02-19
+
+### Fixed - LOG QUALITY & BATCH SUMMARY OVERHAUL
+
+#### Duplicate FUSE Correlation Logs (core/fuse.py)
+- `compute_discounted_weights()` was called twice per batch with identical data: once pre-tuning (line 2162) and once post-tuning (line 2184). Both calls logged the same Spearman correlation pairs, per-detector discounts, and summary counts.
+- Added `quiet: bool = False` parameter. The recompute call now passes `quiet=True` to suppress redundant log output.
+- **Impact**: Eliminates 12-15 duplicate DEBUG/INFO lines per batch run.
+
+#### Duplicate DEGRADE Model Logs (core/degradation_model.py)
+- `RegimeConditionedTrendModel.fit()` fits a global model AND per-regime models, both calling `LinearTrendModel.fit()`. All log messages (Restored state, HEALTH-JUMP, Detected outliers, Adaptive smoothing, Fitted) appeared twice with no way to tell which model produced which log.
+- Added `label: str = "global"` parameter to `LinearTrendModel.__init__()`. All degradation log messages now include `[label]` tag: `Fitted [global]`, `Fitted [regime-0]`, `HEALTH-JUMP [regime-0]`, `Restored state [global]`, etc.
+- `RegimeConditionedTrendModel` passes `label="global"` for the global model and `label=f"regime-{N}"` for per-regime models. Warm-start restoration also preserves labels.
+- **Impact**: Logs are no longer confusing duplicates; each line clearly identifies its source model.
+
+#### Batch Summary Z-Score Bug (core/acm_main.py)
+- The batch summary displayed `Health: P10=-3.0 P50=-1.8 P90=-1.4` — raw fused Z-scores, not health percentages. Negative values made no sense as "health".
+- Now computes actual health index (0-100%) using `health_index()` from `analytics_builder` — the same sigmoid formula used by `ACM_Runs` and `ACM_HealthTimeline`.
+- Summary now shows: `health=[avg=92.3% min=35.1% max=99.8% P10=78.2% P50=95.1%] status=CAUTION`
+- Added `compute_run_health_status()` call to derive HEALTHY/CAUTION/ALERT inline.
+
+#### Batch Summary Overhaul (core/acm_main.py)
+- **Removed** `Console.status()` calls (printed `>>>` prefix, console-only, not searchable in Loki).
+- **Replaced** with single structured `Console.info()` call using `component="SUMMARY"` — now pushed to Loki for dashboarding and searchability.
+- New summary includes: RunID, health index with status, anomaly rate, episode count with avg severity, RUL with top sensor drivers, regime info, drift mode, model maturity, data volume, refit status, and degradation list.
+- Timing breakdown emitted as separate `Console.info()` line with `component="SUMMARY"`.
+
+#### top_sensors Truncation Bug (core/acm_main.py)
+- Forecast log showed `top_sensors=sen` — the code `forecast_results['top_sensors'][:3]` was slicing the formatted **string** to 3 characters instead of limiting to 3 sensors.
+- Removed `[:3]` slice — the string is already formatted to top-3 by `format_top_n(n=3)` upstream in `SensorAttributor`.
+- **Impact**: Full sensor attribution now visible in forecast logs (e.g., `top_sensors=Sensor_A (42.5%), Sensor_B (28.3%), Sensor_C (15.2%)`).
+
+---
+
 ## [11.5.0] - 2026-01-21
 
 ### Fixed - CRITICAL BATCH MODE STABILITY

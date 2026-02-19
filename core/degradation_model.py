@@ -134,11 +134,12 @@ class LinearTrendModel(BaseDegradationModel):
         flatline_epsilon: float = 1e-3,
         enable_adaptive: bool = True,
         min_samples_for_adaptive: int = 30,
-        max_gap_hours: float = 720.0
+        max_gap_hours: float = 720.0,
+        label: str = "global",
     ):
         """
         Initialize Holt's linear trend model.
-        
+
         Args:
             alpha: Level smoothing parameter (0.05-0.95, per Hyndman & Athanasopoulos 2018)
             beta: Trend smoothing parameter (0.01-0.30, per Hyndman & Athanasopoulos 2018)
@@ -147,7 +148,9 @@ class LinearTrendModel(BaseDegradationModel):
             enable_adaptive: Enable adaptive alpha/beta tuning
             min_samples_for_adaptive: Minimum samples required for adaptive tuning
             max_gap_hours: Maximum time gap before data is truncated for fitting
+            label: Human-readable label for log messages (e.g. "global", "regime-0")
         """
+        self.label = label
         self.alpha = np.clip(alpha, 0.05, 0.95)
         self.beta = np.clip(beta, 0.01, 0.30)
         self.max_trend_per_hour = max_trend_per_hour
@@ -241,13 +244,13 @@ class LinearTrendModel(BaseDegradationModel):
         
         if is_flatline:
             self.trend = 0.0
-            Console.info("Flatline detected; zeroing trend", component="DEGRADE")
+            Console.info(f"Flatline detected [{self.label}]; zeroing trend", component="DEGRADE")
         
         # Adaptive smoothing (if enabled, not warm-started, and sufficient samples)
         if self.enable_adaptive and not self._is_warmed and n >= self.min_samples_for_adaptive:
             try:
                 self.alpha, self.beta = self._adaptive_smoothing(health_values)
-                Console.info(f"Adaptive smoothing: alpha={self.alpha:.3f}, beta={self.beta:.3f}", component="DEGRADE")
+                Console.info(f"Adaptive smoothing [{self.label}]: alpha={self.alpha:.3f}, beta={self.beta:.3f}", component="DEGRADE")
             except Exception as e:
                 Console.warn(f"Adaptive smoothing failed: {e}", component="DEGRADE", error_type=type(e).__name__, error=str(e)[:200])
         
@@ -294,7 +297,7 @@ class LinearTrendModel(BaseDegradationModel):
             self.std_error = 1.0
         
         Console.info(
-            f"Fitted: level={self.level:.2f}, trend={self.trend:.4f}/hr, "
+            f"Fitted [{self.label}]: level={self.level:.2f}, trend={self.trend:.4f}/hr, "
             f"std_error={self.std_error:.2f}, n={n}",
             component="DEGRADE"
         )
@@ -469,7 +472,7 @@ class LinearTrendModel(BaseDegradationModel):
         
         self._is_warmed = True
         Console.info(
-            f"Restored state: level={self.level:.2f}, trend={self.trend:.4f}/hr, "
+            f"Restored state [{self.label}]: level={self.level:.2f}, trend={self.trend:.4f}/hr, "
             f"std_error={self.std_error:.2f}",
             component="DEGRADE"
         )
@@ -510,7 +513,7 @@ class LinearTrendModel(BaseDegradationModel):
         outliers = z_scores > n_std
         
         if outliers.sum() > 0:
-            Console.info(f"Detected {outliers.sum()} outliers (robust z > {n_std})", component="DEGRADE")
+            Console.info(f"Detected {outliers.sum()} outliers [{self.label}] (robust z > {n_std})", component="DEGRADE")
             series = series.copy()
             series[outliers] = np.nan
         
@@ -580,14 +583,14 @@ class LinearTrendModel(BaseDegradationModel):
                 post_second_samples = len(health_series) - second_last_loc - 1
                 if post_second_samples >= min_post_jump_samples:
                     Console.info(
-                        f"HEALTH-JUMP: Using second-to-last jump at {second_last_jump_idx} "
+                        f"HEALTH-JUMP [{self.label}]: Using second-to-last jump at {second_last_jump_idx} "
                         f"({post_second_samples} post-jump samples)",
                         component="DEGRADE"
                     )
                     return health_series.iloc[second_last_loc + 1:]
             
             Console.warn(
-                f"HEALTH-JUMP: Jump detected at {last_jump_idx} but only {post_jump_samples} "
+                f"HEALTH-JUMP [{self.label}]: Jump detected at {last_jump_idx} but only {post_jump_samples} "
                 f"post-jump samples (need {min_post_jump_samples}). Using full data.",
                 component="DEGRADE"
             )
@@ -599,7 +602,7 @@ class LinearTrendModel(BaseDegradationModel):
         jump_magnitude = post_jump_health - pre_jump_health
         
         Console.info(
-            f"HEALTH-JUMP: Maintenance reset detected at {last_jump_idx}. "
+            f"HEALTH-JUMP [{self.label}]: Maintenance reset detected at {last_jump_idx}. "
             f"Health jumped {pre_jump_health:.1f}% -> {post_jump_health:.1f}% (+{jump_magnitude:.1f}%). "
             f"Using {post_jump_samples + 1} post-jump samples for trend fitting.",
             component="DEGRADE"
@@ -841,7 +844,8 @@ class RegimeConditionedTrendModel(BaseDegradationModel):
             beta=beta,
             max_trend_per_hour=max_trend_per_hour,
             enable_adaptive=enable_adaptive,
-            min_samples_for_adaptive=min_samples_for_adaptive
+            min_samples_for_adaptive=min_samples_for_adaptive,
+            label="global",
         )
         self.regime_models: Dict[int, LinearTrendModel] = {}
         self.current_regime: Optional[int] = None
@@ -923,13 +927,14 @@ class RegimeConditionedTrendModel(BaseDegradationModel):
                     component="DEGRADE"
                 )
                 continue
-            
+
             model = LinearTrendModel(
                 alpha=self.alpha,
                 beta=self.beta,
                 max_trend_per_hour=self.max_trend_per_hour,
                 enable_adaptive=self.enable_adaptive,
-                min_samples_for_adaptive=self.min_samples_for_adaptive
+                min_samples_for_adaptive=self.min_samples_for_adaptive,
+                label=f"regime-{int(regime_label)}",
             )
             model.fit(regime_health)
             self.regime_models[int(regime_label)] = model
@@ -994,7 +999,8 @@ class RegimeConditionedTrendModel(BaseDegradationModel):
                 beta=self.beta,
                 max_trend_per_hour=self.max_trend_per_hour,
                 enable_adaptive=self.enable_adaptive,
-                min_samples_for_adaptive=self.min_samples_for_adaptive
+                min_samples_for_adaptive=self.min_samples_for_adaptive,
+                label=f"regime-{label}",
             )
             model.set_parameters(model_params)
             self.regime_models[label] = model

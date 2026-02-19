@@ -1821,6 +1821,7 @@ def compute_episode_params(streams: Dict[str, np.ndarray], cfg: Dict[str, Any]) 
 def compute_discounted_weights(
     weights: Dict[str, float],
     streams: Dict[str, np.ndarray],
+    quiet: bool = False,
 ) -> Dict[str, float]:
     """Apply Spearman-based correlation discount to detector weights.
 
@@ -1867,10 +1868,11 @@ def compute_discounted_weights(
                         correlation_count[k2] += 1
                         correlation_sum[k1] += abs(corr)
                         correlation_sum[k2] += abs(corr)
-                        Console.debug(
-                            f"Detector Spearman correlation {k1}<->{k2}: {corr:.2f}",
-                            component="FUSE",
-                        )
+                        if not quiet:
+                            Console.debug(
+                                f"Detector Spearman correlation {k1}<->{k2}: {corr:.2f}",
+                                component="FUSE",
+                            )
 
         for k in keys:
             if correlation_count[k] > 0:
@@ -1878,13 +1880,14 @@ def compute_discounted_weights(
                 # At avg_corr=0.8, discount=15%; capped at 30%
                 discount_factor = min(0.3, (avg_corr - 0.5) * 0.5)
                 w_raw[k] *= (1 - discount_factor)
-                Console.debug(
-                    f"Detector {k}: correlated with {correlation_count[k]} others, "
-                    f"avg_corr={avg_corr:.2f}, discount={discount_factor:.1%}",
-                    component="FUSE",
-                )
+                if not quiet:
+                    Console.debug(
+                        f"Detector {k}: correlated with {correlation_count[k]} others, "
+                        f"avg_corr={avg_corr:.2f}, discount={discount_factor:.1%}",
+                        component="FUSE",
+                    )
 
-        if pairs_correlated > 0:
+        if pairs_correlated > 0 and not quiet:
             Console.info(
                 f"{pairs_correlated}/{pairs_checked} detector pairs correlated, "
                 f"weight adjustments applied",
@@ -2181,7 +2184,7 @@ def run_fusion_pipeline(
             auto_tuned = True
             tuning_diagnostics = diagnostics
             # Recompute discounted weights with the newly tuned base weights
-            discounted_weights = compute_discounted_weights(weights, present)
+            discounted_weights = compute_discounted_weights(weights, present, quiet=True)
 
             if output_manager:
                 output_manager.write_fusion_metrics(

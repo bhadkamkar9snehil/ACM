@@ -66,7 +66,8 @@ except ImportError:
 from core.omr import OMRDetector  # Overall Model Residual detector
 from core.config_history_writer import log_auto_tune_changes
 from core.output_manager import OutputManager, write_sql_artifacts
-from core.run_metadata_writer import write_run_metadata, extract_run_metadata_from_scores, extract_data_quality_score
+from core.run_metadata_writer import write_run_metadata, extract_run_metadata_from_scores, extract_data_quality_score, compute_run_health_status
+from core.analytics_builder import health_index as _compute_health_index
 from core.episode_culprits_writer import write_episode_culprits_enhanced
 from core.pipeline_types import DataContract, ValidationResult
 from core.seasonality import SeasonalPattern  # detect_and_adjust imported inline
@@ -2501,7 +2502,7 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
                 
                 if forecast_results.get('success'):
                     Console.info(
-                        f"Forecast: RUL P10/50/90={forecast_results['rul_p10']:.0f}/{forecast_results['rul_p50']:.0f}/{forecast_results['rul_p90']:.0f}h | tables={len(forecast_results['tables_written'])} | top_sensors={forecast_results['top_sensors'][:3]}",
+                        f"Forecast: RUL P10/50/90={forecast_results['rul_p10']:.0f}/{forecast_results['rul_p50']:.0f}/{forecast_results['rul_p90']:.0f}h | tables={len(forecast_results['tables_written'])} | top_sensors={forecast_results['top_sensors']}",
                         component="FORECAST",
                     )
                     # Record RUL metrics for Prometheus.
@@ -2587,93 +2588,113 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
 
     finally:
         # === Consolidated Batch Analytics Summary ===
-        # Single human-readable block: health, RUL, episodes, regime, drift, model
-        # state, top timing, and outcome. Console-only (not pushed to Loki/SQL).
+        # Structured run summary pushed to Loki (component=SUMMARY) for
+        # searchability and also rendered on the console.
         try:
-            _eq   = equip if 'equip' in locals() else "?"
-            _ws   = win_start.strftime("%Y-%m-%d %H:%M") if 'win_start' in locals() and win_start is not None else "?"
-            _we   = win_end.strftime("%H:%M") if 'win_end' in locals() and win_end is not None else "?"
-            Console.header(f"BATCH SUMMARY  {_eq}  [{_ws} - {_we}]")
+            _eq = equip if 'equip' in locals() else "?"
+            _ws = win_start.strftime("%Y-%m-%d %H:%M") if 'win_start' in locals() and win_start is not None else "?"
+            _we = win_end.strftime("%H:%M") if 'win_end' in locals() and win_end is not None else "?"
+            _rid = str(run_id)[:8] if 'run_id' in locals() and run_id else "?"
+            _out = outcome if 'outcome' in locals() else '?'
 
-            # -- Health --
+            # -- Health (converted to 0-100 index) --
+            _health_str = ""
+            _health_status = "?"
+            _anomaly_str = ""
             if 'frame' in locals() and isinstance(frame, pd.DataFrame) and 'fused' in frame.columns:
                 _fused = frame['fused'].dropna().to_numpy()
                 if len(_fused) > 0:
-                    Console.status(
-                        f"Health:   P10={np.percentile(_fused,10):.1f}"
-                        f"  P50={np.percentile(_fused,50):.1f}"
-                        f"  P90={np.percentile(_fused,90):.1f}"
-                        f"  Min={_fused.min():.1f}"
-                        f"  Max={_fused.max():.1f}"
+                    _hi = _compute_health_index(_fused)
+                    _health_str = (
+                        f"avg={np.mean(_hi):.1f}%  min={np.min(_hi):.1f}%  max={np.max(_hi):.1f}%  "
+                        f"P10={np.percentile(_hi,10):.1f}%  P50={np.percentile(_hi,50):.1f}%"
                     )
+                    _health_status = compute_run_health_status(float(np.mean(_hi)), float(np.min(_hi)))
                     # Anomaly rate (fused z > 3)
                     _n_anom = int((_fused > 3.0).sum())
-                    Console.status(
-                        f"Anomaly:  {_n_anom}/{len(_fused)} pts ({_n_anom/len(_fused)*100:.1f}%) fused > 3σ"
-                    )
+                    _anomaly_str = f"{_n_anom}/{len(_fused)} ({_n_anom/len(_fused)*100:.1f}%)"
 
             # -- RUL --
+            _rul_str = ""
             if 'forecast_results' in locals() and isinstance(forecast_results, dict) and forecast_results.get('success'):
                 _fr = forecast_results
-                Console.status(
-                    f"RUL:      P10={_fr['rul_p10']:.0f}h"
-                    f"  P50={_fr['rul_p50']:.0f}h"
-                    f"  P90={_fr['rul_p90']:.0f}h"
-                )
+                _rul_str = f"P10={_fr['rul_p10']:.0f}h  P50={_fr['rul_p50']:.0f}h  P90={_fr['rul_p90']:.0f}h"
+                _top_sens = _fr.get('top_sensors', '')
+                if _top_sens:
+                    _rul_str += f"  drivers=[{_top_sens}]"
 
             # -- Episodes --
+            _ep_str = ""
             if 'episodes' in locals() and isinstance(episodes, pd.DataFrame):
                 _ep_total = len(episodes)
                 _active_col = next((c for c in ('Active', 'active', 'IsActive') if c in episodes.columns), None)
                 _ep_active = int(episodes[_active_col].sum()) if _active_col else 0
-                Console.status(f"Episodes: {_ep_total} total  {_ep_active} active")
+                _sev_cols = [c for c in ('severity', 'Severity') if c in episodes.columns]
+                _ep_str = f"{_ep_total} total, {_ep_active} active"
+                if _sev_cols and _ep_total > 0:
+                    _sevs = episodes[_sev_cols[0]].dropna()
+                    if len(_sevs) > 0:
+                        _ep_str += f", avg_severity={_sevs.mean():.2f}"
 
             # -- Regime --
+            _regime_str = ""
             if 'score_out' in locals() and isinstance(score_out, dict):
-                _k      = score_out.get('regime_k', 0)
-                _metric = score_out.get('regime_metric', '?')
-                _rscore = score_out.get('regime_score', None)
-                _qok    = 'OK' if ('regime_quality_ok' in locals() and regime_quality_ok) else 'FAIL'
-                _rstr   = f"K={_k}  metric={_metric}"
-                if _rscore is not None:
-                    _rstr += f"  score={_rscore:.3f}"
-                _rstr += f"  quality={_qok}"
+                _k = score_out.get('regime_k', 0)
+                _qok = 'OK' if ('regime_quality_ok' in locals() and regime_quality_ok) else 'FAIL'
+                _regime_str = f"K={_k}  quality={_qok}"
                 if 'frame' in locals() and isinstance(frame, pd.DataFrame) and 'regime_label' in frame.columns:
                     _dom = frame['regime_label'].mode()
                     if len(_dom) > 0 and len(frame) > 0:
                         _dom_pct = (frame['regime_label'] == _dom.iloc[0]).sum() / len(frame) * 100
-                        _rstr += f"  dominant=R{_dom.iloc[0]}({_dom_pct:.0f}%)"
-                Console.status(f"Regime:   {_rstr}")
+                        _regime_str += f"  dominant=R{int(_dom.iloc[0])}({_dom_pct:.0f}%)"
 
             # -- Drift --
+            _drift_str = ""
             if 'frame' in locals() and isinstance(frame, pd.DataFrame) and 'drift_mode' in frame.columns and len(frame) > 0:
-                Console.status(f"Drift:    {frame['drift_mode'].iloc[-1]}")
+                _drift_str = str(frame['drift_mode'].iloc[-1])
 
-            # -- Model state --
+            # -- Model --
+            _model_str = ""
             if 'model_state' in locals() and model_state is not None:
                 _ms = model_state
-                Console.status(
-                    f"Model:    {_ms.maturity.value}"
-                    f"  runs={_ms.consecutive_runs}"
-                    f"  days={_ms.training_days:.1f}"
-                )
+                _model_str = f"{_ms.maturity.value}  runs={_ms.consecutive_runs}  days={_ms.training_days:.1f}"
 
             # -- Data volume --
-            _scored  = rows_read if 'rows_read' in locals() else '?'
+            _scored = rows_read if 'rows_read' in locals() else '?'
             _trained = len(train) if 'train' in locals() and isinstance(train, pd.DataFrame) else '?'
-            Console.status(f"Data:     {_scored} scored  {_trained} trained")
 
-            # -- Top timing sections (top 5 by duration) --
+            # -- Timing --
+            _timing_str = ""
             if 'T' in locals() and hasattr(T, 'totals') and T.totals:
                 _total_t = T.total_elapsed() if hasattr(T, "total_elapsed") else sum(T.totals.values())
                 _top = sorted(T.totals.items(), key=lambda x: x[1], reverse=True)[:5]
-                _timing_str = "  ".join(f"{s}={t:.1f}s" for s, t in _top)
-                Console.status(f"Timing:   total={_total_t:.1f}s  |  {_timing_str}")
+                _timing_str = f"total={_total_t:.1f}s  " + "  ".join(f"{s}={t:.1f}s" for s, t in _top)
 
-            # -- Outcome --
-            _out = outcome if 'outcome' in locals() else '?'
+            # -- Degradations --
             _deg = ', '.join(degradations) if 'degradations' in locals() and degradations else 'none'
-            Console.status(f"Outcome:  {_out}  degraded=[{_deg}]")
+
+            # -- Refit --
+            _refit = "yes" if ('refit_requested' in locals() and refit_requested) else "no"
+
+            # Emit structured summary log (pushed to Loki for dashboarding)
+            Console.info(
+                f"Batch summary | {_eq} | RunID={_rid} | [{_ws}-{_we}] | outcome={_out} | "
+                f"health=[{_health_str}] status={_health_status} | "
+                f"anomalies={_anomaly_str} | "
+                f"episodes=[{_ep_str}] | "
+                f"RUL=[{_rul_str}] | "
+                f"regime=[{_regime_str}] | drift={_drift_str} | "
+                f"model=[{_model_str}] | "
+                f"data={_scored} scored, {_trained} trained | "
+                f"refit={_refit} | degraded=[{_deg}]",
+                component="SUMMARY",
+                equip=_eq,
+                run_id=_rid,
+                outcome=_out,
+                health_status=_health_status,
+            )
+            if _timing_str:
+                Console.info(f"Timing | {_timing_str}", component="SUMMARY")
 
         except Exception:
             pass  # Summary is best-effort; never suppress pipeline errors
