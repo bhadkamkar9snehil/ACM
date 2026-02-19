@@ -162,10 +162,12 @@ class AnalyticsBuilder:
         sensor_train_mean = None
         sensor_train_std = None
         data_quality_df = None
+        omr_contributions = None
 
         if sensor_context:
             v = sensor_context.get("values")
             z = sensor_context.get("z_scores")
+            omr_contributions = sensor_context.get("omr_contributions")
 
             if isinstance(v, pd.DataFrame) and len(v.columns):
                 sensor_values = v.reindex(scores_df.index)
@@ -263,6 +265,7 @@ class AnalyticsBuilder:
                         warn_z=warn_threshold,
                         alert_z=alert_threshold,
                         top_n=top_n,
+                        omr_contributions=omr_contributions
                     )
 
                     result = self.output_manager.write_dataframe(
@@ -498,7 +501,8 @@ class AnalyticsBuilder:
         train_std: Optional[pd.Series],
         warn_z: float,
         alert_z: float,
-        top_n: int
+        top_n: int,
+        omr_contributions: Optional[pd.DataFrame] = None
     ) -> pd.DataFrame:
         """Summarize top sensors by peak z-score deviation (vectorized)."""
         empty_schema = {
@@ -527,7 +531,7 @@ class AnalyticsBuilder:
             latest_ts[c] = col_notna.index[-1] if len(col_notna) > 0 else pd.NaT
         
         max_signed = pd.Series({c: zs.loc[max_idx[c], c] if pd.notna(max_idx[c]) else np.nan for c in valid_cols})
-        latest_signed = zs.iloc[-1]
+        latest_signed = zs.iloc[-1] if not zs.empty else pd.Series(index=valid_cols, dtype=float)
         latest_abs = latest_signed.abs()
         
         above_warn = (abs_zs >= warn_z).sum()
@@ -567,10 +571,28 @@ class AnalyticsBuilder:
             'AboveAlertCount': above_alert.astype(int).values
         })
         
-        df = df[df['MaxAbsZ'] >= warn_z]
-        if df.empty:
-            return pd.DataFrame(empty_schema)
-        df = df.sort_values('MaxAbsZ', ascending=False)
+        # P3-FIX: Latent Attribution Activation
+        # Rank by multivariate contribution if it exceeds univariate Z-score
+        if omr_contributions is not None and not omr_contributions.empty:
+            # Align contributions to the same index and columns as z-scores
+            aligned_omr = omr_contributions.reindex(zs.index).reindex(columns=zs.columns)
+            max_abs_omr = aligned_omr.abs().max()
+            
+            # Create a ranking score: max of univariate Z or multivariate residual
+            df['MaxAbsOMR'] = df['SensorName'].map(max_abs_omr).fillna(0)
+            df['RankingScore'] = df[['MaxAbsZ', 'MaxAbsOMR']].max(axis=1)
+            
+            df = df[df['RankingScore'] >= warn_z]
+            if df.empty:
+                return pd.DataFrame(empty_schema)
+            df = df.sort_values('RankingScore', ascending=False)
+
+        else:
+            df = df[df['MaxAbsZ'] >= warn_z]
+            if df.empty:
+                return pd.DataFrame(empty_schema)
+            df = df.sort_values('MaxAbsZ', ascending=False)
+
         if top_n > 0:
             df = df.head(top_n)
         return df.reset_index(drop=True)

@@ -2130,6 +2130,7 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
                 train_regime_labels=train_regime_labels,
                 output_manager=output_manager,
                 previous_weights=previous_weights,
+                omr_contributions=omr_contributions_data,
                 equip=equip,
             )
             
