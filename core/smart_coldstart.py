@@ -645,7 +645,8 @@ def seed_baseline(
                 score = score.iloc[split_idx:].copy()
                 used = f"score split (train={split_idx}, no overlap)"
             else:
-                Console.warn(f"Cannot split score (too few rows: {len(score)}), accepting overlap", component="BASELINE")
+                Console.warn(f"Cannot do 50/50 split (too few rows: {len(score)}), using first {seed_n} for baseline.", component="BASELINE")
+                score = score.iloc[seed_n:].copy()
     
     if used:
         # Gap detection: if baseline ends >1h before score starts, extend it
