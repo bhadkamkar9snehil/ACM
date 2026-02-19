@@ -509,7 +509,7 @@ class AnalyticsBuilder:
             'SensorName': [], 'MaxTimestamp': [], 'LatestTimestamp': [], 'MaxAbsZ': [],
             'MaxSignedZ': [], 'LatestAbsZ': [], 'LatestSignedZ': [], 'ValueAtPeak': [],
             'LatestValue': [], 'TrainMean': [], 'TrainStd': [], 'AboveWarnCount': [],
-            'AboveAlertCount': []
+            'AboveAlertCount': [], 'MaxAbsOMR': [], 'RankingScore': []
         }
 
         if sensor_zscores is None or sensor_zscores.empty:
@@ -571,27 +571,21 @@ class AnalyticsBuilder:
             'AboveAlertCount': above_alert.astype(int).values
         })
         
-        # P3-FIX: Latent Attribution Activation
-        # Rank by multivariate contribution if it exceeds univariate Z-score
+        sort_by = 'MaxAbsZ'
         if omr_contributions is not None and not omr_contributions.empty:
-            # Align contributions to the same index and columns as z-scores
             aligned_omr = omr_contributions.reindex(zs.index).reindex(columns=zs.columns)
             max_abs_omr = aligned_omr.abs().max()
-            
-            # Create a ranking score: max of univariate Z or multivariate residual
             df['MaxAbsOMR'] = df['SensorName'].map(max_abs_omr).fillna(0)
             df['RankingScore'] = df[['MaxAbsZ', 'MaxAbsOMR']].max(axis=1)
-            
-            df = df[df['RankingScore'] >= warn_z]
-            if df.empty:
-                return pd.DataFrame(empty_schema)
-            df = df.sort_values('RankingScore', ascending=False)
-
+            sort_by = 'RankingScore'
         else:
-            df = df[df['MaxAbsZ'] >= warn_z]
-            if df.empty:
-                return pd.DataFrame(empty_schema)
-            df = df.sort_values('MaxAbsZ', ascending=False)
+            df['MaxAbsOMR'] = 0.0
+            df['RankingScore'] = df['MaxAbsZ']
+
+        df = df[df[sort_by] >= warn_z]
+        if df.empty:
+            return pd.DataFrame(empty_schema)
+        df = df.sort_values(sort_by, ascending=False)
 
         if top_n > 0:
             df = df.head(top_n)
