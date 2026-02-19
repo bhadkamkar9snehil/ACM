@@ -531,8 +531,10 @@ class ForecastEngine:
         if 'forecast.regime_conditioned.max_regime_gap_hours' not in config:
             config['forecast.regime_conditioned.max_regime_gap_hours'] = 0.0
         
-        # Alias for backward compatibility
-        config['max_forecast_hours'] = config.get('max_forecast_hours', config['forecast_horizon_hours'])
+        # Upper cap for adaptive horizon (kept separate from base horizon).
+        # If not configured, allow up to 30 days.
+        if 'max_forecast_hours' not in config:
+            config['max_forecast_hours'] = 720.0
         
         Console.info(
             f"Loaded forecast config: alpha={config.get('alpha', 0.3):.2f}, "
@@ -600,7 +602,7 @@ class ForecastEngine:
                 .reset_index(drop=True))
             regime_df = regime_df.reset_index(drop=True)
 
-            max_regime_gap = float(forecast_config.get('`forecast.regime_conditioned.max_regime_gap_hours`', 0.0))
+            max_regime_gap = float(forecast_config.get('forecast.regime_conditioned.max_regime_gap_hours', 0.0))
             tolerance_hours = max(2.0 * float(dt_hours), 0.0)
             if max_regime_gap > 0:
                 tolerance_hours = min(tolerance_hours, max_regime_gap)
@@ -622,7 +624,7 @@ class ForecastEngine:
             if regime_series.notna().any():
                 current_regime = int(regime_series.dropna().iloc[-1])
 
-            min_coverage = float(forecast_config.get('`forecast.regime_conditioned.min_regime_coverage`', 0.80))
+            min_coverage = float(forecast_config.get('forecast.regime_conditioned.min_regime_coverage', 0.80))
             if coverage < min_coverage:
                 Console.warn(
                     "Regime coverage below threshold; using global degradation model",
@@ -800,7 +802,11 @@ class ForecastEngine:
             adaptive_horizon = base_horizon_hours
         
         forecast_horizon_hours = adaptive_horizon
-        max_forecast_hours = float(forecast_config.get('max_forecast_hours', forecast_horizon_hours))
+        configured_max_forecast_hours = float(forecast_config.get('max_forecast_hours', 720.0))
+        if configured_max_forecast_hours > 0:
+            max_forecast_hours = min(forecast_horizon_hours, configured_max_forecast_hours)
+        else:
+            max_forecast_hours = forecast_horizon_hours
         
         # M11: Forecast resolution - use configured value or fall back to data cadence
         # forecast_resolution_hours allows coarser output (e.g., hourly) than data cadence
@@ -812,7 +818,7 @@ class ForecastEngine:
             dt_hours = float(resolution_hours)
         
         # Generate degradation forecast
-        max_steps = int(max_forecast_hours / dt_hours)
+        max_steps = max(1, int(max_forecast_hours / dt_hours))
         degradation_forecast = degradation_model.predict(
             steps=max_steps,
             dt_hours=dt_hours,
