@@ -126,6 +126,12 @@ class RULEstimator:
         Returns:
             RULEstimate with P10/P50/P90 quantiles and uncertainty metrics
         """
+        # Guard invalid simulation cadence to avoid zero/negative step counts.
+        if not np.isfinite(dt_hours) or dt_hours <= 0:
+            dt_hours = 1.0
+        if not np.isfinite(max_horizon_hours) or max_horizon_hours <= 0:
+            max_horizon_hours = 720.0
+
         # Quick check: already below threshold
         if current_health <= self.failure_threshold:
             return RULEstimate(
@@ -141,7 +147,7 @@ class RULEstimator:
             )
         
         # Generate baseline forecast from degradation model
-        max_steps = int(max_horizon_hours / dt_hours)
+        max_steps = max(1, int(max_horizon_hours / dt_hours))
         baseline_forecast = self.degradation_model.predict(
             steps=max_steps,
             dt_hours=dt_hours,
@@ -176,12 +182,12 @@ class RULEstimator:
             failures_within_horizon = np.sum(simulation_times < max_horizon_hours)
             failure_prob = float(failures_within_horizon / len(simulation_times))
             
-            # Agresti-Coull adjustment for binomial confidence intervals
-            # Reference: Agresti & Coull (1998)
-            if self.n_simulations >= 10:
-                p10, p50, p90 = self._agresti_coull_adjustment(
-                    p10, p50, p90, self.n_simulations, self.confidence_level
-                )
+            # RUL quantiles must remain physically feasible and ordered.
+            # Do not apply binomial-proportion adjustments to time quantiles.
+            p10 = float(np.clip(p10, 0.0, max_horizon_hours))
+            p50 = float(np.clip(p50, 0.0, max_horizon_hours))
+            p90 = float(np.clip(p90, 0.0, max_horizon_hours))
+            p50 = max(p10, min(p50, p90))
         
         Console.info(
             f"RUL estimate: P50={p50:.1f}h, P10={p10:.1f}h, P90={p90:.1f}h, "
@@ -251,13 +257,18 @@ class RULEstimator:
         
         # FAST PATH: No regime transitions - fully vectorized
         if regime_transition_matrix is None or regime_degradation_rates is None or n_regimes == 0:
-            # Generate all noise at once: (n_simulations, n_steps)
+            # Simulate temporally coherent trajectories by perturbing per-step
+            # increments (not independent absolute points). This preserves
+            # realistic path continuity and crossing behavior.
+            start_health = float(current_health) if current_health is not None else float(baseline_forecast[0])
+            baseline_increments = np.empty(n_steps, dtype=float)
+            baseline_increments[0] = float(baseline_forecast[0] - start_health)
+            if n_steps > 1:
+                baseline_increments[1:] = np.diff(baseline_forecast)
+
             noise_matrix = np.random.normal(0, model_std, size=(self.n_simulations, n_steps))
-            
-            # Broadcast baseline to all simulations and add noise
-            health_trajectories = baseline_forecast[np.newaxis, :] + noise_matrix
-            
-            # Clamp to valid range [0, 100]
+            health_increments = baseline_increments[np.newaxis, :] + noise_matrix
+            health_trajectories = start_health + np.cumsum(health_increments, axis=1)
             health_trajectories = np.clip(health_trajectories, 0.0, 100.0)
             
             # Vectorized time-to-failure: find first crossing of threshold
@@ -304,7 +315,7 @@ class RULEstimator:
         # Cumulative health increments: (n_simulations, n_steps)
         # health_increments[sim, t] = applied_rate[sim, t] * dt_hours + noise[sim, t]
         health_increments = np.empty((self.n_simulations, n_steps), dtype=float)
-        health_increments[:, 0] = noise_matrix[:, 0]  # step 0: just noise
+        health_increments[:, 0] = (baseline_forecast[0] - start_health) + noise_matrix[:, 0]
 
         # Simulate regime chains for all simulations simultaneously.
         # At each step t, regimes[:] holds the CURRENT regime for each simulation;
