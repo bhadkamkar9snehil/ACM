@@ -531,8 +531,10 @@ class ForecastEngine:
         if 'forecast.regime_conditioned.max_regime_gap_hours' not in config:
             config['forecast.regime_conditioned.max_regime_gap_hours'] = 0.0
         
-        # Alias for backward compatibility
-        config['max_forecast_hours'] = config.get('max_forecast_hours', config['forecast_horizon_hours'])
+        # Upper cap for adaptive horizon (kept separate from base horizon).
+        # If not configured, allow up to 30 days.
+        if 'max_forecast_hours' not in config:
+            config['max_forecast_hours'] = 720.0
         
         Console.info(
             f"Loaded forecast config: alpha={config.get('alpha', 0.3):.2f}, "
@@ -800,7 +802,11 @@ class ForecastEngine:
             adaptive_horizon = base_horizon_hours
         
         forecast_horizon_hours = adaptive_horizon
-        max_forecast_hours = float(forecast_config.get('max_forecast_hours', forecast_horizon_hours))
+        configured_max_forecast_hours = float(forecast_config.get('max_forecast_hours', 720.0))
+        if configured_max_forecast_hours > 0:
+            max_forecast_hours = min(forecast_horizon_hours, configured_max_forecast_hours)
+        else:
+            max_forecast_hours = forecast_horizon_hours
         
         # M11: Forecast resolution - use configured value or fall back to data cadence
         # forecast_resolution_hours allows coarser output (e.g., hourly) than data cadence
@@ -812,7 +818,7 @@ class ForecastEngine:
             dt_hours = float(resolution_hours)
         
         # Generate degradation forecast
-        max_steps = int(max_forecast_hours / dt_hours)
+        max_steps = max(1, int(max_forecast_hours / dt_hours))
         degradation_forecast = degradation_model.predict(
             steps=max_steps,
             dt_hours=dt_hours,
@@ -876,6 +882,8 @@ class ForecastEngine:
             'failure_prob_horizon': rul_estimate.failure_probability,
             'failure_threshold': failure_threshold,  # v11.1.5: Add for ACM_FailureForecast.ThresholdUsed
             'forecast_method': 'RegimeConditionedHolt',  # v11.1.5: Add for ACM_FailureForecast.Method
+            'num_simulations': n_simulations,
+            'forecast_horizon_hours': max_forecast_hours,
             'model_trend': degradation_model.trend,  # v11.3.0: Fitted trend per dt_hours
             'model_dt_hours': degradation_model.dt_hours  # v11.3.0: Model time step
         }
@@ -1069,6 +1077,14 @@ class ForecastEngine:
             maturity_state, training_rows, training_days = self._get_model_maturity_state()
             
             # V11: Compute RUL confidence with reliability gate
+            drift_z = None
+            try:
+                omr_drift_ctx = self.output_manager.load_omr_drift_context(self.equip_id, lookback_hours=24)
+                if isinstance(omr_drift_ctx, dict):
+                    drift_z = omr_drift_ctx.get('drift_z')
+            except Exception:
+                drift_z = None
+
             confidence, reliability_status, reliability_reason = compute_rul_confidence(
                 p10=forecast_results['rul_p10'],
                 p50=forecast_results['rul_p50'],
@@ -1076,6 +1092,8 @@ class ForecastEngine:
                 maturity_state=maturity_state,
                 training_rows=training_rows,
                 training_days=training_days,
+                drift_z=drift_z,
+                prediction_horizon_hours=float(forecast_results.get('forecast_horizon_hours', forecast_results['rul_p50'])),
             )
             
             # Log reliability status
@@ -1134,8 +1152,8 @@ class ForecastEngine:
                 'Confidence': [float(confidence)],  # V11: Proper confidence from reliability gate
                 'RUL_Status': [reliability_status.value],  # V11: RELIABLE, NOT_RELIABLE, LEARNING, INSUFFICIENT_DATA
                 'FailureTime': [predicted_failure_time],  # FIX: Add predicted failure timestamp
-                'NumSimulations': [1000],  # FIX: Monte Carlo simulation count
-                'Method': ['Multipath'],  # FIX: Add forecasting method
+                'NumSimulations': [int(forecast_results.get('num_simulations', 1000))],
+                'Method': [forecast_results.get('forecast_method', 'RegimeConditionedHolt')],
                 # M13: Operator context fields
                 'HealthLevel': [health_level],
                 'TrendSlope': [float(trend_slope)],
@@ -1235,7 +1253,7 @@ class ForecastEngine:
                     )
                     mvar_result = mvar_forecaster.forecast(
                         sensor_names=sensor_names,
-                        horizon_hours=float(forecast_results.get('forecast_horizon', 168))
+                        horizon_hours=float(forecast_results.get('forecast_horizon_hours', 168))
                     )
                     if mvar_result is not None and not mvar_result.forecast_df.empty:
                         # Write multivariate forecasts to SQL
