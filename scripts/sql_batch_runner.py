@@ -805,8 +805,10 @@ class SQLBatchRunner:
         if not success or outcome == "FAIL":
             Console.error(f"[RUN-DEBUG] {equip_name}: acm_main exited with code {process.returncode}", component="RUN", equipment=equip_name, return_code=process.returncode)
             if stdout_text:
+                # Show only the last 20 lines to avoid duplicating the entire run output
+                tail_lines = stdout_text.rstrip().splitlines()[-20:]
                 Console.error(
-                    f"[RUN-DEBUG] {equip_name}: --- acm_main stdout (captured) ---\n{stdout_text.rstrip()}",
+                    f"[RUN-DEBUG] {equip_name}: --- acm_main stdout (last 20 lines) ---\n" + "\n".join(tail_lines),
                     component="RUN", equipment=equip_name,
                 )
             # Record FAIL in Prometheus metrics (since acm_main didn't complete)

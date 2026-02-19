@@ -133,11 +133,13 @@ class LinearTrendModel(BaseDegradationModel):
         max_trend_per_hour: float = 5.0,
         flatline_epsilon: float = 1e-3,
         enable_adaptive: bool = True,
-        min_samples_for_adaptive: int = 30
+        min_samples_for_adaptive: int = 30,
+        max_gap_hours: float = 720.0,
+        label: str = "global",
     ):
         """
         Initialize Holt's linear trend model.
-        
+
         Args:
             alpha: Level smoothing parameter (0.05-0.95, per Hyndman & Athanasopoulos 2018)
             beta: Trend smoothing parameter (0.01-0.30, per Hyndman & Athanasopoulos 2018)
@@ -145,13 +147,17 @@ class LinearTrendModel(BaseDegradationModel):
             flatline_epsilon: Threshold for detecting flat/constant signal
             enable_adaptive: Enable adaptive alpha/beta tuning
             min_samples_for_adaptive: Minimum samples required for adaptive tuning
+            max_gap_hours: Maximum time gap before data is truncated for fitting
+            label: Human-readable label for log messages (e.g. "global", "regime-0")
         """
+        self.label = label
         self.alpha = np.clip(alpha, 0.05, 0.95)
         self.beta = np.clip(beta, 0.01, 0.30)
         self.max_trend_per_hour = max_trend_per_hour
         self.flatline_epsilon = flatline_epsilon
         self.enable_adaptive = enable_adaptive
         self.min_samples_for_adaptive = min_samples_for_adaptive
+        self.max_gap_hours = max_gap_hours
         
         # Model state (fitted parameters)
         self.level: float = 0.0
@@ -165,6 +171,7 @@ class LinearTrendModel(BaseDegradationModel):
         self.level_history: List[float] = []
         self.trend_history: List[float] = []
         self.residuals: List[float] = []
+        self._is_warmed: bool = False
     
     def fit(self, health_series: pd.Series) -> None:
         """
@@ -191,6 +198,7 @@ class LinearTrendModel(BaseDegradationModel):
         # A health jump is a sudden increase in health (>15% in one period)
         # This indicates maintenance was performed, so we should only use post-jump data
         health_series = self._detect_and_handle_health_jumps(health_series)
+        health_series = self._detect_and_handle_data_gaps(health_series)
         
         # Prepare series (robust median imputation)
         health_values = health_series.copy().astype(float)
@@ -236,13 +244,13 @@ class LinearTrendModel(BaseDegradationModel):
         
         if is_flatline:
             self.trend = 0.0
-            Console.info("Flatline detected; zeroing trend", component="DEGRADE")
+            Console.info(f"Flatline detected [{self.label}]; zeroing trend", component="DEGRADE")
         
-        # Adaptive smoothing (if enabled and sufficient samples)
-        if self.enable_adaptive and n >= self.min_samples_for_adaptive:
+        # Adaptive smoothing (if enabled, not warm-started, and sufficient samples)
+        if self.enable_adaptive and not self._is_warmed and n >= self.min_samples_for_adaptive:
             try:
                 self.alpha, self.beta = self._adaptive_smoothing(health_values)
-                Console.info(f"Adaptive smoothing: alpha={self.alpha:.3f}, beta={self.beta:.3f}", component="DEGRADE")
+                Console.info(f"Adaptive smoothing [{self.label}]: alpha={self.alpha:.3f}, beta={self.beta:.3f}", component="DEGRADE")
             except Exception as e:
                 Console.warn(f"Adaptive smoothing failed: {e}", component="DEGRADE", error_type=type(e).__name__, error=str(e)[:200])
         
@@ -289,7 +297,7 @@ class LinearTrendModel(BaseDegradationModel):
             self.std_error = 1.0
         
         Console.info(
-            f"Fitted: level={self.level:.2f}, trend={self.trend:.4f}/hr, "
+            f"Fitted [{self.label}]: level={self.level:.2f}, trend={self.trend:.4f}/hr, "
             f"std_error={self.std_error:.2f}, n={n}",
             component="DEGRADE"
         )
@@ -462,8 +470,9 @@ class LinearTrendModel(BaseDegradationModel):
         self.dt_hours = params.get("dt_hours", 1.0)
         self.n_fitted = int(params.get("n_fitted", 0))
         
+        self._is_warmed = True
         Console.info(
-            f"Restored state: level={self.level:.2f}, trend={self.trend:.4f}/hr, "
+            f"Restored state [{self.label}]: level={self.level:.2f}, trend={self.trend:.4f}/hr, "
             f"std_error={self.std_error:.2f}",
             component="DEGRADE"
         )
@@ -504,7 +513,7 @@ class LinearTrendModel(BaseDegradationModel):
         outliers = z_scores > n_std
         
         if outliers.sum() > 0:
-            Console.info(f"Detected {outliers.sum()} outliers (robust z > {n_std})", component="DEGRADE")
+            Console.info(f"Detected {outliers.sum()} outliers [{self.label}] (robust z > {n_std})", component="DEGRADE")
             series = series.copy()
             series[outliers] = np.nan
         
@@ -574,14 +583,14 @@ class LinearTrendModel(BaseDegradationModel):
                 post_second_samples = len(health_series) - second_last_loc - 1
                 if post_second_samples >= min_post_jump_samples:
                     Console.info(
-                        f"HEALTH-JUMP: Using second-to-last jump at {second_last_jump_idx} "
+                        f"HEALTH-JUMP [{self.label}]: Using second-to-last jump at {second_last_jump_idx} "
                         f"({post_second_samples} post-jump samples)",
                         component="DEGRADE"
                     )
                     return health_series.iloc[second_last_loc + 1:]
             
             Console.warn(
-                f"HEALTH-JUMP: Jump detected at {last_jump_idx} but only {post_jump_samples} "
+                f"HEALTH-JUMP [{self.label}]: Jump detected at {last_jump_idx} but only {post_jump_samples} "
                 f"post-jump samples (need {min_post_jump_samples}). Using full data.",
                 component="DEGRADE"
             )
@@ -593,7 +602,7 @@ class LinearTrendModel(BaseDegradationModel):
         jump_magnitude = post_jump_health - pre_jump_health
         
         Console.info(
-            f"HEALTH-JUMP: Maintenance reset detected at {last_jump_idx}. "
+            f"HEALTH-JUMP [{self.label}]: Maintenance reset detected at {last_jump_idx}. "
             f"Health jumped {pre_jump_health:.1f}% -> {post_jump_health:.1f}% (+{jump_magnitude:.1f}%). "
             f"Using {post_jump_samples + 1} post-jump samples for trend fitting.",
             component="DEGRADE"
@@ -604,48 +613,72 @@ class LinearTrendModel(BaseDegradationModel):
         # is the new high value we want to keep as baseline for trend fitting
         return health_series.iloc[last_jump_loc:]
 
+    def _detect_and_handle_data_gaps(self, health_series: pd.Series) -> pd.Series:
+        """
+        v11.9.1: Detect large data gaps and use only post-gap data for fitting.
+        
+        This prevents the model from fitting a trend across a long period of missing data,
+        which can lead to an inaccurate trend estimate.
+        """
+        if len(health_series) < 2 or not isinstance(health_series.index, pd.DatetimeIndex):
+            return health_series
+
+        time_diffs = health_series.index.to_series().diff().dt.total_seconds() / 3600.0
+        max_gap_hours = time_diffs.max()
+
+        if max_gap_hours > self.max_gap_hours:
+            last_gap_loc = time_diffs.idxmax()
+            
+            Console.info(
+                f"DATA-GAP: Large data gap of {max_gap_hours:.1f}h detected before {last_gap_loc}. "
+                f"Using {len(health_series.loc[last_gap_loc:])} post-gap samples for trend fitting.",
+                component="DEGRADE"
+            )
+            return health_series.loc[last_gap_loc:]
+        
+        return health_series
+        
     def _adaptive_smoothing(self, health_values: pd.Series) -> Tuple[float, float]:
         """
         Adaptive alpha/beta tuning via expanding-window time-series cross-validation.
-        
-        Optimized implementation:
-        - Coarse-to-fine grid search: 4x4 initial grid, then refine around best
-        - Max 10 CV folds (not n//20) for speed
-        - Vectorized Holt's inner loop using numpy
-        
-        This implements proper time-series CV (not simple grid search) per
-        Hyndman & Athanasopoulos (2018), Section 5.4: "Evaluating forecast accuracy".
-        
-        Grid bounds per Hyndman & Athanasopoulos (2018):
-        - Alpha: [0.05, 0.95] (level smoothing)
-        - Beta: [0.01, 0.30] (trend smoothing)
-        
+
+        Uses a compact single-phase 3×3 = 9-combination grid to keep per-regime
+        runtime bounded. Previous two-phase (4×4 + 3×3 = 25) design caused 241s
+        forecasting times when run across 6 regimes on large datasets.
+
+        Grid: alpha ∈ {0.1, 0.4, 0.8} × beta ∈ {0.01, 0.08, 0.20}
+        Folds: max 5 (was 10) — sufficient for stable MAE estimates on health series.
+
+        This implements proper time-series CV per Hyndman & Athanasopoulos (2018),
+        Section 5.4: "Evaluating forecast accuracy".
+
         Returns:
             (optimal_alpha, optimal_beta)
         """
         n = len(health_values)
-        
-        # CV parameters - cap folds for speed
+
+        # CV parameters
         min_train_size = max(20, n // 4)  # At least 20 or 25% of data
         forecast_horizon = min(12, n // 10)  # Forecast horizon (cap at 12 steps)
-        max_cv_folds = 10  # Cap CV folds for speed
+        max_cv_folds = 5  # 5 folds is sufficient for stable MAE; was 10 (too slow)
         step_size = max(1, (n - min_train_size - forecast_horizon) // max_cv_folds)
-        
+
         if n < min_train_size + forecast_horizon + 5:
             # Insufficient data for CV - fall back to simple grid search
             return self._simple_grid_search(health_values)
-        
-        # Convert to numpy for speed - ensure ndarray type
+
+        # Convert to numpy for speed
         health_arr: np.ndarray = np.asarray(health_values.values, dtype=float)
-        
-        # PHASE 1: Coarse grid search (4x4 = 16 combinations)
-        alpha_grid = np.array([0.1, 0.3, 0.6, 0.9])
-        beta_grid = np.array([0.02, 0.08, 0.15, 0.25])
-        
+
+        # Compact 3×3 = 9-combination grid covering the practical range:
+        #   low/mid/high level smoothing × low/mid/high trend smoothing
+        alpha_grid = np.array([0.1, 0.4, 0.8])
+        beta_grid = np.array([0.01, 0.08, 0.20])
+
         best_alpha = self.alpha
         best_beta = self.beta
         best_cv_error = float("inf")
-        
+
         for alpha_candidate in alpha_grid:
             for beta_candidate in beta_grid:
                 cv_error = self._compute_cv_error_vectorized(
@@ -656,22 +689,7 @@ class LinearTrendModel(BaseDegradationModel):
                     best_cv_error = cv_error
                     best_alpha = alpha_candidate
                     best_beta = beta_candidate
-        
-        # PHASE 2: Fine-tune around best (3x3 = 9 combinations)
-        alpha_fine = np.clip([best_alpha - 0.1, best_alpha, best_alpha + 0.1], 0.05, 0.95)
-        beta_fine = np.clip([best_beta - 0.05, best_beta, best_beta + 0.05], 0.01, 0.30)
-        
-        for alpha_candidate in alpha_fine:
-            for beta_candidate in beta_fine:
-                cv_error = self._compute_cv_error_vectorized(
-                    health_arr, alpha_candidate, beta_candidate,
-                    min_train_size, forecast_horizon, step_size, n
-                )
-                if cv_error < best_cv_error:
-                    best_cv_error = cv_error
-                    best_alpha = alpha_candidate
-                    best_beta = beta_candidate
-        
+
         return best_alpha, best_beta
     
     def _compute_cv_error_vectorized(
@@ -744,24 +762,24 @@ class LinearTrendModel(BaseDegradationModel):
     def _simple_grid_search(self, health_values: pd.Series) -> Tuple[float, float]:
         """
         Fallback simple grid search when insufficient data for proper CV.
-        Minimizes one-step-ahead MAE.
+        Minimizes one-step-ahead MAE. Uses the same compact 3×3 grid as
+        _adaptive_smoothing to keep runtime bounded on short series.
         """
-        alpha_grid = np.linspace(0.05, 0.95, 10)
-        beta_grid = np.linspace(0.01, 0.30, 10)
-        
+        alpha_grid = np.array([0.1, 0.4, 0.8])
+        beta_grid = np.array([0.01, 0.08, 0.20])
+
         best_alpha = self.alpha
         best_beta = self.beta
         best_mae = float("inf")
-        
+
         for alpha_candidate in alpha_grid:
             for beta_candidate in beta_grid:
                 mae = self._evaluate_smoothing_params(health_values, alpha_candidate, beta_candidate)
-                
                 if mae < best_mae:
                     best_mae = mae
                     best_alpha = alpha_candidate
                     best_beta = beta_candidate
-        
+
         return best_alpha, best_beta
     
     def _evaluate_smoothing_params(self, health_values: pd.Series, alpha: float, beta: float) -> float:
@@ -826,7 +844,8 @@ class RegimeConditionedTrendModel(BaseDegradationModel):
             beta=beta,
             max_trend_per_hour=max_trend_per_hour,
             enable_adaptive=enable_adaptive,
-            min_samples_for_adaptive=min_samples_for_adaptive
+            min_samples_for_adaptive=min_samples_for_adaptive,
+            label="global",
         )
         self.regime_models: Dict[int, LinearTrendModel] = {}
         self.current_regime: Optional[int] = None
@@ -908,13 +927,14 @@ class RegimeConditionedTrendModel(BaseDegradationModel):
                     component="DEGRADE"
                 )
                 continue
-            
+
             model = LinearTrendModel(
                 alpha=self.alpha,
                 beta=self.beta,
                 max_trend_per_hour=self.max_trend_per_hour,
                 enable_adaptive=self.enable_adaptive,
-                min_samples_for_adaptive=self.min_samples_for_adaptive
+                min_samples_for_adaptive=self.min_samples_for_adaptive,
+                label=f"regime-{int(regime_label)}",
             )
             model.fit(regime_health)
             self.regime_models[int(regime_label)] = model
@@ -979,7 +999,8 @@ class RegimeConditionedTrendModel(BaseDegradationModel):
                 beta=self.beta,
                 max_trend_per_hour=self.max_trend_per_hour,
                 enable_adaptive=self.enable_adaptive,
-                min_samples_for_adaptive=self.min_samples_for_adaptive
+                min_samples_for_adaptive=self.min_samples_for_adaptive,
+                label=f"regime-{label}",
             )
             model.set_parameters(model_params)
             self.regime_models[label] = model

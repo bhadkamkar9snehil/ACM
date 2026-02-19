@@ -25,6 +25,8 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, cast
+import os
+import json
 
 import numpy as np
 import pandas as pd
@@ -273,6 +275,34 @@ class DataLoader:
 
             Console.info(f"Retrieved {len(df_all)} rows from SQL historian", component="DATA")
 
+            # Exclude persisted low-variance sensors
+            try:
+                import os
+                import json
+                equip_id_cur = self.sql_client.cursor()
+                equip_id_cur.execute("SELECT EquipID FROM Equipment WHERE EquipCode = ?", (equipment_name,))
+                equip_id_row = equip_id_cur.fetchone()
+                equip_id = equip_id_row[0] if equip_id_row else None
+                equip_id_cur.close()
+
+                if equip_id:
+                    exclusion_file = f"artifacts/equip_{equip_id}/low_variance_sensors.json"
+                    if os.path.exists(exclusion_file):
+                        with open(exclusion_file, 'r') as f:
+                            try:
+                                excluded_sensors = json.load(f)
+                            except json.JSONDecodeError:
+                                excluded_sensors = []
+                        
+                        if excluded_sensors:
+                            original_cols = set(df_all.columns)
+                            cols_to_drop = [s for s in excluded_sensors if s in original_cols]
+                            if cols_to_drop:
+                                df_all = df_all.drop(columns=cols_to_drop, errors='ignore')
+                                Console.warn(f"Permanently excluded {len(cols_to_drop)} low-variance sensors based on persisted list.", component="DATA")
+            except Exception as ex_err:
+                Console.warn(f"Failed to process sensor exclusion list: {ex_err}", component="DATA")
+
         except Exception as e:
             Console.error(
                 f"Failed to load from SQL historian: {e}",
@@ -387,9 +417,7 @@ class DataLoader:
 
         Console.info(f"Kept {len(kept)} numeric columns, dropped {len(dropped)} non-numeric", component="DATA")
 
-        # Cadence / resample logic unchanged
-        Console.status(f"Checking cadence and resampling for {len(score)} score rows...")
-
+        # Cadence / resample
         _sampling = data_cfg.get("sampling_secs", 1)
         try:
             if _sampling in (None, "", "auto", "null"):
@@ -404,12 +432,9 @@ class DataLoader:
         interp_method = str(_cfg_get(data_cfg, "interp_method", "linear"))
         max_fill_ratio = float(_cfg_get(data_cfg, "max_fill_ratio", _cfg_get(cfg, "runtime.max_fill_ratio", 0.20)))
 
-        Console.status("  Checking train cadence...")
         cad_ok_train = check_cadence(cast(pd.DatetimeIndex, train.index), sampling_secs)
-        Console.status("  Checking score cadence...")
         cad_ok_score = check_cadence(cast(pd.DatetimeIndex, score.index), sampling_secs)
         cadence_ok = bool(cad_ok_train and cad_ok_score)
-        Console.status(f"  Cadence check complete: train={cad_ok_train}, score={cad_ok_score}")
 
         native_train = native_cadence_secs(cast(pd.DatetimeIndex, train.index))
         native_score = native_cadence_secs(cast(pd.DatetimeIndex, score.index))

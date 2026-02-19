@@ -1,5 +1,5 @@
 ---
-name: acm-master
+name: ACM
 description: "Complete ACM (Automated Condition Monitoring) expertise system for predictive maintenance and equipment health monitoring. PROACTIVELY activate for: (1) ANY ACM pipeline task (batch runs, coldstart, forecasting), (2) SQL Server data management (historian tables, ACM output tables), (3) Observability stack (Loki logs, Tempo traces, Prometheus metrics, Pyroscope profiling), (4) Grafana dashboard development, (5) Detector tuning and fusion configuration, (6) Model lifecycle management, (7) Debugging pipeline issues. Provides: T-SQL patterns for ACM tables, batch runner usage, detector behavior, RUL forecasting, episode diagnostics, and production-ready pipeline patterns. Ensures professional-grade industrial monitoring following ACM v11.0.0 architecture."
 ---
 
@@ -64,7 +64,7 @@ ACM (Automated Condition Monitoring) is a predictive maintenance and equipment h
 - Forecasts Remaining Useful Life (RUL) with Monte Carlo simulations
 - Visualizes results through Grafana dashboards for operations teams
 
-### Current Version: v11.0.0
+### Current Version: v11.14.0
 
 **Key V11 Features:**
 - ONLINE/OFFLINE pipeline mode separation (`--mode auto/online/offline`)
@@ -74,6 +74,8 @@ ACM (Automated Condition Monitoring) is a predictive maintenance and equipment h
 - UNKNOWN regime (label=-1) for low-confidence assignments
 - DataContract validation at pipeline entry
 - Seasonality detection and adjustment
+- Structured batch summary logged to Loki with `component="SUMMARY"` (v11.14.0)
+- Degradation model logs tagged `[global]`/`[regime-N]` for disambiguation (v11.14.0)
 
 ### Active Detectors (6 heads)
 
@@ -136,8 +138,10 @@ Each phase logs with component tags:
 - `[MODEL]` - Detector fitting/scoring
 - `[REGIME]` - Operating regime detection
 - `[FUSE]` - Multi-detector fusion
+- `[DEGRADE]` - Degradation model fitting (tagged `[global]`/`[regime-N]`)
 - `[FORECAST]` - RUL and health predictions
 - `[OUTPUT]` - SQL persistence
+- `[SUMMARY]` - Structured batch summary (v11.14.0, pushed to Loki)
 
 ---
 
@@ -870,11 +874,13 @@ pytest tests/test_progress_tracking.py
 
 | Version | Key Changes |
 |---------|-------------|
-| v11.0.2 | GMM replaces KMeans for regime clustering, transfer learning activation, correlation-aware detector fusion |
-| v11.0.1 | Relaxed promotion criteria, vectorized seasonality/regime smoothing |
+| v11.14.0 | Log quality: deduplicated FUSE/DEGRADE logs, batch summary uses health index (0-100%), structured SUMMARY component to Loki, top_sensors truncation fix |
+| v11.13.x | Log cleanup: removed dead SQL log sink, streamlined console messages |
+| v11.12.x | Metric-aware regime quality, OMR crash fix, batch summary, performance fixes |
+| v11.5.0 | Anti-upsample guard, batch mode selection, refit loop fix |
+| v11.4.0 | Regime clustering uses raw sensor values only (circular masking fix) |
 | v11.0.0 | MaturityState lifecycle, DataContract validation, seasonality detection, UNKNOWN regime |
 | v10.3.0 | Unified observability (Console class), Docker Compose stack |
-| v10.2.0 | Mahalanobis detector removed (redundant with PCA-T²) |
 | v10.0.0 | Continuous forecasting, hazard-based RUL, Monte Carlo simulations |
 
 ---

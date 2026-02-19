@@ -66,7 +66,8 @@ except ImportError:
 from core.omr import OMRDetector  # Overall Model Residual detector
 from core.config_history_writer import log_auto_tune_changes
 from core.output_manager import OutputManager, write_sql_artifacts
-from core.run_metadata_writer import write_run_metadata, extract_run_metadata_from_scores, extract_data_quality_score
+from core.run_metadata_writer import write_run_metadata, extract_run_metadata_from_scores, extract_data_quality_score, compute_run_health_status
+from core.analytics_builder import health_index as _compute_health_index
 from core.episode_culprits_writer import write_episode_culprits_enhanced
 from core.pipeline_types import DataContract, ValidationResult
 from core.seasonality import SeasonalPattern  # detect_and_adjust imported inline
@@ -117,10 +118,8 @@ try:
         record_regime,
         record_data_quality,
         record_model_refit,
-        log_timer,
         start_profiling,
         stop_profiling,
-        enable_sql_logging,  # v11.6.0: Late-bind SQL log persistence
     )
     _OBSERVABILITY_AVAILABLE = True
 except ImportError:
@@ -128,7 +127,6 @@ except ImportError:
     OTEL_AVAILABLE = False
     obs_log = None
     def init_observability(*args, **kwargs): pass
-    def enable_sql_logging(*args, **kwargs): pass  # v11.6.0
     def get_tracer(): return None
     def get_meter(): return None
     def set_acm_context(*args, **kwargs): pass
@@ -165,7 +163,6 @@ except ImportError:
     def record_regime(*args, **kwargs): pass
     def record_data_quality(*args, **kwargs): pass
     def record_model_refit(*args, **kwargs): pass
-    def log_timer(*args, **kwargs): pass
     def start_profiling(): pass
     def stop_profiling(): pass
     def shutdown_observability(): pass
@@ -212,6 +209,7 @@ from core.model_lifecycle import (
     MaturityState,
     ModelState,
     PromotionCriteria,
+    BOOLEAN_ONLY_METRICS,
     check_promotion_eligibility,
     promote_model,
     create_new_model_state,
@@ -304,21 +302,10 @@ class FusionContext:
 
 def _configure_logging(logging_cfg, args):
     """Apply CLI/config logging overrides and return effective flags."""
-    enable_sql_logging_cfg = (logging_cfg or {}).get("enable_sql_sink")
-    if enable_sql_logging_cfg is False:
-        Console.warn("SQL sink disable flag in config is ignored; SQL logging is always enabled in SQL mode.", component="LOG",
-                     config_flag=enable_sql_logging_cfg)
-    enable_sql_logging = True
-
-    # ACMLog does not support dynamic level/format yet; keep placeholders for future work.
-
     log_file = args.log_file or (logging_cfg or {}).get("file")
     if log_file:
         Console.warn(f"File logging disabled in SQL-only mode (ignoring --log-file={log_file})", component="CONFIG",
                      log_file=str(log_file))
-
-    # Module-specific levels are not supported yet.
-    return {"enable_sql_logging": enable_sql_logging}
 
 
 def _get_equipment_id(equipment_name: str, sql_client: Any) -> int:
@@ -705,21 +692,12 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
         cfg = copy.deepcopy(cfg)
         
         logging_cfg = (cfg.get("logging") or {})
-    logging_settings = _configure_logging(logging_cfg, args)
-    should_enable_sql_logging = logging_settings.get("enable_sql_logging", True)
-    
+    _configure_logging(logging_cfg, args)
+
     # Get equipment ID from SQL (already resolved during config loading)
     equip_id = _get_equipment_id(equip, sql_client)
     if not hasattr(cfg, '_equip_id') or cfg._equip_id == 0:
         cfg._equip_id = equip_id
-    
-    # v11.6.0 FIX #4: Enable SQL log persistence AFTER connection established
-    # This allows early logging to console/Loki while still capturing to ACM_RunLogs
-    if _OBSERVABILITY_AVAILABLE:
-        try:
-            enable_sql_logging(sql_client, run_id="pending", equip_id=equip_id)
-        except Exception as e:
-            Console.warn(f"SQL logging init failed (non-fatal): {e}", component="OTEL")
     
     # Compute and store config signature for cache validation.
     config_signature = compute_config_signature(cfg)
@@ -794,7 +772,6 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
     cache_payload: Optional[Dict[str, Any]] = None
     regime_quality_ok: bool = True
     refit_requested: bool = False
-    sql_log_sink: Optional[Any] = None  # SQL log sink for cleanup in finally block
 
     # Heuristic ETAs (configurable).
     eta_load = float((cfg.get("hints") or {}).get("eta_load_sec", 30))
@@ -1058,18 +1035,9 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
         )
         T.log("data_split_complete", train_rows=train.shape[0], train_cols=train.shape[1], score_rows=score.shape[0], score_cols=score.shape[1])
         
-        # Debug checkpoint: confirms data load completed before baseline seeding.
-        Console.status("CHECKPOINT 1: Data loading complete, about to start baseline seeding")
-        import sys
-        sys.stdout.flush()
-
         # ===== Adaptive rolling baseline (cold-start helper) =====
         with T.section("baseline.seed"):
-            Console.status(f"CHECKPOINT 2: Entering baseline.seed section for {equip}...")
-            sys.stdout.flush()
             try:
-                Console.status(f"CHECKPOINT 3: About to call seed_baseline() function")
-                sys.stdout.flush()
                 train, score, baseline_source = seed_baseline(
                     train.copy(), 
                     score.copy(), 
@@ -1127,7 +1095,6 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
         # ===== Feature construction (detectors require engineered features) =====
         with T.section("features.build"):
             train, score = _build_features(train, score, cfg, equip)
-            Console.info(f"Features built: train={train.shape}, score={score.shape}", component="FEAT")
 
         # ===== Impute missing values in feature space (detectors require clean data) =====
         with T.section("features.impute"):
@@ -1278,7 +1245,10 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
                 regime_model = detector_cache.get("regime_model")
                 
                 if regime_model is not None:
-                    regime_model.meta["quality_ok"] = bool(detector_cache.get("regime_quality_ok", True))
+                    # Do NOT overwrite regime_model.meta["quality_ok"] from the cache.
+                    # The model meta stores fit-time quality (set in fit_regime_model()).
+                    # Overwriting it with a cached label-time boolean propagates stale
+                    # quality_ok=False across batches, causing a perpetual retrain loop.
                     if detector_cache.get("regime_basis_hash"):
                         regime_model.train_hash = detector_cache["regime_basis_hash"]
                 
@@ -1530,51 +1500,41 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
                     )
                     
                     regime_state_version = new_state.state_version
-                    regime_defs_count = 0
                     
-                    # Write regime definitions to ACM_RegimeDefinitions (HDBSCAN/GMM).
-                    if output_manager and regime_model is not None and regime_model.model is not None:
-                        try:
-                            import json as _json
-                            regime_defs = []
-                            # Property handles HDBSCAN and GMM model variants.
-                            centroids = regime_model.cluster_centers_  # Property handles all model types
-                            # Get labels - different models store labels differently
-                            if hasattr(regime_model.model, 'labels_'):
-                                labels = regime_model.model.labels_  # HDBSCAN (GMM doesn't have labels_)
-                            else:
-                                labels = []  # GMM doesn't store labels_
-                            # For HDBSCAN, filter out noise labels (-1)
-                            unique_labels = np.unique(labels)
-                            valid_labels = unique_labels[unique_labels >= 0]
-                            # Get model-level silhouette score (same for all regimes)
-                            model_silhouette = regime_model.meta.get("fit_score")
-                            if model_silhouette is not None and not np.isnan(model_silhouette):
-                                model_silhouette = float(model_silhouette)
-                            else:
-                                model_silhouette = None
-                            
-                            for i, centroid in enumerate(centroids):
-                                # Map centroid index to actual regime label (important for HDBSCAN)
-                                regime_id = int(valid_labels[i]) if i < len(valid_labels) else i
-                                regime_defs.append({
-                                    'RegimeID': regime_id,
-                                    'RegimeName': f'Regime_{regime_id}',
-                                    'CentroidJSON': _json.dumps(centroid.tolist()),
-                                    'FeatureColumns': _json.dumps(regime_model.feature_columns if hasattr(regime_model, 'feature_columns') else []),
-                                    'DataPointCount': int(np.sum(np.array(labels) == regime_id)) if len(labels) > 0 else 0,
-                                    'SilhouetteScore': model_silhouette,  # FIX: Include silhouette score
-                                    'MaturityState': new_state.maturity_state if hasattr(new_state, 'maturity_state') else 'LEARNING',
-                                })
-                            output_manager.write_regime_definitions(regime_defs, version=regime_state_version)
-                            regime_defs_count = len(regime_defs)
-                        except Exception as e:
-                            Console.warn(f"Failed to write regime definitions: {e}", component="REGIME")
-                    
-                    Console.info(f"Regime state: saved_v{regime_state_version} | K={new_state.n_clusters} | defs={regime_defs_count}", component="REGIME_STATE")
+                    Console.info(f"Regime state: saved_v{regime_state_version} | K={new_state.n_clusters}", component="REGIME_STATE")
                 except Exception as e:
                     Console.warn(f"Failed to save regime state: {e}", component="REGIME_STATE",
                                  equip=equip, error_type=type(e).__name__, error=str(e)[:200])
+
+            # ALWAYS write regime definitions for the current run if a model exists (for audit).
+            if output_manager and regime_model and regime_model.model:
+                try:
+                    regime_defs_count = 0
+                    regime_defs = []
+                    centroids = regime_model.cluster_centers_
+                    labels = getattr(regime_model.model, 'labels_', [])
+                    unique_labels = np.unique(labels)
+                    valid_labels = unique_labels[unique_labels >= 0]
+                    model_silhouette = regime_model.meta.get("fit_score")
+                    model_silhouette = float(model_silhouette) if model_silhouette is not None and not np.isnan(model_silhouette) else None
+                    
+                    for i, centroid in enumerate(centroids):
+                        regime_id = int(valid_labels[i]) if i < len(valid_labels) else i
+                        regime_defs.append({
+                            'RegimeID': regime_id,
+                            'RegimeName': f'Regime_{regime_id}',
+                            'CentroidJSON': json.dumps(centroid.tolist()),
+                            'FeatureColumns': json.dumps(getattr(regime_model, 'feature_columns', [])),
+                            'DataPointCount': int(np.sum(np.array(labels) == regime_id)) if len(labels) > 0 else 0,
+                            'SilhouetteScore': model_silhouette,
+                            'MaturityState': current_model_maturity or 'UNKNOWN',
+                        })
+                    regime_defs_count = output_manager.write_regime_definitions(regime_defs, version=regime_state_version)
+                    if regime_defs_count > 0:
+                        Console.info(f"Wrote {regime_defs_count} regime definitions for audit", component="REGIME")
+                except Exception as e:
+                    Console.warn(f"Failed to write regime definitions: {e}", component="REGIME")
+
         
         score_out = regime_out
         regime_quality_ok = bool(regime_out.get("regime_quality_ok", True))
@@ -1637,7 +1597,7 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
         quality_report = None
 
         if cached_models and not detectors_just_trained and cfg.get("models", {}).get("auto_retrain", True):
-            with T.section("models.quality_check"):
+            with T.section("models.auto_retrain"):
                 try:
                     from core.model_evaluation import assess_model_quality
                     
@@ -1674,22 +1634,39 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
                                 pass
 
                     # Check regime quality (data-driven trigger).
-                    # BUG FIX: score_out uses "regime_score"/"regime_metric" keys, not "silhouette".
-                    # The old code always read 0.0 (missing key default) → perpetual retraining.
-                    # Also: min_regime_quality threshold (0.3) is silhouette-scaled. HDBSCAN returns
-                    # DBCV/persistence scores on a different scale, so we only apply the threshold
-                    # for silhouette-based metrics; for others, trust regime_quality_ok from regimes.py.
+                    # Metric-aware logic prevents perpetual retrain loops:
+                    #
+                    # silhouette / silhouette_non_noise:
+                    #   - trigger if score < min_regime_quality (default 0.3)
+                    #
+                    # dbcv / persistence (HDBSCAN validity index):
+                    #   - quality_ok=False from regimes.py is a *heuristic* (noise ratio,
+                    #     low validity, etc.). The raw DBCV score on a [-1,1] scale is a
+                    #     better gate. Trigger only if score < min_dbcv_quality (0.0).
+                    #   - Never use quality_ok boolean alone — it fires for any cluster
+                    #     with some noise points, causing endless retrains.
+                    #
+                    # Boolean-only metrics (BIC, calinski_harabasz, …):
+                    #   - Raw score is unscaled; cannot threshold. Don't trigger on these
+                    #     at all — the promotion system blocks CONVERGED instead.
                     regime_quality_trigger = False
                     current_regime_score = score_out.get("regime_score", 0.0)
                     regime_metric_name = score_out.get("regime_metric", "silhouette")
                     min_regime_quality = auto_retrain_cfg.get("min_regime_quality", 0.3)
-                    if not regime_quality_ok:
-                        regime_quality_trigger = True
-                    elif regime_metric_name in ("silhouette", "silhouette_non_noise", "calinski_harabasz"):
-                        # Silhouette-scale metrics can be compared against min_regime_quality
+                    min_dbcv_quality = auto_retrain_cfg.get("min_dbcv_quality", 0.0)
+
+                    if regime_metric_name in ("silhouette", "silhouette_non_noise"):
                         if current_regime_score < min_regime_quality:
                             regime_quality_trigger = True
-                    # HDBSCAN metrics (dbcv, persistence): trust regime_quality_ok from regimes.py
+                    elif regime_metric_name in ("dbcv", "persistence"):
+                        # Use raw score threshold only; ignore quality_ok boolean for HDBSCAN.
+                        if current_regime_score < min_dbcv_quality:
+                            regime_quality_trigger = True
+                    elif regime_metric_name not in BOOLEAN_ONLY_METRICS:
+                        # Unknown metric — fall back to quality_ok boolean as last resort.
+                        if not regime_quality_ok:
+                            regime_quality_trigger = True
+                    # BOOLEAN_ONLY_METRICS (BIC, calinski_harabasz): no trigger.
 
                     # Aggregate triggers and log a consolidated retraining reason.
                     if config_changed or model_age_trigger or regime_quality_trigger:
@@ -1699,14 +1676,23 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
                         if model_age_trigger:
                             reasons.append(f"age={model_age_hours:.0f}h>{max_age_hours}h")
                         if regime_quality_trigger:
-                            reasons.append(f"{regime_metric_name}={current_regime_score:.3f}<{min_regime_quality}")
+                            if not regime_quality_ok:
+                                reasons.append(f"regime_quality_ok=False (metric={regime_metric_name}, score={current_regime_score:.3f})")
+                            else:
+                                reasons.append(f"{regime_metric_name}={current_regime_score:.3f}<{min_regime_quality}")
                         Console.warn(f"Forcing retraining: {' | '.join(reasons)}", component="MODEL", equip=equip)
                         force_retrain = True
-                    
+
                     # Invalidate cached models if retraining is required.
                     if force_retrain:
                         cached_models = None
                         ar1_detector = pca_detector = iforest_detector = gmm_detector = None
+                        # When regime quality was the trigger and discovery is still allowed
+                        # (COLDSTART / LEARNING), also clear the regime model so it gets
+                        # re-discovered on this batch's regimes.label() call instead of
+                        # reusing a model whose meta["quality_ok"] is already False.
+                        if regime_quality_trigger and current_model_maturity in (None, "COLDSTART", "LEARNING"):
+                            regime_model = None
                         
                         # Determine retrain reason for observability.
                         retrain_reason = "config_changed" if config_changed else (
@@ -1771,11 +1757,30 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
                 
                 if output_manager and sql_client:
                     try:
-                        # Get silhouette score from regime model if available.
-                        silhouette = None
+                        # Extract regime quality from the current run.
+                        # score_out = regime_out, populated by discover_regimes() or label_regimes().
+                        # regime_quality_metric tells the promotion check which threshold to apply.
+                        #
+                        # Metric name: prefer score_out (most current), fall back to model meta,
+                        # then default to 'silhouette'.
+                        if score_out and score_out.get("regime_metric"):
+                            regime_fit_metric = score_out["regime_metric"]
+                        elif regime_model is not None and hasattr(regime_model, 'meta'):
+                            regime_fit_metric = regime_model.meta.get('fit_metric', 'silhouette')
+                        else:
+                            regime_fit_metric = 'silhouette'
+
+                        # Score: prefer model meta (set at fit time, not stale from score-half),
+                        # fall back to score_out.regime_score (label-time score).
                         if regime_model is not None and hasattr(regime_model, 'meta'):
-                            silhouette = regime_model.meta.get('fit_score')
-                        
+                            regime_fit_score = regime_model.meta.get('fit_score')
+                            if regime_fit_score is None and score_out:
+                                regime_fit_score = score_out.get('regime_score')
+                        elif score_out:
+                            regime_fit_score = score_out.get('regime_score')
+                        else:
+                            regime_fit_score = None
+
                         # Compute actual stability ratio from regime transitions.
                         # stability = 1 / (1 + normalized_transition_rate)
                         # Low transitions = high stability, high transitions = low stability.
@@ -1792,10 +1797,10 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
                                     total_samples += count
                             if total_samples > 0:
                                 actual_stability = weighted_stability / total_samples
-                        
+
                         # Load existing state or create new.
                         model_state = load_model_state_from_sql(sql_client, equip_id)
-                        
+
                         if model_state is None:
                             # First time: create new state in LEARNING.
                             version = regime_state_version
@@ -1805,18 +1810,23 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
                                 training_rows=len(train),
                                 training_start=train_start,
                                 training_end=train_end,
-                                silhouette_score=silhouette,
+                                silhouette_score=regime_fit_score,
+                                regime_quality_metric=regime_fit_metric,
+                                regime_quality_ok=regime_quality_ok if regime_quality_ok is not None else True,
                                 run_id=run_id,
                             )
                         else:
-                            # Update existing state.
+                            # Update existing state — always refresh the metric and quality_ok
+                            # from the current run so the promotion check uses the right scale.
                             training_days = (train_end - train_start).total_seconds() / 86400.0
                             model_state = update_model_state_from_run(
                                 state=model_state,
                                 run_id=run_id,
                                 run_success=True,
-                                silhouette_score=silhouette,
-                                stability_ratio=actual_stability,  # Use computed stability from regime stats
+                                silhouette_score=regime_fit_score,
+                                regime_quality_metric=regime_fit_metric,
+                                regime_quality_ok=regime_quality_ok if regime_quality_ok is not None else True,
+                                stability_ratio=actual_stability,
                                 additional_rows=len(train),
                                 additional_days=training_days,
                             )
@@ -2492,7 +2502,7 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
                 
                 if forecast_results.get('success'):
                     Console.info(
-                        f"Forecast: RUL P10/50/90={forecast_results['rul_p10']:.0f}/{forecast_results['rul_p50']:.0f}/{forecast_results['rul_p90']:.0f}h | tables={len(forecast_results['tables_written'])} | top_sensors={forecast_results['top_sensors'][:3]}",
+                        f"Forecast: RUL P10/50/90={forecast_results['rul_p10']:.0f}/{forecast_results['rul_p50']:.0f}/{forecast_results['rul_p90']:.0f}h | tables={len(forecast_results['tables_written'])} | top_sensors={forecast_results['top_sensors']}",
                         component="FORECAST",
                     )
                     # Record RUL metrics for Prometheus.
@@ -2577,36 +2587,120 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
         raise
 
     finally:
-        # === Perf: log timer stats ===
-        # Note: Timer class uses `totals`, not `timings`.
-        if 'T' in locals() and hasattr(T, 'totals') and T.totals:
-            try:
-                # Log a summary of all timed sections (console-only, not to Loki).
-                Console.section("Performance Summary")
-                total_time = T.total_elapsed() if hasattr(T, "total_elapsed") else sum(T.totals.values())
-                accounted = sum(T.totals.values())
-                for section, duration in T.totals.items():
-                    Console.status(f"{section}: {duration:.4f}s")
-                    # Also emit to Loki for Grafana timer panel.
-                    pct = (duration / total_time * 100) if total_time > 0 else 0
-                    log_timer(section=section, duration_s=duration, pct=pct, total_s=total_time)
-                unaccounted = max(total_time - accounted, 0.0)
-                if unaccounted > 0:
-                    pct = (unaccounted / total_time * 100) if total_time > 0 else 0
-                    Console.status(f"unaccounted: {unaccounted:.4f}s")
-                    log_timer(section="unaccounted", duration_s=unaccounted, pct=pct, total_s=total_time)
+        # === Consolidated Batch Analytics Summary ===
+        # Structured run summary pushed to Loki (component=SUMMARY) for
+        # searchability and also rendered on the console.
+        try:
+            _eq = equip if 'equip' in locals() else "?"
+            _ws = win_start.strftime("%Y-%m-%d %H:%M") if 'win_start' in locals() and win_start is not None else "?"
+            _we = win_end.strftime("%H:%M") if 'win_end' in locals() and win_end is not None else "?"
+            _rid = str(run_id)[:8] if 'run_id' in locals() and run_id else "?"
+            _out = outcome if 'outcome' in locals() else '?'
 
-            except Exception:
-                pass
+            # -- Health (converted to 0-100 index) --
+            _health_str = ""
+            _health_status = "?"
+            _anomaly_str = ""
+            if 'frame' in locals() and isinstance(frame, pd.DataFrame) and 'fused' in frame.columns:
+                _fused = frame['fused'].dropna().to_numpy()
+                if len(_fused) > 0:
+                    _hi = _compute_health_index(_fused)
+                    _health_str = (
+                        f"avg={np.mean(_hi):.1f}%  min={np.min(_hi):.1f}%  max={np.max(_hi):.1f}%  "
+                        f"P10={np.percentile(_hi,10):.1f}%  P50={np.percentile(_hi,50):.1f}%"
+                    )
+                    _health_status = compute_run_health_status(float(np.mean(_hi)), float(np.min(_hi)))
+                    # Anomaly rate (fused z > 3)
+                    _n_anom = int((_fused > 3.0).sum())
+                    _anomaly_str = f"{_n_anom}/{len(_fused)} ({_n_anom/len(_fused)*100:.1f}%)"
 
-        if sql_log_sink:
-            try:
-                Console.remove_sink(sql_log_sink)
-                sql_log_sink.close()
-            except Exception:
-                pass
-            sql_log_sink = None
-        
+            # -- RUL --
+            _rul_str = ""
+            if 'forecast_results' in locals() and isinstance(forecast_results, dict) and forecast_results.get('success'):
+                _fr = forecast_results
+                _rul_str = f"P10={_fr['rul_p10']:.0f}h  P50={_fr['rul_p50']:.0f}h  P90={_fr['rul_p90']:.0f}h"
+                _top_sens = _fr.get('top_sensors', '')
+                if _top_sens:
+                    _rul_str += f"  drivers=[{_top_sens}]"
+
+            # -- Episodes --
+            _ep_str = ""
+            if 'episodes' in locals() and isinstance(episodes, pd.DataFrame):
+                _ep_total = len(episodes)
+                _active_col = next((c for c in ('Active', 'active', 'IsActive') if c in episodes.columns), None)
+                _ep_active = int(episodes[_active_col].sum()) if _active_col else 0
+                _sev_cols = [c for c in ('severity', 'Severity') if c in episodes.columns]
+                _ep_str = f"{_ep_total} total, {_ep_active} active"
+                if _sev_cols and _ep_total > 0:
+                    _sevs = episodes[_sev_cols[0]].dropna()
+                    if len(_sevs) > 0:
+                        _ep_str += f", avg_severity={_sevs.mean():.2f}"
+
+            # -- Regime --
+            _regime_str = ""
+            if 'score_out' in locals() and isinstance(score_out, dict):
+                _k = score_out.get('regime_k', 0)
+                _qok = 'OK' if ('regime_quality_ok' in locals() and regime_quality_ok) else 'FAIL'
+                _regime_str = f"K={_k}  quality={_qok}"
+                if 'frame' in locals() and isinstance(frame, pd.DataFrame) and 'regime_label' in frame.columns:
+                    _dom = frame['regime_label'].mode()
+                    if len(_dom) > 0 and len(frame) > 0:
+                        _dom_pct = (frame['regime_label'] == _dom.iloc[0]).sum() / len(frame) * 100
+                        _regime_str += f"  dominant=R{int(_dom.iloc[0])}({_dom_pct:.0f}%)"
+
+            # -- Drift --
+            _drift_str = ""
+            if 'frame' in locals() and isinstance(frame, pd.DataFrame) and 'drift_mode' in frame.columns and len(frame) > 0:
+                _drift_str = str(frame['drift_mode'].iloc[-1])
+
+            # -- Model --
+            _model_str = ""
+            if 'model_state' in locals() and model_state is not None:
+                _ms = model_state
+                _model_str = f"{_ms.maturity.value}  runs={_ms.consecutive_runs}  days={_ms.training_days:.1f}"
+
+            # -- Data volume --
+            _scored = rows_read if 'rows_read' in locals() else '?'
+            _trained = len(train) if 'train' in locals() and isinstance(train, pd.DataFrame) else '?'
+
+            # -- Timing --
+            _timing_str = ""
+            if 'T' in locals() and hasattr(T, 'totals') and T.totals:
+                _total_t = T.total_elapsed() if hasattr(T, "total_elapsed") else sum(T.totals.values())
+                _top = sorted(T.totals.items(), key=lambda x: x[1], reverse=True)[:5]
+                _timing_str = f"total={_total_t:.1f}s  " + "  ".join(f"{s}={t:.1f}s" for s, t in _top)
+
+            # -- Degradations --
+            _deg = ', '.join(degradations) if 'degradations' in locals() and degradations else 'none'
+
+            # -- Refit --
+            _refit = "yes" if ('refit_requested' in locals() and refit_requested) else "no"
+
+            # Emit structured summary log (pushed to Loki for dashboarding)
+            Console.info(
+                f"Batch summary | {_eq} | RunID={_rid} | [{_ws}-{_we}] | outcome={_out} | "
+                f"health=[{_health_str}] status={_health_status} | "
+                f"anomalies={_anomaly_str} | "
+                f"episodes=[{_ep_str}] | "
+                f"RUL=[{_rul_str}] | "
+                f"regime=[{_regime_str}] | drift={_drift_str} | "
+                f"model=[{_model_str}] | "
+                f"data={_scored} scored, {_trained} trained | "
+                f"refit={_refit} | degraded=[{_deg}]",
+                component="SUMMARY",
+                equip=_eq,
+                run_id=_rid,
+                outcome=_out,
+                health_status=_health_status,
+            )
+            if _timing_str:
+                Console.info(f"Timing | {_timing_str}", component="SUMMARY")
+
+        except Exception:
+            pass  # Summary is best-effort; never suppress pipeline errors
+
+        # Timer Loki push is handled by Timer._print_summary() at atexit
+
         # === Finalize run in SQL ===
         if sql_client and run_id:
             try:

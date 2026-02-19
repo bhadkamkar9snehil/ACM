@@ -935,7 +935,7 @@ class OutputManager:
                                 (self.run_id,)
                             ).rowcount
                         if rows_deleted and rows_deleted > 0:
-                            Console.info("" + f"Deleted {rows_deleted} existing rows from {table_name} for RunID={self.run_id}, EquipID={self.equip_id}", component="OUTPUT")
+                            Console.info(f"SQL delete from {table_name}: {rows_deleted} rows", component="OUTPUT")
                 except Exception as del_ex:
                     Console.warn(f"Standard pre-delete for {table_name} failed: {del_ex}", component="OUTPUT", table=table_name, equip_id=self.equip_id, run_id=self.run_id, error_type=type(del_ex).__name__)
 
@@ -947,18 +947,20 @@ class OutputManager:
             placeholders = ", ".join(["?"] * len(columns))
             insert_sql = f"INSERT INTO dbo.[{table_name}] ({cols_str}) VALUES ({placeholders})"
 
-            # Clean NaN/Inf values for SQL Server compatibility (pyodbc cannot handle these)
+            # Clean NaN/Inf values for SQL Server compatibility (pyodbc cannot handle these).
+            # Fast path: avoid repeated DataFrame.replace() calls which iterate block-by-block.
             import numpy as np
-            import warnings
             df_clean = df[columns].copy()
-            
-            # Replace 'N/A' strings with NaN (common in CSV data)
-            with warnings.catch_warnings():
-                warnings.filterwarnings('ignore', category=FutureWarning, message='.*Downcasting.*')
-                df_clean = df_clean.replace(['N/A', 'n/a', 'NA', 'na', '#N/A'], np.nan)
-            
+
+            # Replace 'N/A' strings with None using per-column mask (avoids block replace).
+            # Only scan object/string columns where these tokens can appear.
+            _NA_STRINGS = {'N/A', 'n/a', 'NA', 'na', '#N/A'}
+            for col in df_clean.select_dtypes(include='object').columns:
+                mask = df_clean[col].isin(_NA_STRINGS)
+                if mask.any():
+                    df_clean.loc[mask, col] = None
+
             # Convert timestamp columns to datetime objects (vectorized)
-            # PHASE-1 FIX: Use centralized DATETIME_COLUMNS constant instead of heuristic
             ts_cols = [c for c in df_clean.columns if c in DATETIME_COLUMNS or 'timestamp' in c.lower()]
             for col in ts_cols:
                 try:
@@ -972,19 +974,23 @@ class OutputManager:
                         Console.warn(f"{null_count} timestamps failed to parse in column {col}", component="OUTPUT", table=table_name, column=col, failed_count=null_count)
                 except Exception as ex:
                     Console.warn(f"Timestamp conversion failed for {col}: {ex}", component="OUTPUT", table=table_name, column=col, error_type=type(ex).__name__)
-            
-            # Replace extreme float values BEFORE replacing NaN (vectorized)
+
+            # Vectorised float sanitisation: clamp extremes and convert Inf/NaN → None.
+            # Convert the whole frame to object dtype once, then apply numpy masks per column.
             float_cols = df_clean.select_dtypes(include=[np.float64, np.float32]).columns
-            for col in float_cols:
-                # CRIT-06: Lower extreme threshold to 1e38 for SQL safety
-                extreme_mask = df_clean[col].abs() > 1e38
-                if extreme_mask.any():
-                    Console.warn(f"Replacing {extreme_mask.sum()} extreme float values in {table_name}.{col}", component="OUTPUT", table=table_name, column=col, extreme_count=int(extreme_mask.sum()))
-                    df_clean.loc[extreme_mask, col] = None
-            
-            # Replace Inf with None, then replace all NaN with None for SQL NULL
-            df_clean = df_clean.replace([np.inf, -np.inf], None)
-            # Convert to object dtype to allow None values, then replace NaN with None
+            if len(float_cols):
+                float_arr = df_clean[float_cols].to_numpy(dtype=float)
+                # Clamp values outside SQL float range to NaN
+                extreme = np.abs(float_arr) > 1e38
+                if extreme.any():
+                    n_extreme = int(extreme.sum())
+                    Console.warn(f"Clamping {n_extreme} extreme float values in {table_name}", component="OUTPUT", table=table_name, extreme_count=n_extreme)
+                    float_arr[extreme] = np.nan
+                # Replace Inf with NaN (in-place)
+                np.copyto(float_arr, np.nan, where=~np.isfinite(float_arr))
+                df_clean[float_cols] = float_arr
+
+            # Final: convert to object dtype and replace any remaining NaN with None.
             df_clean = df_clean.astype(object).where(pd.notnull(df_clean), None)
             
             records = [tuple(row) for row in df_clean.itertuples(index=False, name=None)]
@@ -1020,7 +1026,7 @@ class OutputManager:
                 Console.error(f"SQL commit failed for {table_name}: {e}", component="OUTPUT", table=table_name, equip_id=self.equip_id, run_id=self.run_id, error_type=type(e).__name__, error=str(e)[:200])
                 raise
 
-        Console.info("" + f"SQL insert to {table_name}: {inserted} rows", component="OUTPUT")
+        Console.info(f"SQL insert to {table_name}: {inserted} rows", component="OUTPUT")
         
         # P1: Track SQL ops for observability metrics
         if _OBSERVABILITY_AVAILABLE and record_sql_op:
@@ -1061,7 +1067,7 @@ class OutputManager:
         """
         cached = self._artifact_cache.get(table_name)
         if cached is not None:
-            Console.info("" + f"Retrieved {table_name} from artifact cache ({len(cached)} rows)", component="OUTPUT")
+            Console.info(f"SQL cache hit {table_name}: {len(cached)} rows", component="OUTPUT")
             return cached.copy()  # Return copy to prevent mutation
         else:
             Console.warn(f"Table {table_name} not found in artifact cache", component="OUTPUT", table=table_name, available_tables=list(self._artifact_cache.keys())[:5])
@@ -2629,7 +2635,7 @@ class OutputManager:
                     float(regime_quality) if regime_quality is not None else None,
                 ))
                 
-            Console.info("SQL refit request recorded in ACM_RefitRequests", component="OUTPUT")
+            Console.info("SQL insert to ACM_RefitRequests: 1 rows", component="OUTPUT")
             return 1
         except Exception as e:
             Console.warn(f"write_refit_request failed: {e}", component="OUTPUT", error=str(e)[:200])
@@ -2710,8 +2716,7 @@ class OutputManager:
                 cur.executemany(insert_sql, insert_records)
             self.sql_client.conn.commit()
             
-            Console.info(f"Saved fusion metrics -> SQL:ACM_RunMetrics ({len(insert_records)} records)", 
-                         component="OUTPUT", equip=self.equipment)
+            Console.info(f"SQL insert to ACM_RunMetrics: {len(insert_records)} rows", component="OUTPUT")
             return len(insert_records)
             
         except Exception as e:
@@ -2860,7 +2865,7 @@ class OutputManager:
                     cur.fast_executemany = True
                     cur.executemany(insert_sql, baseline_records)
                 self.sql_client.conn.commit()
-                Console.info(f"Wrote {len(baseline_records)} records to ACM_BaselineBuffer ({write_reason})", component="BASELINE")
+                Console.info(f"SQL insert to ACM_BaselineBuffer: {len(baseline_records)} rows ({write_reason})", component="OUTPUT")
                 
                 # Run cleanup procedure
                 try:
