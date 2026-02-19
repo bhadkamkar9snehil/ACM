@@ -2364,14 +2364,14 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
           with output_manager.batched_transaction():
             # Core outputs must succeed; failures here abort the run.
             with T.section("persist.write_scores"):
-                rows_written = output_manager.write_scores(frame)
-                Console.info(f"Scores written: {rows_written} rows", component="IO")
+                scores_result = output_manager.write_scores(frame)
+                rows_written += scores_result.get('inserted', 0)
 
             with T.section("persist.write_episodes"):
                 episode_rows = output_manager.write_episodes(episodes)
+                rows_written += episode_rows.get('inserted', 0)
                 if episodes is not None and len(episodes) > 0:
                     record_episode(equip, count=len(episodes), severity="info")
-                    Console.info(f"Episodes written: {episode_rows} rows", component="IO")
 
             # Culprits are written via OutputManager.
             

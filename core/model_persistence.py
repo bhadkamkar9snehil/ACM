@@ -567,10 +567,10 @@ class ModelVersionManager:
             
             # Save to SQL
             try:
-                self._save_models_to_sql(models, metadata, version)
-                Console.info(f"Saved {len(models)} models to SQL ModelRegistry v{version}", component="MODEL")
+                saved_count = self._save_models_to_sql(models, metadata, version)
+                Console.info(f"Saved {saved_count} models to SQL ModelRegistry v{version}", component="MODEL")
                 if span_context and hasattr(span_context, '_span') and span_context._span:
-                    span_context._span.set_attribute("acm.models_saved", len(models))
+                    span_context._span.set_attribute("acm.models_saved", saved_count)
                 return version
             except Exception as e:
                 Console.error(f"Failed to save models to SQL: {e}", component="MODEL-SQL", equip_id=self.equip_id, version=version, error_type=type(e).__name__, error=str(e)[:200])
@@ -583,7 +583,7 @@ class ModelVersionManager:
         
         return version
     
-    def _save_models_to_sql(self, models: Dict[str, Any], metadata: Dict[str, Any], version: int):
+    def _save_models_to_sql(self, models: Dict[str, Any], metadata: Dict[str, Any], version: int) -> int:
         """
         Save models to SQL ModelRegistry table with atomic transaction handling.
         
@@ -598,7 +598,7 @@ class ModelVersionManager:
         
         if not self.sql_client.conn:
             Console.warn("SQL connection not available", component="MODEL-SQL", equipment=self.equip, equip_id=self.equip_id)
-            return
+            return 0
         
         cursor = self.sql_client.conn.cursor()
         saved_count = 0
@@ -672,6 +672,7 @@ class ModelVersionManager:
                 Console.warn(f"Rolling back transaction due to {len(errors)} error(s)", component="MODEL-SQL", error_count=len(errors), equip_id=self.equip_id, version=version)
                 self.sql_client.conn.rollback()
                 Console.warn(f"Transaction rolled back - no models saved", component="MODEL-SQL", equip_id=self.equip_id, version=version)
+                saved_count = 0
             else:
                 self.sql_client.conn.commit()
                 Console.info(f"OK Committed {saved_count}/{len(models)} models to SQL ModelRegistry v{version}", component="MODEL-SQL")
@@ -687,6 +688,7 @@ class ModelVersionManager:
         # v11.6.0 FIX #2: Cleanup old model versions to prevent accumulation
         # WFA_TURBINE_22 had 171 copies of each model type due to no retention
         self._cleanup_old_versions(keep_n=5)
+        return saved_count
 
     def save_calibration_params(self, calibrators_dict: Dict[str, Any], version: int):
         """Append calibration params to an existing model version.
