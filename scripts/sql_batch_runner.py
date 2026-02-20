@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import List, Dict, Optional, Tuple
 from datetime import datetime, timedelta
 import pyodbc
+import numpy as np
 
 # Ensure project root is on sys.path so `core` imports work when running as a script
 project_root = Path(__file__).resolve().parents[1]
@@ -537,6 +538,79 @@ class SQLBatchRunner:
                             )
                     except Exception as tbl_err:
                         Console.warn(f"Skipped {table_name}: {tbl_err}", component="QA", table=table_name, error=str(tbl_err), error_type=type(tbl_err).__name__)
+                
+                # ===== New QA Check 1: OMR Culprit Naming =====
+                try:
+                    # Check if there are any episodes first
+                    cur.execute("SELECT COUNT(*) FROM ACM_EpisodeDiagnostics WHERE EquipID = ? AND RunID = ?", (equip_id, run_id))
+                    episode_count = cur.fetchone()[0]
+                    if episode_count > 0:
+                        cur.execute("SELECT StartTime, EndTime, Culprits FROM ACM_EpisodeDiagnostics WHERE EquipID = ? AND RunID = ?", (equip_id, run_id))
+                        episodes = cur.fetchall()
+                        
+                        for episode in episodes:
+                            start_time, end_time, culprits = episode
+                            
+                            # Query scores for the episode window
+                            cur.execute("""
+                                SELECT AVG(ABS(ar1_z)), AVG(ABS(pca_spe_z)), AVG(ABS(pca_t2_z)), 
+                                    AVG(ABS(iforest_z)), AVG(ABS(gmm_z)), AVG(ABS(omr_z))
+                                FROM ACM_Scores_Wide
+                                WHERE EquipID = ? AND RunID = ? AND Timestamp BETWEEN ? AND ?
+                            """, (equip_id, run_id, start_time, end_time))
+                            avg_scores = cur.fetchone()
+                            
+                            if avg_scores:
+                                detector_scores = {
+                                    'ar1_z': avg_scores[0], 'pca_spe_z': avg_scores[1], 'pca_t2_z': avg_scores[2],
+                                    'iforest_z': avg_scores[3], 'gmm_z': avg_scores[4], 'omr_z': avg_scores[5]
+                                }
+                                # Filter out None values
+                                detector_scores = {k: v for k, v in detector_scores.items() if v is not None}
+                                if not detector_scores:
+                                    continue
+
+                                primary_detector = max(detector_scores, key=detector_scores.get)
+                                
+                                if primary_detector == 'omr_z' and (not culprits or not culprits.startswith('OMR')):
+                                    Console.warn(
+                                        f"QA check failed: OMR episode has incorrect culprit. Expected 'OMR(...)', got '{culprits}'",
+                                        component="QA", table="ACM_EpisodeDiagnostics", equip_id=equip_id, run_id=str(run_id)
+                                    )
+                except Exception as e:
+                    Console.warn(f"QA check for OMR culprit naming failed: {e}", component="QA")
+
+
+                # ===== New QA Check 2: Hotspot Ranking Logic =====
+                try:
+                    cur.execute("SELECT RankingScore, MaxAbsZ, MaxAbsOMR FROM ACM_SensorHotspots WHERE EquipID = ? AND RunID = ? ORDER BY RankingScore DESC", (equip_id, run_id))
+                    hotspots = cur.fetchall()
+                    if hotspots:
+                        # Check sorting
+                        ranking_scores = [h.RankingScore for h in hotspots]
+                        if not all(ranking_scores[i] >= ranking_scores[i+1] for i in range(len(ranking_scores)-1)):
+                            Console.warn(
+                                "QA check failed: ACM_SensorHotspots is not sorted by RankingScore.",
+                                component="QA", table="ACM_SensorHotspots", equip_id=equip_id, run_id=str(run_id)
+                            )
+                        
+                        # Check RankingScore calculation
+                        for spot in hotspots:
+                            max_abs_z = spot.MaxAbsZ if spot.MaxAbsZ is not None else 0.0
+                            max_abs_omr = spot.MaxAbsOMR if spot.MaxAbsOMR is not None else 0.0
+                            if not np.isclose(spot.RankingScore, max(max_abs_z, max_abs_omr)):
+                                Console.warn(
+                                    f"QA check failed: Hotspot RankingScore is incorrect. RankingScore={spot.RankingScore}, MaxAbsZ={spot.MaxAbsZ}, MaxAbsOMR={spot.MaxAbsOMR}",
+                                    component="QA", table="ACM_SensorHotspots", equip_id=equip_id, run_id=str(run_id)
+                                )
+                except pyodbc.ProgrammingError as pe:
+                    if "Invalid column name" in str(pe):
+                        Console.warn("QA check for Hotspot Ranking skipped: RankingScore/MaxAbsOMR columns not in ACM_SensorHotspots.", component="QA")
+                    else:
+                        Console.warn(f"QA check for Hotspot Ranking failed: {pe}", component="QA")
+                except Exception as e:
+                    Console.warn(f"QA check for Hotspot Ranking failed: {e}", component="QA")
+
         except Exception as e:
             Console.error(f"Output inspection failed for {equip_name}: {e}", component="QA", equipment=equip_name, error=str(e), error_type=type(e).__name__)
 

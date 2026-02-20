@@ -1570,7 +1570,8 @@ class OutputManager:
             'dominant_sensor': 'TopSensor1',
             'severity': 'Severity',
             'avg_fused_z': 'AvgZ',
-            'min_health_index': 'min_health_index'
+            'min_health_index': 'min_health_index',
+            'culprits': 'Culprits'
         }
         
         # Add episode_id if missing (sequential)
@@ -1651,7 +1652,7 @@ class OutputManager:
             sql_columns=episode_columns,
             non_numeric_cols={
                 "RunID", "EquipID", "episode_id", "peak_timestamp",
-                "dominant_sensor", "severity", "min_health_index"
+                "dominant_sensor", "severity", "min_health_index", "culprits"
             },
             required=True
         )

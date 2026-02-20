@@ -1395,7 +1395,14 @@ class Fuser:
             fused += w[k] * zs[k]
         return pd.Series(fused, index=original_features.index[:n], name="fused")
 
-    def detect_episodes(self, series: pd.Series, streams: Dict[str, np.ndarray], original_features: pd.DataFrame, regime_labels: Optional[np.ndarray] = None) -> pd.DataFrame:
+    def detect_episodes(
+        self, 
+        series: pd.Series, 
+        streams: Dict[str, np.ndarray], 
+        original_features: pd.DataFrame, 
+        regime_labels: Optional[np.ndarray] = None,
+        omr_contributions: Optional[pd.DataFrame] = None
+    ) -> pd.DataFrame:
         """CUSUM-like episode builder on z-series.
         
         v10.1.0: Added regime_labels parameter for episode-regime correlation.
@@ -1650,6 +1657,20 @@ class Fuser:
                     if top_feature:
                         culprit_sensor = Fuser._get_base_sensor(top_feature)
                         culprits_raw = f"{primary_detector}({culprit_sensor})"
+                
+                # P3-FIX: OMR Attribution (Pure ML Context)
+                elif 'omr' in primary_detector and omr_contributions is not None:
+                    # OMR contributions are model residuals (actual - predicted)
+                    # We find the sensor with the highest mean contribution during the episode
+                    try:
+                        # Slice contributions to episode window
+                        ep_contrib = omr_contributions.iloc[s:e+1]
+                        if not ep_contrib.empty:
+                            # Find column with max absolute mean contribution
+                            top_sensor = ep_contrib.abs().mean().idxmax()
+                            culprits_raw = f"{primary_detector}({top_sensor})"
+                    except Exception:
+                        pass  # Fallback to generic label if lookup fails
 
                 # Format culprit with human-readable label
                 culprits = format_culprit_label(culprits_raw, use_short=False)
@@ -2133,6 +2154,7 @@ def run_fusion_pipeline(
     train_regime_labels: Optional[np.ndarray] = None,
     output_manager: Optional[Any] = None,
     previous_weights: Optional[Dict[str, float]] = None,
+    omr_contributions: Optional[pd.DataFrame] = None,
     equip: str = "",
 ) -> FusionResult:
     """
@@ -2218,7 +2240,7 @@ def run_fusion_pipeline(
         score_fuser = Fuser(weights=weights, ep=episode_params)
         fused = score_fuser.fuse(present, score_data, discounted_weights=discounted_weights)
         episodes = score_fuser.detect_episodes(
-            fused, present, score_data, regime_labels=score_regime_labels
+            fused, present, score_data, regime_labels=score_regime_labels, omr_contributions=omr_contributions
         )
     fused_np = np.asarray(fused, dtype=np.float32).reshape(-1)
 

@@ -656,7 +656,7 @@ class ForecastEngine:
                 'regime_df_shape': regime_df.shape if 'regime_df' in locals() else 'Not created',
                 'rows_count': len(rows) if 'rows' in locals() and rows else 0,
                 'ts_values_type': type(ts_values) if 'ts_values' in locals() else 'Not created',
-                'ts_values_shape': getattr(ts_values, 'shape', 'No shape') if 'ts_values' in locals() else '`N/A`'
+                'ts_values_shape': getattr(ts_values, 'shape', 'No shape') if 'ts_values' in locals() else 'N/A'
             }
             Console.warn(f"Failed to align regime series: {e} | Debug: {debug_info}",
                         component="FORECAST", equip_id=self.equip_id)
