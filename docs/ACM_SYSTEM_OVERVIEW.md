@@ -1537,6 +1537,7 @@ This invalidates all cached regime models.
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
+| v11.15.0 | 2026-02-19 | Latent attribution activation: OMR per-sensor episode culprits, OMR-aware hotspot ranking (MaxAbsOMR, RankingScore), baseline data leakage fix, model persistence return value, QA checks for OMR attribution |
 | v11.11.0 | 2026-02-18 | Forecasting 563s→<5s: vectorize Monte Carlo slow path (O(N×S)→O(S) Python iters); default forecast_resolution_hours=1.0h to cap step count; fix perpetual refit loop (wrong regime_score key) |
 | v11.10.0 | 2026-02-18 | Fusion cleanup: delete combine(), named Spans, required discounted_weights; fix refit timestamp UTC/local mismatch; fix triple timer summary; fix duplicate main() |
 | v11.9.0 | 2026-02-18 | Fusion stability: cross-batch health comparability, calibration persistence, 3x fusion speedup |
@@ -1552,4 +1553,4 @@ This invalidates all cached regime models.
 
 ---
 
-**Document Version:** 11.4.0 | **Updated:** January 21, 2026
+**Document Version:** 11.15.0 | **Updated:** February 19, 2026

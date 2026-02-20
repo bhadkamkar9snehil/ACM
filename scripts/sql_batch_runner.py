@@ -572,7 +572,7 @@ class SQLBatchRunner:
 
                                 primary_detector = max(detector_scores, key=detector_scores.get)
                                 
-                                if primary_detector == 'omr_z' and not culprits.startswith('OMR'):
+                                if primary_detector == 'omr_z' and (not culprits or not culprits.startswith('OMR')):
                                     Console.warn(
                                         f"QA check failed: OMR episode has incorrect culprit. Expected 'OMR(...)', got '{culprits}'",
                                         component="QA", table="ACM_EpisodeDiagnostics", equip_id=equip_id, run_id=str(run_id)
@@ -596,8 +596,9 @@ class SQLBatchRunner:
                         
                         # Check RankingScore calculation
                         for spot in hotspots:
-                            # Using np.isclose for float comparison
-                            if not np.isclose(spot.RankingScore, max(spot.MaxAbsZ, spot.MaxAbsOMR)):
+                            max_abs_z = spot.MaxAbsZ if spot.MaxAbsZ is not None else 0.0
+                            max_abs_omr = spot.MaxAbsOMR if spot.MaxAbsOMR is not None else 0.0
+                            if not np.isclose(spot.RankingScore, max(max_abs_z, max_abs_omr)):
                                 Console.warn(
                                     f"QA check failed: Hotspot RankingScore is incorrect. RankingScore={spot.RankingScore}, MaxAbsZ={spot.MaxAbsZ}, MaxAbsOMR={spot.MaxAbsOMR}",
                                     component="QA", table="ACM_SensorHotspots", equip_id=equip_id, run_id=str(run_id)

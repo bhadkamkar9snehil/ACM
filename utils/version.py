@@ -17,9 +17,71 @@ Release Management:
 - Production deployments use specific tags (never merge commits)
 """
 
-__version__ = "11.13.1"
-__version_date__ = "2026-02-18"
+__version__ = "11.15.0"
+__version_date__ = "2026-02-19"
 __version_author__ = "ACM Development Team"
+
+# v11.15.0: LATENT ATTRIBUTION ACTIVATION
+#
+# OMR contributions now flow through the full pipeline, enabling per-sensor
+# culprit attribution for OMR-dominated episodes and OMR-aware hotspot ranking.
+#
+# 1. OMR Episode Attribution (core/fuse.py)
+#    - detect_episodes() accepts omr_contributions parameter.
+#    - When primary detector is OMR, episode culprit resolves to the sensor
+#      with the highest mean |contribution| during the episode window
+#      (e.g. "OMR(BearingTemp)" instead of generic "OMR").
+#    - Threaded from score_all_detectors → run_fusion_pipeline → detect_episodes.
+#
+# 2. OMR-Aware Hotspot Ranking (core/analytics_builder.py)
+#    - ACM_SensorHotspots gains MaxAbsOMR and RankingScore columns.
+#    - RankingScore = max(MaxAbsZ, MaxAbsOMR); sensors rank by strongest signal.
+#    - Backward-compatible: when no OMR data, falls back to MaxAbsZ ranking.
+#    - Defensive guard for empty z-score DataFrames.
+#
+# 3. Baseline Data Leakage Fix (core/smart_coldstart.py)
+#    - seed_baseline() else-branch now slices score past seed_n instead of
+#      accepting overlap. Prevents train/score data leakage when 50/50 split
+#      is impossible due to insufficient rows.
+#
+# 4. Model Persistence Return Value (core/model_persistence.py)
+#    - _save_models_to_sql() returns actual saved_count (int) instead of None.
+#    - Log and OTEL span now report true count (excludes failed serializations).
+#    - On rollback, saved_count resets to 0.
+#
+# 5. Output Write Accounting (core/acm_main.py)
+#    - write_scores() and write_episodes() results use dict .get('inserted', 0)
+#      with += accumulation instead of overwrite assignment.
+#
+# 6. QA Checks for OMR Attribution (scripts/sql_batch_runner.py)
+#    - QA Check 1: Validates OMR-primary episodes have OMR(...) culprit labels.
+#    - QA Check 2: Validates ACM_SensorHotspots RankingScore = max(MaxAbsZ, MaxAbsOMR)
+#      and descending sort order. Handles NULL values and missing columns gracefully.
+#
+# 7. Minor Fixes
+#    - forecast_engine.py: Removed stray backticks from debug string.
+#    - .gitignore: Added batchrunlogs_TEMP.md.
+
+# v11.14.1: QA COMPLIANCE FIXES
+# - Added 'Culprits' column mapping to ACM_EpisodeDiagnostics in output_manager.py
+# - Added 'RankingScore' and 'MaxAbsOMR' aliases to ACM_SensorHotspots in analytics_builder.py
+
+# v11.14.0: LOG QUALITY & BATCH SUMMARY OVERHAUL
+#
+# 1. Duplicate FUSE Correlation Logs (core/fuse.py)
+#    - Suppressed redundant logging in compute_discounted_weights() re-calculation.
+#
+# 2. Duplicate DEGRADE Model Logs (core/degradation_model.py)
+#    - Added [global]/[regime-N] tags to degradation logs to distinguish models.
+#
+# 3. Batch Summary Z-Score Bug (core/acm_main.py)
+#    - Fixed health display to show % (0-100) instead of raw negative z-scores.
+#
+# 4. Batch Summary Overhaul (core/acm_main.py)
+#    - Replaced Console.status() with structured Console.info(component="SUMMARY") for Loki.
+#
+# 5. top_sensors Truncation Bug (core/acm_main.py)
+#    - Fixed string slicing bug that truncated sensor names in forecast logs.
 
 # v11.13.1: REMOVE DEAD SQL LOG SINK
 #
