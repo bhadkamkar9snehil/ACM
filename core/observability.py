@@ -38,9 +38,12 @@ import functools
 import logging
 import os
 import queue
+import re
 import sys
 import threading
 import time
+import textwrap
+import shutil
 from contextlib import contextmanager
 from datetime import datetime
 from typing import Any, Callable, Dict, Generator, List, Optional, TypeVar
@@ -71,27 +74,348 @@ class _Colors:
     STATUS = Fore.MAGENTA + Style.BRIGHT  # Console-only status (purple/magenta)
     # Component tag (module name like CAL, FUSE, THRESHOLD)
     COMPONENT = Fore.WHITE + Style.BRIGHT  # Neutral color works with all levels
-    # Message
+# Message
     MSG = Fore.WHITE
     RESET = Style.RESET_ALL
+
+
+_COMPONENT_COLORS: Dict[str, str] = {
+    "SQL": Fore.CYAN + Style.BRIGHT,
+    "DATA": Fore.BLUE + Style.BRIGHT,
+    "MODEL": Fore.MAGENTA + Style.BRIGHT,
+    "COLDSTART": Fore.YELLOW + Style.BRIGHT,
+    "BATCH": Fore.GREEN + Style.BRIGHT,
+    "RUN": Fore.CYAN + Style.BRIGHT,
+    "MAIN": Fore.BLUE + Style.BRIGHT,
+    "PRECHECK": Fore.CYAN + Style.BRIGHT,
+    "CONFIG": Fore.WHITE + Style.BRIGHT,
+    "RESET": Fore.YELLOW + Style.BRIGHT,
+    "OTEL": Fore.BLUE + Style.BRIGHT,
+    "PROFILE": Fore.MAGENTA + Style.BRIGHT,
+    "QA": Fore.CYAN + Style.BRIGHT,
+    "OUTPUT": Fore.GREEN + Style.BRIGHT,
+    "OUTPUTS": Fore.GREEN + Style.BRIGHT,
+    "TIMER": Fore.MAGENTA + Style.BRIGHT,
+    "SEASON": Fore.BLUE + Style.BRIGHT,
+    "REGIME": Fore.YELLOW + Style.BRIGHT,
+    "REGIME_STATE": Fore.YELLOW + Style.BRIGHT,
+    "FEAT": Fore.CYAN + Style.BRIGHT,
+    "SCORE": Fore.BLUE + Style.BRIGHT,
+    "LIFECYCLE": Fore.MAGENTA + Style.BRIGHT,
+    "CAL": Fore.CYAN + Style.BRIGHT,
+    "FUSE": Fore.MAGENTA + Style.BRIGHT,
+    "TUNE": Fore.YELLOW + Style.BRIGHT,
+    "TRANSIENT": Fore.CYAN + Style.BRIGHT,
+    "RETRAIN": Fore.YELLOW + Style.BRIGHT,
+    "RETRAIN_TRIGGER": Fore.RED + Style.BRIGHT,
+    "CONFIG_HIST": Fore.MAGENTA + Style.BRIGHT,
+    "AUTO_TUNE": Fore.YELLOW + Style.BRIGHT,
+    "DRIFT": Fore.CYAN + Style.BRIGHT,
+    "BASELINE": Fore.CYAN + Style.BRIGHT,
+    "EPISODES": Fore.MAGENTA + Style.BRIGHT,
+    "ANALYTICS": Fore.BLUE + Style.BRIGHT,
+    "FORECAST": Fore.MAGENTA + Style.BRIGHT,
+    "STATUS": Fore.MAGENTA + Style.BRIGHT,
+}
+
+
+def _component_color(component: str) -> str:
+    comp = component.upper()
+    direct = _COMPONENT_COLORS.get(comp)
+    if direct:
+        return direct
+    # Support component variants like MODEL-SQL, MODEL_LOAD, etc.
+    normalized = comp.replace("-", "_")
+    normalized_color = _COMPONENT_COLORS.get(normalized)
+    if normalized_color:
+        return normalized_color
+    base = normalized.split("_", 1)[0]
+    return _COMPONENT_COLORS.get(base, _Colors.COMPONENT)
+
+
+def _colorize_leading_tag(message: str) -> str:
+    """Colorize leading [TAG] inside message text for legacy call sites."""
+    m = re.match(r"^\[([A-Za-z0-9_-]+)\](\s+.*|$)", message)
+    if not m:
+        return message
+    tag = m.group(1).upper()
+    tail = m.group(2) or ""
+    return f"{_component_color(tag)}[{tag}]{_Colors.RESET}{_Colors.MSG}{tail}"
+
+
+def _format_message_rows(message: str, width: int) -> List[str]:
+    """Format message into compact table-like rows when pipe separators are present."""
+    text = str(message).strip()
+    if not text:
+        return [""]
+
+    if " | " not in text:
+        return textwrap.wrap(
+            text,
+            width=width,
+            break_long_words=False,
+            break_on_hyphens=False,
+        ) or [""]
+
+    parts = [p.strip() for p in text.split(" | ") if p.strip()]
+    if len(parts) <= 1:
+        return textwrap.wrap(
+            text,
+            width=width,
+            break_long_words=False,
+            break_on_hyphens=False,
+        ) or [""]
+
+    rows: List[str] = []
+
+    # Build a compact first row using as many parts as possible.
+    first = parts[0]
+    idx = 1
+    while idx < len(parts):
+        candidate = f"{first} | {parts[idx]}"
+        if len(candidate) <= width:
+            first = candidate
+            idx += 1
+            continue
+        break
+
+    wrapped_first = textwrap.wrap(
+        first,
+        width=width,
+        break_long_words=False,
+        break_on_hyphens=False,
+    ) or [first]
+    rows.extend(wrapped_first)
+
+    # Overflow fields are rendered in a continuation lane.
+    field_width = max(24, width - 3)
+    for part in parts[idx:]:
+        wrapped = textwrap.wrap(
+            part,
+            width=field_width,
+            break_long_words=False,
+            break_on_hyphens=False,
+        ) or [part]
+        rows.append(f"| {wrapped[0]}")
+        for continuation in wrapped[1:]:
+            rows.append(f"  {continuation}")
+    return rows
+
+
+def _format_summary_rows(message: str, width: int) -> List[str]:
+    """Format SUMMARY lines as a readable key/value block."""
+    text = str(message).strip()
+    if not text:
+        return [""]
+    if " | " not in text:
+        return textwrap.wrap(
+            text,
+            width=width,
+            break_long_words=False,
+            break_on_hyphens=False,
+        ) or [text]
+
+    parts = [p.strip() for p in text.split(" | ") if p.strip()]
+    if not parts:
+        return [text]
+
+    header = parts[0]
+    fields = parts[1:]
+    kv_fields: List[tuple[str, str]] = []
+    for field in fields:
+        if "=" in field:
+            key, value = field.split("=", 1)
+            kv_fields.append((key.strip(), value.strip()))
+        else:
+            kv_fields.append(("", field))
+
+    key_width = 0
+    for key, _ in kv_fields:
+        if key:
+            key_width = max(key_width, len(key))
+    key_width = min(key_width, 18)
+
+    rows: List[str] = []
+    wrapped_header = textwrap.wrap(
+        header,
+        width=width,
+        break_long_words=False,
+        break_on_hyphens=False,
+    ) or [header]
+    rows.extend(wrapped_header)
+
+    for key, value in kv_fields:
+        if key:
+            prefix = f"| {key.ljust(key_width)} = "
+        else:
+            prefix = "| "
+        wrapped_value = textwrap.wrap(
+            value,
+            width=max(20, width - len(prefix)),
+            break_long_words=False,
+            break_on_hyphens=False,
+        ) or [""]
+        rows.append(f"{prefix}{wrapped_value[0]}")
+        continuation_indent = " " * len(prefix)
+        for part in wrapped_value[1:]:
+            rows.append(f"{continuation_indent}{part}")
+    return rows
+
+_structlog_timestamper = structlog.processors.TimeStamper(
+    fmt="%Y-%m-%d %H:%M:%S",
+    utc=False,
+)
+_STRUCTLOG_EVENT_PROCESSORS = [
+    structlog.contextvars.merge_contextvars,
+    structlog.processors.add_log_level,
+    _structlog_timestamper,
+    structlog.processors.StackInfoRenderer(),
+    structlog.processors.format_exc_info,
+    structlog.processors.UnicodeDecoder(),
+]
+_STRUCTLOG_CONSOLE_VERBOSE = False
+_structlog_console_renderer = structlog.dev.ConsoleRenderer(
+    colors=True,
+    force_colors=True,
+    sort_keys=False,
+    pad_level=True,
+    pad_event=36,
+    exception_formatter=structlog.dev.RichTracebackFormatter(
+        show_locals=True,
+        word_wrap=True,
+    ),
+)
+
+
+def _normalize_log_message(message: str, component: Optional[str] = None) -> str:
+    """Normalize message text for readability by removing redundant prefixes."""
+    msg = str(message).strip()
+    if not msg:
+        return msg
+
+    upper = msg.upper()
+    level_tokens = ("[DEBUG]", "[INFO]", "[WARN]", "[WARNING]", "[ERROR]", "[SUCCESS]")
+    for token in level_tokens:
+        if upper.startswith(token):
+            msg = msg[len(token):].lstrip(" :-")
+            upper = msg.upper()
+            break
+
+    if component:
+        comp_token = f"[{component.upper()}]"
+        if upper.startswith(comp_token):
+            msg = msg[len(comp_token):].lstrip(" :-")
+
+    return msg
+
+def _extract_leading_tag(message: str) -> tuple[Optional[str], str]:
+    """Extract a leading [TAG] from message text if present."""
+    msg = str(message).strip()
+    m = re.match(r"^\[([A-Za-z0-9_-]+)\](\s+.*|$)", msg)
+    if not m:
+        return None, msg
+    tag = m.group(1).upper()
+    rest = (m.group(2) or "").lstrip()
+    return tag, rest
+
+def _process_event_with_structlog(event: Dict[str, Any]) -> Dict[str, Any]:
+    """Process an event payload through structlog processors (no renderer)."""
+    method_name = str(event.get("level", "info")).lower()
+    processed = dict(event)
+    for processor in _STRUCTLOG_EVENT_PROCESSORS:
+        processed = processor(None, method_name, processed)
+    return processed
+
+
+def _render_console_with_structlog(event_dict: Dict[str, Any]) -> str:
+    """Render one already-processed event line with deterministic color formatting."""
+    event = dict(event_dict)
+    ts = str(event.get("timestamp", ""))
+    level = str(event.get("level", "info")).lower()
+    if event.get("tag") == "success":
+        level = "success"
+    component = str(event.get("component", "")).upper()
+    message = str(event.get("event", ""))
+
+    # Dedicated visual lane for console-only status/header/section lines.
+    if component == "STATUS":
+        timestamp = f"{_Colors.DATE}[{ts}]{_Colors.RESET}"
+        # Dim separators and keep semantic messages vivid.
+        if message and all(c in "=-_*#~ " for c in message):
+            msg_col = f"{Style.DIM}{_Colors.STATUS}{message}{_Colors.RESET}"
+        else:
+            msg_col = f"{_Colors.STATUS}{message}{_Colors.RESET}"
+        return f"{timestamp} {_Colors.STATUS}>>>{_Colors.RESET} {msg_col}"
+
+    if level == "error":
+        lvl_color = _Colors.ERROR
+        lvl_text = "ERROR"
+    elif level in ("warn", "warning"):
+        lvl_color = _Colors.WARN
+        lvl_text = "WARN"
+    elif level == "debug":
+        lvl_color = _Colors.DEBUG
+        lvl_text = "DEBUG"
+    elif level == "success":
+        lvl_color = _Colors.OK
+        lvl_text = "SUCCESS"
+    else:
+        lvl_color = _Colors.INFO
+        lvl_text = "INFO"
+
+    # Aligned columns improve scanability on long-running batch output.
+    level_tag = f"[{lvl_text}]".ljust(9)
+    comp_tag = f"[{component}]".ljust(16) if component else "".ljust(16)
+    timestamp = f"{_Colors.DATE}[{ts}]{_Colors.RESET}"
+    # Wrap long message text ourselves to avoid terminal auto-wrap breaking columns.
+    plain_prefix = f"[{ts}] {level_tag} {comp_tag} "
+    terminal_width = shutil.get_terminal_size(fallback=(160, 25)).columns
+    available = max(40, terminal_width - len(plain_prefix))
+    if component == "SUMMARY":
+        wrapped = _format_summary_rows(message, available)
+    else:
+        wrapped = _format_message_rows(message, available)
+    first = wrapped[0]
+    rest = wrapped[1:]
+
+    line = (
+        f"{timestamp} "
+        f"{lvl_color}{level_tag}{_Colors.RESET} "
+        f"{_component_color(component) if component else _Colors.COMPONENT}{comp_tag}{_Colors.RESET} "
+        f"{_Colors.MSG}{_colorize_leading_tag(first)}{_Colors.RESET}"
+    )
+    if rest:
+        continuation_indent = " " * len(plain_prefix)
+        cont: List[str] = []
+        for part in rest:
+            if part.startswith("| "):
+                cont.append(
+                    f"{continuation_indent}{Style.DIM}{_Colors.COMPONENT}{part[:2]}{_Colors.RESET}"
+                    f"{_Colors.MSG}{part[2:]}{_Colors.RESET}"
+                )
+            else:
+                cont.append(f"{continuation_indent}{_Colors.MSG}{part}{_Colors.RESET}")
+        line = "\n".join([line, *cont])
+
+    if _STRUCTLOG_CONSOLE_VERBOSE:
+        extras = {k: v for k, v in event.items() if k not in {"timestamp", "level", "component", "event", "tag"}}
+        if extras:
+            extra_txt = " ".join(f"{k}={v}" for k, v in sorted(extras.items()))
+            line = f"{line} {_Colors.DEBUG}| {extra_txt}{_Colors.RESET}"
+    return line
 
 # Configure structlog
 def _configure_structlog():
     """Configure structlog with console output."""
-    
-    # Processors for structlog
-    processors = [
-        structlog.contextvars.merge_contextvars,
-        structlog.processors.add_log_level,
-        structlog.processors.TimeStamper(fmt="%Y-%m-%d %H:%M:%S", utc=False),
-        structlog.dev.ConsoleRenderer(colors=True),
-    ]
+    # Shared processors + console renderer.
+    processors = [*_STRUCTLOG_EVENT_PROCESSORS, _structlog_console_renderer]
     
     structlog.configure(
         processors=processors,
         wrapper_class=structlog.make_filtering_bound_logger(logging.INFO),
         context_class=dict,
-        logger_factory=structlog.PrintLoggerFactory(),
+        # Per structlog performance guidance, avoid stdlib logging path.
+        logger_factory=structlog.WriteLoggerFactory(file=sys.stdout),
         cache_logger_on_first_use=True,
     )
 
@@ -724,7 +1048,7 @@ def set_context(
     if run_id is not None:
         _config.run_id = run_id
     
-    # Update structlog context
+    # Update structlog context.
     structlog.contextvars.bind_contextvars(
         equipment=_config.equipment,
         equip_id=_config.equip_id,
@@ -775,20 +1099,67 @@ class Console:
         return now.strftime("%Y-%m-%d"), now.strftime("%H:%M:%S")
     
     @staticmethod
-    def _render_console(level: str, level_color: str, message: str, component: Optional[str] = None) -> None:
+    def _build_event_dict(level: str, message: str, component: Optional[str] = None, **kwargs) -> Dict[str, Any]:
+        """Create a normalized event payload for structlog paths."""
+        inferred_component = component.upper() if component else None
+        if inferred_component is None:
+            lead_tag, stripped_message = _extract_leading_tag(message)
+            if lead_tag:
+                inferred_component = lead_tag
+                message = stripped_message
+
+        event: Dict[str, Any] = {
+            "event": _normalize_log_message(message, inferred_component),
+            "level": level.lower(),
+        }
+        if inferred_component:
+            event["component"] = inferred_component
+        if _config.equipment:
+            event["equipment"] = _config.equipment
+        if _config.equip_id:
+            event["equip_id"] = _config.equip_id
+        if _config.run_id:
+            event["run_id"] = _config.run_id
+        if kwargs:
+            event.update(kwargs)
+        return event
+
+    @staticmethod
+    def _send_event_to_loki(event: Dict[str, Any]) -> None:
+        """Send a normalized event payload to Loki with stable labels."""
+        if not _loki_pusher:
+            return
+        message = str(event.get("event", "")).strip()
+        if not message or all(c in "=-_*#~" for c in message):
+            return
+        level = str(event.get("level", "info")).lower()
+        component = event.get("component")
+        # Drop canonical fields from extra label payload; keep contextual keys.
+        context = {k: v for k, v in event.items() if k not in {
+            "event", "level", "component", "equipment", "equip_id", "run_id", "timestamp"
+        }}
+        _loki_pusher.log(level, message, component=str(component) if component else None, **context)
+
+    @staticmethod
+    def _render_console_event(level: str, level_color: str, event: Dict[str, Any]) -> None:
+        """Render a normalized event payload to console."""
+        try:
+            print(_render_console_with_structlog(event), flush=True)
+        except Exception as e:
+            # Keep style consistent even on renderer failure.
+            date, time_str = Console._format_timestamp()
+            fallback = f"[{date} {time_str}] [{str(event.get('level', level)).upper()}]"
+            component = event.get("component")
+            if component:
+                fallback += f" [{str(component).upper()}]"
+            fallback += f" {str(event.get('event', ''))}"
+            print(f"{fallback} (render_error={type(e).__name__})", flush=True)
+
+    @staticmethod
+    def _render_console(level: str, level_color: str, message: str, component: Optional[str] = None, **kwargs) -> None:
         """Render a log record to console with colors."""
-        date, time_str = Console._format_timestamp()
-        
-        # Build the console line
-        timestamp = f"{_Colors.DATE}[{date}{_Colors.RESET} {_Colors.TIME}{time_str}]{_Colors.RESET}"
-        level_tag = f"{level_color}[{level}]{_Colors.RESET}"
-        
-        if component:
-            comp_tag = f"{level_color}[{component.upper()}]{_Colors.RESET} "
-        else:
-            comp_tag = ""
-        
-        print(f"{timestamp} {level_tag} {comp_tag}{_Colors.MSG}{message}{_Colors.RESET}", flush=True)
+        event = Console._build_event_dict(level, message, component, **kwargs)
+        Console._render_console_event(level, level_color, event)
     
     @staticmethod
     def _send_to_loki(level: str, message: str, component: Optional[str] = None, **kwargs) -> None:
@@ -797,47 +1168,53 @@ class Console:
         Automatically filters out formatting-only messages (separators, blank lines)
         to prevent log pollution.
         """
-        if not _loki_pusher:
-            return
-        # Filter out formatting-only lines (separators, banners)
-        stripped = message.strip()
-        if not stripped or all(c in '=-_*#~' for c in stripped):
-            return  # Skip pure separator/decoration lines
-        _loki_pusher.log(level, message, component=component, **kwargs)
+        event = Console._build_event_dict(level, message, component, **kwargs)
+        Console._send_event_to_loki(_process_event_with_structlog(event))
     
     @staticmethod
     def debug(message: str, component: Optional[str] = None, **kwargs) -> None:
         """Debug message. Only shown in console, low priority in Loki."""
-        Console._render_console("DEBUG", _Colors.DEBUG, message, component)
-        Console._send_to_loki("debug", message, component, **kwargs)
+        raw_event = Console._build_event_dict("debug", message, component, **kwargs)
+        event = _process_event_with_structlog(raw_event)
+        Console._render_console_event("DEBUG", _Colors.DEBUG, event)
+        Console._send_event_to_loki(event)
     
     @staticmethod
     def info(message: str, component: Optional[str] = None, skip_loki: bool = False, **kwargs) -> None:
         """Info message. Standard operational logging."""
-        Console._render_console("INFO", _Colors.INFO, message, component)
+        raw_event = Console._build_event_dict("info", message, component, **kwargs)
+        event = _process_event_with_structlog(raw_event)
+        Console._render_console_event("INFO", _Colors.INFO, event)
         if not skip_loki:
-            Console._send_to_loki("info", message, component, **kwargs)
+            Console._send_event_to_loki(event)
     
     @staticmethod
     def warn(message: str, component: Optional[str] = None, **kwargs) -> None:
         """Warning message. Something unexpected but not fatal."""
-        Console._render_console("WARN", _Colors.WARN, message, component)
-        Console._send_to_loki("warning", message, component, **kwargs)
+        raw_event = Console._build_event_dict("warning", message, component, **kwargs)
+        event = _process_event_with_structlog(raw_event)
+        Console._render_console_event("WARN", _Colors.WARN, event)
+        Console._send_event_to_loki(event)
     
     warning = warn
     
     @staticmethod
     def error(message: str, component: Optional[str] = None, **kwargs) -> None:
         """Error message. Something failed."""
-        Console._render_console("ERROR", _Colors.ERROR, message, component)
-        Console._send_to_loki("error", message, component, **kwargs)
+        raw_event = Console._build_event_dict("error", message, component, **kwargs)
+        event = _process_event_with_structlog(raw_event)
+        Console._render_console_event("ERROR", _Colors.ERROR, event)
+        Console._send_event_to_loki(event)
     
     @staticmethod
     def ok(message: str, component: Optional[str] = None, **kwargs) -> None:
         """Success message (green). Logs as level=info with tag=success to Loki."""
-        Console._render_console("SUCCESS", _Colors.OK, message, component)
+        raw_event = Console._build_event_dict("info", message, component, **kwargs)
+        event = _process_event_with_structlog(raw_event)
+        Console._render_console_event("SUCCESS", _Colors.OK, event)
         kwargs.pop("level", None)  # Avoid conflict
-        Console._send_to_loki("info", message, component, tag="success", **kwargs)
+        event["tag"] = "success"
+        Console._send_event_to_loki(event)
     
     @staticmethod
     def status(message: str) -> None:
@@ -850,8 +1227,9 @@ class Console:
             Console.status("Processing Equipment: FD_FAN")
             Console.status("="*60)  # Section divider
         """
-        date, time_str = Console._format_timestamp()
-        print(f"{_Colors.DATE}[{date}{_Colors.RESET} {_Colors.TIME}{time_str}]{_Colors.RESET} {_Colors.STATUS}>>>{_Colors.RESET} {_Colors.MSG}{message}{_Colors.RESET}", flush=True)
+        event = Console._build_event_dict("info", message, component="STATUS")
+        event = _process_event_with_structlog(event)
+        Console._render_console_event("INFO", _Colors.INFO, event)
         # Intentionally NO Loki push - console only
     
     @staticmethod
@@ -2087,7 +2465,10 @@ class _PyroscopePusher:
                 snapshot = tracemalloc.take_snapshot()
                 tracemalloc.stop()
                 self._memory_profiling_active = False
-                
+
+                # Log top memory allocations to console (mirrors CPU summary above)
+                self._log_top_memory_allocations(snapshot, top_n=10)
+
                 # Convert memory snapshot to collapsed format
                 memory_lines = self._memory_snapshot_to_collapsed(snapshot)
                 if memory_lines:
@@ -2131,7 +2512,9 @@ class _PyroscopePusher:
         NOISE_PATTERNS = {
             'yappi', 'tracemalloc', '_yappi', 'threading_bootstrap',
             'weakrefset', '_weakrefset', 'profile_thread_callback',
+            '<frozen runpy>', '<frozen importlib',
         }
+        APP_HINTS = ("/core/", "\\core\\", "/scripts/", "\\scripts\\")
         
         lines = []
         try:
@@ -2242,22 +2625,96 @@ class _PyroscopePusher:
         """Log the top N CPU-consuming functions."""
         # Sort by total time and get top N
         sorted_stats = sorted(stats, key=lambda s: s.ttot, reverse=True)[:top_n]
-        
+
         if sorted_stats:
-            Console.section("Top CPU Functions")
+            Console.info("Top CPU Functions", component="PROFILE", skip_loki=True)
             for i, stat in enumerate(sorted_stats, 1):
                 # Format time nicely
                 ttot_ms = stat.ttot * 1000
                 ncall = stat.ncall
                 module = stat.module or ""
                 name = stat.name or "unknown"
-                
+
                 # Clean up module path
                 if "/" in module or "\\" in module:
                     import os
                     module = os.path.basename(module).replace(".py", "")
-                
-                Console.status(f"  {i:2}. {module}.{name}: {ttot_ms:.1f}ms ({ncall} calls)")
+
+                Console.info(
+                    f"{i:2}. {module}.{name}: {ttot_ms:.1f}ms ({ncall} calls)",
+                    component="PROFILE",
+                    skip_loki=True,
+                )
+
+    def _log_top_memory_allocations(self, snapshot, top_n: int = 10) -> None:
+        """Log the top N memory-allocating call sites from a tracemalloc snapshot."""
+        import os
+
+        NOISE_PATTERNS = {
+            'yappi', 'tracemalloc', '_yappi', 'threading_bootstrap',
+            'weakrefset', '_weakrefset', 'profile_thread_callback',
+        }
+
+        try:
+            stats = snapshot.statistics('traceback')
+            filtered = []
+            for stat in stats:
+                is_noise = any(
+                    pat in frame.filename.lower()
+                    for frame in stat.traceback
+                    for pat in NOISE_PATTERNS
+                )
+                if not is_noise:
+                    filtered.append(stat)
+                if len(filtered) >= top_n:
+                    break
+
+            if not filtered:
+                return
+
+            Console.info("Top Memory Allocations", component="PROFILE", skip_loki=True)
+            for i, stat in enumerate(filtered[:top_n], 1):
+                size_kb = stat.size / 1024
+                count = stat.count
+                # Use the innermost (most specific) non-noise frame as the label.
+                # Prefer ACM frames (core/ or scripts/) to avoid noisy stdlib frames.
+                label = "unknown"
+                candidate_frames = [
+                    frame for frame in reversed(stat.traceback)
+                    if not any(p in frame.filename.lower() for p in NOISE_PATTERNS)
+                ]
+                if candidate_frames:
+                    app_frame = next(
+                        (f for f in candidate_frames if any(h in f.filename.lower() for h in APP_HINTS)),
+                        None,
+                    )
+                    selected_frame = app_frame or candidate_frames[0]
+                else:
+                    selected_frame = None
+
+                for frame in ([selected_frame] if selected_frame is not None else []):
+                    fname = frame.filename.lower()
+                    if not any(p in fname for p in NOISE_PATTERNS):
+                        module = frame.filename.replace("\\", "/")
+                        parts = module.split("/")
+                        if "core" in parts:
+                            idx = parts.index("core")
+                            module = ".".join(parts[idx:]).replace(".py", "")
+                        elif "scripts" in parts:
+                            idx = parts.index("scripts")
+                            module = ".".join(parts[idx:]).replace(".py", "")
+                        else:
+                            module = os.path.basename(frame.filename).replace(".py", "")
+                        func = self._get_function_name_at_line(frame.filename, frame.lineno)
+                        label = f"{module}.{func}" if func else f"{module}:<line {frame.lineno}>"
+                        break
+                Console.info(
+                    f"{i:2}. {label}: {size_kb:.1f} KB ({count} objects)",
+                    component="PROFILE",
+                    skip_loki=True,
+                )
+        except Exception:
+            return
     
     def _stats_to_collapsed(self, stats) -> List[str]:
         """Convert yappi stats to collapsed stack format.
@@ -2383,7 +2840,7 @@ class _PyroscopePusher:
         data = "\n".join(collapsed_lines).encode("utf-8")
         
         profile_desc = f"{profile_type} ({len(collapsed_lines)} stacks)"
-        Console.info(f"[PROFILE] Pushing {profile_desc} to Pyroscope...")
+        Console.info(f"Pushing {profile_desc} to Pyroscope...", component="PROFILE")
         
         try:
             req = urllib.request.Request(
