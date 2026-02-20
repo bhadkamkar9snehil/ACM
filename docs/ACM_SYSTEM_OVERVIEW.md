@@ -4,7 +4,7 @@
 
 This handbook provides a comprehensive walkthrough of ACM V11 for engineers and maintainers. It covers end-to-end data flow, module architecture, configuration surfaces, algorithmic reasoning, and operational procedures.
 
-**Current Version:** v11.15.4 (February 20, 2026)
+**Current Version:** v11.15.5 (February 20, 2026)
 
 ---
 
@@ -1540,6 +1540,7 @@ This invalidates all cached regime models.
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
+| v11.15.5 | 2026-02-20 | Drift hysteresis continuity fix: load previous ControllerState from ACM_DriftController and pass as prev_alert_mode; CUSUM accumulator reset on fit; unified drift_mode output |
 | v11.15.4 | 2026-02-20 | 5 correctness bugs: config-driven anomaly threshold (was z=1.0→perpetual refit), remove stale regime_quality_ok from manifest, load model_state on scoring batches, disable forecast QA via config, schema-only feature hash |
 | v11.15.3 | 2026-02-20 | Polars-only fast_features: remove pandas wrapper, HAS_POLARS guard, return_type params; fix rolling_spectral_energy crash; dead code cleanup |
 | v11.15.2 | 2026-02-20 | Performance: 4 bottlenecks fixed (~270s/batch saved): apply(pd.to_numeric), episode PCA attribution, rolling_spectral_energy, impute_features |
@@ -1568,4 +1569,4 @@ This invalidates all cached regime models.
 
 ---
 
-**Document Version:** 11.15.0 | **Updated:** February 19, 2026
+**Document Version:** 11.15.5 | **Updated:** February 20, 2026

@@ -1,6 +1,6 @@
 # ACM - Automated Condition Monitoring
 
-[![Version](https://img.shields.io/badge/version-11.15.3-blue)](#) [![Status](https://img.shields.io/badge/status-Production-brightgreen)](#) [![Python](https://img.shields.io/badge/python-3.11+-blue)](#) [![SQL Server](https://img.shields.io/badge/SQL%20Server-2019%2B-blue)](#)
+[![Version](https://img.shields.io/badge/version-11.15.5-blue)](#) [![Status](https://img.shields.io/badge/status-Production-brightgreen)](#) [![Python](https://img.shields.io/badge/python-3.11+-blue)](#) [![SQL Server](https://img.shields.io/badge/SQL%20Server-2019%2B-blue)](#)
 
 **Predictive Maintenance for Industrial Equipment**
 
@@ -1035,6 +1035,12 @@ ACM/
 
 ## Changelog
 
+### v11.15.5 (2026-02-20) - Drift hysteresis continuity and controller state fix
+- **FIX**: `acm_main.py` now loads previous drift controller state from `ACM_DriftController` using a real SQL cursor query (the old `execute_scalar()` call did not exist).
+- **FIX**: Previous state is normalized/validated (`DRIFT` or `FAULT`) and passed to `compute_drift_alert_mode(..., prev_alert_mode=...)` so hysteresis persists correctly across batches.
+- **FIX**: `CUSUMDetector.fit()` resets accumulators (`sum_pos`, `sum_neg`) to prevent stale carry-over when detector objects are reused.
+- **FIX**: Drift output consistently uses `frame['drift_mode']`; fused drift condition uses floor-only gating (`fused_p95 >= fused_drift_min`) so severe drift is not suppressed.
+
 ### v11.15.3 (2026-02-20) - Polars-only rolling functions, dead code removal
 - **REMOVED**: `compute_basic_features()` pandas wrapper — dead code, `_build_features` already called `compute_basic_features_pl()` directly
 - **REMOVED**: `_DEPRECATED_pandas_compute_basic_features()` stub
@@ -1151,6 +1157,6 @@ ACM/
 
 ---
 
-**Version**: 11.15.3 | **Updated**: February 20, 2026
+**Version**: 11.15.5 | **Updated**: February 20, 2026
 
 *For implementation details, see [docs/ACM_SYSTEM_OVERVIEW.md](docs/ACM_SYSTEM_OVERVIEW.md)*

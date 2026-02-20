@@ -17,10 +17,33 @@ Release Management:
 - Production deployments use specific tags (never merge commits)
 """
 
-__version__ = "11.15.4"
+__version__ = "11.15.5"
 __version_date__ = "2026-02-20"
 __version_author__ = "ACM Development Team"
 
+# v11.15.5: DRIFT HYSTERESIS STATE CONTINUITY + CONTROLLER CORRECTNESS
+#
+# Root cause: drift hysteresis in compute_drift_alert_mode() accepts prev_alert_mode,
+# but the caller always effectively used the default because previous mode retrieval
+# relied on a non-existent SQLClient method.
+#
+# Bug 1 - acm_main.py: load previous drift mode from SQL and pass to compute_drift_alert_mode
+#   Symptom: hysteresis behaved as if every batch started from "FAULT", reducing
+#     continuity of DRIFT/Fault state transitions across batches.
+#   Root cause: call site used sql_client.execute_scalar(...), but SQLClient has no
+#     execute_scalar method. Exception path silently fell back to default.
+#   Fix:
+#     - Query ACM_DriftController via sql_client.get_cursor(), fetch TOP 1 ControllerState
+#       by EquipID ordered by CreatedAt DESC.
+#     - Normalize previous state to uppercase and validate against {"DRIFT","FAULT"}.
+#     - Pass validated prev_alert_mode into drift.compute_drift_alert_mode(...).
+#
+# Additional drift correctness updates in this patch train:
+#   - drift.py: CUSUM accumulators reset on fit() to avoid stale carry-over when detector
+#     instances are reused.
+#   - drift.py: alert output normalized to frame['drift_mode'] and fused condition uses a
+#     floor-only check (fused_p95 >= fused_drift_min) to avoid suppressing severe drift.
+#
 # v11.15.4: FIVE CORRECTNESS BUGS — REFIT LOOP, REGIME QUALITY, MODEL STATE, FORECAST QA, HASH STABILITY
 #
 # Root cause: batch logs showed perpetual refit ("Anomaly rate 35.84% exceeds threshold 25.00%"),

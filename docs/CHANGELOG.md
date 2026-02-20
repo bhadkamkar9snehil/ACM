@@ -6,6 +6,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [11.15.5] - 2026-02-20
+
+### Fixed - DRIFT HYSTERESIS STATE CONTINUITY
+
+#### Previous Drift State Retrieval (core/acm_main.py)
+- Drift hysteresis in `compute_drift_alert_mode()` depends on `prev_alert_mode` from the previous batch.
+- Call site attempted to use `sql_client.execute_scalar(...)`, but `SQLClient` has no such method.
+- Result: exception path silently defaulted to `"FAULT"` every batch, so hysteresis continuity was broken.
+- **Fix**: Query `ACM_DriftController` with `sql_client.get_cursor()`, read `TOP 1 ControllerState` by `EquipID` ordered by `CreatedAt DESC`, normalize to uppercase, validate in `{DRIFT, FAULT}`, then pass to `compute_drift_alert_mode(..., prev_alert_mode=...)`.
+
+#### Drift Module Correctness (core/drift.py)
+- `CUSUMDetector.fit()` now resets `sum_pos`/`sum_neg` so reused detector instances do not carry stale accumulation state.
+- Drift output is consistently written to `frame["drift_mode"]` (not `alert_mode`), matching downstream controller/output paths.
+- Multi-feature fused condition now uses floor-only gating (`fused_p95 >= fused_drift_min`) to avoid suppressing severe drift when fused score exceeds an arbitrary upper cap.
+
 ## [11.14.0] - 2026-02-19
 
 ### Fixed - LOG QUALITY & BATCH SUMMARY OVERHAUL

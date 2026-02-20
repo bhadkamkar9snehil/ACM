@@ -2325,12 +2325,32 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
             score_out = drift.compute(score, score_out, cfg)
             frame = score_out["frame"]
 
+        # Load previous drift mode from SQL so hysteresis in compute_drift_alert_mode()
+        # uses the actual last-run state rather than always defaulting to "FAULT".
+        _prev_drift_mode = "FAULT"
+        if sql_client and equip_id:
+            try:
+                with sql_client.get_cursor() as _cur:
+                    _cur.execute(
+                        "SELECT TOP 1 ControllerState FROM dbo.ACM_DriftController "
+                        "WHERE EquipID = ? ORDER BY CreatedAt DESC",
+                        (equip_id,),
+                    )
+                    _row = _cur.fetchone()
+                if _row:
+                    _prev = str(_row[0]).strip().upper()
+                    if _prev in ("DRIFT", "FAULT"):
+                        _prev_drift_mode = _prev
+            except Exception:
+                pass  # Missing table or no rows — safe default is "FAULT".
+
         # Multi-feature drift detection (drift.compute_drift_alert_mode()).
         frame = drift.compute_drift_alert_mode(
             frame=frame,
             cfg=cfg,
             regime_quality_ok=regime_quality_ok,
             equip=equip,
+            prev_alert_mode=_prev_drift_mode,
         )
 
         # ===== Drift controller state =====

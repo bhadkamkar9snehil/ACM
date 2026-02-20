@@ -33,12 +33,16 @@ class CUSUMDetector:
         self.mean = float(np.nanmedian(x))
         mad = float(np.nanmedian(np.abs(x - self.mean)))
         self.std = mad * 1.4826  # Scale MAD to be consistent with std for normal distribution
-        
+
         # DRIFT-AUDIT-01: Guard against non-finite mean (e.g., all-NaN input)
         if not np.isfinite(self.mean):
             self.mean = 0.0
         if not np.isfinite(self.std) or self.std < 1e-9:
             self.std = 1.0
+        # Reset accumulators so score() always starts from a clean state,
+        # regardless of whether the detector object is reused across calls.
+        self.sum_pos = 0.0
+        self.sum_neg = 0.0
         return self
 
     def score(self, x: np.ndarray) -> np.ndarray:
@@ -219,11 +223,11 @@ def compute_drift_alert_mode(
         prev_alert_mode: Alert mode from the previous batch run ('DRIFT' or 'FAULT').
             Used for hysteresis: when already in DRIFT, the lower hysteresis_off
             threshold is applied to sustain the mode. Callers should persist the
-            returned frame['alert_mode'] value and pass it back on the next call.
+            returned frame['drift_mode'] value and pass it back on the next call.
             Defaults to 'FAULT' (no hysteresis on first call).
 
     Returns:
-        Frame with alert_mode column added ('DRIFT' or 'FAULT')
+        Frame with drift_mode column added ('DRIFT' or 'FAULT')
     """
     from .observability import Console
     
@@ -236,7 +240,7 @@ def compute_drift_alert_mode(
     multi_feat_enabled = bool(multi_feat_cfg.get("enabled", False))
     
     if drift_col is None:
-        frame["alert_mode"] = "FAULT"
+        frame["drift_mode"] = "FAULT"
         return frame
     
     try:
@@ -247,7 +251,6 @@ def compute_drift_alert_mode(
             trend_window = int(multi_feat_cfg.get("trend_window", 20))
             trend_threshold = float(multi_feat_cfg.get("trend_threshold", 0.05))
             fused_drift_min = float(multi_feat_cfg.get("fused_drift_min", 2.0))
-            fused_drift_max = float(multi_feat_cfg.get("fused_drift_max", 5.0))
             regime_volatility_max = float(multi_feat_cfg.get("regime_volatility_max", 0.3))
             hysteresis_on = float(multi_feat_cfg.get("hysteresis_on", 3.0))
             hysteresis_off = float(multi_feat_cfg.get("hysteresis_off", 1.5))
@@ -287,13 +290,17 @@ def compute_drift_alert_mode(
             # GRADUAL-DEGRADE-FIX (v11.14.1): Changed from strict AND to 2-of-3.
             # The previous rule required ALL three conditions simultaneously, which
             # missed real gradual degradation scenarios where one condition is
-            # marginally outside bounds (e.g., fused_p95 slightly above 5.0 during
-            # a worsening period, or elevated regime volatility during a regime
-            # transition that accompanies degradation).
+            # marginally outside bounds (e.g., elevated regime volatility during a
+            # regime transition that accompanies degradation).
             # 2-of-3 retains meaningful signal combinations without requiring
             # simultaneous perfection across all dimensions.
+            #
+            # cond_fused is a floor-only check: any fused_p95 >= fused_drift_min
+            # counts, including severe faults well above the minimum. An upper cap
+            # (fused_drift_max) was previously used but is analytically wrong —
+            # it penalised genuine severe degradation by dropping the DRIFT vote.
             cond_trend = abs(drift_trend) > trend_threshold
-            cond_fused = fused_drift_min <= fused_p95 <= fused_drift_max
+            cond_fused = fused_p95 >= fused_drift_min
             cond_regime = regime_volatility < regime_volatility_max
             conditions_met = int(cond_trend) + int(cond_fused) + int(cond_regime)
             is_drift_condition = conditions_met >= 2
@@ -304,7 +311,7 @@ def compute_drift_alert_mode(
             else:
                 alert_mode = "DRIFT" if (drift_p95 > hysteresis_on and is_drift_condition) else "FAULT"
 
-            frame["alert_mode"] = alert_mode
+            frame["drift_mode"] = alert_mode
             Console.info(
                 f"Drift: {drift_col} P95={drift_p95:.3f} | trend={drift_trend:.4f} | "
                 f"fused={fused_p95:.3f} | regime_vol={regime_volatility:.3f} | "
@@ -315,11 +322,11 @@ def compute_drift_alert_mode(
             # Fallback to legacy simple threshold
             drift_p95 = float(np.nanpercentile(drift_array, 95))
             drift_threshold = float(drift_cfg.get("p95_threshold", 2.0))
-            frame["alert_mode"] = "DRIFT" if drift_p95 > drift_threshold else "FAULT"
-            Console.info(f"Drift: {drift_col} P95={drift_p95:.3f} | threshold={drift_threshold:.1f} | mode={frame['alert_mode'].iloc[-1]}", component="DRIFT")
+            frame["drift_mode"] = "DRIFT" if drift_p95 > drift_threshold else "FAULT"
+            Console.info(f"Drift: {drift_col} P95={drift_p95:.3f} | threshold={drift_threshold:.1f} | mode={frame['drift_mode'].iloc[-1]}", component="DRIFT")
     except Exception as e:
         Console.warn(f"Detection failed: {e}", component="DRIFT",
                      equip=equip, error_type=type(e).__name__, error=str(e)[:200])
-        frame["alert_mode"] = "FAULT"
+        frame["drift_mode"] = "FAULT"
     
     return frame
