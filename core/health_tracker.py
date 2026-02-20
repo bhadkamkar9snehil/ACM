@@ -126,7 +126,15 @@ class HealthTimeline:
         output_manager: Optional[Any] = None,
         min_train_samples: int = 200,
         max_gap_hours: float = 720.0,  # 30 days for historical replay
-        min_std_dev: float = 0.01,
+        # GRADUAL-DEGRADE-FIX (v11.14.1): Raised from 0.01 to 1.0.
+        # HealthIndex is in the [0, 100] range. The old threshold of 0.01 meant
+        # a signal had to vary by < 0.01 percentage points to be called FLAT —
+        # essentially requiring bit-identical values. In practice this let through
+        # nearly-constant signals (std ≈ 0.5 %) that carry no trend information
+        # and cannot be reliably forecast. A threshold of 1.0 correctly flags
+        # signals with less than 1 % standard deviation as insufficiently dynamic
+        # for degradation trend fitting.
+        min_std_dev: float = 1.0,
         max_std_dev: float = 50.0,
         max_timeline_rows: int = 10000,
         downsample_freq: str = "15min",

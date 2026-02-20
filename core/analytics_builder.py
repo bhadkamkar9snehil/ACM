@@ -311,22 +311,47 @@ class AnalyticsBuilder:
     def generate_health_timeline(self, scores_df: pd.DataFrame, cfg: Dict[str, Any]) -> pd.DataFrame:
         """
         Generate enhanced health timeline with smoothing, quality flags, and V11 confidence.
-        
+
         Args:
             scores_df: DataFrame with fused Z-scores and timestamp index
             cfg: Configuration dictionary with health smoothing parameters
+
+        GRADUAL-DEGRADE-FIX (v11.14.1):
+        The previous approach applied EMA smoothing AFTER the sigmoid
+        (sigmoid → smooth), which means weak persistent z-score elevations
+        were already compressed to near-100% health before smoothing could
+        accumulate them. A machine slowly drifting at z≈0.8 every batch
+        would show health ≈ 99.9% indefinitely.
+
+        The corrected approach pre-smooths fused_z BEFORE the sigmoid
+        (smooth → sigmoid). Persistent small deviations accumulate in the
+        EWM signal, then the nonlinearity amplifies them into visible health
+        decline only once they are sustained. Step-change spikes still spike
+        the instantaneous score and are preserved in RawHealthIndex.
         """
-        # Calculate raw health index (unsmoothed)
-        raw_health = health_index(scores_df['fused'])
-        
         # Load config parameters
         health_cfg = cfg.get('health', {})
         smoothing_alpha = health_cfg.get('smoothing_alpha', 0.3)
+        # gradient_smoothing_alpha: EMA applied to fused_z BEFORE the sigmoid.
+        # Lower alpha → longer memory → more sensitive to slow sustained drift.
+        # Default 0.1 ≈ half-life of ~6.5 samples (≈ 3 h at 30-min cadence).
+        gradient_alpha = float(health_cfg.get('gradient_smoothing_alpha', 0.1))
         extreme_volatility_threshold = health_cfg.get('extreme_volatility_threshold', 30.0)
         extreme_anomaly_z_threshold = health_cfg.get('extreme_anomaly_z_threshold', 10.0)
-        
-        # Apply EMA smoothing
-        smoothed_health = raw_health.ewm(alpha=smoothing_alpha, adjust=False).mean()
+
+        # Instantaneous health: sigmoid of raw fused_z — preserved as RawHealthIndex.
+        # Captures acute spikes. Does NOT accumulate gradual drift.
+        raw_health = health_index(scores_df['fused'])
+
+        # Gradient health: EMA of fused_z → then sigmoid.
+        # Persistent weak elevations accumulate in the EWM before the nonlinearity,
+        # so gradual degradation becomes visible as a steady health decline rather
+        # than being compressed to ~100% and then smoothed out.
+        fused_gradient = scores_df['fused'].ewm(alpha=gradient_alpha, adjust=False).mean()
+        gradient_health = health_index(fused_gradient)
+
+        # Post-smooth gradient health for visual noise reduction (display only).
+        smoothed_health = gradient_health.ewm(alpha=smoothing_alpha, adjust=False).mean()
         
         # Calculate rate of change for quality flagging
         health_change = smoothed_health.diff().abs()
