@@ -1588,14 +1588,24 @@ class Fuser:
 
             # PERF-FIX (v11.1.7): Precompute global baseline statistics for feature attribution
             # This avoids recomputing median/MAD for each episode (was causing 700s+ overhead)
+            # PERF-FIX (v11.15.2): Precompute the FULL feature z-score matrix as numpy array once.
+            # Per-episode attribution then just slices rows and calls np.nanmean(abs, axis=0) —
+            # eliminating the 5789 pandas Series.fillna() calls that caused 191s in coldstart.
             global_feature_medians: Optional[pd.Series] = None
             global_feature_mads: Optional[pd.Series] = None
+            global_feature_z_np: Optional[np.ndarray] = None   # shape (n_samples, n_numeric_cols)
+            global_numeric_cols_list: Optional[list] = None    # column names aligned to z_np axis-1
             if original_features is not None and not original_features.empty:
-                numeric_cols = original_features.select_dtypes(include=[np.number])
-                if not numeric_cols.empty:
-                    global_feature_medians = numeric_cols.median()
-                    global_feature_mads = (numeric_cols - global_feature_medians).abs().median()
+                _numeric_df = original_features.select_dtypes(include=[np.number])
+                if not _numeric_df.empty:
+                    global_feature_medians = _numeric_df.median()
+                    global_feature_mads = (_numeric_df - global_feature_medians).abs().median()
                     global_feature_mads = global_feature_mads.replace(0, 1e-6)  # Avoid div by zero
+                    # Precompute z-score matrix as contiguous float32 array for fast row-slicing
+                    _z_np = ((_numeric_df.values - global_feature_medians.values) /
+                             global_feature_mads.values).astype(np.float32)
+                    global_feature_z_np = np.nan_to_num(_z_np, nan=0.0, posinf=0.0, neginf=0.0)
+                    global_numeric_cols_list = list(_numeric_df.columns)
 
             rows = []
             for i, (s, e) in enumerate(merged):
@@ -1635,25 +1645,16 @@ class Fuser:
                 culprits_raw = primary_detector
                 if 'pca' in primary_detector or 'mhal' in primary_detector:
                     # P2-FIX (v11.1.6): Improved PCA attribution using absolute deviation
-                    # PERF-FIX (v11.1.7): Use precomputed global median/MAD instead of per-episode computation
-                    # For proper attribution, we look at which features deviate most from baseline
-                    # This is a heuristic approximation of reconstruction error contribution
-                    episode_features = original_features.iloc[s:e+1]
+                    # PERF-FIX (v11.15.2): Use precomputed numpy z-score matrix — slice rows for
+                    # the episode window and call np.nanmean(abs, axis=0) once.  Eliminates
+                    # 5789 pandas Series.fillna() calls that were costing 191s in coldstart.
                     top_feature: Optional[str] = None
-                    if not episode_features.empty and global_feature_medians is not None and global_feature_mads is not None:
-                        numeric_cols = episode_features.select_dtypes(include=[np.number])
-                        if not numeric_cols.empty:
-                            # Use precomputed global baseline for z-score calculation (PERF-FIX)
-                            # Filter to only columns we have precomputed stats for
-                            common_cols = [c for c in numeric_cols.columns if c in global_feature_medians.index]
-                            if common_cols:
-                                # Calculate z-scores using global baseline
-                                feature_z = (numeric_cols[common_cols] - global_feature_medians[common_cols]) / global_feature_mads[common_cols]
-                                feature_abs_mean_z = feature_z.abs().mean()
-                                feature_abs_mean_z = feature_abs_mean_z.dropna()
-                                
-                                if not feature_abs_mean_z.empty:
-                                    top_feature = str(feature_abs_mean_z.idxmax())
+                    if global_feature_z_np is not None and global_numeric_cols_list is not None:
+                        ep_slice = global_feature_z_np[s:e+1]          # shape (ep_len, n_cols)
+                        if ep_slice.shape[0] > 0:
+                            abs_mean_z = np.abs(ep_slice).mean(axis=0)  # shape (n_cols,)
+                            best_idx = int(np.argmax(abs_mean_z))
+                            top_feature = global_numeric_cols_list[best_idx]
                     if top_feature:
                         culprit_sensor = Fuser._get_base_sensor(top_feature)
                         culprits_raw = f"{primary_detector}({culprit_sensor})"

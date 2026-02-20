@@ -812,10 +812,54 @@ class ModelVersionManager:
             Console.warn(f"Failed to get latest version from SQL: {e}", component="MODEL", equip_id=self.equip_id, error_type=type(e).__name__)
             return None
     
+    def load_manifest_only(self) -> Optional[Dict[str, Any]]:
+        """
+        Load ONLY the manifest metadata for the latest model version — no model blobs.
+
+        This is a cheap single-row SQL query used early in the pipeline (before
+        feature imputation) so that we can extract ``train_sensors`` and protect
+        those columns from being dropped by the low-variance filter.  Loading the
+        full model objects (joblib deserialization of 5-10 MB blobs) is deferred
+        until the normal ``models.load`` phase.
+
+        Returns:
+            manifest dict with at least ``train_sensors`` list, or None if no
+            models exist for this equipment.
+        """
+        if not self.sql_client or self.equip_id is None:
+            return None
+        try:
+            version = self._get_latest_version_from_sql()
+            if version is None:
+                return None
+            cur = self.sql_client.cursor()
+            # Fetch StatsJSON from ANY row for this version — they all share the
+            # same stats block (written once per training run).
+            cur.execute(
+                "SELECT TOP 1 StatsJSON FROM ModelRegistry "
+                "WHERE EquipID = ? AND Version = ? AND StatsJSON IS NOT NULL",
+                (self.equip_id, version),
+            )
+            row = cur.fetchone()
+            cur.close()
+            if not row or not row[0]:
+                return None
+            stats = json.loads(row[0])
+            manifest = {"version": version, "source": "sql_manifest_only", **stats}
+            return manifest
+        except Exception as e:
+            Console.warn(
+                f"load_manifest_only failed: {e}",
+                component="MODEL-SQL",
+                equip_id=self.equip_id,
+                error_type=type(e).__name__,
+            )
+            return None
+
     def _load_models_from_sql(self, version: int) -> Optional[Tuple[Dict[str, Any], Dict[str, Any]]]:
         """
         Load models from SQL ModelRegistry table with metadata reconstruction.
-        
+
         SQL-21 Implementation:
         - Retrieves all model types for equipment + version
         - Deserializes binary model data using joblib
