@@ -12,6 +12,8 @@ from __future__ import annotations
 # - Entrypoint: `main()` orchestrates the full SQL-only pipeline for one run.
 # - Stages: SQL connect → config load → data load → features → models → scoring
 #   → regimes → calibration → fusion → drift → persistence → analytics → forecast.
+# - FORECASTING_DISABLED: The forecast/RUL stage is currently commented out.
+#   Search for FORECASTING_DISABLED to find all related changes.
 # - Output: Writes run artifacts and metrics to SQL via `OutputManager` and
 #   emits observability signals when available.
 # - Adaptive: Quality-driven model retraining replaces manual ONLINE/OFFLINE modes.
@@ -53,15 +55,23 @@ try:
     from . import correlation, outliers
     from .ar1_detector import AR1Detector  # Split out of forecasting for clarity
     from . import fast_features
-    from .forecast_engine import ForecastEngine  # Unified forecasting orchestrator
+    # FORECASTING_DISABLED: ForecastEngine import temporarily disabled.
+    # To re-enable: uncomment the line below and remove the stub after this block.
+    # from .forecast_engine import ForecastEngine  # Unified forecasting orchestrator
 except ImportError:
     import pathlib
     sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
     from core import regimes, drift, fuse
     from core import correlation, outliers
     from core.ar1_detector import AR1Detector
-    from core.forecast_engine import ForecastEngine  # Unified forecasting orchestrator
+    # FORECASTING_DISABLED: ForecastEngine import temporarily disabled.
+    # To re-enable: uncomment the line below and remove the stub after this block.
+    # from core.forecast_engine import ForecastEngine  # Unified forecasting orchestrator
     from core import fast_features
+
+# FORECASTING_DISABLED: Stub so pipeline can import without ForecastEngine.
+# Remove this stub when re-enabling forecasting.
+ForecastEngine = None
 
 from core.omr import OMRDetector  # Overall Model Residual detector
 from core.config_history_writer import log_auto_tune_changes
@@ -2488,42 +2498,50 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
                 table_count = analytics_result.get("sql_tables", 0)
                 Console.info(f"Analytics: tables={table_count}", component="OUTPUTS")
 
+            # FORECASTING_DISABLED: RUL + forecasting phase is temporarily disabled.
+            # To re-enable this phase:
+            #   1. Restore ForecastEngine imports at top of file (search FORECASTING_DISABLED).
+            #   2. Remove the ForecastEngine = None stub.
+            #   3. Uncomment the block below (remove the leading `# `).
+            #
             # === RUL + forecasting ===
-            with T.section("outputs.forecasting"):
-                forecast_engine = ForecastEngine(
-                    sql_client=getattr(output_manager, "sql_client", None),
-                    output_manager=output_manager,
-                    equip_id=int(equip_id),
-                    run_id=str(run_id) if run_id is not None else None,
-                    config=cfg,
-                    model_state=model_state,
-                )
-                forecast_results = forecast_engine.run_forecast()
-                
-                if forecast_results.get('success'):
-                    Console.info(
-                        f"Forecast: RUL P10/50/90={forecast_results['rul_p10']:.0f}/{forecast_results['rul_p50']:.0f}/{forecast_results['rul_p90']:.0f}h | tables={len(forecast_results['tables_written'])} | top_sensors={forecast_results['top_sensors']}",
-                        component="FORECAST",
-                    )
-                    # Record RUL metrics for Prometheus.
-                    try:
-                        record_rul(
-                            equip,
-                            rul_hours=float(forecast_results['rul_p50']),
-                            p10=float(forecast_results['rul_p10']),
-                            p50=float(forecast_results['rul_p50']),
-                            p90=float(forecast_results['rul_p90']),
-                        )
-                        if 'active_defects' in forecast_results:
-                            record_active_defects(equip, int(forecast_results['active_defects']))
-                    except Exception:
-                        pass  # OTEL metrics are optional.
-                else:
-                    Console.warn(
-                        f"Forecast failed: {forecast_results.get('error', 'Unknown')}",
-                        component="FORECAST", equip=equip, run_id=run_id,
-                    )
-                    degradations.append("forecast_failed")
+            # with T.section("outputs.forecasting"):
+            #     forecast_engine = ForecastEngine(
+            #         sql_client=getattr(output_manager, "sql_client", None),
+            #         output_manager=output_manager,
+            #         equip_id=int(equip_id),
+            #         run_id=str(run_id) if run_id is not None else None,
+            #         config=cfg,
+            #         model_state=model_state,
+            #     )
+            #     forecast_results = forecast_engine.run_forecast()
+            #
+            #     if forecast_results.get('success'):
+            #         Console.info(
+            #             f"Forecast: RUL P10/50/90={forecast_results['rul_p10']:.0f}/{forecast_results['rul_p50']:.0f}/{forecast_results['rul_p90']:.0f}h | tables={len(forecast_results['tables_written'])} | top_sensors={forecast_results['top_sensors']}",
+            #             component="FORECAST",
+            #         )
+            #         # Record RUL metrics for Prometheus.
+            #         try:
+            #             record_rul(
+            #                 equip,
+            #                 rul_hours=float(forecast_results['rul_p50']),
+            #                 p10=float(forecast_results['rul_p10']),
+            #                 p50=float(forecast_results['rul_p50']),
+            #                 p90=float(forecast_results['rul_p90']),
+            #             )
+            #             if 'active_defects' in forecast_results:
+            #                 record_active_defects(equip, int(forecast_results['active_defects']))
+            #         except Exception:
+            #             pass  # OTEL metrics are optional.
+            #     else:
+            #         Console.warn(
+            #             f"Forecast failed: {forecast_results.get('error', 'Unknown')}",
+            #             component="FORECAST", equip=equip, run_id=run_id,
+            #         )
+            #         degradations.append("forecast_failed")
+
+            Console.info("Forecasting/RUL is disabled (FORECASTING_DISABLED).", component="FORECAST")
 
             # Memory cleanup: free sensor context after forecasting.
             sensor_context = None
@@ -2615,13 +2633,15 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
                     _anomaly_str = f"{_n_anom}/{len(_fused)} ({_n_anom/len(_fused)*100:.1f}%)"
 
             # -- RUL --
-            _rul_str = ""
-            if 'forecast_results' in locals() and isinstance(forecast_results, dict) and forecast_results.get('success'):
-                _fr = forecast_results
-                _rul_str = f"P10={_fr['rul_p10']:.0f}h  P50={_fr['rul_p50']:.0f}h  P90={_fr['rul_p90']:.0f}h"
-                _top_sens = _fr.get('top_sensors', '')
-                if _top_sens:
-                    _rul_str += f"  drivers=[{_top_sens}]"
+            # FORECASTING_DISABLED: RUL summary is suppressed while forecasting is off.
+            # To re-enable: uncomment the block below and remove the disabled= line.
+            _rul_str = "disabled"
+            # if 'forecast_results' in locals() and isinstance(forecast_results, dict) and forecast_results.get('success'):
+            #     _fr = forecast_results
+            #     _rul_str = f"P10={_fr['rul_p10']:.0f}h  P50={_fr['rul_p50']:.0f}h  P90={_fr['rul_p90']:.0f}h"
+            #     _top_sens = _fr.get('top_sensors', '')
+            #     if _top_sens:
+            #         _rul_str += f"  drivers=[{_top_sens}]"
 
             # -- Episodes --
             _ep_str = ""

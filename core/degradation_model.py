@@ -1,4 +1,11 @@
 ﻿"""
+# =============================================================================
+# FORECASTING_DISABLED
+# This module supports ForecastEngine which is currently disabled.
+# See core/forecast_engine.py and core/acm_main.py for re-enablement steps.
+# The module itself is intentionally left intact for future use.
+# =============================================================================
+
 Degradation Models for Health Forecasting (v11.3.0)
 
 Centralizes degradation trend fitting and forecast uncertainty used by
