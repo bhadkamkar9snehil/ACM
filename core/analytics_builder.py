@@ -343,11 +343,15 @@ class AnalyticsBuilder:
         # Captures acute spikes. Does NOT accumulate gradual drift.
         raw_health = health_index(scores_df['fused'])
 
-        # Gradient health: EMA of fused_z → then sigmoid.
+        # Gradient health: EMA of abs(fused_z) → then sigmoid.
         # Persistent weak elevations accumulate in the EWM before the nonlinearity,
         # so gradual degradation becomes visible as a steady health decline rather
         # than being compressed to ~100% and then smoothed out.
-        fused_gradient = scores_df['fused'].ewm(alpha=gradient_alpha, adjust=False).mean()
+        # NOTE: abs() is taken BEFORE the EWM so that bilateral oscillations
+        # around zero (normal baseline noise) do NOT cancel each other out.
+        # Applying EWM to the signed value would make z=+1 / z=-1 alternation
+        # average to EWM≈0 → health≈97%, masking real weak degradation.
+        fused_gradient = scores_df['fused'].abs().ewm(alpha=gradient_alpha, adjust=False).mean()
         gradient_health = health_index(fused_gradient)
 
         # Post-smooth gradient health for visual noise reduction (display only).
@@ -383,12 +387,16 @@ class AnalyticsBuilder:
                 component="HEALTH", equip_id=self.equip_id, extreme_count=extreme_count
             )
         
-        # Calculate health zones
+        # Calculate health zones.
+        # include_lowest=True: closes the left edge of the first bin so that
+        # health=0.0 maps to 'ALERT' rather than producing NaN (pd.cut default
+        # is left-exclusive, so bins=[0,70,85,100] would exclude 0 exactly).
         zones = pd.cut(
             smoothed_health,
-            bins=[0, AnalyticsConstants.HEALTH_ALERT_THRESHOLD, 
+            bins=[0, AnalyticsConstants.HEALTH_ALERT_THRESHOLD,
                   AnalyticsConstants.HEALTH_WATCH_THRESHOLD, 100],
-            labels=['ALERT', 'WATCH', 'GOOD']
+            labels=['ALERT', 'WATCH', 'GOOD'],
+            include_lowest=True,
         )
         
         # V11: Compute confidence vectorized

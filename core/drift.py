@@ -202,20 +202,26 @@ def compute_drift_alert_mode(
     cfg: Dict[str, Any],
     regime_quality_ok: bool = False,
     equip: str = "",
+    prev_alert_mode: str = "FAULT",
 ) -> pd.DataFrame:
     """Compute drift alert mode using multi-feature detection or simple threshold.
-    
+
     This helper determines whether the system is in DRIFT mode (gradual degradation
     requiring retraining) or FAULT mode (transient anomaly) using:
     - Multi-feature detection: drift trend, fused level, regime volatility with hysteresis
     - Simple threshold: P95 drift exceeds configured threshold
-    
+
     Args:
         frame: Scored frame DataFrame with drift_z, cusum_z, fused columns
         cfg: Config dictionary with drift settings
         regime_quality_ok: Whether regime clustering is of sufficient quality
         equip: Equipment name for logging
-        
+        prev_alert_mode: Alert mode from the previous batch run ('DRIFT' or 'FAULT').
+            Used for hysteresis: when already in DRIFT, the lower hysteresis_off
+            threshold is applied to sustain the mode. Callers should persist the
+            returned frame['alert_mode'] value and pass it back on the next call.
+            Defaults to 'FAULT' (no hysteresis on first call).
+
     Returns:
         Frame with alert_mode column added ('DRIFT' or 'FAULT')
     """
@@ -254,16 +260,29 @@ def compute_drift_alert_mode(
             drift_trend = compute_drift_trend(drift_array, window=trend_window, timestamps=timestamps_arr)
             fused_p95 = float(np.nanpercentile(frame["fused"].to_numpy(dtype=np.float32), 95)) if "fused" in frame.columns else 0.0
 
-            # Compute regime volatility if regime labels exist
+            # Compute regime volatility if regime labels exist.
+            # Use the same cadence-expanded window as compute_drift_trend so both
+            # conditions in the 2-of-3 vote measure over the same time span.
+            # Without this, drift_trend uses ~100 samples (24 h at 15-min cadence)
+            # while regime_volatility used only trend_window=20 samples (~5 h) —
+            # inconsistent temporal coverage making cond_regime unreliable.
+            volatility_window = trend_window
+            if timestamps_arr is not None and len(timestamps_arr) >= 2:
+                try:
+                    t = np.asarray(timestamps_arr, dtype="datetime64[s]")
+                    diffs = np.diff(t).astype(np.float64)
+                    dt_secs = float(np.nanmedian(diffs[diffs > 0])) if len(diffs) > 0 else 0.0
+                    if dt_secs > 0:
+                        min_samples = int(np.ceil((24.0 * 3600.0) / dt_secs))
+                        volatility_window = min(max(trend_window, min_samples), len(drift_array))
+                except Exception:
+                    pass
             regime_volatility = 0.0
             if "regime_label" in frame.columns and regime_quality_ok:
                 regime_labels = frame["regime_label"].to_numpy()
-                regime_volatility = compute_regime_volatility(regime_labels, window=trend_window)
+                regime_volatility = compute_regime_volatility(regime_labels, window=volatility_window)
 
             drift_p95 = float(np.nanpercentile(drift_array, 95))
-
-            # Previous alert mode (for hysteresis) - assume "FAULT" if unavailable
-            prev_alert_mode = "FAULT"
 
             # GRADUAL-DEGRADE-FIX (v11.14.1): Changed from strict AND to 2-of-3.
             # The previous rule required ALL three conditions simultaneously, which
