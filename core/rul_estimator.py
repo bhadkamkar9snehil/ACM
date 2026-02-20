@@ -1,4 +1,11 @@
 """
+# =============================================================================
+# FORECASTING_DISABLED
+# This module supports ForecastEngine which is currently disabled.
+# See core/forecast_engine.py and core/acm_main.py for re-enablement steps.
+# The module itself is intentionally left intact for future use.
+# =============================================================================
+
 RUL Estimator with Monte Carlo Simulation (v10.1.0)
 
 Remaining Useful Life estimation via Monte Carlo degradation simulations.

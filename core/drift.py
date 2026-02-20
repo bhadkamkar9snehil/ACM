@@ -57,36 +57,68 @@ class CUSUMDetector:
 # DRIFT-01: Multi-Feature Drift Detection Helpers (moved from acm_main.py)
 # ============================================================================
 
-def compute_drift_trend(drift_series: np.ndarray, window: int = 20) -> float:
+def compute_drift_trend(
+    drift_series: np.ndarray,
+    window: int = 20,
+    timestamps=None,
+    min_hours: float = 24.0,
+) -> float:
     """
-    Compute drift trend as the slope of linear regression over the last `window` points.
-    
-    Positive slope indicates upward drift (degradation), negative indicates recovery.
-    Returns normalized slope (slope per sample).
-    
+    Compute drift trend as the slope of linear regression over recent points.
+
+    GRADUAL-DEGRADE-FIX (v11.14.1):
+    The previous implementation used a hard-coded 20-sample window regardless
+    of data cadence. For 30-min data, 20 samples = 10 hours — far too short to
+    detect multi-day or multi-week wear trends. For daily batches, 20 samples
+    = 20 days which is reasonable but over-shoots for faster cadences.
+
+    When `timestamps` is provided, the window is expanded so it covers at
+    least `min_hours` of actual clock time. The sample-count window is used
+    as a floor, not a ceiling, so short-cadence data uses longer windows.
+
+    Positive slope indicates upward drift (degradation), negative = recovery.
+
     Args:
-        drift_series: Array of drift/CUSUM z-scores
-        window: Number of recent points to use for trend calculation
-    
+        drift_series: Array of drift/CUSUM z-scores.
+        window: Minimum number of recent points (floor).
+        timestamps: Optional datetime-like array aligned with drift_series.
+                    When provided, window is stretched to cover min_hours.
+        min_hours: Minimum clock-time coverage for the regression window.
+                   Default 24 h ensures at least one full day of trend signal.
+
     Returns:
-        Slope of linear regression fit. Positive = worsening, negative = improving.
+        Slope of linear regression fit (units: z-score per sample).
+        Positive = worsening, negative = improving.
     """
     if len(drift_series) < 2:
         return 0.0
-    
-    # Use last `window` points
-    recent = drift_series[-window:] if len(drift_series) >= window else drift_series
+
+    # GRADUAL-DEGRADE-FIX: expand window to cover at least min_hours of data.
+    effective_window = window
+    if timestamps is not None and len(timestamps) >= 2:
+        try:
+            t = np.asarray(timestamps, dtype="datetime64[s]")
+            diffs = np.diff(t).astype(np.float64)  # seconds
+            dt_secs = float(np.nanmedian(diffs[diffs > 0])) if len(diffs) > 0 else 0.0
+            if dt_secs > 0:
+                min_samples = int(np.ceil((min_hours * 3600.0) / dt_secs))
+                effective_window = min(max(window, min_samples), len(drift_series))
+        except Exception:
+            pass  # Fall back to sample-count window on any parse failure
+
+    # Use last `effective_window` points
+    recent = drift_series[-effective_window:] if len(drift_series) >= effective_window else drift_series
     if len(recent) < 2:
         return 0.0
-    
+
     # Remove NaNs
     valid_mask = ~np.isnan(recent)
     if valid_mask.sum() < 2:
         return 0.0
-    
+
     x = np.arange(len(recent))[valid_mask]
     y = recent[valid_mask]
-    
+
     # Linear regression: y = slope * x + intercept
     try:
         slope, _ = np.polyfit(x, y, 1)
@@ -170,20 +202,26 @@ def compute_drift_alert_mode(
     cfg: Dict[str, Any],
     regime_quality_ok: bool = False,
     equip: str = "",
+    prev_alert_mode: str = "FAULT",
 ) -> pd.DataFrame:
     """Compute drift alert mode using multi-feature detection or simple threshold.
-    
+
     This helper determines whether the system is in DRIFT mode (gradual degradation
     requiring retraining) or FAULT mode (transient anomaly) using:
     - Multi-feature detection: drift trend, fused level, regime volatility with hysteresis
     - Simple threshold: P95 drift exceeds configured threshold
-    
+
     Args:
         frame: Scored frame DataFrame with drift_z, cusum_z, fused columns
         cfg: Config dictionary with drift settings
         regime_quality_ok: Whether regime clustering is of sufficient quality
         equip: Equipment name for logging
-        
+        prev_alert_mode: Alert mode from the previous batch run ('DRIFT' or 'FAULT').
+            Used for hysteresis: when already in DRIFT, the lower hysteresis_off
+            threshold is applied to sustain the mode. Callers should persist the
+            returned frame['alert_mode'] value and pass it back on the next call.
+            Defaults to 'FAULT' (no hysteresis on first call).
+
     Returns:
         Frame with alert_mode column added ('DRIFT' or 'FAULT')
     """
@@ -214,36 +252,65 @@ def compute_drift_alert_mode(
             hysteresis_on = float(multi_feat_cfg.get("hysteresis_on", 3.0))
             hysteresis_off = float(multi_feat_cfg.get("hysteresis_off", 1.5))
             
+            # GRADUAL-DEGRADE-FIX: pass timestamps so compute_drift_trend can
+            # expand the regression window to cover at least 24 h of clock time.
+            timestamps_arr = frame.index.to_numpy() if isinstance(frame.index, pd.DatetimeIndex) else None
+
             # Compute features (using local helpers)
-            drift_trend = compute_drift_trend(drift_array, window=trend_window)
+            drift_trend = compute_drift_trend(drift_array, window=trend_window, timestamps=timestamps_arr)
             fused_p95 = float(np.nanpercentile(frame["fused"].to_numpy(dtype=np.float32), 95)) if "fused" in frame.columns else 0.0
-            
-            # Compute regime volatility if regime labels exist
+
+            # Compute regime volatility if regime labels exist.
+            # Use the same cadence-expanded window as compute_drift_trend so both
+            # conditions in the 2-of-3 vote measure over the same time span.
+            # Without this, drift_trend uses ~100 samples (24 h at 15-min cadence)
+            # while regime_volatility used only trend_window=20 samples (~5 h) —
+            # inconsistent temporal coverage making cond_regime unreliable.
+            volatility_window = trend_window
+            if timestamps_arr is not None and len(timestamps_arr) >= 2:
+                try:
+                    t = np.asarray(timestamps_arr, dtype="datetime64[s]")
+                    diffs = np.diff(t).astype(np.float64)
+                    dt_secs = float(np.nanmedian(diffs[diffs > 0])) if len(diffs) > 0 else 0.0
+                    if dt_secs > 0:
+                        min_samples = int(np.ceil((24.0 * 3600.0) / dt_secs))
+                        volatility_window = min(max(trend_window, min_samples), len(drift_array))
+                except Exception:
+                    pass
             regime_volatility = 0.0
             if "regime_label" in frame.columns and regime_quality_ok:
                 regime_labels = frame["regime_label"].to_numpy()
-                regime_volatility = compute_regime_volatility(regime_labels, window=trend_window)
-            
+                regime_volatility = compute_regime_volatility(regime_labels, window=volatility_window)
+
             drift_p95 = float(np.nanpercentile(drift_array, 95))
-            
-            # Previous alert mode (for hysteresis) - assume "FAULT" if unavailable
-            prev_alert_mode = "FAULT"
-            
-            # Composite rule for drift detection
-            is_drift_condition = (
-                abs(drift_trend) > trend_threshold and
-                fused_drift_min <= fused_p95 <= fused_drift_max and
-                regime_volatility < regime_volatility_max
-            )
-            
+
+            # GRADUAL-DEGRADE-FIX (v11.14.1): Changed from strict AND to 2-of-3.
+            # The previous rule required ALL three conditions simultaneously, which
+            # missed real gradual degradation scenarios where one condition is
+            # marginally outside bounds (e.g., fused_p95 slightly above 5.0 during
+            # a worsening period, or elevated regime volatility during a regime
+            # transition that accompanies degradation).
+            # 2-of-3 retains meaningful signal combinations without requiring
+            # simultaneous perfection across all dimensions.
+            cond_trend = abs(drift_trend) > trend_threshold
+            cond_fused = fused_drift_min <= fused_p95 <= fused_drift_max
+            cond_regime = regime_volatility < regime_volatility_max
+            conditions_met = int(cond_trend) + int(cond_fused) + int(cond_regime)
+            is_drift_condition = conditions_met >= 2
+
             # Hysteresis logic
             if prev_alert_mode == "DRIFT":
                 alert_mode = "DRIFT" if drift_p95 > hysteresis_off else "FAULT"
             else:
                 alert_mode = "DRIFT" if (drift_p95 > hysteresis_on and is_drift_condition) else "FAULT"
-            
+
             frame["alert_mode"] = alert_mode
-            Console.info(f"Drift: {drift_col} P95={drift_p95:.3f} | trend={drift_trend:.4f} | fused={fused_p95:.3f} | mode={alert_mode}", component="DRIFT")
+            Console.info(
+                f"Drift: {drift_col} P95={drift_p95:.3f} | trend={drift_trend:.4f} | "
+                f"fused={fused_p95:.3f} | regime_vol={regime_volatility:.3f} | "
+                f"conditions={conditions_met}/3 | mode={alert_mode}",
+                component="DRIFT",
+            )
         else:
             # Fallback to legacy simple threshold
             drift_p95 = float(np.nanpercentile(drift_array, 95))

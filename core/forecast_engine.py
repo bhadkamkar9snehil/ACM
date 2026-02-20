@@ -1,4 +1,16 @@
 ﻿"""
+# =============================================================================
+# FORECASTING_DISABLED
+# This module is currently NOT called by the pipeline.
+# The outputs.forecasting phase in acm_main.py is commented out.
+# To re-enable:
+#   1. In core/acm_main.py, search for FORECASTING_DISABLED and follow instructions.
+#   2. Remove the ForecastEngine = None stub in acm_main.py.
+#   3. Restore the ForecastEngine import lines.
+#   4. Uncomment the outputs.forecasting block.
+# The module itself is intentionally left intact for future use.
+# =============================================================================
+
 Forecast Engine Orchestrator (v11.3.0)
 
 Unified forecasting and RUL estimation engine replacing duplicate logic from:
