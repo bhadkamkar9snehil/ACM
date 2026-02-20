@@ -4,7 +4,7 @@
 
 This handbook provides a comprehensive walkthrough of ACM V11 for engineers and maintainers. It covers end-to-end data flow, module architecture, configuration surfaces, algorithmic reasoning, and operational procedures.
 
-**Current Version:** v11.4.0 (January 21, 2026)
+**Current Version:** v11.15.3 (February 20, 2026)
 
 ---
 
@@ -221,14 +221,17 @@ PHASE 6: DATA QUALITY GUARDRAILS [data.guardrails]
 └── Output: quality_score, valid_columns list
 
 PHASE 7: FEATURE ENGINEERING [features.build + features.impute]
-├── fast_features.compute_all_features() from fast_features.py
-├── Build rolling statistics (mean, std, min, max) for each window size
-├── Build lag features (t-1, t-2, ... up to lag_depth)
-├── Compute per-sensor z-scores relative to training distribution
-├── Optional: Polars acceleration if row count > polars_threshold
-├── Impute missing values using TRAIN medians (prevents leakage)
+├── Pandas→Polars conversion: pl.from_pandas(train/score) in _build_features()
+├── fast_features.compute_basic_features_pl() — Polars-only, no pandas fallback
+│   ├── rolling_median, rolling_mad, rolling_mean_std (robust statistics)
+│   ├── rolling_ols_slope (local trend)
+│   ├── rolling_skew_kurt (distribution shape)
+│   └── rolling_spectral_energy (vectorized stride-trick FFT, 3 frequency bands)
+├── Polars→Pandas conversion: result.to_pandas() at pipeline boundary
+├── impute_features(): protected_columns from load_manifest_only() prevents
+│   low-var column drops that would cause feature mismatch (v11.15.1 fix)
 ├── Compute feature hash for model cache validation
-└── Output: train_features, score_features DataFrames
+└── Output: train_features, score_features DataFrames (pandas, in pipeline)
 
 PHASE 8: MODEL TRAINING [train.detector_fit] (adaptive)
 ├── Check ModelRegistry for cached models matching feature hash
@@ -430,7 +433,7 @@ core/acm_main.py (ORCHESTRATOR - 6000+ lines)
     │
     ├── Data Processing
     │   ├── core/pipeline_types.py ───────── DataContract, PipelineMode enums
-    │   ├── core/fast_features.py ────────── compute_all_features (pandas/Polars)
+    │   ├── core/fast_features.py ────────── compute_basic_features_pl (Polars-only)
     │   ├── core/seasonality.py ──────────── SeasonalityHandler (FFT patterns)
     │   └── core/smart_coldstart.py ──────── SmartColdstart (historian retry)
     │
@@ -1400,7 +1403,7 @@ core/
 ├── observability.py     # Console, Span, Metrics
 ├── pipeline_types.py    # DataContract, ValidationResult
 │
-├── fast_features.py     # Feature engineering (pandas/Polars)
+├── fast_features.py     # Feature engineering (Polars-only; pandas boundary in acm_main._build_features)
 ├── seasonality.py       # FFT pattern detection
 ├── smart_coldstart.py   # Historian retry logic
 │
@@ -1537,19 +1540,30 @@ This invalidates all cached regime models.
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
+| v11.15.3 | 2026-02-20 | Polars-only fast_features: remove pandas wrapper, HAS_POLARS guard, return_type params; fix rolling_spectral_energy crash; dead code cleanup |
+| v11.15.2 | 2026-02-20 | Performance: 4 bottlenecks fixed (~270s/batch saved): apply(pd.to_numeric), episode PCA attribution, rolling_spectral_energy, impute_features |
+| v11.15.1 | 2026-02-19 | Feature mismatch fix: protected_columns in impute_features prevents 632→630 drop on scoring batches; load_manifest_only() for cheap SQL manifest fetch |
 | v11.15.0 | 2026-02-19 | Latent attribution activation: OMR per-sensor episode culprits, OMR-aware hotspot ranking (MaxAbsOMR, RankingScore), baseline data leakage fix, model persistence return value, QA checks for OMR attribution |
-| v11.11.0 | 2026-02-18 | Forecasting 563s→<5s: vectorize Monte Carlo slow path (O(N×S)→O(S) Python iters); default forecast_resolution_hours=1.0h to cap step count; fix perpetual refit loop (wrong regime_score key) |
-| v11.10.0 | 2026-02-18 | Fusion cleanup: delete combine(), named Spans, required discounted_weights; fix refit timestamp UTC/local mismatch; fix triple timer summary; fix duplicate main() |
-| v11.9.0 | 2026-02-18 | Fusion stability: cross-batch health comparability, calibration persistence, 3x fusion speedup |
-| v11.8.0 | 2026-02-12 | Adaptive pipeline: remove ONLINE/OFFLINE modes entirely |
-| v11.4.0 | 2026-01-21 | Regime clustering: raw sensors only (architectural fix) |
+| v11.14.0 | 2026-02-19 | Log quality: deduplicated FUSE/DEGRADE logs, batch summary shows health % not z-scores, SUMMARY component to Loki, top_sensors truncation fix |
+| v11.13.1 | 2026-02-18 | Remove dead SQL log sink (_SqlLogSink never wired to Console; ACM_RunLogs always empty) |
+| v11.12.0 | 2026-02-18 | Metric-aware regime quality, DBCV retrain trigger fix, OMR/OutputManager performance, consolidated batch analytics summary |
+| v11.11.0 | 2026-02-18 | Forecasting 563s→<5s: vectorize Monte Carlo slow path; cap forecast_resolution_hours=1.0h |
+| v11.10.0 | 2026-02-18 | Fusion cleanup: delete combine() wrapper, named Spans; fix refit timestamp mismatch, triple timer, duplicate main() |
+| v11.9.0 | 2026-02-18 | Fusion stability: cross-batch health comparability, remove double z-scoring, calibration persistence, 3× fusion speedup |
+| v11.8.0 | 2026-02-12 | Adaptive pipeline: remove ONLINE/OFFLINE modes entirely, --force-retrain replaces --mode offline |
+| v11.6.0 | 2026-02-08 | 6 critical fixes: transform error guard, model accumulation, spurious refits, training subsampling, false positive thresholds |
+| v11.5.0 | 2026-01-28 | Anti-upsample guard, batch mode selection, refit loop fix |
+| v11.4.0 | 2026-01-21 | Regime clustering: raw sensors only (circular masking fix — health-state features removed) |
 | v11.3.4 | 2026-01-20 | RUL validation guards |
 | v11.3.3 | 2026-01-18 | Contamination filtering for calibration |
 | v11.3.2 | 2026-01-16 | Model compatibility validation |
 | v11.3.0 | 2026-01-13 | Interactive installer, false positive reduction |
-| v11.2.2 | 2026-01-04 | P0 analytical fixes (harmonic mean confidence) |
-| v11.0.0 | 2025-12-15 | Model lifecycle, confidence model |
-| v10.3.0 | 2025-12-01 | Observability stack |
+| v11.2.2 | 2026-01-04 | P0 analytical fixes (harmonic mean confidence, circular weight guard, tightened promotion) |
+| v11.1.4 | 2025-12-24 | Detector correlation discount, maintenance reset detection, seasonal adjustment data flow fix |
+| v11.0.0 | 2025-12-15 | Model lifecycle (COLDSTART→LEARNING→CONVERGED), confidence model, UNKNOWN regime |
+| v10.3.0 | 2025-12-01 | Observability stack (Grafana, Tempo, Loki, Prometheus, Pyroscope) |
+| v10.2.0 | 2025-12-16 | MHAL detector removed (redundant with PCA-T²) |
+| v10.0.0 | 2025-12-04 | Unified forecasting, Monte Carlo RUL, 11→4 forecast tables |
 
 ---
 

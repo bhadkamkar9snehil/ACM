@@ -348,8 +348,14 @@ def run_analytics(equip: str, start_time: str, end_time: str) -> AnalyticsReport
     # Build features
     print("\nBuilding features...")
     window = cfg.get('feature_window', 16)
-    train_features = fast_features.compute_basic_features(train, window=window)
-    score_features = fast_features.compute_basic_features(score, window=window)
+    train_features = fast_features.compute_basic_features_pl(
+        fast_features.pl.from_pandas(train),
+        window=window,
+    ).to_pandas()
+    score_features = fast_features.compute_basic_features_pl(
+        fast_features.pl.from_pandas(score),
+        window=window,
+    ).to_pandas()
     
     # Impute missing values
     low_var_threshold = 1e-4

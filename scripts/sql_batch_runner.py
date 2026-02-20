@@ -31,7 +31,7 @@ import math
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import List, Dict, Optional, Tuple
+from typing import Any, List, Dict, Optional, Tuple
 from datetime import datetime, timedelta
 import pyodbc
 import numpy as np
@@ -205,6 +205,125 @@ class SQLBatchRunner:
         except Exception as e:
             Console.warn(f"Could not read config {param_path} for EquipID={equip_id}: {e}", component="CONFIG", equip_id=equip_id, param_path=param_path, error=str(e))
         return default_value
+
+    @staticmethod
+    def _parse_bool_value(raw_value: Any) -> Optional[bool]:
+        """Parse config values to bool. Returns None if parsing is not possible."""
+        if raw_value is None:
+            return None
+        if isinstance(raw_value, bool):
+            return raw_value
+        if isinstance(raw_value, (int, float)):
+            return bool(raw_value)
+
+        text = str(raw_value).strip().lower()
+        if text in ("true", "1", "yes", "y", "on"):
+            return True
+        if text in ("false", "0", "no", "n", "off"):
+            return False
+        return None
+
+    def _get_config_bool(self, equip_id: int, param_path: str, default_value: Optional[bool]) -> Optional[bool]:
+        """
+        Fetch boolean config from ACM_Config with equipment override + global fallback.
+
+        Returns default_value if key is missing or cannot be parsed.
+        """
+        try:
+            with self._get_sql_connection() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT TOP 1 ParamValue
+                    FROM dbo.ACM_Config
+                    WHERE EquipID IN (0, ?) AND ParamPath = ?
+                    ORDER BY CASE WHEN EquipID = ? THEN 0 ELSE 1 END, UpdatedAt DESC
+                    """,
+                    (equip_id, param_path, equip_id),
+                )
+                row = cur.fetchone()
+                if row:
+                    parsed = self._parse_bool_value(row[0])
+                    if parsed is not None:
+                        return parsed
+        except Exception as e:
+            Console.warn(
+                f"Could not read config {param_path} for EquipID={equip_id}: {e}",
+                component="CONFIG",
+                equip_id=equip_id,
+                param_path=param_path,
+                error=str(e),
+            )
+        return default_value
+
+    def _should_expect_forecast_outputs(self, equip_id: int, run_id: Any) -> bool:
+        """
+        Determine whether QA should require forecast/RUL output tables.
+
+        Priority:
+        1) Explicit config switch to disable forecasting.
+        2) Runtime log marker from current run (FORECASTING_DISABLED).
+        3) Default to expecting forecast outputs.
+        """
+        # Explicit config switches (if present).
+        disable_switch_paths = (
+            "runtime.phases.forecast",
+            "runtime.phases.forecasting",
+            "runtime.phases.rul",
+            "forecasting.enabled",
+            "forecasting.enable_continuous",
+            "rul.enabled",
+        )
+        for param_path in disable_switch_paths:
+            switch_value = self._get_config_bool(equip_id, param_path, default_value=None)
+            if switch_value is False:
+                Console.info(
+                    f"QA forecast expectation disabled by config: {param_path}=false",
+                    component="QA",
+                    equip_id=equip_id,
+                    param_path=param_path,
+                )
+                return False
+
+        # Runtime marker from ACM run logs.
+        try:
+            with self._get_sql_connection() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    IF OBJECT_ID('dbo.ACM_RunLogs','U') IS NOT NULL
+                    BEGIN
+                        SELECT ISNULL((
+                            SELECT TOP 1 1
+                            FROM dbo.ACM_RunLogs
+                            WHERE EquipID = ? AND RunID = ?
+                              AND (Message LIKE ? OR Message LIKE ?)
+                            ORDER BY LoggedAt DESC
+                        ), 0);
+                    END
+                    ELSE SELECT 0;
+                    """,
+                    (equip_id, run_id, "%FORECASTING_DISABLED%", "%Forecasting/RUL is disabled%"),
+                )
+                row = cur.fetchone()
+                if row and int(row[0]) == 1:
+                    Console.info(
+                        "QA forecast expectation disabled by run marker (FORECASTING_DISABLED)",
+                        component="QA",
+                        equip_id=equip_id,
+                        run_id=str(run_id),
+                    )
+                    return False
+        except Exception as e:
+            Console.warn(
+                f"Could not determine forecast expectation from ACM_RunLogs: {e}",
+                component="QA",
+                equip_id=equip_id,
+                run_id=str(run_id),
+                error=str(e),
+            )
+
+        return True
 
     def _set_tick_minutes(self, equip_id: int, minutes: int, log: bool = True) -> None:
         """Upsert runtime.tick_minutes in ACM_Config for the equipment (patched: no Category/ChangeReason)."""
@@ -483,6 +602,14 @@ class SQLBatchRunner:
                     f"window=[{started_at},{completed_at})",
                     component="QA", equip_id=equip_id, run_id=str(run_id)
                 )
+                forecast_outputs_required = self._should_expect_forecast_outputs(equip_id, run_id)
+                if not forecast_outputs_required:
+                    Console.info(
+                        "Forecast/RUL outputs are optional for this run; zero-row checks are informational only.",
+                        component="QA",
+                        equip_id=equip_id,
+                        run_id=str(run_id),
+                    )
                 tables_to_check: List[Tuple[str, bool, bool]] = [
                     # (table, has_run_id, critical)
                     ("ACM_Scores_Wide", True, True),
@@ -495,9 +622,9 @@ class SQLBatchRunner:
                     ("ACM_SensorCorrelations", True, False),
                     ("ACM_DetectorCorrelation", True, False),
                     ("ACM_SeasonalPatterns", True, False),
-                    ("ACM_HealthForecast", True, True),
-                    ("ACM_FailureForecast", True, True),
-                    ("ACM_RUL", True, True),
+                    ("ACM_HealthForecast", True, forecast_outputs_required),
+                    ("ACM_FailureForecast", True, forecast_outputs_required),
+                    ("ACM_RUL", True, forecast_outputs_required),
                     ("ACM_DriftController", True, False),
                     ("ACM_RegimeDefinitions", True, False),
                     ("ACM_RegimeOccupancy", True, False),
@@ -807,7 +934,6 @@ class SQLBatchRunner:
         Console.info(f"{printable}", component="RUN", command=printable)
         # Environment variables for ACM subprocess
         env = dict(os.environ)
-        
         # Propagate trace context to subprocess for end-to-end trace correlation
         # This allows child process logs to be linked to the parent batch runner trace
         trace_ctx = get_trace_context()

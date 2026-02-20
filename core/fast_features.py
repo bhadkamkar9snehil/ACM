@@ -1,11 +1,9 @@
-"""Fast feature builder (Polars-first API with pandas fallback).
+"""Fast feature builder (Polars-only API).
 
-This module provides a small set of building-block functions used by the analytic
-backbone: rolling median, rolling MAD, rolling mean/std, and a simple spectral-energy
-calculator. It prefers polars when available for performance; falls back to pandas.
-
-Note: This is a PO C-level feature builder meant to integrate quickly with the
-existing pipeline. We'll extend it iteratively.
+This module provides rolling feature building-blocks used by the analytic backbone:
+rolling median, MAD, mean/std, OLS slope, skew/kurtosis, and spectral energy.
+All core rolling functions require Polars DataFrame input and return Polars DataFrames.
+No pandas fallback paths exist in the main pipeline functions.
 """
 from __future__ import annotations
 
@@ -20,106 +18,59 @@ import pandas as pd
 warnings.filterwarnings("ignore", message="invalid value encountered in divide", category=RuntimeWarning)
 from core.observability import Span, Console
 
-# Try polars
-try:
-    import polars as pl
-    HAS_POLARS = True
-except Exception:
-    HAS_POLARS = False
+# Polars is a hard dependency — no fallback
+import polars as pl
 
-if HAS_POLARS:
-    _ROLLING_SUPPORTS_MIN_SAMPLES = "min_samples" in inspect.signature(pl.Expr.rolling_median).parameters
-else:
-    _ROLLING_SUPPORTS_MIN_SAMPLES = False
+_ROLLING_SUPPORTS_MIN_SAMPLES = "min_samples" in inspect.signature(pl.Expr.rolling_median).parameters
 
 def _rolling_kwargs(min_periods: int) -> Dict[str, int]:
     return {"min_samples": min_periods} if _ROLLING_SUPPORTS_MIN_SAMPLES else {"min_periods": min_periods}
 
 
-def _to_pandas(df) -> pd.DataFrame:
-    if HAS_POLARS and isinstance(df, pl.DataFrame):
-        return df.to_pandas()
-    if isinstance(df, pd.DataFrame):
-        return df
-    raise TypeError("Unsupported dataframe type")
-
-
 FillMethod = Literal["median", "ffill", "bfill", "interpolate", "none"]
 
 
-def _apply_fill(df, method: FillMethod = "median", fill_values: Optional[dict] = None):
-    """Apply fill strategy to handle missing values. Supports both Polars and pandas.
-    
+def _apply_fill(df: pl.DataFrame, method: FillMethod = "median", fill_values: Optional[dict] = None) -> pl.DataFrame:
+    """Apply fill strategy to handle missing values. Requires Polars DataFrame input.
+
     Parameters
     ----------
-    df : DataFrame
-        Input dataframe (Polars or pandas)
+    df : pl.DataFrame
     method : FillMethod
         Fill strategy: "median", "ffill", "bfill", "interpolate", or "none"
     fill_values : dict, optional
-        Pre-computed fill values {column_name: fill_value}. If provided, these values
-        are used instead of computing from the data (prevents data leakage when filling
-        score data with train-derived statistics).
-        
-    Returns
-    -------
-    DataFrame
-        Filled dataframe (same type as input)
+        Pre-computed fill values {column_name: fill_value}. If provided, used instead
+        of computing from the data (prevents data leakage when filling score data with
+        train-derived statistics).
     """
-    if HAS_POLARS and isinstance(df, pl.DataFrame):
-        if method == "median":
-            # Use with_columns to keep non-numeric columns
-            # Corrected: Use the robust schema-based method to get numeric columns
-            numeric_cols = [c for c, t in df.schema.items() if t in pl.NUMERIC_DTYPES]
-            
-            if fill_values is not None:
-                # Use provided fill values (train-derived for score data)
-                return df.with_columns([
-                    pl.col(c).fill_null(fill_values.get(c, pl.col(c).median())) 
-                    for c in numeric_cols
-                ])
-            else:
-                # Compute from data (for train data)
-                return df.with_columns([pl.col(c).fill_null(pl.col(c).median()) for c in numeric_cols])
+    if not isinstance(df, pl.DataFrame):
+        raise TypeError("_apply_fill requires a Polars DataFrame")
 
-        if method == "ffill":
-            # Keep all columns; forward-fill wherever nulls appear
-            return df.with_columns([pl.col(c).fill_null(strategy="forward") for c in df.columns])
-
-        if method == "bfill":
-            # Keep all columns; backward-fill wherever nulls appear
-            return df.with_columns([pl.col(c).fill_null(strategy="backward") for c in df.columns])
-
-        if method == "interpolate":
-            # Interpolate is defined for numeric columns; keep non-numeric untouched.
-            # Note: with_columns is correct here. select would drop non-numerics.
-            return df.with_columns([
-                pl.when(pl.col(c).is_numeric())
-                  .then(pl.col(c).interpolate())
-                  .otherwise(pl.col(c))
-                  .alias(c)
-                for c in df.columns
-            ])
-
-        return df  # method == "none"
-
-    # --- Pandas path ---
-    pdf = _to_pandas(df)
     if method == "median":
+        numeric_cols = [c for c, t in df.schema.items() if t in pl.NUMERIC_DTYPES]
         if fill_values is not None:
-            # Use provided fill values (train-derived for score data)
-            return pdf.fillna(fill_values)
-        else:
-            # Compute from data (for train data)
-            meds = pdf.select_dtypes(np.number).median()
-            return pdf.fillna(meds)
+            return df.with_columns([
+                pl.col(c).fill_null(fill_values.get(c, pl.col(c).median()))
+                for c in numeric_cols
+            ])
+        return df.with_columns([pl.col(c).fill_null(pl.col(c).median()) for c in numeric_cols])
+
     if method == "ffill":
-        return pdf.fillna(method="ffill")
+        return df.with_columns([pl.col(c).fill_null(strategy="forward") for c in df.columns])
+
     if method == "bfill":
-        return pdf.fillna(method="bfill")
+        return df.with_columns([pl.col(c).fill_null(strategy="backward") for c in df.columns])
+
     if method == "interpolate":
-        return pdf.interpolate(limit_direction="both")
-    return pdf
+        return df.with_columns([
+            pl.when(pl.col(c).is_numeric())
+              .then(pl.col(c).interpolate())
+              .otherwise(pl.col(c))
+              .alias(c)
+            for c in df.columns
+        ])
+
+    return df  # method == "none"
 
 
 # ========================================================================
@@ -193,175 +144,86 @@ def deduplicate_index(
     return df, dup_count
 
 
-def rolling_median(df: pd.DataFrame, window: int, cols: Optional[List[str]] = None, min_periods: int = 1,
-                   return_type: Literal["pandas", "polars"] = "pandas") -> pd.DataFrame:
-    """Compute rolling median for specified columns. Returns DataFrame of medians.
-    Prefers Polars if available and input is polars.
-    """
+def rolling_median(df: pl.DataFrame, window: int, cols: Optional[List[str]] = None, min_periods: int = 1) -> pl.DataFrame:
+    """Compute rolling median for specified columns. Requires Polars DataFrame input."""
+    if not isinstance(df, pl.DataFrame):
+        raise TypeError("rolling_median requires a Polars DataFrame input")
     if cols is None:
         cols = list(df.columns)
-    # Polars path
-    if HAS_POLARS and isinstance(df, pl.DataFrame):
-        exprs = [
-            pl.col(c).rolling_median(window, **_rolling_kwargs(min_periods)).alias(f"{c}_med")
-            for c in cols
-        ]
-        pl_out = df.select(exprs)
-        return pl_out if return_type == "polars" else pl_out.to_pandas()
-
-    # pandas path
-    pdf = _to_pandas(df)
-    res = pdf[cols].rolling(window=window, min_periods=min_periods, center=False).median()
-    res.columns = [c + "_med" for c in res.columns]
-    return res
+    return df.select([
+        pl.col(c).rolling_median(window, **_rolling_kwargs(min_periods)).alias(f"{c}_med")
+        for c in cols
+    ])
 
 
-def rolling_mad(df: pd.DataFrame, window: int, cols: Optional[List[str]] = None, min_periods: int = 1,
-                return_type: Literal["pandas", "polars"] = "pandas") -> pd.DataFrame:
-    """Rolling median absolute deviation (MAD) per column."""
+def rolling_mad(df: pl.DataFrame, window: int, cols: Optional[List[str]] = None, min_periods: int = 1) -> pl.DataFrame:
+    """Rolling median absolute deviation (MAD) per column. Requires Polars DataFrame input."""
+    if not isinstance(df, pl.DataFrame):
+        raise TypeError("rolling_mad requires a Polars DataFrame input")
     if cols is None:
         cols = list(df.columns)
-    if HAS_POLARS and isinstance(df, pl.DataFrame):
-        # Polars path: Use expressions for performance and correctness.
-        exprs = []
-        for c in cols:
-            col_expr = pl.col(c)
-            # Rolling median of the original series
-            median_expr = col_expr.rolling_median(window, **_rolling_kwargs(min_periods))
-            # Rolling MAD: rolling median of the absolute deviation from the rolling median
-            mad_expr = (col_expr - median_expr).abs().rolling_median(window, **_rolling_kwargs(min_periods))
-            exprs.append(mad_expr.alias(f"{c}_mad"))
-        
-        pl_out = df.select(exprs)
-        return pl_out if return_type == "polars" else pl_out.to_pandas()
-
-    pdf = _to_pandas(df)
-    def mad(x):
-        return np.median(np.abs(x - np.median(x)))
-    res = pdf[cols].rolling(window=window, min_periods=min_periods).apply(mad, raw=True)
-    res.columns = [c + "_mad" for c in res.columns]
-    return res
-
-
-def rolling_mean_std(df: pd.DataFrame, window: int, cols: Optional[List[str]] = None, min_periods: int = 1,
-                    return_type: Literal["pandas", "polars"] = "pandas") -> pd.DataFrame:
-    if cols is None:
-        cols = list(df.columns)
-    if HAS_POLARS and isinstance(df, pl.DataFrame):
-        exprs = []
-        for c in cols:
-            exprs.append(pl.col(c).rolling_mean(window, **_rolling_kwargs(min_periods)).alias(f"{c}_mean"))
-            exprs.append(pl.col(c).rolling_std(window, **_rolling_kwargs(min_periods)).alias(f"{c}_std"))
-        
-        pl_out = df.select(exprs)
-        return pl_out if return_type == "polars" else pl_out.to_pandas()
-
-    pdf = _to_pandas(df)
-    mean = pdf[cols].rolling(window=window, min_periods=min_periods).mean()
-    std = pdf[cols].rolling(window=window, min_periods=min_periods).std()
-    mean.columns = [c + "_mean" for c in mean.columns]
-    std.columns = [c + "_std" for c in std.columns]
-    return pd.concat([mean, std], axis=1)
-
-
-def rolling_skew_kurt(df: pd.DataFrame, window: int, cols: Optional[List[str]] = None, min_periods: int = 1,
-                      return_type: Literal["pandas", "polars"] = "pandas",
-                      skew_clip: float = 100.0, kurt_clip: float = 1000.0) -> pd.DataFrame:
-    """Compute rolling skewness and kurtosis for specified columns.
-    Returns DataFrame with both metrics per column.
-    
-    Args:
-        df: Input DataFrame
-        window: Rolling window size
-        cols: Columns to compute (default: all)
-        min_periods: Minimum periods for rolling calculation
-        return_type: Output format ("pandas" or "polars")
-        skew_clip: Max absolute skewness value (default: 100). Values beyond this are
-                   typically numerical artifacts from near-constant windows.
-        kurt_clip: Max absolute kurtosis value (default: 1000). Real-world kurtosis
-                   rarely exceeds 100; values > 1000 indicate numerical instability.
-    
-    Note:
-        Kurtosis clipping prevents overflow in downstream calculations (e.g., AR1 detector)
-        when computing variance on features with pathological values from near-constant
-        sensor windows (e.g., sensor_47 with 61% zeros produces kurtosis ~1e50).
-    """
-    if cols is None:
-        cols = list(df.columns)
-    
-    if HAS_POLARS and isinstance(df, pl.DataFrame):
-        # Refactor to use the idiomatic Polars expression API.
-        exprs = []
-        for c in cols:
-            # Corrected: Use positional argument for window size
-            # Clip to prevent numerical overflow downstream
-            exprs.append(
-                pl.col(c).rolling_skew(window, bias=False)
-                .clip(-skew_clip, skew_clip)
-                .alias(f"{c}_skew")
-            )
-            exprs.append(
-                pl.col(c).rolling_kurtosis(window, fisher=True)
-                .clip(-kurt_clip, kurt_clip)
-                .alias(f"{c}_kurt")
-            )
-        pl_out = df.select(exprs)
-        return pl_out if return_type == "polars" else pl_out.to_pandas()
-
-    pdf = _to_pandas(df)
-    skew = pdf[cols].rolling(window=window, min_periods=min_periods).skew()
-    kurt = pdf[cols].rolling(window=window, min_periods=min_periods).kurt()
-    
-    # Clip extreme values to prevent numerical overflow in downstream calculations
-    # (e.g., AR1 detector variance calculation on features with kurtosis ~1e50)
-    skew = skew.clip(-skew_clip, skew_clip)
-    kurt = kurt.clip(-kurt_clip, kurt_clip)
-    
-    skew.columns = [c + "_skew" for c in skew.columns]
-    kurt.columns = [c + "_kurt" for c in kurt.columns]
-    return pd.concat([skew, kurt], axis=1)
-
-
-def rolling_ols_slope(df: pd.DataFrame, window: int, cols: Optional[List[str]] = None, min_periods: int = 1,
-                      return_type: Literal["pandas", "polars"] = "pandas") -> pd.DataFrame:
-    """Compute rolling OLS slope for specified columns using proper linear regression.
-    More robust than simple differencing, especially for noisy data.
-    """
-    if cols is None:
-        cols = list(df.columns)
-    
-    if HAS_POLARS and isinstance(df, pl.DataFrame):
-        # Polars native implementation of rolling OLS slope. This is significantly
-        # faster than using rolling_apply with a Python function. Robust fix using covariance.
-        df_idx = df.with_columns(pl.arange(0, pl.len()).alias("_t").cast(pl.Float64))
-        exprs = []
-        for c in cols:
-            x = pl.col(c).cast(pl.Float64)
-            t = pl.col("_t")
-            # slope = Cov(t,x) / Var(t)
-            num = ( (t * x).rolling_mean(window, min_periods=min_periods)
-                  - t.rolling_mean(window, min_periods=min_periods) * x.rolling_mean(window, min_periods=min_periods) )
-            den = ( (t.pow(2)).rolling_mean(window, min_periods=min_periods)
-                  - (t.rolling_mean(window, min_periods=min_periods)).pow(2) )
-            slope_expr = (num / pl.when(den.abs() > 1e-12).then(den).otherwise(1.0)).alias(f"{c}_slope")
-            exprs.append(slope_expr)
-        
-        if not exprs:
-            return pl.DataFrame() if return_type == "polars" else pd.DataFrame()
-
-        pl_out = df_idx.select(exprs)
-        return pl_out if return_type == "polars" else pl_out.to_pandas()
-    
-    pdf = _to_pandas(df)
-    slopes = pd.DataFrame(index=pdf.index)
+    exprs = []
     for c in cols:
-        slopes[c + "_slope"] = pdf[c].rolling(window=window, min_periods=min_periods).apply(
-            ols_slope, raw=True
-        )
-    return slopes
+        col_expr = pl.col(c)
+        median_expr = col_expr.rolling_median(window, **_rolling_kwargs(min_periods))
+        mad_expr = (col_expr - median_expr).abs().rolling_median(window, **_rolling_kwargs(min_periods))
+        exprs.append(mad_expr.alias(f"{c}_mad"))
+    return df.select(exprs)
+
+
+def rolling_mean_std(df: pl.DataFrame, window: int, cols: Optional[List[str]] = None, min_periods: int = 1) -> pl.DataFrame:
+    """Rolling mean and std per column. Requires Polars DataFrame input."""
+    if not isinstance(df, pl.DataFrame):
+        raise TypeError("rolling_mean_std requires a Polars DataFrame input")
+    if cols is None:
+        cols = list(df.columns)
+    exprs = []
+    for c in cols:
+        exprs.append(pl.col(c).rolling_mean(window, **_rolling_kwargs(min_periods)).alias(f"{c}_mean"))
+        exprs.append(pl.col(c).rolling_std(window, **_rolling_kwargs(min_periods)).alias(f"{c}_std"))
+    return df.select(exprs)
+
+
+def rolling_skew_kurt(df: pl.DataFrame, window: int, cols: Optional[List[str]] = None, min_periods: int = 1,
+                      skew_clip: float = 100.0, kurt_clip: float = 1000.0) -> pl.DataFrame:
+    """Compute rolling skewness and kurtosis per column. Requires Polars DataFrame input.
+
+    Note: Kurtosis clipping prevents overflow (e.g., AR1 detector) when near-constant
+    sensor windows produce kurtosis ~1e50.
+    """
+    if not isinstance(df, pl.DataFrame):
+        raise TypeError("rolling_skew_kurt requires a Polars DataFrame input")
+    if cols is None:
+        cols = list(df.columns)
+    exprs = []
+    for c in cols:
+        exprs.append(pl.col(c).rolling_skew(window, bias=False).clip(-skew_clip, skew_clip).alias(f"{c}_skew"))
+        exprs.append(pl.col(c).rolling_kurtosis(window, fisher=True).clip(-kurt_clip, kurt_clip).alias(f"{c}_kurt"))
+    return df.select(exprs)
+
+
+def rolling_ols_slope(df: pl.DataFrame, window: int, cols: Optional[List[str]] = None, min_periods: int = 1) -> pl.DataFrame:
+    """Rolling OLS slope via covariance formula. Requires Polars DataFrame input."""
+    if not isinstance(df, pl.DataFrame):
+        raise TypeError("rolling_ols_slope requires a Polars DataFrame input")
+    if cols is None:
+        cols = list(df.columns)
+    if not cols:
+        return pl.DataFrame()
+    df_idx = df.with_columns(pl.arange(0, pl.len()).alias("_t").cast(pl.Float64))
+    exprs = []
+    for c in cols:
+        x = pl.col(c).cast(pl.Float64)
+        t = pl.col("_t")
+        num = ( (t * x).rolling_mean(window, min_periods=min_periods)
+              - t.rolling_mean(window, min_periods=min_periods) * x.rolling_mean(window, min_periods=min_periods) )
+        den = ( (t.pow(2)).rolling_mean(window, min_periods=min_periods)
+              - (t.rolling_mean(window, min_periods=min_periods)).pow(2) )
+        exprs.append((num / pl.when(den.abs() > 1e-12).then(den).otherwise(1.0)).alias(f"{c}_slope"))
+    return df_idx.select(exprs)
 
 def ols_slope(x):
-    """Helper function for pandas rolling apply. Not used by Polars."""
+    """Legacy helper kept for reference. Not used in Polars-first pipeline."""
     if len(x) < 2:
         return 0.0
     try:
@@ -376,217 +238,89 @@ def ols_slope(x):
 
 
 
-def rolling_spectral_energy(df: pd.DataFrame, window: int, cols: Optional[List[str]] = None, 
+def rolling_spectral_energy(df: pl.DataFrame, window: int, cols: Optional[List[str]] = None,
                           bands: Optional[List[Tuple[float, float]]] = None,
-                          fs: float = 1.0, min_periods: int = 1,
-                          return_type: Literal["pandas", "polars"] = "pandas",
-                          method: Literal["auto", "fft", "goertzel"] = "auto") -> pd.DataFrame:
-    """Compute rolling spectral energy in frequency bands for specified columns.
-    For each window, computes FFT and returns energy in specified frequency bands.
-    Returns DataFrame with band energies per column.
+                          fs: float = 1.0, min_periods: int = 1) -> pl.DataFrame:
+    """Rolling spectral energy in frequency bands. Requires Polars DataFrame input.
+
+    Uses vectorized sliding-window FFT (stride tricks + batch rfft) — ~50-100x faster
+    than per-row callbacks. Returns pl.DataFrame with columns <col>_energy_<band_idx>.
 
     Parameters
     ----------
-    df : DataFrame
-        Input dataframe (polars or pandas)
+    df : pl.DataFrame
     window : int
-        Window size for rolling computation
-    cols : List[str], optional
-        Columns to process. Defaults to all columns.
-    bands : List[Tuple[float, float]], optional
-        List of (low, high) frequency pairs defining bands.
-        Frequencies in Hz relative to sampling rate fs.
-        Defaults to [(0, 0.1*nyq), (0.1*nyq, 0.3*nyq), (0.3*nyq, nyq)]
-    fs : float, default=1.0
-        Sampling frequency in Hz. Used to scale frequency bands.
-    min_periods : int, default=1
-        Minimum number of observations required to calculate statistic
-
-    Returns
-    -------
-    DataFrame
-        DataFrame with columns named <col>_energy_<band_idx>
+    cols : List[str], optional — defaults to all columns
+    bands : List[Tuple[float, float]], optional — (lo, hi) Hz pairs, defaults to low/mid/high
+    fs : float — sampling frequency in Hz (default 1.0)
     """
-    # Early exit for empty/small data
+    if not isinstance(df, pl.DataFrame):
+        raise TypeError("rolling_spectral_energy requires a Polars DataFrame input")
     if len(df) < window // 2:
-        if return_type == "polars" and HAS_POLARS:
-            return pl.DataFrame()
-        return pd.DataFrame(index=df.index)
+        return pl.DataFrame()
     if cols is None:
         cols = list(df.columns)
-
     nyq = 0.5 * fs
     if bands is None:
-        bands = [(0.0, 0.1*nyq), (0.1*nyq, 0.3*nyq), (0.3*nyq, nyq)]
-    
-    def compute_band_energies(x):
-        if len(x) < window // 2:  # need enough points for meaningful FFT
-            return np.zeros(len(bands))
-        try:
-                # Prefer FFT for moderately-sized windows. The Goertzel per-bin
-                # implementation is only beneficial for very small windows. Reduce
-                # the Goertzel threshold so windows like 64 use FFT (much faster).
-            if method == "goertzel" or (method == "auto" and window <= 32):
-                return goertzel_energy(x, fs=fs, bands=bands)
-            return spectral_energy(x, fs=fs, bands=bands)
-        except:
-            return np.zeros(len(bands))
-    
-    # Polars path
-    if HAS_POLARS and isinstance(df, pl.DataFrame):
-        # Pre-allocate output expressions
-        energy_exprs = []
-        
-        def compute_all_bands_np(x: np.ndarray) -> list[float]:
-            if len(x) < max(min_periods, window // 2): return [0.0]*len(bands)
-            x = x - np.mean(x)
-            freqs = np.fft.rfftfreq(len(x), d=1.0/fs)
-            spec  = np.abs(np.fft.rfft(x))**2
-            out = []
-            for lo, hi in bands:
-                mask = (freqs >= lo) & (freqs < hi)
-                out.append(float(np.sum(spec[mask])))
+        bands = [(0.0, 0.1 * nyq), (0.1 * nyq, 0.3 * nyq), (0.3 * nyq, nyq)]
+
+    # PERF-FIX (v11.15.2): batch FFT over all windows at once via stride tricks.
+    def _vectorized_spectral_energy(arr1d: np.ndarray) -> np.ndarray:
+        """Return shape (n_rows, n_bands) float32 energy array."""
+        n = len(arr1d)
+        out = np.zeros((n, len(bands)), dtype=np.float32)
+        if n < window:
             return out
-
-        for c in cols:
-            # Version-gate the implementation. rolling_list is a more recent addition.
-            if hasattr(pl.Expr, "rolling_list"):
-                # Use rolling_list + map_elements to avoid version-specific .rolling().apply() signatures
-                lst = pl.col(c).rolling_list(window_size=window, min_periods=min_periods)
-                arr = lst.map_elements(
-                    lambda v: compute_all_bands_np(np.asarray(v, float)),
-                    return_dtype=pl.List(pl.Float64)
-                )
-            else:
-                # Fallback for older Polars: use rolling apply with the correct 'period' keyword
-                try:
-                    arr = (pl.col(c)
-                           .rolling(period=window, min_periods=min_periods)
-                           .apply(
-                               lambda s: compute_all_bands_np(np.asarray(s, dtype=float)),
-                               return_dtype=pl.List(pl.Float64)
-                           ))
-                except Exception:
-                    # If even that fails, this version of Polars is too old for this feature.
-                    # We will let it produce an empty expression list, which will be handled downstream.
-                    continue
-            for i in range(len(bands)):
-                energy_exprs.append(
-                    arr.arr.get(i).fill_null(0.0).alias(f"{c}_energy_{i}")
-                )
-
-        pl_out = df.select(energy_exprs)
-        if return_type == "polars":
-            return pl_out
-        return pl_out.to_pandas()
-    
-    # Pandas path (fixed: compute each band as scalar to avoid returning arrays to .apply)
-    pdf = _to_pandas(df)
-    results = []
-    for c in cols:
-        # create a DataFrame to hold per-band scalar series for this column
-        energy_df = pd.DataFrame(index=pdf.index)
-        for band_idx in range(len(bands)):
-            idx = band_idx  # capture loop variable
-
-            def band_scalar(x, _idx=idx):
-                # x will be a numpy array when raw=True
-                try:
-                    if len(x) < window // 2:
-                        return 0.0
-                    # Align the pandas-side heuristic with the Polars/pandas
-                    # decision above: only use Goertzel for small windows.
-                    if method == "goertzel" or (method == "auto" and window <= 32):
-                        return float(goertzel_energy(x, fs=fs, bands=bands)[_idx])
-                    return float(spectral_energy(x, fs=fs, bands=bands)[_idx])
-                except:
-                    return 0.0
-
-            series = pdf[c].rolling(window=window, min_periods=min_periods).apply(
-                band_scalar, raw=True
-            )
-            energy_df[f"{c}_energy_{band_idx}"] = series.astype(float)
-        # only append if we produced any columns (defensive)
-        if len(energy_df.columns) > 0:
-            results.append(energy_df)
-
-    # return a concatenated frame; if no results, return empty frame with same index
-    if results:
-        out = pd.concat(results, axis=1)
+        shape = (n - window + 1, window)
+        strides = (arr1d.strides[0], arr1d.strides[0])
+        wins = np.lib.stride_tricks.as_strided(arr1d, shape=shape, strides=strides)
+        wins = wins - wins.mean(axis=1, keepdims=True)
+        spec = np.abs(np.fft.rfft(wins, axis=1)) ** 2
+        freqs = np.fft.rfftfreq(window, d=1.0 / fs)
+        start = window - 1
+        for b_idx, (lo, hi) in enumerate(bands):
+            mask = (freqs >= lo) & (freqs < hi)
+            out[start:, b_idx] = spec[:, mask].sum(axis=1)
         return out
-    return pd.DataFrame(index=pdf.index)
+
+    n_rows = len(df)
+    pl_cols: dict = {}
+    for c in cols:
+        arr = np.asarray(df[c].to_numpy(allow_copy=False), dtype=np.float64)
+        arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
+        try:
+            energy = _vectorized_spectral_energy(arr)
+        except Exception:
+            energy = np.zeros((n_rows, len(bands)), dtype=np.float32)
+        for b_idx in range(len(bands)):
+            pl_cols[f"{c}_energy_{b_idx}"] = energy[:, b_idx].astype(np.float64)
+    return pl.DataFrame(pl_cols) if pl_cols else pl.DataFrame()
 
 
-def rolling_xcorr(df: pd.DataFrame, window: int, target_col: str, ref_cols: Optional[List[str]] = None,
-                min_periods: int = 1, standardize: bool = True,
-                return_type: Literal["pandas", "polars"] = "pandas") -> pd.DataFrame:
+def rolling_xcorr(df: pl.DataFrame, window: int, target_col: str, ref_cols: Optional[List[str]] = None,
+                min_periods: int = 1) -> pl.DataFrame:
     """Compute rolling cross-correlation between target column and reference columns.
-    
-    Parameters
-    ----------
-    df : DataFrame
-        Input dataframe (polars or pandas)
-    window : int
-        Window size for rolling computation
-    target_col : str
-        Name of target column to correlate against
-    ref_cols : List[str], optional
-        List of reference columns to correlate with target. Defaults to all columns except target.
-    min_periods : int, default=1
-        Minimum number of observations required to calculate correlation
-    standardize : bool, default=True
-        Whether to standardize (z-score) values before correlation. More robust but slower.
-        When False, uses raw values which is faster but more sensitive to scaling.
-
-    Returns
-    -------
-    DataFrame
-        DataFrame with columns named <ref_col>_xcorr containing correlation coefficients
+    Requires Polars DataFrame input. Returns pl.DataFrame with <ref_col>_xcorr columns.
     """
+    if not isinstance(df, pl.DataFrame):
+        raise TypeError("rolling_xcorr requires a Polars DataFrame input")
     if ref_cols is None:
         ref_cols = [c for c in df.columns if c != target_col]
-    
     if target_col not in df.columns:
         raise ValueError(f"Target column '{target_col}' not found in dataframe")
-    
-    # Polars path (safe expression building and early return)
-    if HAS_POLARS and isinstance(df, pl.DataFrame):
-        exprs = []
-        tgt = pl.col(target_col)
-        for ref in ref_cols:
-            # Corrected: Use positional window argument
-            exprs.append(pl.rolling_corr(tgt, pl.col(ref), window, min_periods=min_periods).alias(f"{ref}_xcorr"))
-
-        pl_out = df.select(exprs)
-        return pl_out if return_type == "polars" else pl_out.to_pandas()
-    
-    # Pandas path
-    pdf = _to_pandas(df)
-    result = pd.DataFrame(index=pdf.index)
-    target = pdf[target_col]
-    for ref in ref_cols:
-        result[f"{ref}_xcorr"] = target.rolling(window=window, min_periods=min_periods).corr(pdf[ref])
-    if return_type == "polars" and HAS_POLARS:
-        return pl.from_pandas(result)
-    return result
+    exprs = [
+        pl.rolling_corr(pl.col(target_col), pl.col(ref), window_size=window, min_samples=min_periods).alias(f"{ref}_xcorr")
+        for ref in ref_cols
+    ]
+    return df.select(exprs)
 
 
-def rolling_spectral_energy_pl(df: 'pl.DataFrame', window: int, cols: Optional[List[str]] = None,
-                              bands: Optional[List[Tuple[float, float]]] = None,
-                              fs: float = 1.0, min_periods: int = 1) -> 'pl.DataFrame':
-    """Polars-native wrapper for `rolling_spectral_energy` that returns a pl.DataFrame.
-    Requires Polars to be installed and a Polars DataFrame input.
-    """
-    if not HAS_POLARS:
-        raise RuntimeError("Polars is not available in this environment")
-    if not isinstance(df, pl.DataFrame):
-        raise TypeError("df must be a Polars DataFrame for rolling_spectral_energy_pl")
-    return rolling_spectral_energy(df, window, cols=cols, bands=bands, fs=fs, min_periods=min_periods, return_type="polars")
+# rolling_spectral_energy_pl is identical to rolling_spectral_energy (kept for call-site compat)
+rolling_spectral_energy_pl = rolling_spectral_energy
 
 
-def rolling_pairwise_lag(df: pd.DataFrame, max_lag: int = 3, cols: Optional[List[str]] = None,
-                         window: Optional[int] = None, min_periods: int = 1,
-                         return_type: Literal["pandas", "polars"] = "pandas") -> pd.DataFrame:
+def rolling_pairwise_lag(df: pl.DataFrame, max_lag: int = 3, cols: Optional[List[str]] = None,
+                         window: Optional[int] = None, min_periods: int = 1) -> pl.DataFrame:
     """Generate rolling pairwise lag features between all ordered column pairs.
 
     For each ordered pair (a, b) where a != b, and for each lag in [0, max_lag],
@@ -637,47 +371,24 @@ def rolling_pairwise_lag(df: pd.DataFrame, max_lag: int = 3, cols: Optional[List
     if window is None:
         window = max_lag + 1
 
-    # Polars native path
-    if HAS_POLARS and isinstance(df, pl.DataFrame):
-        exprs = []
-        for i, a in enumerate(cols):
-            for b in cols:
-                if a == b:
-                    continue
-                for lag in range(0, max_lag + 1):
-                    # Check for modern Polars API first
-                    if hasattr(pl.Expr, "rolling_corr"):
-                        # Corrected: Use positional window argument to avoid keyword friction
-                        exprs.append(pl.col(a).rolling_corr(
-                            pl.col(b).shift(lag), window, min_periods=min_periods
-                        ).alias(f"{a}__{b}_lag{lag}_corr"))
-                    # Fallback for older Polars versions that had pl.rolling_corr
-                    elif hasattr(pl, "rolling_corr"):
-                        exprs.append(
-                            pl.rolling_corr(pl.col(a), pl.col(b).shift(lag), window, min_periods=min_periods).alias(f"{a}__{b}_lag{lag}_corr")
-                        )
-        pl_out = df.select(exprs)
-        return pl_out if return_type == "polars" else pl_out.to_pandas()
-
-    # Pandas path (stream pair-by-pair to limit peak memory)
-    pdf = _to_pandas(df)
-    out = pd.DataFrame(index=pdf.index)
+    if not isinstance(df, pl.DataFrame):
+        raise TypeError("rolling_pairwise_lag requires a Polars DataFrame input")
+    exprs = []
     for a in cols:
         for b in cols:
             if a == b:
                 continue
             for lag in range(0, max_lag + 1):
-                series = pdf[a].rolling(window=window, min_periods=min_periods).corr(pdf[b].shift(lag))
-                out[f"{a}__{b}_lag{lag}_corr"] = series
-    if return_type == "polars" and HAS_POLARS:
-        return pl.from_pandas(out)
-    return out
+                exprs.append(
+                    pl.rolling_corr(pl.col(a), pl.col(b).shift(lag), window_size=window, min_samples=min_periods)
+                    .alias(f"{a}__{b}_lag{lag}_corr")
+                )
+    return df.select(exprs)
 
 
-def batched_pairwise_lag(df: pd.DataFrame, max_lag: int = 3, cols: Optional[List[str]] = None,
+def batched_pairwise_lag(df: pl.DataFrame, max_lag: int = 3, cols: Optional[List[str]] = None,
                         window: Optional[int] = None, min_periods: int = 1, batch_size: int = 100,
-                        min_corr: float = 0.0, unique_pairs: bool = True,
-                        return_type: Literal["pandas", "polars"] = "pandas") -> pd.DataFrame:
+                        min_corr: float = 0.0, unique_pairs: bool = True) -> pl.DataFrame:
     """Generate rolling pairwise lag features between column pairs with optional batching and pruning.
 
     For each unique (unordered) pair (a, b) where a != b, compute rolling correlation between a and b
@@ -755,78 +466,36 @@ def batched_pairwise_lag(df: pd.DataFrame, max_lag: int = 3, cols: Optional[List
                     continue
             pairs.append((a, b))
     
+    if not isinstance(df, pl.DataFrame):
+        raise TypeError("batched_pairwise_lag requires a Polars DataFrame input")
+
     # Process pairs in batches to limit memory use
-    all_results = []
+    all_results: list = []
     for batch_start in range(0, len(pairs), batch_size):
         batch_pairs = pairs[batch_start:batch_start + batch_size]
-        
-        # Polars path with expression batching
-        if HAS_POLARS and isinstance(df, pl.DataFrame):
-            # Pre-compute correlations for this batch
-            exprs = []
-            for a, b in batch_pairs:
-                for lag in range(max_lag + 1):
-                    exprs.append(
-                        pl.col(a)
-                        .rolling_corr(pl.col(b).shift(lag), window, min_periods=min_periods)
-                        .alias(f"{a}__{b}_lag{lag}_corr")
-                    )
-            
-            # Compute correlations for this batch
-            batch_result = df.select(exprs)
-            
-            # If thresholding, only keep columns with any correlation above threshold
-            if min_corr > 0:
-                keep_cols = []
-                for col in batch_result.columns:
-                    if batch_result.select(pl.col(col).abs().max()).item() >= min_corr:
-                        keep_cols.append(col)
-                batch_result = batch_result.select(keep_cols) if keep_cols else None
-            
-            if batch_result is not None and len(batch_result.columns) > 0:
-                all_results.append(batch_result)
-        
-        # Pandas path
-        else:
-            pdf = _to_pandas(df)
-            batch_result = pd.DataFrame(index=pdf.index)
-            
-            for a, b in batch_pairs:
-                # Compute all lags for this pair
-                pair_results = []
-                for lag in range(max_lag + 1):
-                    series = pdf[a].rolling(window=window, min_periods=min_periods).corr(
-                        pdf[b].shift(lag)
-                    )
-                    pair_results.append((f"{a}__{b}_lag{lag}_corr", series))
-                
-                # If thresholding, check if any lag correlation exceeds threshold
-                if min_corr > 0:
-                    max_corr = max(abs(s).max() for _, s in pair_results)
-                    if max_corr < min_corr:
-                        continue
-                
-                # Add correlations that passed threshold
-                for name, series in pair_results:
-                    batch_result[name] = series
-            
-            if len(batch_result.columns) > 0:
-                all_results.append(batch_result)
-    
-    # Combine results
+        exprs = []
+        for a, b in batch_pairs:
+            for lag in range(max_lag + 1):
+                exprs.append(
+                    pl.rolling_corr(pl.col(a), pl.col(b).shift(lag), window_size=window, min_samples=min_periods)
+                    .alias(f"{a}__{b}_lag{lag}_corr")
+                )
+        batch_result = df.select(exprs)
+        if min_corr > 0:
+            keep_cols = [
+                col for col in batch_result.columns
+                if batch_result.select(pl.col(col).abs().max()).item() >= min_corr
+            ]
+            if not keep_cols:
+                continue
+            batch_result = batch_result.select(keep_cols)
+        if len(batch_result.columns) > 0:
+            all_results.append(batch_result)
+
     if not all_results:
-        # Return empty frame with correct type
-        return (pl.DataFrame() if return_type == "polars" and HAS_POLARS
-                else pd.DataFrame())
-    
-    if HAS_POLARS and isinstance(df, pl.DataFrame):
-        out = pl.concat(all_results, how="horizontal")
-        return out if return_type == "polars" else out.to_pandas()
-    else:
-        out = pd.concat(all_results, axis=1)
-        if return_type == "polars" and HAS_POLARS:
-            return pl.from_pandas(out)
-        return out
+        return pl.DataFrame()
+
+    return pl.concat(all_results, how="horizontal")
 
 
 def compute_basic_features_pl(df: 'pl.DataFrame', window: int = 3, cols: Optional[List[str]] = None, 
@@ -875,27 +544,38 @@ def compute_basic_features_pl(df: 'pl.DataFrame', window: int = 3, cols: Optiona
     ...     pl.col("*").filter(pl.col("*").str.contains("_rz|_slope"))
     ... ])
     """
-    if not HAS_POLARS:
-        raise RuntimeError("Polars is not available in this environment")
     if not isinstance(df, pl.DataFrame):
-        raise TypeError("df must be a Polars DataFrame for compute_basic_features_pl")
+        raise TypeError("compute_basic_features_pl requires a Polars DataFrame")
 
     if cols is None:
         cols = list(df.columns)
 
+    # Only compute features for numeric columns in the active frame.
+    numeric_cols = {c for c, t in df.schema.items() if t in pl.NUMERIC_DTYPES}
+    cols = [c for c in cols if c in numeric_cols]
+    if not cols:
+        return pl.DataFrame()
+
+    # Polars rolling ops can panic on empty frames; short-circuit deterministically.
+    if df.height == 0:
+        return pl.DataFrame(schema=[(f"{c}_med", pl.Float64) for c in cols])
+
     # Fill missing values (Polars path) - use provided fill_values if available
     pl_filled = _apply_fill(df, method="median", fill_values=fill_values)
 
-    # Rolling building blocks (request Polars outputs)
-    med = rolling_median(pl_filled, window, cols, min_periods=1, return_type="polars")
-    mad = rolling_mad(pl_filled, window, cols, min_periods=1, return_type="polars")
-    ms = rolling_mean_std(pl_filled, window, cols, min_periods=1, return_type="polars")
-    slopes = rolling_ols_slope(pl_filled, window, cols, min_periods=1, return_type="polars")
-    sk = rolling_skew_kurt(pl_filled, window, cols, min_periods=1, return_type="polars")
-    se = rolling_spectral_energy(pl_filled, window, cols, min_periods=1, return_type="polars")
+    # Rolling building blocks — all return pl.DataFrame (Polars-only)
+    med    = rolling_median(pl_filled, window, cols, min_periods=1)
+    mad    = rolling_mad(pl_filled, window, cols, min_periods=1)
+    ms     = rolling_mean_std(pl_filled, window, cols, min_periods=1)
+    slopes = rolling_ols_slope(pl_filled, window, cols, min_periods=1)
+    sk     = rolling_skew_kurt(pl_filled, window, cols, min_periods=1)
+    se     = rolling_spectral_energy(pl_filled, window, cols, min_periods=1)
 
     # Combine all parts first, then compute robust z-score
     parts = [med, mad, ms, slopes, sk, se]
+    # Defensive normalization while migration is in progress:
+    # avoid pl.concat failures if any helper accidentally returns pandas.
+    parts = [pl.from_pandas(p) if isinstance(p, pd.DataFrame) else p for p in parts]
     parts = [p for p in parts if p is not None and len(p.columns) > 0]
     if not parts:
         return pl.DataFrame()
@@ -996,99 +676,6 @@ def goertzel_energy(series: np.ndarray, fs: float = 1.0, bands: Optional[List[Tu
         mask = (freqs >= a) & (freqs < b)
         energies.append(float(np.sum(spec[mask])))
     return np.array(energies, dtype=float)
-
-
-def compute_basic_features(pdf: pd.DataFrame, window: int = 3, cols: Optional[List[str]] = None,
-                            fill_values: Optional[dict] = None) -> pd.DataFrame:
-    """Compute a compact set of features for each timestamp using pandas input.
-    Returns a pandas DataFrame aligned with input index.
-
-    Features computed:
-    - rolling_median: robust central tendency
-    - rolling_mad: scale/variability (robust to outliers)
-    - rolling_mean_std: classical location and scale
-    - rolling_ols_slope: local trend (more stable than differencing)
-    - rolling_skew_kurt: distribution shape
-    - rolling_spectral_energy: frequency-domain energy in low/mid/high bands
-    - robust_z: (x - rolling_median) / (rolling_mad * 1.4826)
-
-    Parameters
-    ----------
-    pdf : pd.DataFrame
-        Input pandas DataFrame. Will be converted if Polars input.
-    window : int, default=3
-        Window size for rolling computations.
-    cols : List[str], optional
-        Columns to process. Defaults to all columns.
-    fill_values : dict, optional
-        Pre-computed fill values {column_name: fill_value}. If provided, these values
-        are used for imputation instead of computing from the data. This prevents data
-        leakage when processing score data (use training-derived fill values).
-
-    Returns
-    -------
-    pd.DataFrame
-        DataFrame containing computed features, aligned with input index.
-        Missing values and infinities are replaced with 0.0.
-
-    Examples
-    --------
-    >>> import pandas as pd
-    >>> import numpy as np
-    >>> # Create sample data with different patterns
-    >>> n = 1000
-    >>> df = pd.DataFrame({
-    ...     'normal': np.random.randn(n),
-    ...     'spiky': np.random.randn(n) + (np.random.rand(n) > 0.95) * 10,
-    ...     'trend': np.cumsum(np.random.randn(n) * 0.1)
-    ... })
-    >>> # Compute basic features with 10-point window
-    >>> features = compute_basic_features(df, window=10)
-    >>> # Show robust z-scores for spiky series
-    >>> features['spiky_rz']  # Should highlight outliers
-    """
-    # =================================================================================
-    # POLARS-ONLY IMPLEMENTATION: No Pandas fallback to ensure deterministic behavior.
-    # All feature generation uses Polars for consistency and performance (5-10x faster).
-    # =================================================================================
-    # NOTE: Timer removed from wrapper - timing happens in compute_basic_features_pl()
-    # =================================================================================
-    if not HAS_POLARS:
-        raise RuntimeError(
-            "Polars is required for feature generation but not installed. "
-            "Install with: pip install polars"
-        )
-
-    # Convert pandas to Polars if needed
-    if isinstance(pdf, pd.DataFrame):
-        pdf_pl = pl.from_pandas(pdf)
-    elif isinstance(pdf, pl.DataFrame):
-        pdf_pl = pdf
-    else:
-        raise TypeError(f"Expected pd.DataFrame or pl.DataFrame, got {type(pdf)}")
-
-    # Compute features using Polars (timing happens inside)
-    features_pl = compute_basic_features_pl(pdf_pl, window=window, cols=cols)
-    return features_pl.to_pandas()
-
-
-# REMOVED: Pandas fallback implementation (lines 1075-1125)
-# This ensures deterministic feature generation - no silent path switching.
-# All feature engineering now uses Polars exclusively.
-
-def _DEPRECATED_pandas_compute_basic_features(pdf, window, cols, fill_values=None):
-    """
-    DEPRECATED: This Pandas implementation has been removed to ensure deterministic behavior.
-    The Polars-Pandas divergence caused non-deterministic feature counts (630 vs 632).
-    Use compute_basic_features_pl() exclusively via compute_basic_features().
-
-    Historical reference only - DO NOT USE.
-    """
-    raise NotImplementedError(
-        "Pandas implementation deprecated. Use Polars-only compute_basic_features()."
-    )
-
-# Old Pandas implementation REMOVED - see _DEPRECATED_pandas_compute_basic_features() above
 
 
 # =============================================================================
@@ -1583,17 +1170,18 @@ def impute_features(
     run_id: Optional[str] = None,
     equip_id: int = 0,
     equip: str = "",
+    protected_columns: Optional[List[str]] = None,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, List[str]]:
     """
     Impute missing values and drop unusable columns from feature DataFrames.
-    
+
     Handles:
     - Replace inf with NaN
     - Fill NaN with train column medians
     - Align score columns to train columns
-    - Drop all-NaN and low-variance columns
+    - Drop all-NaN and low-variance columns (unless protected)
     - Log dropped features via output_manager
-    
+
     Args:
         train: Training features DataFrame
         score: Scoring features DataFrame
@@ -1602,35 +1190,101 @@ def impute_features(
         run_id: Run identifier
         equip_id: Equipment ID
         equip: Equipment name for logging
-        
+        protected_columns: Feature columns that must NOT be dropped regardless of
+            variance.  Pass the ``train_sensors`` list from the cached model
+            manifest so that scoring batches always present the same feature
+            space to the loaded detectors, even when the baseline-derived train
+            split happens to produce near-zero variance for a feature.
+
     Returns:
         Tuple of (train_imputed, score_imputed, dropped_cols)
     """
-    # Replace inf with NaN
-    train = train.copy()
-    score = score.copy()
-    train.replace([np.inf, -np.inf], np.nan, inplace=True)
-    score.replace([np.inf, -np.inf], np.nan, inplace=True)
+    # PERF-FIX (v11.15.2): Avoid full-DataFrame .copy() + .replace() which was
+    # costing ~40s per batch on 632-column DataFrames.
+    # Strategy:
+    #   1. Convert to float64 numpy arrays (one allocation, contiguous memory).
+    #   2. Zero inf/nan mask in-place with np.copyto / boolean indexing.
+    #   3. Compute medians on numpy arrays (faster than pandas column-wise).
+    #   4. Broadcast-fill NaNs via np.where (vectorized, no Python loops).
+    #   5. Reconstruct pandas DataFrames only at the end.
+
+    train_idx = train.index
+    score_idx = score.index
+    train_cols = list(train.columns)
+
+    # Align score columns to train before converting to numpy
+    score = score.reindex(columns=train_cols)
+
+    # Convert to contiguous float64 arrays (copy happens here — exactly once each)
+    tr = train.values.astype(np.float64, copy=True)
+    sc = score.values.astype(np.float64, copy=True)
+
+    # Replace ±inf with NaN (in-place, no DataFrame overhead)
+    tr[~np.isfinite(tr)] = np.nan
+    sc[~np.isfinite(sc)] = np.nan
+
+    # Compute column medians from train (nanmedian ignores NaN, shape: n_cols)
+    col_meds_np = np.nanmedian(tr, axis=0)  # faster than pd.DataFrame.median()
+
+    # Fill NaN in train with column medians (broadcast over rows)
+    nan_mask_tr = np.isnan(tr)
+    if nan_mask_tr.any():
+        np.copyto(tr, np.broadcast_to(col_meds_np, tr.shape), where=nan_mask_tr)
+
+    # Fill NaN in score: first use train medians, then fall back to score medians
+    nan_mask_sc = np.isnan(sc)
+    if nan_mask_sc.any():
+        np.copyto(sc, np.broadcast_to(col_meds_np, sc.shape), where=nan_mask_sc)
+        # Any remaining NaN means train median was also NaN → use score column median
+        nan_mask_sc2 = np.isnan(sc)
+        if nan_mask_sc2.any():
+            score_col_meds = np.nanmedian(sc, axis=0)
+            score_col_meds = np.where(np.isnan(score_col_meds), 0.0, score_col_meds)
+            np.copyto(sc, np.broadcast_to(score_col_meds, sc.shape), where=nan_mask_sc2)
+
+    # Reconstruct pandas DataFrames (index preserved)
+    train = pd.DataFrame(tr, index=train_idx, columns=train_cols)
+    score = pd.DataFrame(sc, index=score_idx, columns=train_cols)
+
+    # col_meds as Series for downstream compatibility (all_nan_cols check)
+    col_meds = pd.Series(col_meds_np, index=train_cols)
     
-    col_meds = train.median(numeric_only=True)
-    train.fillna(col_meds, inplace=True)
-    
-    # Align score to train columns
-    score = score.reindex(columns=train.columns)
-    score.fillna(col_meds, inplace=True)
-    
-    # Fill remaining NaNs with score medians
-    nan_cols = score.columns[score.isna().any()].tolist()
-    for c in nan_cols:
-        if score[c].dtype.kind in "if":
-            score[c].fillna(score[c].median(), inplace=True)
-    
-    # Find columns to drop: all-NaN or low-variance
-    all_nan_cols = [c for c in train.columns if pd.isna(col_meds.get(c))]
-    feat_stds = train.std(numeric_only=True)
-    low_var_cols = list(feat_stds[feat_stds < low_var_threshold].index)
+    # Find columns to drop: all-NaN or low-variance.
+    # protected_columns (the saved model's train_sensors) are NEVER dropped — the
+    # baseline-derived train split used in scoring batches can temporarily produce
+    # near-zero variance for features that were perfectly fine at training time.
+    # Dropping them here causes a feature-count mismatch that forces an unnecessary
+    # full retrain every scoring batch.
+    _protected: set = set(protected_columns) if protected_columns else set()
+
+    all_nan_cols = [
+        c for c in train.columns
+        if pd.isna(col_meds.get(c)) and c not in _protected
+    ]
+    # PERF-FIX: train is a clean float64 DataFrame after numpy reconstruction —
+    # np.std (ddof=1) is faster than pd.DataFrame.std(numeric_only=True) here.
+    feat_stds_np = np.std(tr, axis=0, ddof=1)  # shape (n_cols,)
+    feat_stds = pd.Series(feat_stds_np, index=train_cols)
+    low_var_cols = [
+        c for c in feat_stds[feat_stds < low_var_threshold].index
+        if c not in _protected
+    ]
     cols_to_drop = list(set(all_nan_cols + low_var_cols))
-    
+
+    # Separately surface how many protected columns were spared (diagnostic only).
+    protected_spared = [
+        c for c in train.columns
+        if c in _protected and (
+            pd.isna(col_meds.get(c)) or (c in feat_stds.index and feat_stds[c] < low_var_threshold)
+        )
+    ]
+    if protected_spared:
+        Console.info(
+            f"Retained {len(protected_spared)} low-var/NaN columns because they are "
+            f"in the cached model feature set (protected from drop)",
+            component="FEAT", equip=equip, protected_count=len(protected_spared),
+        )
+
     if cols_to_drop:
         Console.warn(
             f"Dropping {len(cols_to_drop)} columns ({len(all_nan_cols)} NaN, {len(low_var_cols)} low-var)",
@@ -1638,7 +1292,7 @@ def impute_features(
         )
         train = train.drop(columns=cols_to_drop)
         score = score.drop(columns=cols_to_drop)
-        
+
         # Log to SQL via output_manager
         if output_manager:
             drop_records = []

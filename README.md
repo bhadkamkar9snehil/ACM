@@ -1,6 +1,6 @@
 # ACM - Automated Condition Monitoring
 
-[![Version](https://img.shields.io/badge/version-11.14.0-blue)](#) [![Status](https://img.shields.io/badge/status-Production-brightgreen)](#) [![Python](https://img.shields.io/badge/python-3.11+-blue)](#) [![SQL Server](https://img.shields.io/badge/SQL%20Server-2019%2B-blue)](#)
+[![Version](https://img.shields.io/badge/version-11.15.3-blue)](#) [![Status](https://img.shields.io/badge/status-Production-brightgreen)](#) [![Python](https://img.shields.io/badge/python-3.11+-blue)](#) [![SQL Server](https://img.shields.io/badge/SQL%20Server-2019%2B-blue)](#)
 
 **Predictive Maintenance for Industrial Equipment**
 
@@ -117,7 +117,7 @@ Industrial equipment fails without warning. Maintenance teams face a costly trad
 | Layer | Technology | Purpose |
 |-------|------------|---------|
 | **Runtime** | Python 3.11 | Core pipeline execution |
-| **Data Processing** | pandas, NumPy, scikit-learn | Feature engineering, ML models |
+| **Data Processing** | Polars (features), pandas, NumPy, scikit-learn | Feature engineering, ML models |
 | **Database** | Microsoft SQL Server 2019+ | Historian data, results storage |
 | **Connectivity** | pyodbc, T-SQL | SQL Server integration |
 | **Visualization** | Grafana | Real-time dashboards |
@@ -790,36 +790,30 @@ python scripts/sql/populate_acm_config.py
 
 ## Running ACM
 
-### Pipeline Modes (v11.5.0)
+### Adaptive Pipeline (v11.8.0+)
 
-ACM operates in two distinct pipeline modes that control model behavior:
+ACM is fully adaptive — there is no ONLINE/OFFLINE distinction. The pipeline automatically decides whether to retrain based on model state and quality metrics:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                         PIPELINE MODE SELECTION                             │
+│                       ADAPTIVE PIPELINE DECISIONS                           │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
-│  OFFLINE MODE (Training)              ONLINE MODE (Scoring)                 │
-│  ─────────────────────                ────────────────────                  │
-│  • Train detector models              • Use cached models only              │
-│  • Discover operating regimes         • No regime discovery                 │
-│  • Calibrate thresholds               • Score incoming data                 │
-│  • Full feature engineering           • Apply existing thresholds           │
+│  RETRAINING TRIGGERS (automatic)      SCORING (default)                     │
+│  ───────────────────────────────      ────────────────                      │
+│  • Coldstart — no cached models       • Cached models loaded                │
+│  • Quality degradation detected       • Regimes from cached model           │
+│    (silhouette < 0.30, drift > 3.0)   • Thresholds from calibration cache   │
+│  • Feature hash mismatch              • Calibration params reused           │
+│  • Model age > 30 days                • Health scores training-anchored     │
+│  • --force-retrain CLI flag           • Comparable across batches           │
 │                                                                             │
-│  Use for:                             Use for:                              │
-│  • Coldstart (first run)              • Production scoring                  │
-│  • Historical backfill                • Real-time monitoring                │
-│  • Scheduled model refresh            • After models CONVERGED              │
-│  • After config changes               • Normal batch processing             │
+│  MODEL LIFECYCLE:                                                           │
+│  ────────────────                                                           │
+│  COLDSTART → LEARNING → CONVERGED → (retrain if quality drops)              │
 │                                                                             │
-│  BATCH MODE SELECTION (sql_batch_runner.py):                                │
-│  ───────────────────────────────────────────                                │
-│  Coldstart batch (no models exist)   → OFFLINE (train once)                 │
-│  Post-coldstart batches              → ONLINE (score only)                  │
-│  Explicit --mode override            → Uses specified mode                  │
-│                                                                             │
-│  IMPORTANT: Models must stabilize before reliable RUL predictions.          │
-│  The batch runner automatically handles mode selection.                     │
+│  IMPORTANT: RUL predictions are NOT_RELIABLE until CONVERGED.               │
+│  Typically 5+ batches (days) to reach CONVERGED state.                      │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -869,8 +863,7 @@ Process a specific time range:
 python -m core.acm_main \
     --equip FD_FAN \
     --start-time "2024-01-01T00:00:00" \
-    --end-time "2024-01-31T23:59:59" \
-    --mode offline
+    --end-time "2024-01-31T23:59:59"
 ```
 
 | Argument | Description |
@@ -878,7 +871,7 @@ python -m core.acm_main \
 | `--equip` | Equipment code |
 | `--start-time` | ISO 8601 start time |
 | `--end-time` | ISO 8601 end time |
-| `--mode` | `offline` (full training), `online` (scoring only), `auto` |
+| `--force-retrain` | Force full model retraining (replaces old `--mode offline`) |
 
 ### Option 3: Analytics-Only Mode (No SQL)
 
@@ -1042,6 +1035,32 @@ ACM/
 
 ## Changelog
 
+### v11.15.3 (2026-02-20) - Polars-only rolling functions, dead code removal
+- **REMOVED**: `compute_basic_features()` pandas wrapper — dead code, `_build_features` already called `compute_basic_features_pl()` directly
+- **REMOVED**: `_DEPRECATED_pandas_compute_basic_features()` stub
+- **REMOVED**: `HAS_POLARS` guard and `try/except` import — Polars is a hard dependency
+- **REMOVED**: `return_type` parameter from all 9 rolling functions — all always return `pl.DataFrame`
+- **FIX**: `rolling_spectral_energy` crash — was returning `pd.DataFrame` even when Polars input, causing `AttributeError: 'DataFrame' object has no attribute '_df'` at `pl.concat`
+- **FIX**: `pl.rolling_corr` API — `window_size=` is keyword-only in Polars 1.34+
+
+### v11.15.2 (2026-02-20) - Performance: 4 profiler bottlenecks eliminated (~270s/batch saved)
+- **FIX B1**: `apply(pd.to_numeric)` after Polars features — removed (Polars already emits float64)
+- **FIX B2**: `detect_episodes` PCA attribution — vectorized numpy precomputation (191s → 0.1s)
+- **FIX B3**: `rolling_spectral_energy` — stride-trick batch FFT (~20s → <0.5s)
+- **FIX B4**: `impute_features` — numpy-native path (~40s → ~2s)
+
+### v11.15.1 (2026-02-19) - Feature mismatch fix (forced retrain every batch)
+- **FIX**: `impute_features()` dropped low-var columns from baseline-derived train (scoring batches), causing 632→630 feature count mismatch and forced retrain every batch
+- **NEW**: `load_manifest_only()` fetches `train_sensors` from SQL manifest before imputation
+- **NEW**: `protected_columns` parameter in `impute_features()` — never drops model-trained columns
+
+### v11.15.0 (2026-02-19) - Latent OMR attribution + QA checks
+- **NEW**: OMR contributions flow through full pipeline — per-sensor culprit attribution for OMR episodes
+- **NEW**: `ACM_SensorHotspots` gains `MaxAbsOMR` and `RankingScore` columns
+- **FIX**: Baseline data leakage in `seed_baseline()` else-branch
+- **FIX**: `_save_models_to_sql()` returns actual `saved_count` (was returning None)
+- **NEW**: QA checks in `sql_batch_runner.py` for OMR attribution integrity
+
 ### v11.14.0 (2026-02-19) - Log Quality & Batch Summary Overhaul
 - **FIX**: Eliminated duplicate FUSE Spearman correlation logs (12-15 lines per batch)
 - **FIX**: Degradation model logs now tagged `[global]` / `[regime-N]` — no more ambiguous duplicates
@@ -1132,6 +1151,6 @@ ACM/
 
 ---
 
-**Version**: 11.14.0 | **Updated**: February 19, 2026
+**Version**: 11.15.3 | **Updated**: February 20, 2026
 
 *For implementation details, see [docs/ACM_SYSTEM_OVERVIEW.md](docs/ACM_SYSTEM_OVERVIEW.md)*

@@ -398,6 +398,17 @@ BEGIN
 END
 GO
 
+-- ACM_EpisodeDiagnostics: add columns introduced in v11.15.0 if missing
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.ACM_EpisodeDiagnostics') AND name = 'StartTime')
+    ALTER TABLE dbo.[ACM_EpisodeDiagnostics] ADD [StartTime] DATETIME2(3) NULL;
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.ACM_EpisodeDiagnostics') AND name = 'EndTime')
+    ALTER TABLE dbo.[ACM_EpisodeDiagnostics] ADD [EndTime] DATETIME2(3) NULL;
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.ACM_EpisodeDiagnostics') AND name = 'Culprits')
+    ALTER TABLE dbo.[ACM_EpisodeDiagnostics] ADD [Culprits] NVARCHAR(512) NULL;
+GO
+
 -- ACM_EpisodeMetrics
 IF OBJECT_ID('dbo.[ACM_EpisodeMetrics]','U') IS NULL
 BEGIN
@@ -1404,6 +1415,14 @@ BEGIN
         [AlertCount] INT NULL
     );
 END
+GO
+
+-- ACM_SensorHotspots: add columns introduced in v11.15.0 if missing
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.ACM_SensorHotspots') AND name = 'MaxAbsOMR')
+    ALTER TABLE dbo.[ACM_SensorHotspots] ADD [MaxAbsOMR] FLOAT(53) NULL;
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.ACM_SensorHotspots') AND name = 'RankingScore')
+    ALTER TABLE dbo.[ACM_SensorHotspots] ADD [RankingScore] FLOAT(53) NULL;
 GO
 
 -- ACM_SensorHotspotTimeline

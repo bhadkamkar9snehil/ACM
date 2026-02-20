@@ -493,7 +493,7 @@ def _build_features(
     Build engineered features from raw sensor data.
 
     Transforms raw sensor time series into statistical features using
-    fast_features.compute_basic_features(). Handles:
+    fast_features.compute_basic_features_pl(). Handles:
     - Fill value computation from TRAIN only (prevents data leakage)
     - Polars/pandas conversion (handled internally by fast_features)
     - Index preservation
@@ -527,9 +527,16 @@ def _build_features(
     train_fill_values = train.select_dtypes(include=[np.number]).median().to_dict()
     Console.info(f"Computed {len(train_fill_values)} fill values from training data", component="FEAT")
 
-    # Build features - fast_features handles Polars/pandas internally
-    train_feat = fast_features.compute_basic_features(train, window=feat_win)
-    score_feat = fast_features.compute_basic_features(score, window=feat_win, fill_values=train_fill_values)
+    # Build features directly through Polars-native path (no wrapper).
+    train_feat = fast_features.compute_basic_features_pl(
+        fast_features.pl.from_pandas(train),
+        window=feat_win,
+    )
+    score_feat = fast_features.compute_basic_features_pl(
+        fast_features.pl.from_pandas(score),
+        window=feat_win,
+        fill_values=train_fill_values,
+    )
 
     # Normalize to pandas, restore indices, enforce numeric
     if not isinstance(train_feat, pd.DataFrame):
@@ -539,8 +546,15 @@ def _build_features(
 
     train_feat.index = idx_train
     score_feat.index = idx_score
-    train_feat = train_feat.apply(pd.to_numeric, errors="coerce")
-    score_feat = score_feat.apply(pd.to_numeric, errors="coerce")
+    # PERF-FIX: Polars already emits float64 columns; apply(pd.to_numeric) on 632
+    # columns was causing ~24s of overhead per batch.  Use select_dtypes to cast
+    # any stray object columns in-place (rare) instead of scanning all 632 cols.
+    obj_cols_train = train_feat.select_dtypes(include="object").columns
+    if len(obj_cols_train):
+        train_feat[obj_cols_train] = train_feat[obj_cols_train].apply(pd.to_numeric, errors="coerce")
+    obj_cols_score = score_feat.select_dtypes(include="object").columns
+    if len(obj_cols_score):
+        score_feat[obj_cols_score] = score_feat[obj_cols_score].apply(pd.to_numeric, errors="coerce")
 
     Console.info(f"Features built: train={train_feat.shape}, score={score_feat.shape}", component="FEAT")
     return train_feat, score_feat
@@ -1106,10 +1120,46 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
         with T.section("features.build"):
             train, score = _build_features(train, score, cfg, equip)
 
+        # ===== Resolve protected feature columns from cached model manifest =====
+        # Do a lightweight SQL manifest-only fetch (no model blobs) so that we
+        # know which feature columns the currently-saved detectors were trained on.
+        # These columns must survive the low-variance filter below — the
+        # baseline-derived train split used in scoring batches can temporarily
+        # have near-zero variance for features that were fine at training time,
+        # causing a spurious 632→630 mismatch that forces a full retrain every
+        # scoring batch.  Full model objects are still loaded later in
+        # models.load as normal.
+        _manifest_protected_columns: Optional[List[str]] = None
+        _use_cache_this_run = cfg.get("models", {}).get("use_cache", True) and not (
+            meta.get('is_coldstart_run', False) if isinstance(meta, dict)
+            else getattr(meta, 'is_coldstart_run', False)
+        )
+        if _use_cache_this_run and sql_client is not None:
+            try:
+                from core.model_persistence import ModelVersionManager
+                _early_mgr = ModelVersionManager(
+                    equip=equip, sql_client=sql_client, equip_id=equip_id
+                )
+                _early_manifest = _early_mgr.load_manifest_only()
+                if _early_manifest:
+                    _manifest_protected_columns = _early_manifest.get("train_sensors") or None
+                    if _manifest_protected_columns:
+                        Console.info(
+                            f"Feature protection: {len(_manifest_protected_columns)} columns "
+                            f"from cached model manifest will not be dropped by low-var filter",
+                            component="FEAT", equip=equip,
+                        )
+            except Exception as _mpe:
+                Console.warn(
+                    f"Early manifest load failed (non-fatal): {_mpe}",
+                    component="FEAT", equip=equip,
+                )
+
         # ===== Impute missing values in feature space (detectors require clean data) =====
         with T.section("features.impute"):
             train, score, _ = fast_features.impute_features(
-                train, score, low_var_threshold, output_manager, run_id, equip_id, equip
+                train, score, low_var_threshold, output_manager, run_id, equip_id, equip,
+                protected_columns=_manifest_protected_columns,
             )
 
         current_train_columns = list(train.columns)
