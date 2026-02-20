@@ -104,7 +104,8 @@ class ModelQualityMonitor:
     def assess_anomaly_rate(
         self,
         scores: pd.DataFrame,
-        threshold_col: str = "fused"
+        threshold_col: str = "fused",
+        cfg: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Assess anomaly detection rate.
@@ -140,7 +141,16 @@ class ModelQualityMonitor:
             }
 
         fused_z = fused_values[valid_mask]
-        threshold = 1.0  # Assuming z > 1.0 is anomalous
+        # Use the configured alert z-score as the anomaly threshold.
+        # Hardcoding z=1.0 flagged 30-40% of healthy data (1 std dev above mean),
+        # causing perpetual refit loops. The actual alert threshold is ~3.0.
+        _cfg = cfg if cfg is not None else self.cfg
+        _thresh_cfg = (_cfg or {}).get("thresholds", {})
+        threshold = float(
+            _thresh_cfg.get("alert_z")
+            or _thresh_cfg.get("alert")
+            or 3.0
+        )
         
         anomalies = (fused_z > threshold).sum()
         total = len(fused_z)
@@ -338,8 +348,8 @@ def assess_model_quality(
     clip_z = cfg.get("thresholds", {}).get("self_tune", {}).get("clip_z", 12.0)
     detector_quality = monitor.assess_detector_quality(scores, detector_names, clip_z)
     
-    # Assess anomaly rate
-    anomaly_metrics = monitor.assess_anomaly_rate(scores)
+    # Assess anomaly rate (pass cfg so threshold uses alert_z from config, not hardcoded 1.0)
+    anomaly_metrics = monitor.assess_anomaly_rate(scores, cfg=cfg)
     
     # Assess regime quality
     regime_metrics = monitor.assess_regime_quality(regime_quality)

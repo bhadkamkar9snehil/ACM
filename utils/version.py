@@ -17,9 +17,53 @@ Release Management:
 - Production deployments use specific tags (never merge commits)
 """
 
-__version__ = "11.15.3"
+__version__ = "11.15.4"
 __version_date__ = "2026-02-20"
 __version_author__ = "ACM Development Team"
+
+# v11.15.4: FIVE CORRECTNESS BUGS — REFIT LOOP, REGIME QUALITY, MODEL STATE, FORECAST QA, HASH STABILITY
+#
+# Root cause: batch logs showed perpetual refit ("Anomaly rate 35.84% exceeds threshold 25.00%"),
+# all regime assignments forced to "unknown", blank [model] in batch summary, QA FAIL on every
+# run for forecast tables, and spurious cache misses causing unnecessary retraining.
+#
+# Bug 1 — model_evaluation.py: Hardcoded z=1.0 anomaly threshold drives perpetual refit
+#   Symptom: [WARN][RETRAIN-TRIGGER] Anomaly rate 35.84% exceeds threshold 25.00%
+#   Root cause: assess_anomaly_rate() used threshold=1.0 (z > 1.0 = "anomalous"), flagging
+#     35% of healthy Gaussian data as anomalous. The refit trigger at 25% always fired.
+#   Fix: Replace hardcoded 1.0 with config-driven value from thresholds.alert_z / thresholds.alert
+#     (default 3.0). Added cfg parameter to assess_anomaly_rate(); call site passes cfg=cfg.
+#
+# Bug 2 — detector_orchestrator.py: Stale regime_quality_ok propagated from cached manifest
+#   Symptom: All score-batch regime assignments forced to "unknown" (quality_ok=False)
+#   Root cause: rebuild_detectors_from_cache() loaded regime_quality_ok from the cached
+#     manifest (set at fit time when quality may have been poor). On scoring batches this
+#     stale False value was propagated, causing acm_main.py to force all points to regime=-1.
+#   Fix: Removed the 2 lines that overwrote result["regime_quality_ok"] from the manifest.
+#     Regime quality is re-evaluated by the pipeline each batch; the manifest value is stale.
+#
+# Bug 3 — acm_main.py: model_state never loaded on scoring batches → blank [model] in summary
+#   Symptom: Batch summary [model] field always blank/None on scoring runs
+#   Root cause: load_model_state_from_sql() was only called inside the if models_were_trained:
+#     block, which is skipped entirely on scoring batches.
+#   Fix: After the lifecycle block, added a fallback: if model_state is None and we have
+#     sql_client + equip_id, load model_state from SQL. Best-effort (errors suppressed).
+#
+# Bug 4 — configs/config_table.csv: Forecast QA required even though forecasting is disabled
+#   Symptom: [QA FAIL] 0 rows in ACM_RUL/ACM_HealthForecast/ACM_FailureForecast every run
+#   Root cause: _should_expect_forecast_outputs() checks ACM_RunLogs for FORECASTING_DISABLED
+#     marker, but ACM_RunLogs was removed in v11.13.1. The check always falls through to
+#     return True → forecast tables always expected → QA FAIL.
+#   Fix: Added runtime.phases.forecast=False to config_table.csv. This is checked first in
+#     _should_expect_forecast_outputs() before the ACM_RunLogs query (line 270).
+#
+# Bug 5 — detector_orchestrator.py: Data-bytes hash causes spurious cache misses every batch
+#   Symptom: Cache miss on every scoring batch even when feature schema is unchanged
+#   Root cause: compute_stable_feature_hash() hashed training data bytes. When the training
+#     window shifts forward one tick (normal batch-runner behavior), the hash changes even
+#     though the feature schema (columns + dtypes) is identical → forced cache miss → retrain.
+#   Fix: compute_stable_feature_hash() now hashes schema only: col count + sorted col:dtype
+#     pairs. Row count and data values are excluded. Hash is stable across window shifts.
 
 # v11.15.3: POLARS-ONLY ROLLING FUNCTIONS — REMOVE ALL PANDAS FALLBACKS + DEAD CODE
 #

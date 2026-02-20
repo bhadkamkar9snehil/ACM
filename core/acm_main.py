@@ -1939,6 +1939,15 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
                         Console.warn(f"Failed to update model lifecycle: {e}", component="LIFECYCLE",
                                      error=str(e)[:200])
 
+        # On scoring batches (models_were_trained=False), model_state is still None here
+        # because the lifecycle block above only runs when models are fitted. Load it from
+        # SQL so the batch summary [model] field is populated on every run.
+        if model_state is None and sql_client and equip_id:
+            try:
+                model_state = load_model_state_from_sql(sql_client, equip_id)
+            except Exception:
+                pass  # Summary field is best-effort; never fail the batch.
+
         # ===== Phase 6: Calibration (z-score normalization) =====
         # Fit calibrators on TRAIN data, transform SCORE data.
         # v11.3.3: Now includes contamination filtering for robust calibration.

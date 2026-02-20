@@ -195,6 +195,7 @@ EquipID,Category,ParamPath,ParamValue,ValueType,LastUpdated,UpdatedBy,ChangeReas
 0,runtime,phases.models,True,bool,2025-10-27 00:00:00,SYSTEM,initial_config,
 0,runtime,phases.fuse,True,bool,2025-10-27 00:00:00,SYSTEM,initial_config,
 0,runtime,phases.report,True,bool,2025-10-27 00:00:00,SYSTEM,initial_config,
+0,runtime,phases.forecast,False,bool,2026-02-20 00:00:00,BUGFIX,forecasting_disabled_until_restored_v11.15.4,
 0,runtime,baseline.window_hours,72,int,2025-12-16 00:00:00,OPTIMIZATION,baseline_buffer_retention_hours,
 0,runtime,baseline.max_points,100000,int,2025-12-16 00:00:00,OPTIMIZATION,baseline_buffer_max_rows,
 0,runtime,baseline.refresh_interval_batches,10,int,2025-12-16 00:00:00,OPTIMIZATION,only_write_baseline_every_N_batches_when_models_exist,
