@@ -422,3 +422,61 @@ def write_drift_controller_state(
             error=str(e)[:200],
         )
     return 0
+
+
+def run_drift_pipeline(
+    *,
+    score_data: pd.DataFrame,
+    frame: pd.DataFrame,
+    score_out: Dict[str, Any],
+    cfg: Dict[str, Any],
+    regime_quality_ok: bool,
+    equip: str,
+    sql_client: Optional[Any],
+    equip_id: int,
+    output_manager: Optional[Any],
+    logger: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """
+    Execute drift compute, alert-mode classification, and controller persistence.
+
+    Returns:
+        Dict with updated frame/score_out and rows written to drift controller.
+    """
+    if logger is None:
+        from .observability import Console as _Console
+        logger = _Console
+
+    score_out["frame"] = frame
+    score_out = compute(score_data, score_out, cfg)
+    frame = score_out["frame"]
+
+    prev_mode = load_previous_drift_mode(
+        sql_client=sql_client,
+        equip_id=equip_id,
+        default_mode="FAULT",
+    )
+
+    frame = compute_drift_alert_mode(
+        frame=frame,
+        cfg=cfg,
+        regime_quality_ok=regime_quality_ok,
+        equip=equip,
+        prev_alert_mode=prev_mode,
+    )
+
+    rows_written = write_drift_controller_state(
+        output_manager=output_manager,
+        frame=frame,
+        cfg=cfg,
+        score_out=score_out,
+        logger=logger,
+        equip=equip,
+    )
+
+    return {
+        "frame": frame,
+        "score_out": score_out,
+        "drift_controller_rows": rows_written,
+        "prev_mode": prev_mode,
+    }
