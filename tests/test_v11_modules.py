@@ -355,6 +355,29 @@ class TestRefactorHelpers:
         )
         assert rows == 0
 
+    def test_run_drift_pipeline_smoke(self):
+        """Drift pipeline wrapper should return frame and score_out keys."""
+        from core.drift import run_drift_pipeline
+
+        frame = pd.DataFrame({"fused": [0.1, 0.2, 0.3], "drift_z": [0.0, 0.0, 0.0]})
+        score_data = pd.DataFrame({"x": [1.0, 2.0, 3.0]})
+        score_out = {"frame": frame.copy()}
+        out = run_drift_pipeline(
+            score_data=score_data,
+            frame=frame,
+            score_out=score_out,
+            cfg={"drift": {}},
+            regime_quality_ok=False,
+            equip="FD_FAN",
+            sql_client=None,
+            equip_id=1,
+            output_manager=None,
+        )
+        assert "frame" in out
+        assert "score_out" in out
+        assert "drift_controller_rows" in out
+        assert isinstance(out["frame"], pd.DataFrame)
+
     def test_evaluate_and_maybe_refit_cached_models_no_cache(self):
         """Auto-retrain helper should return no-op when cached models are absent."""
         from core.model_evaluation import evaluate_and_maybe_refit_cached_models
