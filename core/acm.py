@@ -74,7 +74,7 @@ ForecastEngine = None
 
 from core.omr import OMRDetector  # Overall Model Residual detector
 from core.config_history_writer import log_auto_tune_changes
-from core.output_manager import OutputManager, write_sql_artifacts
+from core.output_manager import OutputManager
 from core.run_metadata_writer import (
     emit_batch_summary,
     finalize_noop_run,
@@ -1633,9 +1633,7 @@ def main() -> None:
             run_completion_time = datetime.now()
 
         # === SQL-specific artifact writing ===
-        # Delegated to output_manager.write_sql_artifacts().
-        rows_written = write_sql_artifacts(
-            output_manager=output_manager,
+        rows_written = output_manager.write_sql_artifacts_for_run(
             frame=frame,
             episodes=episodes,
             train=train,
