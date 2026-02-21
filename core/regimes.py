@@ -4130,6 +4130,149 @@ def run_regime_labeling_stage(
     )
 
 
+@dataclass
+class ScoringRegimeStageResult:
+    """Result bundle for detector scoring plus regime labeling stages."""
+    frame: pd.DataFrame
+    omr_contributions_data: Optional[pd.DataFrame]
+    score_out: Dict[str, Any]
+    regime_model: Optional[RegimeModel]
+    train_regime_labels: Optional[np.ndarray]
+    score_regime_labels: Optional[np.ndarray]
+    regime_quality_ok: bool
+    regime_state_version: int
+    regime_loaded_from_state: bool
+    degraded_regime_basis: bool
+    current_model_maturity: Optional[str]
+
+
+def run_scoring_regime_stage(
+    *,
+    train_df: pd.DataFrame,
+    score_df: pd.DataFrame,
+    raw_train: Optional[pd.DataFrame],
+    raw_score: Optional[pd.DataFrame],
+    cfg: Dict[str, Any],
+    pca_detector: Optional[Any],
+    regime_model: Optional[RegimeModel],
+    regime_state: Optional[Any],
+    regime_state_version: int,
+    regime_loaded_from_state: bool,
+    det_flags: Dict[str, bool],
+    detectors: Dict[str, Any],
+    equip: str,
+    equip_id: int,
+    sql_client: Any,
+    output_manager: Any,
+    refit_requested: bool,
+    section_fn: Any,
+    score_all_detectors_fn: Any,
+    resolve_maturity_for_regime_stage_fn: Any,
+    record_regime_fn: Optional[Callable[..., Any]] = None,
+    logger: Any = Console,
+) -> ScoringRegimeStageResult:
+    """
+    Execute scoring and regime stages.
+
+    Stage order:
+    1. Regime feature-basis build
+    2. Detector scoring
+    3. Regime maturity resolve
+    4. Regime labeling
+    5. Regime occupancy/transition persistence
+    """
+    basis_result = build_regime_feature_basis_stage(
+        train_features=train_df,
+        score_features=score_df,
+        raw_train=raw_train,
+        raw_score=raw_score,
+        pca_detector=pca_detector,
+        cfg=cfg,
+        regime_model=regime_model,
+        equip=equip,
+        logger=logger,
+    )
+    regime_basis_train = basis_result.regime_basis_train
+    regime_basis_score = basis_result.regime_basis_score
+    regime_basis_meta = basis_result.regime_basis_meta
+    regime_basis_hash = basis_result.regime_basis_hash
+    regime_model = basis_result.regime_model
+
+    with section_fn("score.detector_score"):
+        frame, omr_contributions_data = score_all_detectors_fn(
+            data=score_df,
+            ar1_detector=detectors.get("ar1_detector"),
+            pca_detector=detectors.get("pca_detector"),
+            iforest_detector=detectors.get("iforest_detector"),
+            gmm_detector=detectors.get("gmm_detector"),
+            omr_detector=detectors.get("omr_detector"),
+            **det_flags,
+        )
+
+    current_model_maturity = resolve_maturity_for_regime_stage_fn(
+        sql_client=sql_client,
+        equip_id=equip_id,
+        refit_requested=refit_requested,
+        logger=logger,
+    )
+
+    with section_fn("regimes.label"):
+        regime_labeling_result = run_regime_labeling_stage(
+            score_df=score_df,
+            frame=frame,
+            train_df=train_df,
+            cfg=cfg,
+            regime_basis_train=regime_basis_train,
+            regime_basis_score=regime_basis_score,
+            regime_basis_meta=regime_basis_meta,
+            regime_basis_hash=regime_basis_hash,
+            regime_model=regime_model,
+            regime_loaded_from_state=regime_loaded_from_state,
+            regime_state=regime_state,
+            regime_state_version=regime_state_version,
+            raw_train=raw_train,
+            output_manager=output_manager,
+            current_model_maturity=current_model_maturity,
+            equip=equip,
+            equip_id=equip_id,
+            sql_client=sql_client,
+            logger=logger,
+            record_regime_fn=record_regime_fn,
+        )
+
+    frame = regime_labeling_result.frame
+    score_out = regime_labeling_result.score_out
+    regime_model = regime_labeling_result.regime_model
+    train_regime_labels = regime_labeling_result.train_regime_labels
+    score_regime_labels = regime_labeling_result.score_regime_labels
+    regime_quality_ok = regime_labeling_result.regime_quality_ok
+    regime_state_version = regime_labeling_result.regime_state_version
+    regime_loaded_from_state = regime_labeling_result.regime_loaded_from_state
+
+    with section_fn("regimes.occupancy"):
+        write_regime_occupancy_and_transitions(
+            score_regime_labels=score_regime_labels,
+            frame=frame,
+            output_manager=output_manager,
+            logger=logger,
+            equip=equip,
+        )
+
+    return ScoringRegimeStageResult(
+        frame=frame,
+        omr_contributions_data=omr_contributions_data,
+        score_out=score_out,
+        regime_model=regime_model,
+        train_regime_labels=train_regime_labels,
+        score_regime_labels=score_regime_labels,
+        regime_quality_ok=bool(score_out.get("regime_quality_ok", True)),
+        regime_state_version=regime_state_version,
+        regime_loaded_from_state=regime_loaded_from_state,
+        degraded_regime_basis=basis_result.degraded,
+        current_model_maturity=current_model_maturity,
+    )
+
+
 def apply_transient_state_labels(
     frame: pd.DataFrame,
     score_data: pd.DataFrame,
