@@ -584,6 +584,11 @@ def connect_acm_sql(
     try:
         cli = SQLClient.from_ini("acm")
         cli.connect()
+        # Validate the live connection before returning.
+        cur = cli.cursor()
+        cur.execute("SELECT 1")
+        cur.fetchone()
+        cur.close()
         return cli
     except Exception as ini_err:
         if logger is not None and hasattr(logger, "warn"):
@@ -596,6 +601,11 @@ def connect_acm_sql(
         sql_cfg = cfg.get("sql", {}) or {}
         cli = SQLClient(sql_cfg)
         cli.connect()
+        # Validate the fallback connection as well.
+        cur = cli.cursor()
+        cur.execute("SELECT 1")
+        cur.fetchone()
+        cur.close()
         return cli
 
 

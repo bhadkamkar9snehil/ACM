@@ -100,8 +100,8 @@ from core.observability import (
 _OBSERVABILITY_AVAILABLE = True
 
 from core.sql_client import (
-    SQLClient,
     execute_with_deadlock_retry,
+    connect_acm_sql,
     resolve_equipment_id_required,
     load_config_required_from_sql,
     start_acm_run,
@@ -282,12 +282,9 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
     # ========================================================================
     Console.info("Connecting to SQL Server...", component="SQL")
     try:
-        sql_client = SQLClient.from_ini('acm')
-        sql_client.connect()
-        # Quick health check.
-        _cur = sql_client.cursor()
-        _cur.execute("SELECT 1")
-        _cur.fetchone()
+        sql_client = connect_acm_sql(cfg={}, logger=Console)
+        if sql_client is None:
+            raise RuntimeError("connect_acm_sql returned None")
         Console.ok("SQL connection established", component="SQL")
     except Exception as e:
         Console.error(f"SQL connection failed: {e}", component="SQL",
