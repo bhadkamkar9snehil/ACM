@@ -4159,6 +4159,54 @@ def apply_transient_state_labels(
     return frame, transient_counts
 
 
+@dataclass
+class RegimePostprocessResult:
+    """Result bundle for regime health and transient post-processing."""
+    frame: pd.DataFrame
+    transient_counts: Dict[str, int]
+
+
+def run_regime_postprocess_stage(
+    *,
+    frame: pd.DataFrame,
+    score_data: pd.DataFrame,
+    regime_model: Optional[RegimeModel],
+    regime_quality_ok: bool,
+    cfg: Dict[str, Any],
+    output_manager: Optional[Any] = None,
+    logger: Any = Console,
+) -> RegimePostprocessResult:
+    """
+    Apply regime health labels, transient labels, and emit consolidated regime log.
+    """
+    frame, _ = apply_regime_health_labels(
+        frame=frame,
+        regime_model=regime_model,
+        regime_quality_ok=regime_quality_ok,
+        cfg=cfg,
+        output_manager=output_manager,
+        logger=logger,
+    )
+
+    frame, transient_counts = apply_transient_state_labels(
+        frame=frame,
+        score_data=score_data,
+        cfg=cfg,
+        logger=logger,
+    )
+
+    state_counts = frame["regime_state"].value_counts().to_dict() if "regime_state" in frame.columns else {}
+    logger.info(
+        f"Regime: quality_ok={regime_quality_ok} | states={state_counts} | transient={transient_counts}",
+        component="REGIME",
+    )
+
+    return RegimePostprocessResult(
+        frame=frame,
+        transient_counts=transient_counts,
+    )
+
+
 def write_regime_occupancy_and_transitions(
     score_regime_labels: Optional[np.ndarray],
     frame: pd.DataFrame,

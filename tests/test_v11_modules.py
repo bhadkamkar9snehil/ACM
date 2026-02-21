@@ -276,6 +276,28 @@ class TestModelLifecycleModule:
         assert deprecated.maturity == MaturityState.DEPRECATED
         assert deprecated.deprecated_at is not None
 
+    def test_resolve_maturity_for_regime_stage_overrides_converged_on_refit(self, monkeypatch):
+        """Regime-stage maturity helper should downgrade CONVERGED to LEARNING when refit is requested."""
+        from core import model_lifecycle as ml
+        from core.model_lifecycle import ModelState, MaturityState
+
+        state = ModelState(
+            equip_id=1,
+            version=3,
+            maturity=MaturityState.CONVERGED,
+            created_at=datetime.now(),
+            training_rows=1000,
+            training_days=12.0,
+        )
+
+        monkeypatch.setattr(ml, "load_model_state_safe", lambda sql_client, equip_id, logger=None: state)
+        maturity = ml.resolve_maturity_for_regime_stage(
+            sql_client=object(),
+            equip_id=1,
+            refit_requested=True,
+        )
+        assert maturity == "LEARNING"
+
 
 class TestRegimesUnknownLabel:
     """Test UNKNOWN_REGIME_LABEL in regimes.py."""
@@ -1350,6 +1372,39 @@ class TestRefactorHelpers:
         assert result.score_regime_labels is not None
         assert recorded == [("FD_FAN", 1, "regime_1")]
         assert len(definitions_calls) == 1
+
+    def test_run_regime_postprocess_stage_composes_health_and_transient(self, monkeypatch):
+        """Regime postprocess stage should compose health and transient helpers and return final frame."""
+        from core import regimes
+
+        idx = pd.date_range("2026-01-01", periods=2, freq="h")
+        base_frame = pd.DataFrame({"regime_label": [0, 1], "fused": [0.1, 0.2]}, index=idx)
+
+        def _fake_apply_health_labels(**kwargs):
+            frame = kwargs["frame"].copy()
+            frame["regime_state"] = ["steady", "transient"]
+            return frame, {0: {"mean": 0.1}}
+
+        def _fake_apply_transient_labels(**kwargs):
+            frame = kwargs["frame"].copy()
+            frame["transient_state"] = ["steady", "startup"]
+            return frame, {"steady": 1, "startup": 1}
+
+        monkeypatch.setattr(regimes, "apply_regime_health_labels", _fake_apply_health_labels)
+        monkeypatch.setattr(regimes, "apply_transient_state_labels", _fake_apply_transient_labels)
+
+        result = regimes.run_regime_postprocess_stage(
+            frame=base_frame,
+            score_data=base_frame[["fused"]],
+            regime_model=None,
+            regime_quality_ok=True,
+            cfg={},
+            output_manager=None,
+        )
+
+        assert "regime_state" in result.frame.columns
+        assert "transient_state" in result.frame.columns
+        assert result.transient_counts == {"steady": 1, "startup": 1}
 
     def test_release_persist_memory_clears_raw_frames_and_detector_models(self):
         """Output manager persist cleanup helper should clear raw frames and detector model pointers."""

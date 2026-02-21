@@ -846,28 +846,17 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
             )
 
         # Regime health labeling and transient detection.
-        transient_counts: Dict[str, int] = {}
-        frame, _ = regimes.apply_regime_health_labels(
-            frame=frame,
-            regime_model=regime_model,
-            regime_quality_ok=regime_quality_ok,
-            cfg=cfg,
-            output_manager=output_manager,
-            logger=Console,
-        )
-        
-        # Transient state detection.
-        with T.section("regimes.transient_detection"):
-            frame, transient_counts = regimes.apply_transient_state_labels(
+        with T.section("regimes.postprocess"):
+            regime_post = regimes.run_regime_postprocess_stage(
                 frame=frame,
-                score_data=score,  # Use original score data for ROC calculation.
+                score_data=score,
+                regime_model=regime_model,
+                regime_quality_ok=regime_quality_ok,
                 cfg=cfg,
+                output_manager=output_manager,
                 logger=Console,
             )
-        
-        # Consolidated regime/transient log.
-        state_counts = frame["regime_state"].value_counts().to_dict() if "regime_state" in frame.columns else {}
-        Console.info(f"Regime: quality_ok={regime_quality_ok} | states={state_counts} | transient={transient_counts}", component="REGIME")
+            frame = regime_post.frame
 
         # ===== Autonomous parameter tuning =====
         # Delegated to model_evaluation.auto_tune_parameters().
