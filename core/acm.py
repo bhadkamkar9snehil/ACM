@@ -154,8 +154,13 @@ def _configure_logging(logging_cfg, args):
 # Kept here for tight integration with run orchestration.
 # =======================
 def _continuous_learning_enabled(cfg: Dict[str, Any]) -> bool:
-    """Return True if continuous learning is enabled in config."""
-    return cfg.get("continuous_learning", {}).get("enabled", False)
+    """
+    Continuous learning is a core ACM capability and is always enabled.
+
+    The legacy config toggle is intentionally ignored.
+    """
+    _ = cfg
+    return True
 
 def _detect_mode(cfg: Optional[Dict[str, Any]] = None) -> str:
     """
