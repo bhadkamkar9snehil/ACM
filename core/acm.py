@@ -1749,22 +1749,13 @@ def main() -> None:
                 output_manager.write_seasonal_patterns_from_detected(seasonal_patterns)
 
             # ===== Memory cleanup: free large objects no longer needed =====
-            # After persist, raw sensor data and training matrices are no longer needed.
-            try:
-                del raw_train, raw_score
-            except NameError:
-                pass  # Already deleted or never created
-            try:
-                # Free detector model internals (keep thin wrappers for reference).
-                # Do not set detectors to None; they are still used by write_sql_artifacts.
-                if iforest_detector is not None and hasattr(iforest_detector, 'model'):
-                    iforest_detector.model = None  # IForest models are large (100+ trees)
-                if omr_detector is not None and hasattr(omr_detector, 'model'):
-                    omr_detector.model = None  # OMR models can be large
-                # Keep pca_detector intact; it's needed for PCA loadings.
-            except Exception:
-                pass
-            gc.collect()
+            # After persist, raw sensor data and selected detector internals are no longer needed.
+            raw_train, raw_score = output_manager.release_persist_memory(
+                raw_train=raw_train,
+                raw_score=raw_score,
+                iforest_detector=iforest_detector,
+                omr_detector=omr_detector,
+            )
 
             # === Analytics generation ===
             with T.section("outputs.comprehensive_analytics"):

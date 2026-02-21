@@ -627,3 +627,39 @@ Validation completed:
 Main branch status:
 1. `main` was not touched.
 2. Work was delivered through phase branch to integration branch only.
+
+### 2026-02-21 - Phase 4 Extraction: Persist Memory Cleanup and Runtime Validation
+
+Branch flow used:
+1. `integration/acm-single-entrypoint` (in-progress refactor branch for this slice)
+
+Completed:
+1. Extracted persist-phase memory cleanup call from `core/acm.py` into `core/output_manager.py` using `OutputManager.release_persist_memory(...)`.
+2. Removed inline cleanup block in `core/acm.py` for raw frame deletion and detector model pointer cleanup.
+3. Added test coverage for the extracted helper in `tests/test_v11_modules.py`:
+   - `test_release_persist_memory_clears_raw_frames_and_detector_models`
+4. Fixed observability stack scrape wiring so Prometheus scrapes Alloy correctly:
+   - `install/observability/prometheus.yaml` target changed from `host.docker.internal:12345` to `acm-alloy:9099`.
+5. Verified Fleet Overview palette compatibility remains valid:
+   - `python skills/grafana-dashboard-ops/scripts/validate_grafana_palette_modes.py`
+
+Validation completed:
+1. `pytest tests/test_v11_modules.py -q` passed (34 tests).
+2. `python -c "from core.acm import main; print(callable(main))"` returned `True`.
+3. Batch runner execution on wind turbines:
+   - `WFA_TURBINE_0` completed with ACM run finalized `outcome=OK`
+   - `WFA_TURBINE_10` completed with ACM run finalized `outcome=OK`
+   - `WFA_TURBINE_13` completed with ACM run finalized `outcome=OK`
+   - `WFA_TURBINE_11` precheck failed due no historian data (expected runner error path)
+4. Grafana dashboard query validation:
+   - `python skills/grafana-dashboard-ops/scripts/validate_acm_dashboards.py` passed
+   - `python skills/grafana-dashboard-ops/scripts/validate_grafana_api_queries.py` passed (`checked=58 errors=0`)
+5. Loki verification:
+   - Observed finalized run logs for the three successful ACM RunIDs.
+6. Prometheus verification:
+   - Before fix: `prom_targets_up=1/2` (`alloy` target down)
+   - After fix and restart: `prom_targets_up=2/2`.
+
+Main branch status:
+1. `main` was not touched.
+2. Work remains on refactor integration branch.

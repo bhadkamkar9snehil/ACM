@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import time
 import math
+import gc
 import threading
 from pathlib import Path
 from contextlib import contextmanager, nullcontext
@@ -3123,6 +3124,31 @@ class OutputManager:
                 error=str(e)[:200],
             )
             return 0
+
+    def release_persist_memory(
+        self,
+        raw_train: Optional[pd.DataFrame],
+        raw_score: Optional[pd.DataFrame],
+        iforest_detector: Optional[Any] = None,
+        omr_detector: Optional[Any] = None,
+    ) -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame]]:
+        """
+        Free large persist-phase objects after SQL writes are complete.
+
+        Returns:
+            Tuple of cleared (raw_train, raw_score) placeholders.
+        """
+        raw_train = None
+        raw_score = None
+
+        if iforest_detector is not None and hasattr(iforest_detector, "model"):
+            iforest_detector.model = None
+
+        if omr_detector is not None and hasattr(omr_detector, "model"):
+            omr_detector.model = None
+
+        gc.collect()
+        return raw_train, raw_score
     
     
     def get_stats(self) -> Dict[str, Any]:

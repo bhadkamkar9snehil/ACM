@@ -600,6 +600,33 @@ class TestRefactorHelpers:
         assert out_frame.equals(frame)
         assert counts == {}
 
+    def test_release_persist_memory_clears_raw_frames_and_detector_models(self):
+        """Output manager persist cleanup helper should clear raw frames and detector model pointers."""
+        from core.output_manager import OutputManager
+
+        class _Detector:
+            def __init__(self):
+                self.model = object()
+
+        output_manager = OutputManager.__new__(OutputManager)
+        idx = pd.date_range("2026-01-01", periods=2, freq="h")
+        raw_train = pd.DataFrame({"sensor": [1.0, 2.0]}, index=idx)
+        raw_score = pd.DataFrame({"sensor": [1.1, 2.1]}, index=idx)
+        iforest_detector = _Detector()
+        omr_detector = _Detector()
+
+        out_train, out_score = output_manager.release_persist_memory(
+            raw_train=raw_train,
+            raw_score=raw_score,
+            iforest_detector=iforest_detector,
+            omr_detector=omr_detector,
+        )
+
+        assert out_train is None
+        assert out_score is None
+        assert iforest_detector.model is None
+        assert omr_detector.model is None
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
