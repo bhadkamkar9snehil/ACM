@@ -5,7 +5,7 @@ module: core.regimes
 source: core/regimes.py
 line_start: 220
 line_end: 237
-generated_at: 2026-02-21T03:35:55+00:00
+generated_at: 2026-02-21T06:33:21+00:00
 tags:
   - acm
   - class

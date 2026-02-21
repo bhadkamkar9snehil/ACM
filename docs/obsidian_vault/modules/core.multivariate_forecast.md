@@ -2,7 +2,7 @@
 type: module
 module: core.multivariate_forecast
 source: core/multivariate_forecast.py
-generated_at: 2026-02-21T03:35:55+00:00
+generated_at: 2026-02-21T06:33:21+00:00
 tags:
   - acm
   - module

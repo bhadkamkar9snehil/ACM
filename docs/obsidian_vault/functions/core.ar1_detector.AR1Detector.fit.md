@@ -5,7 +5,7 @@ module: core.ar1_detector
 source: core/ar1_detector.py
 line_start: 58
 line_end: 171
-generated_at: 2026-02-21T03:35:55+00:00
+generated_at: 2026-02-21T06:33:21+00:00
 tags:
   - acm
   - method

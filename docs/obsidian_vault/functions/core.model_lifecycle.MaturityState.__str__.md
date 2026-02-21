@@ -3,9 +3,9 @@ type: method
 id: core.model_lifecycle.MaturityState.__str__
 module: core.model_lifecycle
 source: core/model_lifecycle.py
-line_start: 46
-line_end: 47
-generated_at: 2026-02-21T03:35:55+00:00
+line_start: 47
+line_end: 48
+generated_at: 2026-02-21T06:33:21+00:00
 tags:
   - acm
   - method
@@ -15,7 +15,7 @@ tags:
 
 Defined in: [[modules/core.model_lifecycle|core.model_lifecycle]]
 
-Source: `core/model_lifecycle.py:46`
+Source: `core/model_lifecycle.py:47`
 
 Kind: `method`
 

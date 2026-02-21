@@ -3,9 +3,9 @@ type: function
 id: core.acm._detect_mode
 module: core.acm
 source: core/acm.py
-line_start: 365
-line_end: 371
-generated_at: 2026-02-21T03:35:55+00:00
+line_start: 350
+line_end: 356
+generated_at: 2026-02-21T06:33:21+00:00
 tags:
   - acm
   - function
@@ -15,7 +15,7 @@ tags:
 
 Defined in: [[modules/core.acm|core.acm]]
 
-Source: `core/acm.py:365`
+Source: `core/acm.py:350`
 
 Kind: `function`
 

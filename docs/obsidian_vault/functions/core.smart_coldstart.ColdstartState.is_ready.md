@@ -5,7 +5,7 @@ module: core.smart_coldstart
 source: core/smart_coldstart.py
 line_start: 70
 line_end: 72
-generated_at: 2026-02-21T03:35:55+00:00
+generated_at: 2026-02-21T06:33:21+00:00
 tags:
   - acm
   - method

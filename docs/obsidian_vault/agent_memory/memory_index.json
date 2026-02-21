@@ -1,11 +1,11 @@
 {
-  "generated_at": "2026-02-21T03:41:53+00:00",
+  "generated_at": "2026-02-21T06:33:21+00:00",
   "module_count": 36,
   "modules": [
     {
       "module_name": "core.acm",
       "source_path": "core/acm.py",
-      "symbol_count": 18,
+      "symbol_count": 13,
       "core_import_count": 15,
       "core_imports": [
         "core.adaptive_thresholds",
@@ -28,7 +28,7 @@
     {
       "module_name": "core.adaptive_thresholds",
       "source_path": "core/adaptive_thresholds.py",
-      "symbol_count": 11,
+      "symbol_count": 12,
       "core_import_count": 1,
       "core_imports": [
         "core.fuse"
@@ -110,7 +110,7 @@
     {
       "module_name": "core.drift",
       "source_path": "core/drift.py",
-      "symbol_count": 10,
+      "symbol_count": 12,
       "core_import_count": 1,
       "core_imports": [
         "core.fuse"
@@ -190,7 +190,7 @@
     {
       "module_name": "core.model_evaluation",
       "source_path": "core/model_evaluation.py",
-      "symbol_count": 11,
+      "symbol_count": 12,
       "core_import_count": 1,
       "core_imports": [
         "core.observability"
@@ -199,7 +199,7 @@
     {
       "module_name": "core.model_lifecycle",
       "source_path": "core/model_lifecycle.py",
-      "symbol_count": 17,
+      "symbol_count": 20,
       "core_import_count": 1,
       "core_imports": [
         "core.observability"
@@ -208,7 +208,7 @@
     {
       "module_name": "core.model_persistence",
       "source_path": "core/model_persistence.py",
-      "symbol_count": 34,
+      "symbol_count": 38,
       "core_import_count": 1,
       "core_imports": [
         "core.observability"
@@ -260,14 +260,14 @@
     {
       "module_name": "core.pipeline_types",
       "source_path": "core/pipeline_types.py",
-      "symbol_count": 21,
+      "symbol_count": 23,
       "core_import_count": 0,
       "core_imports": []
     },
     {
       "module_name": "core.regimes",
       "source_path": "core/regimes.py",
-      "symbol_count": 57,
+      "symbol_count": 59,
       "core_import_count": 1,
       "core_imports": [
         "core.observability"
@@ -303,7 +303,7 @@
     {
       "module_name": "core.seasonality",
       "source_path": "core/seasonality.py",
-      "symbol_count": 19,
+      "symbol_count": 20,
       "core_import_count": 0,
       "core_imports": []
     },

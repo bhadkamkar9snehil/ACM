@@ -5,7 +5,7 @@ module: core.rul_estimator
 source: core/rul_estimator.py
 line_start: 504
 line_end: 552
-generated_at: 2026-02-21T03:35:55+00:00
+generated_at: 2026-02-21T06:33:21+00:00
 tags:
   - acm
   - function

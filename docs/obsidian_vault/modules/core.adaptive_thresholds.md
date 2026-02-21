@@ -2,7 +2,7 @@
 type: module
 module: core.adaptive_thresholds
 source: core/adaptive_thresholds.py
-generated_at: 2026-02-21T03:35:55+00:00
+generated_at: 2026-02-21T06:33:21+00:00
 tags:
   - acm
   - module
@@ -29,3 +29,4 @@ Summary: Adaptive Threshold Calculator for Dynamic FusedZ Thresholds
 - [[functions/core.adaptive_thresholds.AdaptiveThresholdCalculator.calculate_warn_threshold|core.adaptive_thresholds.AdaptiveThresholdCalculator.calculate_warn_threshold]] (line 385, method)
 - [[functions/core.adaptive_thresholds.calculate_thresholds_from_config|core.adaptive_thresholds.calculate_thresholds_from_config]] (line 421, function)
 - [[functions/core.adaptive_thresholds.calculate_and_persist_thresholds|core.adaptive_thresholds.calculate_and_persist_thresholds]] (line 504, function)
+- [[functions/core.adaptive_thresholds.maybe_update_adaptive_thresholds|core.adaptive_thresholds.maybe_update_adaptive_thresholds]] (line 619, function)

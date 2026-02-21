@@ -2,7 +2,7 @@
 type: module
 module: core.pipeline_types
 source: core/pipeline_types.py
-generated_at: 2026-02-21T03:35:55+00:00
+generated_at: 2026-02-21T06:33:21+00:00
 tags:
   - acm
   - module
@@ -39,3 +39,5 @@ Summary: ACM Pipeline Types - v11.8.0
 - [[functions/core.pipeline_types.FeatureMatrix.signature|core.pipeline_types.FeatureMatrix.signature]] (line 455, method)
 - [[functions/core.pipeline_types.GuardrailResult|core.pipeline_types.GuardrailResult]] (line 471, class)
 - [[functions/core.pipeline_types.run_data_guardrails|core.pipeline_types.run_data_guardrails]] (line 481, function)
+- [[functions/core.pipeline_types.run_data_guardrails_safe|core.pipeline_types.run_data_guardrails_safe]] (line 602, function)
+- [[functions/core.pipeline_types.validate_data_contract_at_entry|core.pipeline_types.validate_data_contract_at_entry]] (line 640, function)

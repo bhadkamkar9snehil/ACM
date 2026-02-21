@@ -3,9 +3,9 @@ type: function
 id: core.model_lifecycle.get_active_model_dict
 module: core.model_lifecycle
 source: core/model_lifecycle.py
-line_start: 462
-line_end: 503
-generated_at: 2026-02-21T03:35:55+00:00
+line_start: 676
+line_end: 717
+generated_at: 2026-02-21T06:33:21+00:00
 tags:
   - acm
   - function
@@ -15,7 +15,7 @@ tags:
 
 Defined in: [[modules/core.model_lifecycle|core.model_lifecycle]]
 
-Source: `core/model_lifecycle.py:462`
+Source: `core/model_lifecycle.py:676`
 
 Kind: `function`
 

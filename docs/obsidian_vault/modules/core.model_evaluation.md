@@ -2,7 +2,7 @@
 type: module
 module: core.model_evaluation
 source: core/model_evaluation.py
-generated_at: 2026-02-21T03:35:55+00:00
+generated_at: 2026-02-21T06:33:21+00:00
 tags:
   - acm
   - module
@@ -28,4 +28,5 @@ Summary: Autonomous Model Re-evaluation Module
 - [[functions/core.model_evaluation.ModelQualityMonitor.create_quality_report|core.model_evaluation.ModelQualityMonitor.create_quality_report]] (line 298, method)
 - [[functions/core.model_evaluation.assess_model_quality|core.model_evaluation.assess_model_quality]] (line 324, function)
 - [[functions/core.model_evaluation.evaluate_force_retrain_triggers|core.model_evaluation.evaluate_force_retrain_triggers]] (line 384, function)
-- [[functions/core.model_evaluation.auto_tune_parameters|core.model_evaluation.auto_tune_parameters]] (line 486, function)
+- [[functions/core.model_evaluation.evaluate_and_maybe_refit_cached_models|core.model_evaluation.evaluate_and_maybe_refit_cached_models]] (line 486, function)
+- [[functions/core.model_evaluation.auto_tune_parameters|core.model_evaluation.auto_tune_parameters]] (line 572, function)

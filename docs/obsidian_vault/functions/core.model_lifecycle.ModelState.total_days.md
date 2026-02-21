@@ -3,9 +3,9 @@ type: method
 id: core.model_lifecycle.ModelState.total_days
 module: core.model_lifecycle
 source: core/model_lifecycle.py
-line_start: 171
-line_end: 173
-generated_at: 2026-02-21T03:35:55+00:00
+line_start: 172
+line_end: 174
+generated_at: 2026-02-21T06:33:21+00:00
 tags:
   - acm
   - method
@@ -15,7 +15,7 @@ tags:
 
 Defined in: [[modules/core.model_lifecycle|core.model_lifecycle]]
 
-Source: `core/model_lifecycle.py:171`
+Source: `core/model_lifecycle.py:172`
 
 Kind: `method`
 

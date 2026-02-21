@@ -3,9 +3,9 @@ type: function
 id: core.acm._namespace_to_cli_args
 module: core.acm
 source: core/acm.py
-line_start: 464
-line_end: 488
-generated_at: 2026-02-21T03:35:55+00:00
+line_start: 418
+line_end: 442
+generated_at: 2026-02-21T06:33:21+00:00
 tags:
   - acm
   - function
@@ -15,7 +15,7 @@ tags:
 
 Defined in: [[modules/core.acm|core.acm]]
 
-Source: `core/acm.py:464`
+Source: `core/acm.py:418`
 
 Kind: `function`
 

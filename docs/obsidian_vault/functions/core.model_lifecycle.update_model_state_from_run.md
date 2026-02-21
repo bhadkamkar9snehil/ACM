@@ -3,9 +3,9 @@ type: function
 id: core.model_lifecycle.update_model_state_from_run
 module: core.model_lifecycle
 source: core/model_lifecycle.py
-line_start: 400
-line_end: 459
-generated_at: 2026-02-21T03:35:55+00:00
+line_start: 401
+line_end: 460
+generated_at: 2026-02-21T06:33:21+00:00
 tags:
   - acm
   - function
@@ -15,7 +15,7 @@ tags:
 
 Defined in: [[modules/core.model_lifecycle|core.model_lifecycle]]
 
-Source: `core/model_lifecycle.py:400`
+Source: `core/model_lifecycle.py:401`
 
 Kind: `function`
 

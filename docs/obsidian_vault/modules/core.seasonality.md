@@ -2,7 +2,7 @@
 type: module
 module: core.seasonality
 source: core/seasonality.py
-generated_at: 2026-02-21T03:35:55+00:00
+generated_at: 2026-02-21T06:33:21+00:00
 tags:
   - acm
   - module
@@ -37,3 +37,4 @@ Summary: Seasonality Handler for ACM v11.0.0 (P5.9)
 - [[functions/core.seasonality.SeasonalityHandler.has_patterns|core.seasonality.SeasonalityHandler.has_patterns]] (line 464, method)
 - [[functions/core.seasonality.SeasonalityHandler.get_pattern_strength|core.seasonality.SeasonalityHandler.get_pattern_strength]] (line 478, method)
 - [[functions/core.seasonality.detect_and_adjust|core.seasonality.detect_and_adjust]] (line 498, function)
+- [[functions/core.seasonality.detect_and_adjust_safe|core.seasonality.detect_and_adjust_safe]] (line 562, function)
