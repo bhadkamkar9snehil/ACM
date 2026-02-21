@@ -1,0 +1,24 @@
+---
+type: function
+id: core.metrics.log_forecast_diagnostics
+module: core.metrics
+source: core/metrics.py
+line_start: 517
+line_end: 534
+generated_at: 2026-02-21T03:35:55+00:00
+tags:
+  - acm
+  - function
+---
+
+# core.metrics.log_forecast_diagnostics
+
+Defined in: [[modules/core.metrics|core.metrics]]
+
+Source: `core/metrics.py:517`
+
+Kind: `function`
+
+Signature: `log_forecast_diagnostics(diagnostics: Dict[str, any], prefix: str='[ForecastDiag]')`
+
+Summary: Log forecast diagnostics summary to console.

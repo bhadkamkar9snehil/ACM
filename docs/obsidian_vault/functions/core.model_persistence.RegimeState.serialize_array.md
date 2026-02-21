@@ -1,0 +1,24 @@
+---
+type: method
+id: core.model_persistence.RegimeState.serialize_array
+module: core.model_persistence
+source: core/model_persistence.py
+line_start: 348
+line_end: 354
+generated_at: 2026-02-21T03:35:55+00:00
+tags:
+  - acm
+  - method
+---
+
+# core.model_persistence.RegimeState.serialize_array
+
+Defined in: [[modules/core.model_persistence|core.model_persistence]]
+
+Source: `core/model_persistence.py:348`
+
+Kind: `method`
+
+Signature: `serialize_array(arr: np.ndarray)`
+
+Summary: Serialize numpy array to JSON string.

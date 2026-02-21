@@ -1,0 +1,24 @@
+---
+type: method
+id: core.fuse.ScoreCalibrator.transform_with_raw
+module: core.fuse
+source: core/fuse.py
+line_start: 1255
+line_end: 1293
+generated_at: 2026-02-21T03:35:55+00:00
+tags:
+  - acm
+  - method
+---
+
+# core.fuse.ScoreCalibrator.transform_with_raw
+
+Defined in: [[modules/core.fuse|core.fuse]]
+
+Source: `core/fuse.py:1255`
+
+Kind: `method`
+
+Signature: `transform_with_raw(self, x: np.ndarray, regime_labels: Optional[np.ndarray]=None)`
+
+Summary: P3-FIX (v11.1.6): Return both clipped (for UI) and unclipped (for analytics) z-scores.

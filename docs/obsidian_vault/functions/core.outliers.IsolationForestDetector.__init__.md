@@ -1,0 +1,24 @@
+---
+type: method
+id: core.outliers.IsolationForestDetector.__init__
+module: core.outliers
+source: core/outliers.py
+line_start: 39
+line_end: 58
+generated_at: 2026-02-21T03:35:55+00:00
+tags:
+  - acm
+  - method
+---
+
+# core.outliers.IsolationForestDetector.__init__
+
+Defined in: [[modules/core.outliers|core.outliers]]
+
+Source: `core/outliers.py:39`
+
+Kind: `method`
+
+Signature: `__init__(self, if_cfg: Dict[str, Any])`
+
+Summary: Initializes the detector with Isolation Forest configuration.

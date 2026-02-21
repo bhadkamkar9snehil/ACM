@@ -1,0 +1,24 @@
+---
+type: class
+id: core.forecast_engine.RegimeConditionedForecaster
+module: core.forecast_engine
+source: core/forecast_engine.py
+line_start: 1719
+line_end: 2513
+generated_at: 2026-02-21T03:35:55+00:00
+tags:
+  - acm
+  - class
+---
+
+# core.forecast_engine.RegimeConditionedForecaster
+
+Defined in: [[modules/core.forecast_engine|core.forecast_engine]]
+
+Source: `core/forecast_engine.py:1719`
+
+Kind: `class`
+
+Signature: `RegimeConditionedForecaster`
+
+Summary: Extension to ForecastEngine providing regime-aware forecasting.

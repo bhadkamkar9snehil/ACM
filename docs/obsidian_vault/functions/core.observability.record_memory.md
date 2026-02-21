@@ -1,0 +1,24 @@
+---
+type: function
+id: core.observability.record_memory
+module: core.observability
+source: core/observability.py
+line_start: 1915
+line_end: 1953
+generated_at: 2026-02-21T03:35:55+00:00
+tags:
+  - acm
+  - function
+---
+
+# core.observability.record_memory
+
+Defined in: [[modules/core.observability|core.observability]]
+
+Source: `core/observability.py:1915`
+
+Kind: `function`
+
+Signature: `record_memory(current_mb: float, peak_mb: float=0.0, equipment: str='', section: str='', run_id: str='')`
+
+Summary: Record memory usage metrics.
