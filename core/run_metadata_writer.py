@@ -12,6 +12,7 @@ Called at the end of every ACM run (success or failure).
 
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+from dataclasses import dataclass
 import json
 import pandas as pd
 import numpy as np
@@ -693,105 +694,108 @@ def finalize_run_with_metadata(
             pass
 
 
-def finalize_pipeline_teardown(
-    *,
-    console: Any,
-    equip: str,
-    run_id: Optional[str],
-    win_start: Optional[pd.Timestamp],
-    win_end: Optional[pd.Timestamp],
-    outcome: str,
-    frame: Optional[pd.DataFrame],
-    episodes: Optional[pd.DataFrame],
-    score_out: Optional[Dict[str, Any]],
-    regime_quality_ok: bool,
-    model_state: Optional[Any],
-    rows_read: int,
-    train: Optional[pd.DataFrame],
-    degradations: Optional[List[str]],
-    refit_requested: bool,
-    timer: Optional[Any],
-    sql_client: Any,
-    output_manager: Optional[Any],
-    equip_id: int,
-    equip_name: str,
-    started_at: datetime,
-    rows_written: int,
-    err_json: Optional[str],
-    meta: Optional[Any],
-    config_signature: str,
-    per_regime_enabled: bool,
-    regime_count: int,
-    observability_enabled: bool,
-    record_data_quality_fn: Optional[Any],
-    record_run_fn: Optional[Any],
-    record_batch_processed_fn: Optional[Any],
-    record_health_score_fn: Optional[Any],
-    record_error_fn: Optional[Any],
-    span_ctx: Optional[Any],
-    root_span: Optional[Any],
-    close_run_span_fn: Any,
-    shutdown_run_observability_fn: Any,
-) -> None:
+@dataclass
+class PipelineTeardownState:
+    """Typed teardown payload passed from ACM orchestrator."""
+    console: Any
+    equip: str
+    run_id: Optional[str]
+    win_start: Optional[pd.Timestamp]
+    win_end: Optional[pd.Timestamp]
+    outcome: str
+    frame: Optional[pd.DataFrame]
+    episodes: Optional[pd.DataFrame]
+    score_out: Optional[Dict[str, Any]]
+    regime_quality_ok: bool
+    model_state: Optional[Any]
+    rows_read: int
+    train: Optional[pd.DataFrame]
+    degradations: Optional[List[str]]
+    refit_requested: bool
+    timer: Optional[Any]
+    sql_client: Any
+    output_manager: Optional[Any]
+    equip_id: int
+    equip_name: str
+    started_at: datetime
+    rows_written: int
+    err_json: Optional[str]
+    meta: Optional[Any]
+    config_signature: str
+    per_regime_enabled: bool
+    regime_count: int
+    observability_enabled: bool
+    record_data_quality_fn: Optional[Any]
+    record_run_fn: Optional[Any]
+    record_batch_processed_fn: Optional[Any]
+    record_health_score_fn: Optional[Any]
+    record_error_fn: Optional[Any]
+    span_ctx: Optional[Any]
+    root_span: Optional[Any]
+    close_run_span_fn: Any
+    shutdown_run_observability_fn: Any
+
+
+def finalize_pipeline_teardown(state: PipelineTeardownState) -> None:
     """
     Consolidated teardown for summary, SQL finalization, and observability shutdown.
     """
     emit_batch_summary(
-        console=console,
-        equip=equip,
-        run_id=run_id,
-        win_start=win_start,
-        win_end=win_end,
-        outcome=outcome,
-        frame=frame,
-        episodes=episodes,
-        score_out=score_out,
-        regime_quality_ok=regime_quality_ok,
-        model_state=model_state,
-        rows_read=rows_read,
-        train=train,
-        degradations=degradations,
-        refit_requested=refit_requested,
-        timer=timer,
+        console=state.console,
+        equip=state.equip,
+        run_id=state.run_id,
+        win_start=state.win_start,
+        win_end=state.win_end,
+        outcome=state.outcome,
+        frame=state.frame,
+        episodes=state.episodes,
+        score_out=state.score_out,
+        regime_quality_ok=state.regime_quality_ok,
+        model_state=state.model_state,
+        rows_read=state.rows_read,
+        train=state.train,
+        degradations=state.degradations,
+        refit_requested=state.refit_requested,
+        timer=state.timer,
     )
 
     finalize_run_with_metadata(
-        sql_client=sql_client,
-        output_manager=output_manager,
-        run_id=run_id,
-        equip_id=int(equip_id),
-        equip_name=equip_name,
-        started_at=started_at,
-        outcome=outcome,
-        rows_read=rows_read,
-        rows_written=rows_written,
-        err_json=err_json,
-        frame=frame,
-        train=train,
-        episodes=episodes,
-        meta=meta,
-        refit_requested=refit_requested,
-        config_signature=config_signature,
-        per_regime_enabled=per_regime_enabled,
-        regime_count=regime_count,
-        observability_enabled=observability_enabled,
-        record_data_quality_fn=record_data_quality_fn,
-        record_run_fn=record_run_fn,
-        record_batch_processed_fn=record_batch_processed_fn,
-        record_health_score_fn=record_health_score_fn,
-        record_error_fn=record_error_fn,
-        logger=console,
+        sql_client=state.sql_client,
+        output_manager=state.output_manager,
+        run_id=state.run_id,
+        equip_id=int(state.equip_id),
+        equip_name=state.equip_name,
+        started_at=state.started_at,
+        outcome=state.outcome,
+        rows_read=state.rows_read,
+        rows_written=state.rows_written,
+        err_json=state.err_json,
+        frame=state.frame,
+        train=state.train,
+        episodes=state.episodes,
+        meta=state.meta,
+        refit_requested=state.refit_requested,
+        config_signature=state.config_signature,
+        per_regime_enabled=state.per_regime_enabled,
+        regime_count=state.regime_count,
+        observability_enabled=state.observability_enabled,
+        record_data_quality_fn=state.record_data_quality_fn,
+        record_run_fn=state.record_run_fn,
+        record_batch_processed_fn=state.record_batch_processed_fn,
+        record_health_score_fn=state.record_health_score_fn,
+        record_error_fn=state.record_error_fn,
+        logger=state.console,
     )
 
-    close_run_span_fn(
-        span_ctx=span_ctx,
-        root_span=root_span,
-        outcome=outcome,
-        rows_read=rows_read,
-        rows_written=rows_written,
+    state.close_run_span_fn(
+        span_ctx=state.span_ctx,
+        root_span=state.root_span,
+        outcome=state.outcome,
+        rows_read=state.rows_read,
+        rows_written=state.rows_written,
     )
 
-    shutdown_run_observability_fn(observability_enabled)
+    state.shutdown_run_observability_fn(state.observability_enabled)
 
 
 
