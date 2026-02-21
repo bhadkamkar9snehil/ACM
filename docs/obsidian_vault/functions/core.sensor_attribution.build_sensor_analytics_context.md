@@ -9,7 +9,7 @@ line_end: 949
 
 # core.sensor_attribution.build_sensor_analytics_context
 
-Defined in: [[modules/core.sensor_attribution|core.sensor_attribution]]
+Defined in: [[modules/core.sensor_attribution]]
 
 Source: `core/sensor_attribution.py:892`
 

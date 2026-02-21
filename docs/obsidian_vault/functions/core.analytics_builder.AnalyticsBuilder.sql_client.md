@@ -9,7 +9,7 @@ line_end: 122
 
 # core.analytics_builder.AnalyticsBuilder.sql_client
 
-Defined in: [[modules/core.analytics_builder|core.analytics_builder]]
+Defined in: [[modules/core.analytics_builder]]
 
 Source: `core/analytics_builder.py:121`
 

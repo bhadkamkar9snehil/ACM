@@ -9,7 +9,7 @@ line_end: 88
 
 # core.omr.OMRModel.to_dict
 
-Defined in: [[modules/core.omr|core.omr]]
+Defined in: [[modules/core.omr]]
 
 Source: `core/omr.py:52`
 

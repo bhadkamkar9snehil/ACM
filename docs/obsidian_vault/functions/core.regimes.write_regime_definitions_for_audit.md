@@ -9,7 +9,7 @@ line_end: 4053
 
 # core.regimes.write_regime_definitions_for_audit
 
-Defined in: [[modules/core.regimes|core.regimes]]
+Defined in: [[modules/core.regimes]]
 
 Source: `core/regimes.py:4001`
 

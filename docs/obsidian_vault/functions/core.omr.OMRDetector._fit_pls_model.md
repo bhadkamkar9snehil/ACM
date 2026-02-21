@@ -9,7 +9,7 @@ line_end: 266
 
 # core.omr.OMRDetector._fit_pls_model
 
-Defined in: [[modules/core.omr|core.omr]]
+Defined in: [[modules/core.omr]]
 
 Source: `core/omr.py:261`
 

@@ -9,7 +9,7 @@ line_end: 68
 
 # core.data_loader._cfg_get
 
-Defined in: [[modules/core.data_loader|core.data_loader]]
+Defined in: [[modules/core.data_loader]]
 
 Source: `core/data_loader.py:59`
 

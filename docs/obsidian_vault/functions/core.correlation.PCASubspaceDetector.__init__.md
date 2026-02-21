@@ -9,7 +9,7 @@ line_end: 79
 
 # core.correlation.PCASubspaceDetector.__init__
 
-Defined in: [[modules/core.correlation|core.correlation]]
+Defined in: [[modules/core.correlation]]
 
 Source: `core/correlation.py:71`
 

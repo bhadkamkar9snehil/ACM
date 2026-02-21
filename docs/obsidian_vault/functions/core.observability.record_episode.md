@@ -9,7 +9,7 @@ line_end: 1824
 
 # core.observability.record_episode
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:1819`
 

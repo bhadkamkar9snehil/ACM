@@ -9,7 +9,7 @@ line_end: 1351
 
 # core.fuse.build_threshold_rows
 
-Defined in: [[modules/core.fuse|core.fuse]]
+Defined in: [[modules/core.fuse]]
 
 Source: `core/fuse.py:1321`
 

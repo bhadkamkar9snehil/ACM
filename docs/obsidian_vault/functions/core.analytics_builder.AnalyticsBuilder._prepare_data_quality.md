@@ -9,7 +9,7 @@ line_end: 689
 
 # core.analytics_builder.AnalyticsBuilder._prepare_data_quality
 
-Defined in: [[modules/core.analytics_builder|core.analytics_builder]]
+Defined in: [[modules/core.analytics_builder]]
 
 Source: `core/analytics_builder.py:627`
 

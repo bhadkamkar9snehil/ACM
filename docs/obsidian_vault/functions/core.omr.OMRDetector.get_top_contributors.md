@@ -9,7 +9,7 @@ line_end: 636
 
 # core.omr.OMRDetector.get_top_contributors
 
-Defined in: [[modules/core.omr|core.omr]]
+Defined in: [[modules/core.omr]]
 
 Source: `core/omr.py:613`
 

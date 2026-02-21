@@ -3,15 +3,15 @@ type: method
 id: core.output_manager.OutputManager.write_dataframe
 module: core.output_manager
 source: core/output_manager.py
-line_start: 638
-line_end: 821
+line_start: 639
+line_end: 822
 ---
 
 # core.output_manager.OutputManager.write_dataframe
 
-Defined in: [[modules/core.output_manager|core.output_manager]]
+Defined in: [[modules/core.output_manager]]
 
-Source: `core/output_manager.py:638`
+Source: `core/output_manager.py:639`
 
 Kind: `method`
 

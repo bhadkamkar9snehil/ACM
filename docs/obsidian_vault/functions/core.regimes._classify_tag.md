@@ -9,7 +9,7 @@ line_end: 622
 
 # core.regimes._classify_tag
 
-Defined in: [[modules/core.regimes|core.regimes]]
+Defined in: [[modules/core.regimes]]
 
 Source: `core/regimes.py:580`
 

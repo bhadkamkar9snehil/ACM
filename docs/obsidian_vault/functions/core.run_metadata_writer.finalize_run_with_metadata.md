@@ -3,15 +3,15 @@ type: function
 id: core.run_metadata_writer.finalize_run_with_metadata
 module: core.run_metadata_writer
 source: core/run_metadata_writer.py
-line_start: 528
-line_end: 651
+line_start: 567
+line_end: 690
 ---
 
 # core.run_metadata_writer.finalize_run_with_metadata
 
-Defined in: [[modules/core.run_metadata_writer|core.run_metadata_writer]]
+Defined in: [[modules/core.run_metadata_writer]]
 
-Source: `core/run_metadata_writer.py:528`
+Source: `core/run_metadata_writer.py:567`
 
 Kind: `function`
 

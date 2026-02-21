@@ -9,7 +9,7 @@ line_end: 262
 
 # core.metrics.compute_directional_accuracy
 
-Defined in: [[modules/core.metrics|core.metrics]]
+Defined in: [[modules/core.metrics]]
 
 Source: `core/metrics.py:218`
 

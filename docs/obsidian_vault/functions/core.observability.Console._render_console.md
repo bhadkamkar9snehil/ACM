@@ -9,7 +9,7 @@ line_end: 1256
 
 # core.observability.Console._render_console
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:1253`
 

@@ -3,15 +3,15 @@ type: method
 id: core.fuse.Fuser.__init__
 module: core.fuse
 source: core/fuse.py
-line_start: 1403
-line_end: 1405
+line_start: 1766
+line_end: 1768
 ---
 
 # core.fuse.Fuser.__init__
 
-Defined in: [[modules/core.fuse|core.fuse]]
+Defined in: [[modules/core.fuse]]
 
-Source: `core/fuse.py:1403`
+Source: `core/fuse.py:1766`
 
 Kind: `method`
 

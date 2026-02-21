@@ -9,7 +9,7 @@ line_end: 509
 
 # core.model_persistence.ModelVersionManager.get_latest_version
 
-Defined in: [[modules/core.model_persistence|core.model_persistence]]
+Defined in: [[modules/core.model_persistence]]
 
 Source: `core/model_persistence.py:503`
 

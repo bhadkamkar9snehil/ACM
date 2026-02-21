@@ -9,7 +9,7 @@ line_end: 148
 
 # core.outliers.GMMDetector.__init__
 
-Defined in: [[modules/core.outliers|core.outliers]]
+Defined in: [[modules/core.outliers]]
 
 Source: `core/outliers.py:122`
 

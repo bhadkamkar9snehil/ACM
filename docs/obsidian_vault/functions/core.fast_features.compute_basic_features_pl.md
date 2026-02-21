@@ -9,7 +9,7 @@ line_end: 616
 
 # core.fast_features.compute_basic_features_pl
 
-Defined in: [[modules/core.fast_features|core.fast_features]]
+Defined in: [[modules/core.fast_features]]
 
 Source: `core/fast_features.py:501`
 

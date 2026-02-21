@@ -9,7 +9,7 @@ line_end: 79
 
 # core.confidence.ConfidenceFactors.to_dict
 
-Defined in: [[modules/core.confidence|core.confidence]]
+Defined in: [[modules/core.confidence]]
 
 Source: `core/confidence.py:72`
 

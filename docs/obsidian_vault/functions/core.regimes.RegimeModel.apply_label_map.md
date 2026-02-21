@@ -9,7 +9,7 @@ line_end: 505
 
 # core.regimes.RegimeModel.apply_label_map
 
-Defined in: [[modules/core.regimes|core.regimes]]
+Defined in: [[modules/core.regimes]]
 
 Source: `core/regimes.py:484`
 

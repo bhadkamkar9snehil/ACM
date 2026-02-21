@@ -9,7 +9,7 @@ line_end: 80
 
 # core.metrics.compute_rmse
 
-Defined in: [[modules/core.metrics|core.metrics]]
+Defined in: [[modules/core.metrics]]
 
 Source: `core/metrics.py:55`
 

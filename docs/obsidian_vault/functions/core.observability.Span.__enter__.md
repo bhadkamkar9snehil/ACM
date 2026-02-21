@@ -9,7 +9,7 @@ line_end: 1634
 
 # core.observability.Span.__enter__
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:1563`
 

@@ -9,7 +9,7 @@ line_end: 1878
 
 # core.observability.record_detector_scores
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:1853`
 

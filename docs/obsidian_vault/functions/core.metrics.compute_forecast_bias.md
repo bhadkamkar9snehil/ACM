@@ -9,7 +9,7 @@ line_end: 143
 
 # core.metrics.compute_forecast_bias
 
-Defined in: [[modules/core.metrics|core.metrics]]
+Defined in: [[modules/core.metrics]]
 
 Source: `core/metrics.py:118`
 

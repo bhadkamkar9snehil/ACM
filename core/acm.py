@@ -103,6 +103,7 @@ from core.detector_orchestrator import (
 )
 from core.model_persistence import (
     save_trained_models,
+    persist_calibration_params_safe,
     restore_detectors_from_runtime_cache,
     load_quality_regime_state_if_needed,
     load_and_rebuild_detectors_from_sql_cache,
@@ -1351,196 +1352,51 @@ def main() -> None:
         # Fit calibrators on TRAIN data, transform SCORE data.
         # v11.3.3: Now includes contamination filtering for robust calibration.
         with T.section("calibrate"):
-            cal_q = float((cfg or {}).get("thresholds", {}).get("q", 0.98))
-            self_tune_cfg = (cfg or {}).get("thresholds", {}).get("self_tune", {})
-            use_per_regime = (cfg.get("fusion", {}) or {}).get("per_regime", False)
-            quality_ok = bool(use_per_regime and regime_quality_ok and train_regime_labels is not None and score_regime_labels is not None)
-            
-            # v11.3.3: Add contamination filter config to self_tune_cfg for ScoreCalibrator
-            # This addresses Analytics Audit Finding #6: contaminated training windows
-            contam_filter_cfg = (cfg or {}).get("thresholds", {}).get("contamination_filter", {})
-            if contam_filter_cfg:
-                self_tune_cfg["contamination_filter"] = {
-                    "enabled": contam_filter_cfg.get("enabled", True),
-                    "method": contam_filter_cfg.get("method", "iterative_mad"),
-                    "z_threshold": float(contam_filter_cfg.get("z_threshold", 4.0)),
-                    "max_iterations": int(contam_filter_cfg.get("max_iterations", 10)),
-                    "min_retained_ratio": float(contam_filter_cfg.get("min_retained_ratio", 0.70)),
-                }
-            else:
-                # Default: enable contamination filtering with iterative MAD
-                self_tune_cfg["contamination_filter"] = {
-                    "enabled": True,
-                    "method": "iterative_mad",
-                    "z_threshold": 4.0,
-                    "max_iterations": 10,
-                    "min_retained_ratio": 0.70,
-                }
-            
-            # Score TRAIN data with all fitted detectors.
-            # v11.6.1 FIX: pca_cached was computed on SUBSAMPLED train data during fit (e.g., 10K rows)
-            # but here we're scoring the FULL train data (e.g., 13K+ rows). 
-            # NEVER use pca_cached when lengths don't match - always re-score.
-            pca_cached_for_train = None  # Force fresh PCA scoring for calibration
-            if pca_train_spe is not None and len(pca_train_spe) == len(train):
-                # Only use cached PCA scores if lengths match exactly
-                pca_cached_for_train = (pca_train_spe, pca_train_t2)
-            else:
-                # Log why we're not using cache (diagnostic)
-                if pca_train_spe is not None:
-                    Console.info(
-                        f"PCA cache length mismatch: cached={len(pca_train_spe)}, train={len(train)} - re-scoring",
-                        component="CALIBRATE"
-                    )
-            
-            train_frame, _ = score_all_detectors(
-                data=train,
-                ar1_detector=ar1_detector,
-                pca_detector=pca_detector,
-                iforest_detector=iforest_detector,
-                gmm_detector=gmm_detector,
-                omr_detector=omr_detector,
-                ar1_enabled=ar1_enabled,
-                pca_enabled=pca_enabled,
-                iforest_enabled=iforest_enabled,
-                gmm_enabled=gmm_enabled,
-                omr_enabled=omr_enabled,
-                pca_cached=pca_cached_for_train,  # v11.6.1: Only use if lengths match
-                return_omr_contributions=False,
-            )
-            
-            # Compute adaptive z-clip directly from TRAIN raw scores (no temp calibrators).
-            # This avoids redundant temporary fits and uses inline P99 z-scores.
-            default_clip = float(self_tune_cfg.get("clip_z", 8.0))
-            train_z_p99 = {}
-            
-            # Detector raw columns to analyze.
-            det_raw_cols = [("ar1", "ar1_raw"), ("pca_spe", "pca_spe"), ("pca_t2", "pca_t2"),
-                           ("iforest", "iforest_raw"), ("gmm", "gmm_raw")]
-            if omr_enabled:
-                det_raw_cols.append(("omr", "omr_raw"))
-            
-            for det_name, raw_col in det_raw_cols:
-                if raw_col in train_frame.columns:
-                    raw_vals = train_frame[raw_col].to_numpy(copy=False)
-                    finite_vals = raw_vals[np.isfinite(raw_vals)]
-                    if len(finite_vals) > 10:
-                        # Compute median/MAD/scale inline (same formula as ScoreCalibrator.fit).
-                        med = float(np.median(finite_vals))
-                        mad = float(np.median(np.abs(finite_vals - med)))
-                        scale = mad * 1.4826 if mad > 1e-9 else float(np.nanstd(finite_vals))
-                        scale = max(scale, 1e-3)  # Minimum scale
-                        # Compute z-scores and P99
-                        z_vals = (finite_vals - med) / scale
-                        p99 = float(np.percentile(z_vals, 99))
-                        if 0 < p99 < 100:  # Sanity check
-                            train_z_p99[det_name] = p99
-            
-            # Set adaptive clip: max(default, 1.5 * max_train_p99), capped at 50.
-            adaptive_clip = default_clip
-            if train_z_p99:
-                max_train_p99 = max(train_z_p99.values())
-                adaptive_clip = max(default_clip, min(max_train_p99 * 1.5, 50.0))
-                self_tune_cfg["clip_z"] = adaptive_clip
-            
-            fit_regimes = train_regime_labels if quality_ok else None
-            transform_regimes = score_regime_labels if quality_ok else None
-
-            # Surface per-regime calibration activity.
-            frame["per_regime_active"] = 1 if quality_ok else 0
-            
-            # Delegate to detector_orchestrator.calibrate_all_detectors().
-            # v11.9.0: Pass cached calibration params for cross-batch consistency
-            frame, calibrators_dict = calibrate_all_detectors(
-                train_frame=train_frame,
-                score_frame=frame,
-                cal_q=cal_q,
-                self_tune_cfg=self_tune_cfg,
-                fit_regimes=fit_regimes,
-                transform_regimes=transform_regimes,
-                omr_enabled=omr_enabled,
+            calibration_result = fuse.run_calibration_stage(
+                train=train,
+                frame=frame,
+                cfg=cfg,
+                regime_quality_ok=regime_quality_ok,
+                train_regime_labels=train_regime_labels,
+                score_regime_labels=score_regime_labels,
+                pca_train_spe=pca_train_spe,
+                pca_train_t2=pca_train_t2,
+                detectors={
+                    "ar1_detector": ar1_detector,
+                    "pca_detector": pca_detector,
+                    "iforest_detector": iforest_detector,
+                    "gmm_detector": gmm_detector,
+                    "omr_detector": omr_detector,
+                },
+                detector_flags={
+                    "ar1_enabled": ar1_enabled,
+                    "pca_enabled": pca_enabled,
+                    "iforest_enabled": iforest_enabled,
+                    "gmm_enabled": gmm_enabled,
+                    "omr_enabled": omr_enabled,
+                },
                 cached_calibration_params=cached_calibration_params,
+                saved_model_version=saved_model_version,
+                score_all_detectors_fn=score_all_detectors,
+                calibrate_all_detectors_fn=calibrate_all_detectors,
+                persist_calibration_params_fn=lambda version, calibrators_dict: persist_calibration_params_safe(
+                    equip=equip,
+                    sql_client=sql_client,
+                    equip_id=equip_id,
+                    saved_model_version=version,
+                    calibrators_dict=calibrators_dict,
+                    logger=Console,
+                ),
+                output_manager=output_manager,
+                logger=Console,
+                equip=equip,
             )
-
-            # v11.9.0: Persist calibration params for future scoring batches
-            if saved_model_version is not None and calibrators_dict:
-                try:
-                    from core.model_persistence import ModelVersionManager
-                    cal_manager = ModelVersionManager(equip=equip, sql_client=sql_client, equip_id=equip_id)
-                    cal_manager.save_calibration_params(calibrators_dict, version=saved_model_version)
-                except Exception as e:
-                    Console.warn(f"Failed to persist calibration params: {e}", component="CAL",
-                                 equip=equip, error=str(e)[:200])
-
-            # Extract calibrators for later use.
-            cal_ar = calibrators_dict.get("ar1_z")
-            cal_pca_spe = calibrators_dict.get("pca_spe_z")
-            cal_pca_t2 = calibrators_dict.get("pca_t2_z")
-            cal_if = calibrators_dict.get("iforest_z")
-            cal_gmm = calibrators_dict.get("gmm_z")
-            cal_omr = calibrators_dict.get("omr_z")
-
-            # Compute TRAIN z-scores for PCA metrics (needed for SQL metadata).
-            # Only compute if PCA is enabled and calibrators exist.
-            spe_p95_train = 0.0
-            t2_p95_train = 0.0
-            if pca_enabled and cal_pca_spe is not None and "pca_spe" in train_frame.columns:
-                pca_train_spe_z = cal_pca_spe.transform(
-                    train_frame["pca_spe"].to_numpy(dtype=np.float32), regime_labels=fit_regimes
-                )
-                spe_p95_train = float(np.nanpercentile(pca_train_spe_z, 95))
-            if pca_enabled and cal_pca_t2 is not None and "pca_t2" in train_frame.columns:
-                pca_train_t2_z = cal_pca_t2.transform(
-                    train_frame["pca_t2"].to_numpy(dtype=np.float32), regime_labels=fit_regimes
-                )
-                t2_p95_train = float(np.nanpercentile(pca_train_t2_z, 95))
-            
-            # Build calibrators list, filtering out None entries
-            calibrators: List[Tuple[str, fuse.ScoreCalibrator]] = []
-            if ar1_enabled and cal_ar is not None:
-                calibrators.append(("ar1_z", cal_ar))
-            if pca_enabled and cal_pca_spe is not None:
-                calibrators.append(("pca_spe_z", cal_pca_spe))
-            if pca_enabled and cal_pca_t2 is not None:
-                calibrators.append(("pca_t2_z", cal_pca_t2))
-            if iforest_enabled and cal_if is not None:
-                calibrators.append(("iforest_z", cal_if))
-            if gmm_enabled and cal_gmm is not None:
-                calibrators.append(("gmm_z", cal_gmm))
-            if omr_enabled and cal_omr is not None and "omr_raw" in frame.columns:
-                calibrators.append(("omr_z", cal_omr))
-
-            # Generate per-regime threshold transparency table.
-            per_regime_count = 0
-            if quality_ok and use_per_regime:
-                per_regime_rows = fuse.build_per_regime_threshold_rows(calibrators)
-                if per_regime_rows:
-                    # Convert to pandas DataFrame.
-                    per_regime_df = pd.DataFrame(per_regime_rows)
-                    # Pass logical artifact name instead of file path.
-                    output_manager.write_dataframe(per_regime_df, "per_regime_thresholds")
-                    per_regime_count = len(per_regime_rows)
-
-            # Always write thresholds table with global fallback.
-            threshold_rows = fuse.build_threshold_rows(calibrators)
-            if threshold_rows:
-                thresholds_df = pd.DataFrame(threshold_rows)
-                # Pass logical artifact name instead of file path.
-                output_manager.write_dataframe(thresholds_df, "acm_thresholds")
-
-            # ===== Calibration summary =====
-            cal_summary_count = 0
-            try:
-                if output_manager and calibrators:
-                    calibration_summary = fuse.build_calibration_summary_rows(calibrators)
-                    if calibration_summary:
-                        cal_summary_count = output_manager.write_calibration_summary(calibration_summary)
-            except Exception as e:
-                Console.warn(f"Calibration summary write failed: {e}", component="CAL",
-                             equip=equip, error=str(e)[:200])
-            
-            # Consolidated calibration log.
-            Console.info(f"Calibration complete: q={cal_q} | clip_z={adaptive_clip:.2f} | detectors={len(calibrators)} | thresholds={len(threshold_rows)} | per_regime={per_regime_count} | summary={cal_summary_count}", component="CAL")
+            frame = calibration_result.frame
+            train_frame = calibration_result.train_frame
+            spe_p95_train = calibration_result.spe_p95_train
+            t2_p95_train = calibration_result.t2_p95_train
+            quality_ok = calibration_result.quality_ok
+            use_per_regime = calibration_result.use_per_regime
 
         # ===== Phase 7: Fusion + episodes =====
         with T.section("fusion"):
@@ -1559,24 +1415,15 @@ def main() -> None:
                 omr_contributions=omr_contributions_data,
                 equip=equip,
             )
-            
-            # Unpack results
-            frame["fused"] = fusion_result.fused_scores
-            episodes = fusion_result.episodes
-            fusion_weights_used = fusion_result.weights_used
-            
-            if fusion_result.train_fused is not None:
-                train_frame["fused"] = fusion_result.train_fused
-            
-            # Record observability metrics.
-            detector_scores = {"fused_z": float(fusion_result.fused_scores[-1]) if len(fusion_result.fused_scores) > 0 else 0.0}
-            for det in ["ar1_z", "pca_spe_z", "pca_t2_z", "iforest_z", "gmm_z", "omr_z"]:
-                if det in frame.columns:
-                    detector_scores[det] = float(frame[det].iloc[-1])
-            record_detector_scores(equip, detector_scores)
-            
-            if len(episodes) > 0:
-                record_episode(equip, count=len(episodes), severity="warning")
+
+            frame, train_frame, episodes, fusion_weights_used = fuse.apply_fusion_result_and_record_metrics(
+                frame=frame,
+                train_frame=train_frame,
+                fusion_result=fusion_result,
+                equip=equip,
+                record_detector_scores_fn=record_detector_scores,
+                record_episode_fn=record_episode,
+            )
 
         # ===== Adaptive thresholds =====
         with T.section("thresholds.adaptive"):

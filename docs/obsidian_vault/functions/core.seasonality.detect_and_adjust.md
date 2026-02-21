@@ -9,7 +9,7 @@ line_end: 559
 
 # core.seasonality.detect_and_adjust
 
-Defined in: [[modules/core.seasonality|core.seasonality]]
+Defined in: [[modules/core.seasonality]]
 
 Source: `core/seasonality.py:498`
 

@@ -9,7 +9,7 @@ line_end: 1250
 
 # core.observability.Console._render_console_event
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:1238`
 

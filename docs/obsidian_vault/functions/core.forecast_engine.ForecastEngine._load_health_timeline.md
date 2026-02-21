@@ -9,7 +9,7 @@ line_end: 516
 
 # core.forecast_engine.ForecastEngine._load_health_timeline
 
-Defined in: [[modules/core.forecast_engine|core.forecast_engine]]
+Defined in: [[modules/core.forecast_engine]]
 
 Source: `core/forecast_engine.py:472`
 

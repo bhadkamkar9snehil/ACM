@@ -9,7 +9,7 @@ line_end: 212
 
 # core.data_loader.DataLoader.__init__
 
-Defined in: [[modules/core.data_loader|core.data_loader]]
+Defined in: [[modules/core.data_loader]]
 
 Source: `core/data_loader.py:205`
 

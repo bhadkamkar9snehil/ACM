@@ -9,7 +9,7 @@ line_end: 775
 
 # core.detector_orchestrator.compute_stable_feature_hash
 
-Defined in: [[modules/core.detector_orchestrator|core.detector_orchestrator]]
+Defined in: [[modules/core.detector_orchestrator]]
 
 Source: `core/detector_orchestrator.py:744`
 

@@ -9,7 +9,7 @@ line_end: 257
 
 # core.correlation.PCASubspaceDetector.score
 
-Defined in: [[modules/core.correlation|core.correlation]]
+Defined in: [[modules/core.correlation]]
 
 Source: `core/correlation.py:164`
 

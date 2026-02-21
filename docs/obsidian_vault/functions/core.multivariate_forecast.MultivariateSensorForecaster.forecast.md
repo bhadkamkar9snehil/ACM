@@ -9,7 +9,7 @@ line_end: 516
 
 # core.multivariate_forecast.MultivariateSensorForecaster.forecast
 
-Defined in: [[modules/core.multivariate_forecast|core.multivariate_forecast]]
+Defined in: [[modules/core.multivariate_forecast]]
 
 Source: `core/multivariate_forecast.py:442`
 

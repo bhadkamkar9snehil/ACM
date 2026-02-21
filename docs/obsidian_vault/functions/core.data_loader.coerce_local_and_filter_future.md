@@ -9,7 +9,7 @@ line_end: 129
 
 # core.data_loader.coerce_local_and_filter_future
 
-Defined in: [[modules/core.data_loader|core.data_loader]]
+Defined in: [[modules/core.data_loader]]
 
 Source: `core/data_loader.py:92`
 

@@ -9,7 +9,7 @@ line_end: 307
 
 # core.confidence.compute_health_confidence
 
-Defined in: [[modules/core.confidence|core.confidence]]
+Defined in: [[modules/core.confidence]]
 
 Source: `core/confidence.py:263`
 

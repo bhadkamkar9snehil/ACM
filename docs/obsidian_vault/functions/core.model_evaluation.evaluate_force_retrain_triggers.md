@@ -9,7 +9,7 @@ line_end: 483
 
 # core.model_evaluation.evaluate_force_retrain_triggers
 
-Defined in: [[modules/core.model_evaluation|core.model_evaluation]]
+Defined in: [[modules/core.model_evaluation]]
 
 Source: `core/model_evaluation.py:384`
 

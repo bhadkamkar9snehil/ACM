@@ -9,7 +9,7 @@ line_end: 202
 
 # core.fuse.CalibrationContaminationFilter._filter_iqr
 
-Defined in: [[modules/core.fuse|core.fuse]]
+Defined in: [[modules/core.fuse]]
 
 Source: `core/fuse.py:165`
 

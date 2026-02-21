@@ -9,7 +9,7 @@ line_end: 476
 
 # core.seasonality.SeasonalityHandler.has_patterns
 
-Defined in: [[modules/core.seasonality|core.seasonality]]
+Defined in: [[modules/core.seasonality]]
 
 Source: `core/seasonality.py:464`
 

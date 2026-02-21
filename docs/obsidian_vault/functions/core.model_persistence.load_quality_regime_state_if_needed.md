@@ -9,7 +9,7 @@ line_end: 1662
 
 # core.model_persistence.load_quality_regime_state_if_needed
 
-Defined in: [[modules/core.model_persistence|core.model_persistence]]
+Defined in: [[modules/core.model_persistence]]
 
 Source: `core/model_persistence.py:1640`
 

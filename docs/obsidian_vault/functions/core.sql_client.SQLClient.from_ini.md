@@ -9,7 +9,7 @@ line_end: 102
 
 # core.sql_client.SQLClient.from_ini
 
-Defined in: [[modules/core.sql_client|core.sql_client]]
+Defined in: [[modules/core.sql_client]]
 
 Source: `core/sql_client.py:77`
 

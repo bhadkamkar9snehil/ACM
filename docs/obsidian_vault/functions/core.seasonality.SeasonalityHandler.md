@@ -9,7 +9,7 @@ line_end: 495
 
 # core.seasonality.SeasonalityHandler
 
-Defined in: [[modules/core.seasonality|core.seasonality]]
+Defined in: [[modules/core.seasonality]]
 
 Source: `core/seasonality.py:139`
 

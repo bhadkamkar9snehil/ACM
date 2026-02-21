@@ -9,7 +9,7 @@ line_end: 500
 
 # core.health_tracker.HealthTimeline.get_data_summary
 
-Defined in: [[modules/core.health_tracker|core.health_tracker]]
+Defined in: [[modules/core.health_tracker]]
 
 Source: `core/health_tracker.py:436`
 

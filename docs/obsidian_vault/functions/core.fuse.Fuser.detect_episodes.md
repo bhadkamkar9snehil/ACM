@@ -3,15 +3,15 @@ type: method
 id: core.fuse.Fuser.detect_episodes
 module: core.fuse
 source: core/fuse.py
-line_start: 1476
-line_end: 1828
+line_start: 1839
+line_end: 2191
 ---
 
 # core.fuse.Fuser.detect_episodes
 
-Defined in: [[modules/core.fuse|core.fuse]]
+Defined in: [[modules/core.fuse]]
 
-Source: `core/fuse.py:1476`
+Source: `core/fuse.py:1839`
 
 Kind: `method`
 

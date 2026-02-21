@@ -9,7 +9,7 @@ line_end: 37
 
 # core.multivariate_forecast.SensorCorrelation
 
-Defined in: [[modules/core.multivariate_forecast|core.multivariate_forecast]]
+Defined in: [[modules/core.multivariate_forecast]]
 
 Source: `core/multivariate_forecast.py:30`
 

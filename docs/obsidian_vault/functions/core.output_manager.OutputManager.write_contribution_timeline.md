@@ -3,15 +3,15 @@ type: method
 id: core.output_manager.OutputManager.write_contribution_timeline
 module: core.output_manager
 source: core/output_manager.py
-line_start: 2598
-line_end: 2613
+line_start: 2599
+line_end: 2614
 ---
 
 # core.output_manager.OutputManager.write_contribution_timeline
 
-Defined in: [[modules/core.output_manager|core.output_manager]]
+Defined in: [[modules/core.output_manager]]
 
-Source: `core/output_manager.py:2598`
+Source: `core/output_manager.py:2599`
 
 Kind: `method`
 

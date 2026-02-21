@@ -9,7 +9,7 @@ line_end: 704
 
 # core.sql_client.load_config_required_from_sql
 
-Defined in: [[modules/core.sql_client|core.sql_client]]
+Defined in: [[modules/core.sql_client]]
 
 Source: `core/sql_client.py:633`
 

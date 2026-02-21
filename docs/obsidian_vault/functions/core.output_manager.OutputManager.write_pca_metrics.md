@@ -3,15 +3,15 @@ type: method
 id: core.output_manager.OutputManager.write_pca_metrics
 module: core.output_manager
 source: core/output_manager.py
-line_start: 1076
-line_end: 1160
+line_start: 1077
+line_end: 1161
 ---
 
 # core.output_manager.OutputManager.write_pca_metrics
 
-Defined in: [[modules/core.output_manager|core.output_manager]]
+Defined in: [[modules/core.output_manager]]
 
-Source: `core/output_manager.py:1076`
+Source: `core/output_manager.py:1077`
 
 Kind: `method`
 

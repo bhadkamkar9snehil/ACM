@@ -3,15 +3,15 @@ type: function
 id: core.output_manager._cfg_get
 module: core.output_manager
 source: core/output_manager.py
-line_start: 270
-line_end: 279
+line_start: 271
+line_end: 280
 ---
 
 # core.output_manager._cfg_get
 
-Defined in: [[modules/core.output_manager|core.output_manager]]
+Defined in: [[modules/core.output_manager]]
 
-Source: `core/output_manager.py:270`
+Source: `core/output_manager.py:271`
 
 Kind: `function`
 

@@ -3,15 +3,15 @@ type: method
 id: core.output_manager.OutputManager._generate_sensor_hotspots_table
 module: core.output_manager
 source: core/output_manager.py
-line_start: 3402
-line_end: 3417
+line_start: 3428
+line_end: 3443
 ---
 
 # core.output_manager.OutputManager._generate_sensor_hotspots_table
 
-Defined in: [[modules/core.output_manager|core.output_manager]]
+Defined in: [[modules/core.output_manager]]
 
-Source: `core/output_manager.py:3402`
+Source: `core/output_manager.py:3428`
 
 Kind: `method`
 

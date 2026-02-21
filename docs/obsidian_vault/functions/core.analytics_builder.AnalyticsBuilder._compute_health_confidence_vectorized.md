@@ -9,7 +9,7 @@ line_end: 450
 
 # core.analytics_builder.AnalyticsBuilder._compute_health_confidence_vectorized
 
-Defined in: [[modules/core.analytics_builder|core.analytics_builder]]
+Defined in: [[modules/core.analytics_builder]]
 
 Source: `core/analytics_builder.py:425`
 

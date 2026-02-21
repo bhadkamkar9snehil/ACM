@@ -9,7 +9,7 @@ line_end: 726
 
 # core.pipeline_types.validate_data_contract_at_entry
 
-Defined in: [[modules/core.pipeline_types|core.pipeline_types]]
+Defined in: [[modules/core.pipeline_types]]
 
 Source: `core/pipeline_types.py:640`
 

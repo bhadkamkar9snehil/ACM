@@ -3,15 +3,15 @@ type: method
 id: core.output_manager.OutputManager.write_active_models
 module: core.output_manager
 source: core/output_manager.py
-line_start: 2999
-line_end: 3028
+line_start: 3000
+line_end: 3029
 ---
 
 # core.output_manager.OutputManager.write_active_models
 
-Defined in: [[modules/core.output_manager|core.output_manager]]
+Defined in: [[modules/core.output_manager]]
 
-Source: `core/output_manager.py:2999`
+Source: `core/output_manager.py:3000`
 
 Kind: `method`
 

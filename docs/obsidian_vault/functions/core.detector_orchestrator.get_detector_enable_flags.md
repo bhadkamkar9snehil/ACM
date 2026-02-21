@@ -9,7 +9,7 @@ line_end: 350
 
 # core.detector_orchestrator.get_detector_enable_flags
 
-Defined in: [[modules/core.detector_orchestrator|core.detector_orchestrator]]
+Defined in: [[modules/core.detector_orchestrator]]
 
 Source: `core/detector_orchestrator.py:329`
 

@@ -9,7 +9,7 @@ line_end: 142
 
 # core.model_persistence.ForecastState.serialize_forecast_horizon
 
-Defined in: [[modules/core.model_persistence|core.model_persistence]]
+Defined in: [[modules/core.model_persistence]]
 
 Source: `core/model_persistence.py:129`
 

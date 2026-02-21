@@ -9,7 +9,7 @@ line_end: 705
 
 # core.smart_coldstart.seed_baseline
 
-Defined in: [[modules/core.smart_coldstart|core.smart_coldstart]]
+Defined in: [[modules/core.smart_coldstart]]
 
 Source: `core/smart_coldstart.py:567`
 

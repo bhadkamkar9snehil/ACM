@@ -9,7 +9,7 @@ line_end: 307
 
 # core.metrics.compute_theils_u
 
-Defined in: [[modules/core.metrics|core.metrics]]
+Defined in: [[modules/core.metrics]]
 
 Source: `core/metrics.py:265`
 

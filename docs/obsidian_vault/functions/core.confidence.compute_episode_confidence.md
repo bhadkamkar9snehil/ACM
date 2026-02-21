@@ -9,7 +9,7 @@ line_end: 373
 
 # core.confidence.compute_episode_confidence
 
-Defined in: [[modules/core.confidence|core.confidence]]
+Defined in: [[modules/core.confidence]]
 
 Source: `core/confidence.py:310`
 

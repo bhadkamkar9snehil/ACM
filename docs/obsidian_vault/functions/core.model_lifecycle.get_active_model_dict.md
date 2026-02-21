@@ -9,7 +9,7 @@ line_end: 717
 
 # core.model_lifecycle.get_active_model_dict
 
-Defined in: [[modules/core.model_lifecycle|core.model_lifecycle]]
+Defined in: [[modules/core.model_lifecycle]]
 
 Source: `core/model_lifecycle.py:676`
 

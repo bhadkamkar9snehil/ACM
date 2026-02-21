@@ -9,7 +9,7 @@ line_end: 71
 
 # core.failure_probability.health_to_failure_probability
 
-Defined in: [[modules/core.failure_probability|core.failure_probability]]
+Defined in: [[modules/core.failure_probability]]
 
 Source: `core/failure_probability.py:26`
 

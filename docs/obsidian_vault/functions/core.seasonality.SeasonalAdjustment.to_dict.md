@@ -9,7 +9,7 @@ line_end: 108
 
 # core.seasonality.SeasonalAdjustment.to_dict
 
-Defined in: [[modules/core.seasonality|core.seasonality]]
+Defined in: [[modules/core.seasonality]]
 
 Source: `core/seasonality.py:100`
 

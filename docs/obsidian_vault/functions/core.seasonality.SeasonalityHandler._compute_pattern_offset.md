@@ -9,7 +9,7 @@ line_end: 426
 
 # core.seasonality.SeasonalityHandler._compute_pattern_offset
 
-Defined in: [[modules/core.seasonality|core.seasonality]]
+Defined in: [[modules/core.seasonality]]
 
 Source: `core/seasonality.py:411`
 

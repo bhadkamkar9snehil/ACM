@@ -9,7 +9,7 @@ line_end: 2213
 
 # core.observability.get_meter
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:2211`
 

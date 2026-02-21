@@ -9,7 +9,7 @@ line_end: 1214
 
 # core.fuse.ScoreCalibrator.fit
 
-Defined in: [[modules/core.fuse|core.fuse]]
+Defined in: [[modules/core.fuse]]
 
 Source: `core/fuse.py:1057`
 

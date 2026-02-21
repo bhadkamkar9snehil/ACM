@@ -9,7 +9,7 @@ line_end: 767
 
 # core.degradation_model.LinearTrendModel._compute_cv_error_vectorized
 
-Defined in: [[modules/core.degradation_model|core.degradation_model]]
+Defined in: [[modules/core.degradation_model]]
 
 Source: `core/degradation_model.py:702`
 

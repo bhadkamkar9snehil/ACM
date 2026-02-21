@@ -9,7 +9,7 @@ line_end: 57
 
 # core.drift.CUSUMDetector.score
 
-Defined in: [[modules/core.drift|core.drift]]
+Defined in: [[modules/core.drift]]
 
 Source: `core/drift.py:48`
 

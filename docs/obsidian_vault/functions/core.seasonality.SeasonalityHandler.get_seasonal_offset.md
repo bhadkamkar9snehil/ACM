@@ -9,7 +9,7 @@ line_end: 355
 
 # core.seasonality.SeasonalityHandler.get_seasonal_offset
 
-Defined in: [[modules/core.seasonality|core.seasonality]]
+Defined in: [[modules/core.seasonality]]
 
 Source: `core/seasonality.py:313`
 

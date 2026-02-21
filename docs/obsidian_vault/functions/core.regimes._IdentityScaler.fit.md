@@ -9,7 +9,7 @@ line_end: 231
 
 # core.regimes._IdentityScaler.fit
 
-Defined in: [[modules/core.regimes|core.regimes]]
+Defined in: [[modules/core.regimes]]
 
 Source: `core/regimes.py:230`
 

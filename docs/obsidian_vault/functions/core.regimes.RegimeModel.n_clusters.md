@@ -9,7 +9,7 @@ line_end: 449
 
 # core.regimes.RegimeModel.n_clusters
 
-Defined in: [[modules/core.regimes|core.regimes]]
+Defined in: [[modules/core.regimes]]
 
 Source: `core/regimes.py:440`
 

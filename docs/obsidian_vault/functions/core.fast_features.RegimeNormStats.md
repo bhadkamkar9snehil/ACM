@@ -9,7 +9,7 @@ line_end: 731
 
 # core.fast_features.RegimeNormStats
 
-Defined in: [[modules/core.fast_features|core.fast_features]]
+Defined in: [[modules/core.fast_features]]
 
 Source: `core/fast_features.py:701`
 

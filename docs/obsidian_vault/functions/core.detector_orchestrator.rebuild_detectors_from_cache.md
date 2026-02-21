@@ -9,7 +9,7 @@ line_end: 741
 
 # core.detector_orchestrator.rebuild_detectors_from_cache
 
-Defined in: [[modules/core.detector_orchestrator|core.detector_orchestrator]]
+Defined in: [[modules/core.detector_orchestrator]]
 
 Source: `core/detector_orchestrator.py:489`
 

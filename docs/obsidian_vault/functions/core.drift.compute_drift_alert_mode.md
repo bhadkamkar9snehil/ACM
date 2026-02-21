@@ -9,7 +9,7 @@ line_end: 332
 
 # core.drift.compute_drift_alert_mode
 
-Defined in: [[modules/core.drift|core.drift]]
+Defined in: [[modules/core.drift]]
 
 Source: `core/drift.py:204`
 

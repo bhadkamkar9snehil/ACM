@@ -9,7 +9,7 @@ line_end: 646
 
 # core.degradation_model.LinearTrendModel._detect_and_handle_data_gaps
 
-Defined in: [[modules/core.degradation_model|core.degradation_model]]
+Defined in: [[modules/core.degradation_model]]
 
 Source: `core/degradation_model.py:623`
 

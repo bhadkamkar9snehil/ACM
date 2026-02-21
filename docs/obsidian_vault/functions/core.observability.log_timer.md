@@ -9,7 +9,7 @@ line_end: 2203
 
 # core.observability.log_timer
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:2178`
 

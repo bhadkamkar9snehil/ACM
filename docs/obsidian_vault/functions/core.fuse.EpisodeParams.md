@@ -3,15 +3,15 @@ type: class
 id: core.fuse.EpisodeParams
 module: core.fuse
 source: core/fuse.py
-line_start: 1375
-line_end: 1399
+line_start: 1738
+line_end: 1762
 ---
 
 # core.fuse.EpisodeParams
 
-Defined in: [[modules/core.fuse|core.fuse]]
+Defined in: [[modules/core.fuse]]
 
-Source: `core/fuse.py:1375`
+Source: `core/fuse.py:1738`
 
 Kind: `class`
 

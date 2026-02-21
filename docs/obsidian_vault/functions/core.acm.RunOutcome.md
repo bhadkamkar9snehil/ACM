@@ -3,15 +3,15 @@ type: class
 id: core.acm.RunOutcome
 module: core.acm
 source: core/acm.py
-line_start: 251
-line_end: 262
+line_start: 255
+line_end: 266
 ---
 
 # core.acm.RunOutcome
 
-Defined in: [[modules/core.acm|core.acm]]
+Defined in: [[modules/core.acm]]
 
-Source: `core/acm.py:251`
+Source: `core/acm.py:255`
 
 Kind: `class`
 

@@ -9,7 +9,7 @@ line_end: 2139
 
 # core.observability.record_capacity
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:2094`
 

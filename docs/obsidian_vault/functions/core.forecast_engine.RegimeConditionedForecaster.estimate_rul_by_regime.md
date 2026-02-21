@@ -9,7 +9,7 @@ line_end: 2109
 
 # core.forecast_engine.RegimeConditionedForecaster.estimate_rul_by_regime
 
-Defined in: [[modules/core.forecast_engine|core.forecast_engine]]
+Defined in: [[modules/core.forecast_engine]]
 
 Source: `core/forecast_engine.py:1985`
 

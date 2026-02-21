@@ -9,7 +9,7 @@ line_end: 2426
 
 # core.forecast_engine.RegimeConditionedForecaster._estimate_data_quality
 
-Defined in: [[modules/core.forecast_engine|core.forecast_engine]]
+Defined in: [[modules/core.forecast_engine]]
 
 Source: `core/forecast_engine.py:2372`
 

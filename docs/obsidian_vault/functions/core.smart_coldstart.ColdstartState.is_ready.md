@@ -9,7 +9,7 @@ line_end: 72
 
 # core.smart_coldstart.ColdstartState.is_ready
 
-Defined in: [[modules/core.smart_coldstart|core.smart_coldstart]]
+Defined in: [[modules/core.smart_coldstart]]
 
 Source: `core/smart_coldstart.py:70`
 

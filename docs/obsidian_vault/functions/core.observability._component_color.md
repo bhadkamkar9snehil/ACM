@@ -9,7 +9,7 @@ line_end: 133
 
 # core.observability._component_color
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:122`
 

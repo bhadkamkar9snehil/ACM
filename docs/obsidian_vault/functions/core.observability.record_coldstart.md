@@ -9,7 +9,7 @@ line_end: 1840
 
 # core.observability.record_coldstart
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:1835`
 

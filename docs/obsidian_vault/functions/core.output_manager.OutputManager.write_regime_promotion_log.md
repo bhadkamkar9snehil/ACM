@@ -3,15 +3,15 @@ type: method
 id: core.output_manager.OutputManager.write_regime_promotion_log
 module: core.output_manager
 source: core/output_manager.py
-line_start: 2615
-line_end: 2630
+line_start: 2616
+line_end: 2631
 ---
 
 # core.output_manager.OutputManager.write_regime_promotion_log
 
-Defined in: [[modules/core.output_manager|core.output_manager]]
+Defined in: [[modules/core.output_manager]]
 
-Source: `core/output_manager.py:2615`
+Source: `core/output_manager.py:2616`
 
 Kind: `method`
 

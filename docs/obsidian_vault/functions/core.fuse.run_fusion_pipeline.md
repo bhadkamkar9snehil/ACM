@@ -3,15 +3,15 @@ type: function
 id: core.fuse.run_fusion_pipeline
 module: core.fuse
 source: core/fuse.py
-line_start: 2226
-line_end: 2341
+line_start: 2589
+line_end: 2704
 ---
 
 # core.fuse.run_fusion_pipeline
 
-Defined in: [[modules/core.fuse|core.fuse]]
+Defined in: [[modules/core.fuse]]
 
-Source: `core/fuse.py:2226`
+Source: `core/fuse.py:2589`
 
 Kind: `function`
 

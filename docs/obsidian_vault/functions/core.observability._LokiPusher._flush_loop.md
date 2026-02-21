@@ -9,7 +9,7 @@ line_end: 2529
 
 # core.observability._LokiPusher._flush_loop
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:2516`
 

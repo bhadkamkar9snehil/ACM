@@ -3,15 +3,15 @@ type: method
 id: core.output_manager.OutputManager.write_pca_loadings
 module: core.output_manager
 source: core/output_manager.py
-line_start: 1162
-line_end: 1242
+line_start: 1163
+line_end: 1243
 ---
 
 # core.output_manager.OutputManager.write_pca_loadings
 
-Defined in: [[modules/core.output_manager|core.output_manager]]
+Defined in: [[modules/core.output_manager]]
 
-Source: `core/output_manager.py:1162`
+Source: `core/output_manager.py:1163`
 
 Kind: `method`
 

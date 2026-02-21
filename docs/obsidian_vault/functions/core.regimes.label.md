@@ -9,7 +9,7 @@ line_end: 3240
 
 # core.regimes.label
 
-Defined in: [[modules/core.regimes|core.regimes]]
+Defined in: [[modules/core.regimes]]
 
 Source: `core/regimes.py:3098`
 

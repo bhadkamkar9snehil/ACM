@@ -9,7 +9,7 @@ line_end: 259
 
 # core.regimes._stable_int_hash
 
-Defined in: [[modules/core.regimes|core.regimes]]
+Defined in: [[modules/core.regimes]]
 
 Source: `core/regimes.py:255`
 

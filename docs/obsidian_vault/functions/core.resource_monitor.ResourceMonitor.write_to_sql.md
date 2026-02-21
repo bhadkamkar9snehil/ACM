@@ -9,7 +9,7 @@ line_end: 547
 
 # core.resource_monitor.ResourceMonitor.write_to_sql
 
-Defined in: [[modules/core.resource_monitor|core.resource_monitor]]
+Defined in: [[modules/core.resource_monitor]]
 
 Source: `core/resource_monitor.py:517`
 

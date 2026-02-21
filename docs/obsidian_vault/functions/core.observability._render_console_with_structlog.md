@@ -9,7 +9,7 @@ line_end: 405
 
 # core.observability._render_console_with_structlog
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:330`
 

@@ -9,7 +9,7 @@ line_end: 143
 
 # core.observability._colorize_leading_tag
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:136`
 

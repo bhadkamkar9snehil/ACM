@@ -9,7 +9,7 @@ line_end: 191
 
 # core.omr.OMRDetector._validate_input
 
-Defined in: [[modules/core.omr|core.omr]]
+Defined in: [[modules/core.omr]]
 
 Source: `core/omr.py:170`
 

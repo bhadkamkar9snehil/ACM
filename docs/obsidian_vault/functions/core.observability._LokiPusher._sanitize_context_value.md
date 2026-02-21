@@ -9,7 +9,7 @@ line_end: 2389
 
 # core.observability._LokiPusher._sanitize_context_value
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:2361`
 

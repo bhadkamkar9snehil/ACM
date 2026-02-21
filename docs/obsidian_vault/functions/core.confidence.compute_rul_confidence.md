@@ -9,7 +9,7 @@ line_end: 424
 
 # core.confidence.compute_rul_confidence
 
-Defined in: [[modules/core.confidence|core.confidence]]
+Defined in: [[modules/core.confidence]]
 
 Source: `core/confidence.py:376`
 

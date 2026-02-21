@@ -9,7 +9,7 @@ line_end: 1158
 
 # core.fast_features.normalize_with_confidence_gating
 
-Defined in: [[modules/core.fast_features|core.fast_features]]
+Defined in: [[modules/core.fast_features]]
 
 Source: `core/fast_features.py:1048`
 

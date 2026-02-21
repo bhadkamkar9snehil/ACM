@@ -9,7 +9,7 @@ line_end: 124
 
 # core.model_lifecycle.PromotionCriteria
 
-Defined in: [[modules/core.model_lifecycle|core.model_lifecycle]]
+Defined in: [[modules/core.model_lifecycle]]
 
 Source: `core/model_lifecycle.py:67`
 

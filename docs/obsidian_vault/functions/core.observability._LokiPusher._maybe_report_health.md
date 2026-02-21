@@ -9,7 +9,7 @@ line_end: 2663
 
 # core.observability._LokiPusher._maybe_report_health
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:2646`
 

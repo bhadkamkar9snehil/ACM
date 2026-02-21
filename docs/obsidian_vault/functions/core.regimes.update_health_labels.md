@@ -9,7 +9,7 @@ line_end: 1971
 
 # core.regimes.update_health_labels
 
-Defined in: [[modules/core.regimes|core.regimes]]
+Defined in: [[modules/core.regimes]]
 
 Source: `core/regimes.py:1845`
 

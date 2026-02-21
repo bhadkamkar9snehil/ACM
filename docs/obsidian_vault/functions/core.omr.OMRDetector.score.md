@@ -9,7 +9,7 @@ line_end: 611
 
 # core.omr.OMRDetector.score
 
-Defined in: [[modules/core.omr|core.omr]]
+Defined in: [[modules/core.omr]]
 
 Source: `core/omr.py:459`
 

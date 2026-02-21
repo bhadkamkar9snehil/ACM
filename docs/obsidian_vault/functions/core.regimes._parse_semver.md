@@ -9,7 +9,7 @@ line_end: 129
 
 # core.regimes._parse_semver
 
-Defined in: [[modules/core.regimes|core.regimes]]
+Defined in: [[modules/core.regimes]]
 
 Source: `core/regimes.py:119`
 

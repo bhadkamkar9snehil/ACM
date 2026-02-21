@@ -9,7 +9,7 @@ line_end: 1371
 
 # core.fuse.build_calibration_summary_rows
 
-Defined in: [[modules/core.fuse|core.fuse]]
+Defined in: [[modules/core.fuse]]
 
 Source: `core/fuse.py:1354`
 

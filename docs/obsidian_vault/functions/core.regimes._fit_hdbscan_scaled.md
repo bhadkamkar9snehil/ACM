@@ -9,7 +9,7 @@ line_end: 1257
 
 # core.regimes._fit_hdbscan_scaled
 
-Defined in: [[modules/core.regimes|core.regimes]]
+Defined in: [[modules/core.regimes]]
 
 Source: `core/regimes.py:1002`
 

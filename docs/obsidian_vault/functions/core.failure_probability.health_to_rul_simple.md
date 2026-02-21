@@ -9,7 +9,7 @@ line_end: 318
 
 # core.failure_probability.health_to_rul_simple
 
-Defined in: [[modules/core.failure_probability|core.failure_probability]]
+Defined in: [[modules/core.failure_probability]]
 
 Source: `core/failure_probability.py:282`
 

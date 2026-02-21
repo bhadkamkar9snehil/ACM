@@ -9,7 +9,7 @@ line_end: 342
 
 # core.sql_client.SQLClient.execute
 
-Defined in: [[modules/core.sql_client|core.sql_client]]
+Defined in: [[modules/core.sql_client]]
 
 Source: `core/sql_client.py:283`
 

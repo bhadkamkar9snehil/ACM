@@ -1,6 +1,6 @@
 ---
 type: reference
-generated_at: 2026-02-21T13:53:42+00:00
+generated_at: 2026-02-21T14:23:15+00:00
 ---
 
 # Outputs and Status
@@ -12,10 +12,10 @@ Outcome semantics:
 4. FAIL
 
 Primary output owner:
-- [[modules/core.output_manager|core.output_manager]]
+- [[modules/core.output_manager]]
 
 Primary run metadata owner:
-- [[modules/core.run_metadata_writer|core.run_metadata_writer]]
+- [[modules/core.run_metadata_writer]]
 
 Primary lifecycle table:
 - ACM_Runs

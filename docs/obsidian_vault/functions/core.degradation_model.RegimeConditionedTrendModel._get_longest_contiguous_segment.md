@@ -9,7 +9,7 @@ line_end: 1094
 
 # core.degradation_model.RegimeConditionedTrendModel._get_longest_contiguous_segment
 
-Defined in: [[modules/core.degradation_model|core.degradation_model]]
+Defined in: [[modules/core.degradation_model]]
 
 Source: `core/degradation_model.py:1025`
 

@@ -9,7 +9,7 @@ line_end: 2644
 
 # core.observability._LokiPusher._push_payload
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:2606`
 

@@ -9,7 +9,7 @@ line_end: 163
 
 # core.fuse.CalibrationContaminationFilter._bypass_result
 
-Defined in: [[modules/core.fuse|core.fuse]]
+Defined in: [[modules/core.fuse]]
 
 Source: `core/fuse.py:149`
 

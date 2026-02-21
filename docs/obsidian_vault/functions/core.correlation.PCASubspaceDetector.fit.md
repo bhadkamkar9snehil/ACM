@@ -9,7 +9,7 @@ line_end: 162
 
 # core.correlation.PCASubspaceDetector.fit
 
-Defined in: [[modules/core.correlation|core.correlation]]
+Defined in: [[modules/core.correlation]]
 
 Source: `core/correlation.py:81`
 

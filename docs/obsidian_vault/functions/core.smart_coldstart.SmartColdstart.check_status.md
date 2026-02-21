@@ -9,7 +9,7 @@ line_end: 159
 
 # core.smart_coldstart.SmartColdstart.check_status
 
-Defined in: [[modules/core.smart_coldstart|core.smart_coldstart]]
+Defined in: [[modules/core.smart_coldstart]]
 
 Source: `core/smart_coldstart.py:98`
 

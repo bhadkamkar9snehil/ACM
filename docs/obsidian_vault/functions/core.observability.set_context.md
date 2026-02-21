@@ -9,7 +9,7 @@ line_end: 1165
 
 # core.observability.set_context
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:1129`
 

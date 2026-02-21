@@ -9,7 +9,7 @@ line_end: 810
 
 # core.metrics.rolling_backtest
 
-Defined in: [[modules/core.metrics|core.metrics]]
+Defined in: [[modules/core.metrics]]
 
 Source: `core/metrics.py:662`
 

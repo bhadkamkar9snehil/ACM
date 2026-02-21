@@ -9,7 +9,7 @@ line_end: 2327
 
 # core.observability._LokiPusher._metric_attrs
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:2323`
 

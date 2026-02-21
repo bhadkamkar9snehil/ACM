@@ -9,7 +9,7 @@ line_end: 169
 
 # core.model_lifecycle.ModelState.silhouette_score
 
-Defined in: [[modules/core.model_lifecycle|core.model_lifecycle]]
+Defined in: [[modules/core.model_lifecycle]]
 
 Source: `core/model_lifecycle.py:168`
 

@@ -9,7 +9,7 @@ line_end: 384
 
 # core.drift.build_drift_controller_state
 
-Defined in: [[modules/core.drift|core.drift]]
+Defined in: [[modules/core.drift]]
 
 Source: `core/drift.py:364`
 

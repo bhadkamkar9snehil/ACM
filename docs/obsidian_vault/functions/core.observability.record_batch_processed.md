@@ -9,7 +9,7 @@ line_end: 1781
 
 # core.observability.record_batch_processed
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:1778`
 

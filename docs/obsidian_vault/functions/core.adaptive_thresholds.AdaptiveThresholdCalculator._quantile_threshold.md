@@ -9,7 +9,7 @@ line_end: 268
 
 # core.adaptive_thresholds.AdaptiveThresholdCalculator._quantile_threshold
 
-Defined in: [[modules/core.adaptive_thresholds|core.adaptive_thresholds]]
+Defined in: [[modules/core.adaptive_thresholds]]
 
 Source: `core/adaptive_thresholds.py:247`
 

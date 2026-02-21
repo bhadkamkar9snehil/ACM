@@ -9,7 +9,7 @@ line_end: 3153
 
 # core.observability._PyroscopePusher._stats_to_collapsed
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:3100`
 

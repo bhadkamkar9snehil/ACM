@@ -9,7 +9,7 @@ line_end: 728
 
 # core.failure_probability.bootstrap_degradation_rate
 
-Defined in: [[modules/core.failure_probability|core.failure_probability]]
+Defined in: [[modules/core.failure_probability]]
 
 Source: `core/failure_probability.py:609`
 

@@ -9,7 +9,7 @@ line_end: 2395
 
 # core.regimes.smooth_labels
 
-Defined in: [[modules/core.regimes|core.regimes]]
+Defined in: [[modules/core.regimes]]
 
 Source: `core/regimes.py:2226`
 

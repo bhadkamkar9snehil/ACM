@@ -9,7 +9,7 @@ line_end: 259
 
 # core.omr.OMRDetector._compute_optimal_components
 
-Defined in: [[modules/core.omr|core.omr]]
+Defined in: [[modules/core.omr]]
 
 Source: `core/omr.py:228`
 

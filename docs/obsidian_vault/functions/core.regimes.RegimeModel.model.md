@@ -9,7 +9,7 @@ line_end: 482
 
 # core.regimes.RegimeModel.model
 
-Defined in: [[modules/core.regimes|core.regimes]]
+Defined in: [[modules/core.regimes]]
 
 Source: `core/regimes.py:477`
 

@@ -9,7 +9,7 @@ line_end: 406
 
 # core.detector_orchestrator.reconcile_detector_flags_with_loaded_models
 
-Defined in: [[modules/core.detector_orchestrator|core.detector_orchestrator]]
+Defined in: [[modules/core.detector_orchestrator]]
 
 Source: `core/detector_orchestrator.py:353`
 

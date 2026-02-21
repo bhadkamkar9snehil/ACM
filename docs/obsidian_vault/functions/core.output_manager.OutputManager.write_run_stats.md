@@ -3,15 +3,15 @@ type: method
 id: core.output_manager.OutputManager.write_run_stats
 module: core.output_manager
 source: core/output_manager.py
-line_start: 1445
-line_end: 1465
+line_start: 1446
+line_end: 1466
 ---
 
 # core.output_manager.OutputManager.write_run_stats
 
-Defined in: [[modules/core.output_manager|core.output_manager]]
+Defined in: [[modules/core.output_manager]]
 
-Source: `core/output_manager.py:1445`
+Source: `core/output_manager.py:1446`
 
 Kind: `method`
 

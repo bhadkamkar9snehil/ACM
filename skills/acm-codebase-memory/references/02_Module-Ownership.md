@@ -21,12 +21,12 @@ type: agent-memory
 | `[core.failure_probability]` | 18 | 0 |
 | `[core.fast_features]` | 33 | 1 |
 | `[core.forecast_engine]` | 31 | 11 |
-| `[core.fuse]` | 34 | 1 |
+| `[core.fuse]` | 44 | 1 |
 | `[core.health_tracker]` | 13 | 1 |
 | `[core.metrics]` | 14 | 1 |
 | `[core.model_evaluation]` | 12 | 1 |
 | `[core.model_lifecycle]` | 20 | 1 |
-| `[core.model_persistence]` | 38 | 1 |
+| `[core.model_persistence]` | 39 | 1 |
 | `[core.multivariate_forecast]` | 11 | 1 |
 | `[core.observability]` | 108 | 0 |
 | `[core.omr]` | 19 | 0 |

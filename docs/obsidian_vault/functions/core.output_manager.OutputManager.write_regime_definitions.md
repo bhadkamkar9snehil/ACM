@@ -3,15 +3,15 @@ type: method
 id: core.output_manager.OutputManager.write_regime_definitions
 module: core.output_manager
 source: core/output_manager.py
-line_start: 2980
-line_end: 2997
+line_start: 2981
+line_end: 2998
 ---
 
 # core.output_manager.OutputManager.write_regime_definitions
 
-Defined in: [[modules/core.output_manager|core.output_manager]]
+Defined in: [[modules/core.output_manager]]
 
-Source: `core/output_manager.py:2980`
+Source: `core/output_manager.py:2981`
 
 Kind: `method`
 

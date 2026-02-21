@@ -3,15 +3,15 @@ type: method
 id: core.output_manager.OutputManager.write_fusion_metrics
 module: core.output_manager
 source: core/output_manager.py
-line_start: 2698
-line_end: 2779
+line_start: 2699
+line_end: 2780
 ---
 
 # core.output_manager.OutputManager.write_fusion_metrics
 
-Defined in: [[modules/core.output_manager|core.output_manager]]
+Defined in: [[modules/core.output_manager]]
 
-Source: `core/output_manager.py:2698`
+Source: `core/output_manager.py:2699`
 
 Kind: `method`
 

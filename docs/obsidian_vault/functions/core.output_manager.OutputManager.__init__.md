@@ -3,15 +3,15 @@ type: method
 id: core.output_manager.OutputManager.__init__
 module: core.output_manager
 source: core/output_manager.py
-line_start: 329
-line_end: 402
+line_start: 330
+line_end: 403
 ---
 
 # core.output_manager.OutputManager.__init__
 
-Defined in: [[modules/core.output_manager|core.output_manager]]
+Defined in: [[modules/core.output_manager]]
 
-Source: `core/output_manager.py:329`
+Source: `core/output_manager.py:330`
 
 Kind: `method`
 

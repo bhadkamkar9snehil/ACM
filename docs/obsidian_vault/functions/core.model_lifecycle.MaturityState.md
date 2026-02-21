@@ -9,7 +9,7 @@ line_end: 48
 
 # core.model_lifecycle.MaturityState
 
-Defined in: [[modules/core.model_lifecycle|core.model_lifecycle]]
+Defined in: [[modules/core.model_lifecycle]]
 
 Source: `core/model_lifecycle.py:40`
 

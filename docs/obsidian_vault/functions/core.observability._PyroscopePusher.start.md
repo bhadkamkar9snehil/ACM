@@ -9,7 +9,7 @@ line_end: 2797
 
 # core.observability._PyroscopePusher.start
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:2776`
 

@@ -9,7 +9,7 @@ line_end: 378
 
 # core.failure_probability.WeibullHazardModel.__init__
 
-Defined in: [[modules/core.failure_probability|core.failure_probability]]
+Defined in: [[modules/core.failure_probability]]
 
 Source: `core/failure_probability.py:358`
 

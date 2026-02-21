@@ -9,7 +9,7 @@ line_end: 115
 
 # core.forecast_engine._mann_kendall_trend_direction
 
-Defined in: [[modules/core.forecast_engine|core.forecast_engine]]
+Defined in: [[modules/core.forecast_engine]]
 
 Source: `core/forecast_engine.py:90`
 

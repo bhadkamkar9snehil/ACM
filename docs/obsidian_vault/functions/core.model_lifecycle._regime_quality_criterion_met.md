@@ -9,7 +9,7 @@ line_end: 243
 
 # core.model_lifecycle._regime_quality_criterion_met
 
-Defined in: [[modules/core.model_lifecycle|core.model_lifecycle]]
+Defined in: [[modules/core.model_lifecycle]]
 
 Source: `core/model_lifecycle.py:196`
 

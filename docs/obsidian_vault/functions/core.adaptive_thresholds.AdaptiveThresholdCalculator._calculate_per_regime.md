@@ -9,7 +9,7 @@ line_end: 245
 
 # core.adaptive_thresholds.AdaptiveThresholdCalculator._calculate_per_regime
 
-Defined in: [[modules/core.adaptive_thresholds|core.adaptive_thresholds]]
+Defined in: [[modules/core.adaptive_thresholds]]
 
 Source: `core/adaptive_thresholds.py:188`
 

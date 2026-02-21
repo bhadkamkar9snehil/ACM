@@ -9,7 +9,7 @@ line_end: 185
 
 # core.sql_client.SQLClient._build_conn_str
 
-Defined in: [[modules/core.sql_client|core.sql_client]]
+Defined in: [[modules/core.sql_client]]
 
 Source: `core/sql_client.py:138`
 

@@ -9,7 +9,7 @@ line_end: 394
 
 # core.rul_estimator.RULEstimator._find_time_to_failure
 
-Defined in: [[modules/core.rul_estimator|core.rul_estimator]]
+Defined in: [[modules/core.rul_estimator]]
 
 Source: `core/rul_estimator.py:368`
 

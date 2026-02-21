@@ -3,15 +3,15 @@ type: method
 id: core.output_manager.OutputManager.set_maturity_state
 module: core.output_manager
 source: core/output_manager.py
-line_start: 404
-line_end: 414
+line_start: 405
+line_end: 415
 ---
 
 # core.output_manager.OutputManager.set_maturity_state
 
-Defined in: [[modules/core.output_manager|core.output_manager]]
+Defined in: [[modules/core.output_manager]]
 
-Source: `core/output_manager.py:404`
+Source: `core/output_manager.py:405`
 
 Kind: `method`
 

@@ -9,7 +9,7 @@ line_end: 112
 
 # core.outliers.IsolationForestDetector.predict
 
-Defined in: [[modules/core.outliers|core.outliers]]
+Defined in: [[modules/core.outliers]]
 
 Source: `core/outliers.py:108`
 

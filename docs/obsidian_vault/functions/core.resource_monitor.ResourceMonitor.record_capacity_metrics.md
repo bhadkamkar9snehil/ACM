@@ -9,7 +9,7 @@ line_end: 610
 
 # core.resource_monitor.ResourceMonitor.record_capacity_metrics
 
-Defined in: [[modules/core.resource_monitor|core.resource_monitor]]
+Defined in: [[modules/core.resource_monitor]]
 
 Source: `core/resource_monitor.py:586`
 

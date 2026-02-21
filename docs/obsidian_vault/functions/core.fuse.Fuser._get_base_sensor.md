@@ -3,15 +3,15 @@ type: method
 id: core.fuse.Fuser._get_base_sensor
 module: core.fuse
 source: core/fuse.py
-line_start: 1420
-line_end: 1424
+line_start: 1783
+line_end: 1787
 ---
 
 # core.fuse.Fuser._get_base_sensor
 
-Defined in: [[modules/core.fuse|core.fuse]]
+Defined in: [[modules/core.fuse]]
 
-Source: `core/fuse.py:1420`
+Source: `core/fuse.py:1783`
 
 Kind: `method`
 

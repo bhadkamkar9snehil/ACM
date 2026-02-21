@@ -9,7 +9,7 @@ line_end: 34
 
 # core.omr.ModelType
 
-Defined in: [[modules/core.omr|core.omr]]
+Defined in: [[modules/core.omr]]
 
 Source: `core/omr.py:29`
 

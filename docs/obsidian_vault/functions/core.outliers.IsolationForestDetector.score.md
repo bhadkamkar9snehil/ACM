@@ -9,7 +9,7 @@ line_end: 102
 
 # core.outliers.IsolationForestDetector.score
 
-Defined in: [[modules/core.outliers|core.outliers]]
+Defined in: [[modules/core.outliers]]
 
 Source: `core/outliers.py:81`
 

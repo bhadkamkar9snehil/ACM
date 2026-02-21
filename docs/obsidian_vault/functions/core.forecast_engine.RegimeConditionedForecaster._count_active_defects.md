@@ -9,7 +9,7 @@ line_end: 2343
 
 # core.forecast_engine.RegimeConditionedForecaster._count_active_defects
 
-Defined in: [[modules/core.forecast_engine|core.forecast_engine]]
+Defined in: [[modules/core.forecast_engine]]
 
 Source: `core/forecast_engine.py:2327`
 

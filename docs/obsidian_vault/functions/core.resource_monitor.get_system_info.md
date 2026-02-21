@@ -9,7 +9,7 @@ line_end: 159
 
 # core.resource_monitor.get_system_info
 
-Defined in: [[modules/core.resource_monitor|core.resource_monitor]]
+Defined in: [[modules/core.resource_monitor]]
 
 Source: `core/resource_monitor.py:138`
 

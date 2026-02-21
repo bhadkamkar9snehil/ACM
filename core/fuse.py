@@ -10,7 +10,7 @@ v11.3.3 (2026-01-19): Added CalibrationContaminationFilter for robust calibratio
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Mapping, Optional, Tuple, cast
+from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple, cast
 from core.observability import Console, Span
 from utils.detector_labels import format_culprit_label
 
@@ -1371,6 +1371,369 @@ def build_calibration_summary_rows(
     return rows
 
 
+def persist_threshold_artifacts(
+    output_manager: Optional[Any],
+    calibrators: List[Tuple[str, "ScoreCalibrator"]],
+    quality_ok: bool,
+    use_per_regime: bool,
+) -> Tuple[int, int]:
+    """
+    Persist per-regime and global threshold artifacts.
+
+    Returns:
+        Tuple of (per_regime_row_count, threshold_row_count)
+    """
+    if output_manager is None:
+        return 0, 0
+
+    per_regime_count = 0
+    if quality_ok and use_per_regime:
+        per_regime_rows = build_per_regime_threshold_rows(calibrators)
+        if per_regime_rows:
+            per_regime_df = pd.DataFrame(per_regime_rows)
+            output_manager.write_dataframe(per_regime_df, "per_regime_thresholds")
+            per_regime_count = len(per_regime_rows)
+
+    threshold_rows = build_threshold_rows(calibrators)
+    if threshold_rows:
+        thresholds_df = pd.DataFrame(threshold_rows)
+        output_manager.write_dataframe(thresholds_df, "acm_thresholds")
+
+    return per_regime_count, len(threshold_rows)
+
+
+def apply_contamination_filter_config(
+    self_tune_cfg: Dict[str, Any],
+    thresholds_cfg: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """
+    Apply contamination-filter settings into calibration self-tune config.
+
+    Mutates and returns self_tune_cfg to preserve existing runtime behavior.
+    """
+    contam_filter_cfg = (thresholds_cfg or {}).get("contamination_filter", {})
+    if contam_filter_cfg:
+        self_tune_cfg["contamination_filter"] = {
+            "enabled": contam_filter_cfg.get("enabled", True),
+            "method": contam_filter_cfg.get("method", "iterative_mad"),
+            "z_threshold": float(contam_filter_cfg.get("z_threshold", 4.0)),
+            "max_iterations": int(contam_filter_cfg.get("max_iterations", 10)),
+            "min_retained_ratio": float(contam_filter_cfg.get("min_retained_ratio", 0.70)),
+        }
+    else:
+        self_tune_cfg["contamination_filter"] = {
+            "enabled": True,
+            "method": "iterative_mad",
+            "z_threshold": 4.0,
+            "max_iterations": 10,
+            "min_retained_ratio": 0.70,
+        }
+    return self_tune_cfg
+
+
+def choose_pca_cache_for_calibration(
+    pca_train_spe: Optional[np.ndarray],
+    pca_train_t2: Optional[np.ndarray],
+    train_len: int,
+    logger: Any = Console,
+) -> Optional[Tuple[np.ndarray, Optional[np.ndarray]]]:
+    """
+    Return cached PCA scores only when cache length exactly matches train length.
+    """
+    if pca_train_spe is not None and len(pca_train_spe) == train_len:
+        return (pca_train_spe, pca_train_t2)
+
+    if pca_train_spe is not None:
+        logger.info(
+            f"PCA cache length mismatch: cached={len(pca_train_spe)}, train={train_len} - re-scoring",
+            component="CALIBRATE",
+        )
+    return None
+
+
+def compute_and_set_adaptive_clip(
+    train_frame: pd.DataFrame,
+    self_tune_cfg: Dict[str, Any],
+    omr_enabled: bool,
+) -> float:
+    """
+    Compute adaptive z-clip from TRAIN raw detector scores and update self_tune_cfg.
+    """
+    default_clip = float(self_tune_cfg.get("clip_z", 8.0))
+    train_z_p99: Dict[str, float] = {}
+    det_raw_cols = [
+        ("ar1", "ar1_raw"),
+        ("pca_spe", "pca_spe"),
+        ("pca_t2", "pca_t2"),
+        ("iforest", "iforest_raw"),
+        ("gmm", "gmm_raw"),
+    ]
+    if omr_enabled:
+        det_raw_cols.append(("omr", "omr_raw"))
+
+    for det_name, raw_col in det_raw_cols:
+        if raw_col not in train_frame.columns:
+            continue
+        raw_vals = train_frame[raw_col].to_numpy(copy=False)
+        finite_vals = raw_vals[np.isfinite(raw_vals)]
+        if len(finite_vals) <= 10:
+            continue
+        med = float(np.median(finite_vals))
+        mad = float(np.median(np.abs(finite_vals - med)))
+        scale = mad * 1.4826 if mad > 1e-9 else float(np.nanstd(finite_vals))
+        scale = max(scale, 1e-3)
+        z_vals = (finite_vals - med) / scale
+        p99 = float(np.percentile(z_vals, 99))
+        if 0 < p99 < 100:
+            train_z_p99[det_name] = p99
+
+    adaptive_clip = default_clip
+    if train_z_p99:
+        max_train_p99 = max(train_z_p99.values())
+        adaptive_clip = max(default_clip, min(max_train_p99 * 1.5, 50.0))
+        self_tune_cfg["clip_z"] = adaptive_clip
+    return adaptive_clip
+
+
+def compute_pca_train_percentiles(
+    train_frame: pd.DataFrame,
+    fit_regimes: Optional[np.ndarray],
+    pca_enabled: bool,
+    calibrators_dict: Dict[str, Any],
+) -> Tuple[float, float]:
+    """
+    Compute P95 TRAIN z-scores for PCA SPE and T2 calibrators.
+    """
+    spe_p95_train = 0.0
+    t2_p95_train = 0.0
+    cal_pca_spe = calibrators_dict.get("pca_spe_z")
+    cal_pca_t2 = calibrators_dict.get("pca_t2_z")
+
+    if pca_enabled and cal_pca_spe is not None and "pca_spe" in train_frame.columns:
+        pca_train_spe_z = cal_pca_spe.transform(
+            train_frame["pca_spe"].to_numpy(dtype=np.float32), regime_labels=fit_regimes
+        )
+        spe_p95_train = float(np.nanpercentile(pca_train_spe_z, 95))
+
+    if pca_enabled and cal_pca_t2 is not None and "pca_t2" in train_frame.columns:
+        pca_train_t2_z = cal_pca_t2.transform(
+            train_frame["pca_t2"].to_numpy(dtype=np.float32), regime_labels=fit_regimes
+        )
+        t2_p95_train = float(np.nanpercentile(pca_train_t2_z, 95))
+
+    return spe_p95_train, t2_p95_train
+
+
+def collect_enabled_calibrators(
+    calibrators_dict: Dict[str, Any],
+    frame: pd.DataFrame,
+    ar1_enabled: bool,
+    pca_enabled: bool,
+    iforest_enabled: bool,
+    gmm_enabled: bool,
+    omr_enabled: bool,
+) -> List[Tuple[str, "ScoreCalibrator"]]:
+    """
+    Collect active calibrator objects in detector output order.
+    """
+    calibrators: List[Tuple[str, "ScoreCalibrator"]] = []
+    cal_ar = calibrators_dict.get("ar1_z")
+    cal_pca_spe = calibrators_dict.get("pca_spe_z")
+    cal_pca_t2 = calibrators_dict.get("pca_t2_z")
+    cal_if = calibrators_dict.get("iforest_z")
+    cal_gmm = calibrators_dict.get("gmm_z")
+    cal_omr = calibrators_dict.get("omr_z")
+
+    if ar1_enabled and cal_ar is not None:
+        calibrators.append(("ar1_z", cal_ar))
+    if pca_enabled and cal_pca_spe is not None:
+        calibrators.append(("pca_spe_z", cal_pca_spe))
+    if pca_enabled and cal_pca_t2 is not None:
+        calibrators.append(("pca_t2_z", cal_pca_t2))
+    if iforest_enabled and cal_if is not None:
+        calibrators.append(("iforest_z", cal_if))
+    if gmm_enabled and cal_gmm is not None:
+        calibrators.append(("gmm_z", cal_gmm))
+    if omr_enabled and cal_omr is not None and "omr_raw" in frame.columns:
+        calibrators.append(("omr_z", cal_omr))
+    return calibrators
+
+
+def write_calibration_summary_safe(
+    output_manager: Optional[Any],
+    calibrators: List[Tuple[str, "ScoreCalibrator"]],
+    logger: Any = Console,
+    equip: str = "",
+) -> int:
+    """
+    Write calibration summary payload and return written row count.
+    """
+    if output_manager is None or not calibrators:
+        return 0
+
+    try:
+        calibration_summary = build_calibration_summary_rows(calibrators)
+        if not calibration_summary:
+            return 0
+        return int(output_manager.write_calibration_summary(calibration_summary))
+    except Exception as e:
+        logger.warn(
+            f"Calibration summary write failed: {e}",
+            component="CAL",
+            equip=equip,
+            error=str(e)[:200],
+        )
+        return 0
+
+
+@dataclass
+class CalibrationStageResult:
+    """Result payload from calibration stage orchestration."""
+    frame: pd.DataFrame
+    train_frame: pd.DataFrame
+    calibrators_dict: Dict[str, Any]
+    calibrators: List[Tuple[str, "ScoreCalibrator"]]
+    spe_p95_train: float
+    t2_p95_train: float
+    quality_ok: bool
+    use_per_regime: bool
+
+
+def run_calibration_stage(
+    *,
+    train: pd.DataFrame,
+    frame: pd.DataFrame,
+    cfg: Dict[str, Any],
+    regime_quality_ok: bool,
+    train_regime_labels: Optional[np.ndarray],
+    score_regime_labels: Optional[np.ndarray],
+    pca_train_spe: Optional[np.ndarray],
+    pca_train_t2: Optional[np.ndarray],
+    detectors: Dict[str, Any],
+    detector_flags: Dict[str, bool],
+    cached_calibration_params: Optional[Dict[str, Any]],
+    saved_model_version: Optional[int],
+    score_all_detectors_fn: Callable[..., Tuple[pd.DataFrame, Optional[Any]]],
+    calibrate_all_detectors_fn: Callable[..., Tuple[pd.DataFrame, Dict[str, Any]]],
+    persist_calibration_params_fn: Optional[Callable[..., bool]] = None,
+    output_manager: Optional[Any] = None,
+    logger: Any = Console,
+    equip: str = "",
+) -> CalibrationStageResult:
+    """
+    Run calibration stage end-to-end while keeping behavior parity with acm.py.
+    """
+    cal_q = float((cfg or {}).get("thresholds", {}).get("q", 0.98))
+    self_tune_cfg = (cfg or {}).get("thresholds", {}).get("self_tune", {})
+    use_per_regime = (cfg.get("fusion", {}) or {}).get("per_regime", False)
+    quality_ok = bool(
+        use_per_regime
+        and regime_quality_ok
+        and train_regime_labels is not None
+        and score_regime_labels is not None
+    )
+
+    apply_contamination_filter_config(
+        self_tune_cfg=self_tune_cfg,
+        thresholds_cfg=(cfg or {}).get("thresholds", {}),
+    )
+
+    pca_cached_for_train = choose_pca_cache_for_calibration(
+        pca_train_spe=pca_train_spe,
+        pca_train_t2=pca_train_t2,
+        train_len=len(train),
+        logger=logger,
+    )
+
+    train_frame, _ = score_all_detectors_fn(
+        data=train,
+        ar1_detector=detectors.get("ar1_detector"),
+        pca_detector=detectors.get("pca_detector"),
+        iforest_detector=detectors.get("iforest_detector"),
+        gmm_detector=detectors.get("gmm_detector"),
+        omr_detector=detectors.get("omr_detector"),
+        ar1_enabled=bool(detector_flags.get("ar1_enabled", True)),
+        pca_enabled=bool(detector_flags.get("pca_enabled", True)),
+        iforest_enabled=bool(detector_flags.get("iforest_enabled", True)),
+        gmm_enabled=bool(detector_flags.get("gmm_enabled", True)),
+        omr_enabled=bool(detector_flags.get("omr_enabled", True)),
+        pca_cached=pca_cached_for_train,
+        return_omr_contributions=False,
+    )
+
+    adaptive_clip = compute_and_set_adaptive_clip(
+        train_frame=train_frame,
+        self_tune_cfg=self_tune_cfg,
+        omr_enabled=bool(detector_flags.get("omr_enabled", True)),
+    )
+
+    fit_regimes = train_regime_labels if quality_ok else None
+    transform_regimes = score_regime_labels if quality_ok else None
+    frame["per_regime_active"] = 1 if quality_ok else 0
+
+    frame, calibrators_dict = calibrate_all_detectors_fn(
+        train_frame=train_frame,
+        score_frame=frame,
+        cal_q=cal_q,
+        self_tune_cfg=self_tune_cfg,
+        fit_regimes=fit_regimes,
+        transform_regimes=transform_regimes,
+        omr_enabled=bool(detector_flags.get("omr_enabled", True)),
+        cached_calibration_params=cached_calibration_params,
+    )
+
+    if persist_calibration_params_fn is not None:
+        persist_calibration_params_fn(saved_model_version, calibrators_dict)
+
+    spe_p95_train, t2_p95_train = compute_pca_train_percentiles(
+        train_frame=train_frame,
+        fit_regimes=fit_regimes,
+        pca_enabled=bool(detector_flags.get("pca_enabled", True)),
+        calibrators_dict=calibrators_dict,
+    )
+
+    calibrators = collect_enabled_calibrators(
+        calibrators_dict=calibrators_dict,
+        frame=frame,
+        ar1_enabled=bool(detector_flags.get("ar1_enabled", True)),
+        pca_enabled=bool(detector_flags.get("pca_enabled", True)),
+        iforest_enabled=bool(detector_flags.get("iforest_enabled", True)),
+        gmm_enabled=bool(detector_flags.get("gmm_enabled", True)),
+        omr_enabled=bool(detector_flags.get("omr_enabled", True)),
+    )
+
+    per_regime_count, threshold_count = persist_threshold_artifacts(
+        output_manager=output_manager,
+        calibrators=calibrators,
+        quality_ok=quality_ok,
+        use_per_regime=use_per_regime,
+    )
+
+    cal_summary_count = write_calibration_summary_safe(
+        output_manager=output_manager,
+        calibrators=calibrators,
+        logger=logger,
+        equip=equip,
+    )
+
+    logger.info(
+        f"Calibration complete: q={cal_q} | clip_z={adaptive_clip:.2f} | detectors={len(calibrators)} | "
+        f"thresholds={threshold_count} | per_regime={per_regime_count} | summary={cal_summary_count}",
+        component="CAL",
+    )
+
+    return CalibrationStageResult(
+        frame=frame,
+        train_frame=train_frame,
+        calibrators_dict=calibrators_dict,
+        calibrators=calibrators,
+        spe_p95_train=spe_p95_train,
+        t2_p95_train=t2_p95_train,
+        quality_ok=quality_ok,
+        use_per_regime=use_per_regime,
+    )
+
+
 @dataclass
 class EpisodeParams:
     """Parameters for episode detection with hysteresis.
@@ -2339,3 +2702,36 @@ def run_fusion_pipeline(
         tuning_diagnostics=tuning_diagnostics,
         train_fused=train_fused,
     )
+
+
+def apply_fusion_result_and_record_metrics(
+    frame: pd.DataFrame,
+    train_frame: Optional[pd.DataFrame],
+    fusion_result: "FusionResult",
+    equip: str = "",
+    record_detector_scores_fn: Optional[Callable[..., None]] = None,
+    record_episode_fn: Optional[Callable[..., None]] = None,
+) -> Tuple[pd.DataFrame, Optional[pd.DataFrame], pd.DataFrame, Dict[str, float]]:
+    """
+    Apply fusion outputs to score/train frames and emit observability metrics.
+    """
+    frame["fused"] = fusion_result.fused_scores
+    episodes = fusion_result.episodes
+    fusion_weights_used = fusion_result.weights_used
+
+    if train_frame is not None and fusion_result.train_fused is not None:
+        train_frame["fused"] = fusion_result.train_fused
+
+    detector_scores = {
+        "fused_z": float(fusion_result.fused_scores[-1]) if len(fusion_result.fused_scores) > 0 else 0.0
+    }
+    for det in ["ar1_z", "pca_spe_z", "pca_t2_z", "iforest_z", "gmm_z", "omr_z"]:
+        if det in frame.columns:
+            detector_scores[det] = float(frame[det].iloc[-1])
+
+    if record_detector_scores_fn is not None:
+        record_detector_scores_fn(equip, detector_scores)
+    if record_episode_fn is not None and len(episodes) > 0:
+        record_episode_fn(equip, count=len(episodes), severity="warning")
+
+    return frame, train_frame, episodes, fusion_weights_used

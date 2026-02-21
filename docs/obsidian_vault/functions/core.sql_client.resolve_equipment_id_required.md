@@ -9,7 +9,7 @@ line_end: 630
 
 # core.sql_client.resolve_equipment_id_required
 
-Defined in: [[modules/core.sql_client|core.sql_client]]
+Defined in: [[modules/core.sql_client]]
 
 Source: `core/sql_client.py:602`
 

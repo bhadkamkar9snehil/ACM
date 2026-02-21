@@ -9,7 +9,7 @@ line_end: 269
 
 # core.health_tracker.HealthTimeline.load_from_sql
 
-Defined in: [[modules/core.health_tracker|core.health_tracker]]
+Defined in: [[modules/core.health_tracker]]
 
 Source: `core/health_tracker.py:172`
 

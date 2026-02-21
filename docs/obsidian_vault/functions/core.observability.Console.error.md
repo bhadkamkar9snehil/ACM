@@ -9,7 +9,7 @@ line_end: 1301
 
 # core.observability.Console.error
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:1296`
 

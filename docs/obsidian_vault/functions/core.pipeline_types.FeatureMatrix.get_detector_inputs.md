@@ -9,7 +9,7 @@ line_end: 453
 
 # core.pipeline_types.FeatureMatrix.get_detector_inputs
 
-Defined in: [[modules/core.pipeline_types|core.pipeline_types]]
+Defined in: [[modules/core.pipeline_types]]
 
 Source: `core/pipeline_types.py:451`
 

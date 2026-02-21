@@ -9,7 +9,7 @@ line_end: 527
 
 # core.degradation_model.LinearTrendModel._detect_and_remove_outliers
 
-Defined in: [[modules/core.degradation_model|core.degradation_model]]
+Defined in: [[modules/core.degradation_model]]
 
 Source: `core/degradation_model.py:487`
 

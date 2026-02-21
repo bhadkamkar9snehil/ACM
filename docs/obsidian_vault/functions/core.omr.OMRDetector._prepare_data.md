@@ -9,7 +9,7 @@ line_end: 226
 
 # core.omr.OMRDetector._prepare_data
 
-Defined in: [[modules/core.omr|core.omr]]
+Defined in: [[modules/core.omr]]
 
 Source: `core/omr.py:193`
 

@@ -9,7 +9,7 @@ line_end: 2995
 
 # core.observability._PyroscopePusher._get_function_name_at_line
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:2959`
 

@@ -9,7 +9,7 @@ line_end: 157
 
 # core.drift.compute_regime_volatility
 
-Defined in: [[modules/core.drift|core.drift]]
+Defined in: [[modules/core.drift]]
 
 Source: `core/drift.py:134`
 

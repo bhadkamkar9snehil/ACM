@@ -9,7 +9,7 @@ line_end: 197
 
 # core.drift.compute
 
-Defined in: [[modules/core.drift|core.drift]]
+Defined in: [[modules/core.drift]]
 
 Source: `core/drift.py:160`
 

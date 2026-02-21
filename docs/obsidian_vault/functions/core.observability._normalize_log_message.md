@@ -9,7 +9,7 @@ line_end: 309
 
 # core.observability._normalize_log_message
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:290`
 

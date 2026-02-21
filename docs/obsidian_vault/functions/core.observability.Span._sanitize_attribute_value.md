@@ -9,7 +9,7 @@ line_end: 1534
 
 # core.observability.Span._sanitize_attribute_value
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:1523`
 

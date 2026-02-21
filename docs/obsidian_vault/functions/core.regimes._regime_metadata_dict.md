@@ -9,7 +9,7 @@ line_end: 252
 
 # core.regimes._regime_metadata_dict
 
-Defined in: [[modules/core.regimes|core.regimes]]
+Defined in: [[modules/core.regimes]]
 
 Source: `core/regimes.py:240`
 

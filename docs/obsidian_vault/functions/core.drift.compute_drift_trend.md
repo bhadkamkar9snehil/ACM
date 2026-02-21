@@ -9,7 +9,7 @@ line_end: 131
 
 # core.drift.compute_drift_trend
 
-Defined in: [[modules/core.drift|core.drift]]
+Defined in: [[modules/core.drift]]
 
 Source: `core/drift.py:64`
 

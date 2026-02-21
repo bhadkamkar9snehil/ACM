@@ -9,7 +9,7 @@ line_end: 161
 
 # core.data_loader.check_cadence
 
-Defined in: [[modules/core.data_loader|core.data_loader]]
+Defined in: [[modules/core.data_loader]]
 
 Source: `core/data_loader.py:154`
 

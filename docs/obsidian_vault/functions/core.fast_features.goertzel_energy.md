@@ -9,7 +9,7 @@ line_end: 678
 
 # core.fast_features.goertzel_energy
 
-Defined in: [[modules/core.fast_features|core.fast_features]]
+Defined in: [[modules/core.fast_features]]
 
 Source: `core/fast_features.py:641`
 

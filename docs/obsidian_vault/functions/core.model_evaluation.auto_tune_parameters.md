@@ -9,7 +9,7 @@ line_end: 775
 
 # core.model_evaluation.auto_tune_parameters
 
-Defined in: [[modules/core.model_evaluation|core.model_evaluation]]
+Defined in: [[modules/core.model_evaluation]]
 
 Source: `core/model_evaluation.py:572`
 

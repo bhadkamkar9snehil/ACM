@@ -9,7 +9,7 @@ line_end: 901
 
 # core.forecast_engine.ForecastEngine._generate_forecast_and_rul
 
-Defined in: [[modules/core.forecast_engine|core.forecast_engine]]
+Defined in: [[modules/core.forecast_engine]]
 
 Source: `core/forecast_engine.py:785`
 

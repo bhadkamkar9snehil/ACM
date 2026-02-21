@@ -3,15 +3,15 @@ type: function
 id: core.output_manager.write_pca_artifacts
 module: core.output_manager
 source: core/output_manager.py
-line_start: 3424
-line_end: 3556
+line_start: 3450
+line_end: 3582
 ---
 
 # core.output_manager.write_pca_artifacts
 
-Defined in: [[modules/core.output_manager|core.output_manager]]
+Defined in: [[modules/core.output_manager]]
 
-Source: `core/output_manager.py:3424`
+Source: `core/output_manager.py:3450`
 
 Kind: `function`
 

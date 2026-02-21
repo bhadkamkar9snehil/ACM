@@ -9,7 +9,7 @@ line_end: 2175
 
 # core.observability.record_disk_io
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:2142`
 

@@ -9,7 +9,7 @@ line_end: 2104
 
 # core.regimes._generate_regime_semantic_labels
 
-Defined in: [[modules/core.regimes|core.regimes]]
+Defined in: [[modules/core.regimes]]
 
 Source: `core/regimes.py:2039`
 

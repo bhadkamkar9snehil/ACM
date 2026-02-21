@@ -9,7 +9,7 @@ line_end: 101
 
 # core.degradation_model.BaseDegradationModel.update_incremental
 
-Defined in: [[modules/core.degradation_model|core.degradation_model]]
+Defined in: [[modules/core.degradation_model]]
 
 Source: `core/degradation_model.py:94`
 

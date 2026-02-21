@@ -9,7 +9,7 @@ line_end: 1580
 
 # core.regimes.fit_regime_model
 
-Defined in: [[modules/core.regimes|core.regimes]]
+Defined in: [[modules/core.regimes]]
 
 Source: `core/regimes.py:1260`
 

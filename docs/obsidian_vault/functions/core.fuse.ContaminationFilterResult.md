@@ -9,7 +9,7 @@ line_end: 40
 
 # core.fuse.ContaminationFilterResult
 
-Defined in: [[modules/core.fuse|core.fuse]]
+Defined in: [[modules/core.fuse]]
 
 Source: `core/fuse.py:28`
 

@@ -3,15 +3,15 @@ type: method
 id: core.output_manager.OutputManager.flush
 module: core.output_manager
 source: core/output_manager.py
-line_start: 3136
-line_end: 3140
+line_start: 3162
+line_end: 3166
 ---
 
 # core.output_manager.OutputManager.flush
 
-Defined in: [[modules/core.output_manager|core.output_manager]]
+Defined in: [[modules/core.output_manager]]
 
-Source: `core/output_manager.py:3136`
+Source: `core/output_manager.py:3162`
 
 Kind: `method`
 

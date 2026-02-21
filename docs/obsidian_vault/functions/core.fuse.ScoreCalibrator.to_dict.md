@@ -9,7 +9,7 @@ line_end: 1042
 
 # core.fuse.ScoreCalibrator.to_dict
 
-Defined in: [[modules/core.fuse|core.fuse]]
+Defined in: [[modules/core.fuse]]
 
 Source: `core/fuse.py:1035`
 

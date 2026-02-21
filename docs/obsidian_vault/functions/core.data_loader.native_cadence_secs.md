@@ -9,7 +9,7 @@ line_end: 151
 
 # core.data_loader.native_cadence_secs
 
-Defined in: [[modules/core.data_loader|core.data_loader]]
+Defined in: [[modules/core.data_loader]]
 
 Source: `core/data_loader.py:137`
 

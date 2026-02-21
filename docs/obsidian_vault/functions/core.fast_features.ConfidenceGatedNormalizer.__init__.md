@@ -9,7 +9,7 @@ line_end: 788
 
 # core.fast_features.ConfidenceGatedNormalizer.__init__
 
-Defined in: [[modules/core.fast_features|core.fast_features]]
+Defined in: [[modules/core.fast_features]]
 
 Source: `core/fast_features.py:774`
 

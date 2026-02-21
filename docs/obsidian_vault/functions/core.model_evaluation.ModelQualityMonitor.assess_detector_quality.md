@@ -9,7 +9,7 @@ line_end: 102
 
 # core.model_evaluation.ModelQualityMonitor.assess_detector_quality
 
-Defined in: [[modules/core.model_evaluation|core.model_evaluation]]
+Defined in: [[modules/core.model_evaluation]]
 
 Source: `core/model_evaluation.py:59`
 

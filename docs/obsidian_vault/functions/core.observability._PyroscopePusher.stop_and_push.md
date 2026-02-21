@@ -9,7 +9,7 @@ line_end: 2868
 
 # core.observability._PyroscopePusher.stop_and_push
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:2799`
 

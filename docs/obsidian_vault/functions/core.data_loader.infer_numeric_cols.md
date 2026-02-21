@@ -9,7 +9,7 @@ line_end: 134
 
 # core.data_loader.infer_numeric_cols
 
-Defined in: [[modules/core.data_loader|core.data_loader]]
+Defined in: [[modules/core.data_loader]]
 
 Source: `core/data_loader.py:132`
 

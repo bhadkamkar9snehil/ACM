@@ -9,7 +9,7 @@ line_end: 30
 
 # core.outliers._finite_impute
 
-Defined in: [[modules/core.outliers|core.outliers]]
+Defined in: [[modules/core.outliers]]
 
 Source: `core/outliers.py:20`
 

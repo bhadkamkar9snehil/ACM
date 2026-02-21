@@ -9,7 +9,7 @@ line_end: 568
 
 # core.multivariate_forecast.save_sensor_correlations
 
-Defined in: [[modules/core.multivariate_forecast|core.multivariate_forecast]]
+Defined in: [[modules/core.multivariate_forecast]]
 
 Source: `core/multivariate_forecast.py:519`
 

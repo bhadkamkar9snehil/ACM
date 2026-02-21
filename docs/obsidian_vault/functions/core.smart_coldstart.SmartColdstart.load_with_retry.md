@@ -9,7 +9,7 @@ line_end: 479
 
 # core.smart_coldstart.SmartColdstart.load_with_retry
 
-Defined in: [[modules/core.smart_coldstart|core.smart_coldstart]]
+Defined in: [[modules/core.smart_coldstart]]
 
 Source: `core/smart_coldstart.py:320`
 

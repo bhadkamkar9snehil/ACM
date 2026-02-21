@@ -9,7 +9,7 @@ line_end: 2037
 
 # core.observability.record_section_resources
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:1982`
 

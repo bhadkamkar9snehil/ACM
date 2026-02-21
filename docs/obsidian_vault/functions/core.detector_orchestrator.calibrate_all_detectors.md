@@ -9,7 +9,7 @@ line_end: 181
 
 # core.detector_orchestrator.calibrate_all_detectors
 
-Defined in: [[modules/core.detector_orchestrator|core.detector_orchestrator]]
+Defined in: [[modules/core.detector_orchestrator]]
 
 Source: `core/detector_orchestrator.py:110`
 

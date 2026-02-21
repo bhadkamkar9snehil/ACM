@@ -3,15 +3,15 @@ type: class
 id: core.acm.FusionContext
 module: core.acm
 source: core/acm.py
-line_start: 317
-line_end: 322
+line_start: 321
+line_end: 326
 ---
 
 # core.acm.FusionContext
 
-Defined in: [[modules/core.acm|core.acm]]
+Defined in: [[modules/core.acm]]
 
-Source: `core/acm.py:317`
+Source: `core/acm.py:321`
 
 Kind: `class`
 

@@ -9,7 +9,7 @@ line_end: 73
 
 # core.resource_monitor.enable_resource_metrics
 
-Defined in: [[modules/core.resource_monitor|core.resource_monitor]]
+Defined in: [[modules/core.resource_monitor]]
 
 Source: `core/resource_monitor.py:60`
 

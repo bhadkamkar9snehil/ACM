@@ -9,7 +9,7 @@ line_end: 1593
 
 # core.model_persistence.align_current_features_to_cached_manifest
 
-Defined in: [[modules/core.model_persistence|core.model_persistence]]
+Defined in: [[modules/core.model_persistence]]
 
 Source: `core/model_persistence.py:1525`
 

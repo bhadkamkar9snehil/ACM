@@ -9,7 +9,7 @@ line_end: 418
 
 # core.model_persistence.save_regime_state
 
-Defined in: [[modules/core.model_persistence|core.model_persistence]]
+Defined in: [[modules/core.model_persistence]]
 
 Source: `core/model_persistence.py:357`
 

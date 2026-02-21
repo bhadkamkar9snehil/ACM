@@ -9,7 +9,7 @@ line_end: 56
 
 # core.ar1_detector.AR1Detector.__init__
 
-Defined in: [[modules/core.ar1_detector|core.ar1_detector]]
+Defined in: [[modules/core.ar1_detector]]
 
 Source: `core/ar1_detector.py:35`
 

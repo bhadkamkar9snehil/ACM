@@ -9,7 +9,7 @@ line_end: 534
 
 # core.metrics.log_forecast_diagnostics
 
-Defined in: [[modules/core.metrics|core.metrics]]
+Defined in: [[modules/core.metrics]]
 
 Source: `core/metrics.py:517`
 

@@ -9,7 +9,7 @@ line_end: 409
 
 # core.seasonality.SeasonalityHandler.adjust_baseline
 
-Defined in: [[modules/core.seasonality|core.seasonality]]
+Defined in: [[modules/core.seasonality]]
 
 Source: `core/seasonality.py:357`
 

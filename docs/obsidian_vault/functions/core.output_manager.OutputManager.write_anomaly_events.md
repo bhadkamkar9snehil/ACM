@@ -3,15 +3,15 @@ type: method
 id: core.output_manager.OutputManager.write_anomaly_events
 module: core.output_manager
 source: core/output_manager.py
-line_start: 2065
-line_end: 2142
+line_start: 2066
+line_end: 2143
 ---
 
 # core.output_manager.OutputManager.write_anomaly_events
 
-Defined in: [[modules/core.output_manager|core.output_manager]]
+Defined in: [[modules/core.output_manager]]
 
-Source: `core/output_manager.py:2065`
+Source: `core/output_manager.py:2066`
 
 Kind: `method`
 

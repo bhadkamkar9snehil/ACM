@@ -3,15 +3,15 @@ type: function
 id: core.output_manager._health_index
 module: core.output_manager
 source: core/output_manager.py
-line_start: 299
-line_end: 301
+line_start: 300
+line_end: 302
 ---
 
 # core.output_manager._health_index
 
-Defined in: [[modules/core.output_manager|core.output_manager]]
+Defined in: [[modules/core.output_manager]]
 
-Source: `core/output_manager.py:299`
+Source: `core/output_manager.py:300`
 
 Kind: `function`
 

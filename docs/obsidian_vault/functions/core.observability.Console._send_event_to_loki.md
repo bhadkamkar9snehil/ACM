@@ -9,7 +9,7 @@ line_end: 1235
 
 # core.observability.Console._send_event_to_loki
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:1222`
 

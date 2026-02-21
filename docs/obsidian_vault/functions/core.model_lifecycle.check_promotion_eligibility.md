@@ -9,7 +9,7 @@ line_end: 298
 
 # core.model_lifecycle.check_promotion_eligibility
 
-Defined in: [[modules/core.model_lifecycle|core.model_lifecycle]]
+Defined in: [[modules/core.model_lifecycle]]
 
 Source: `core/model_lifecycle.py:246`
 

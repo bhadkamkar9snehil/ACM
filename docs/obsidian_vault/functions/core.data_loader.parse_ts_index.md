@@ -9,7 +9,7 @@ line_end: 89
 
 # core.data_loader.parse_ts_index
 
-Defined in: [[modules/core.data_loader|core.data_loader]]
+Defined in: [[modules/core.data_loader]]
 
 Source: `core/data_loader.py:82`
 

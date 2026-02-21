@@ -9,7 +9,7 @@ line_end: 2345
 
 # core.observability._LokiPusher._record_gauge_metric
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:2338`
 

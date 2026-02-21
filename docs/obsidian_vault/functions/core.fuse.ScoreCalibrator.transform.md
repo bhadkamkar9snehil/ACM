@@ -9,7 +9,7 @@ line_end: 1253
 
 # core.fuse.ScoreCalibrator.transform
 
-Defined in: [[modules/core.fuse|core.fuse]]
+Defined in: [[modules/core.fuse]]
 
 Source: `core/fuse.py:1216`
 

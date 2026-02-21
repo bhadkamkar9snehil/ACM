@@ -9,7 +9,7 @@ line_end: 260
 
 # core.confidence.check_rul_reliability
 
-Defined in: [[modules/core.confidence|core.confidence]]
+Defined in: [[modules/core.confidence]]
 
 Source: `core/confidence.py:196`
 

@@ -9,7 +9,7 @@ line_end: 140
 
 # core.confidence.compute_data_quality_confidence
 
-Defined in: [[modules/core.confidence|core.confidence]]
+Defined in: [[modules/core.confidence]]
 
 Source: `core/confidence.py:100`
 
