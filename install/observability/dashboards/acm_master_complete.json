@@ -1661,7 +1661,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT\n  ro.RegimeLabel,\n  ROUND(ro.DwellTimeHours, 2) AS DwellTimeHours,\n  ROUND(ro.DwellFraction * 100, 1) AS DwellPct,\n  ro.EntryCount\nFROM dbo.ACM_RegimeOccupancy ro\nWHERE ro.EquipID = $equipment\n  AND ro.RunID = (SELECT TOP 1 RunID FROM dbo.ACM_Runs WHERE EquipID = $equipment ORDER BY StartedAt DESC)\nORDER BY ro.DwellTimeHours DESC",
+          "rawSql": "SELECT\n  ro.RegimeLabel,\n  ro.RecordCount,\n  ROUND(ro.Percentage, 1) AS Percentage\nFROM dbo.ACM_RegimeOccupancy ro\nWHERE ro.EquipID = $equipment\n  AND ro.RunID = (SELECT TOP 1 RunID FROM dbo.ACM_Runs WHERE EquipID = $equipment ORDER BY StartedAt DESC)\nORDER BY ro.Percentage DESC",
           "refId": "A"
         }
       ],
@@ -2044,7 +2044,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT TOP 15 SensorName, ROUND(MaxAbsZ, 2) AS MaxAbsZ\nFROM ACM_SensorHotspots\nWHERE EquipID = $equipment\n  AND RunID = (SELECT TOP 1 RunID FROM ACM_SensorHotspots WHERE EquipID = $equipment ORDER BY CreatedAt DESC)\nORDER BY MaxAbsZ DESC",
+          "rawSql": "SELECT TOP 15 SensorName, ROUND(MaxAbsZ, 2) AS MaxAbsZ\nFROM dbo.ACM_SensorHotspots\nWHERE EquipID = $equipment\n  AND RunID = (SELECT TOP 1 RunID FROM dbo.ACM_Runs WHERE EquipID = $equipment ORDER BY StartedAt DESC)\nORDER BY MaxAbsZ DESC",
           "refId": "A"
         }
       ],
@@ -2186,7 +2186,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT TOP 20\n    SensorName,\n    ROUND(MaxAbsZ, 2) AS MaxAbsZ,\n    ROUND(LatestAbsZ, 2) AS LatestAbsZ,\n    AboveWarnCount AS WarnCnt,\n    AboveAlertCount AS AlertCnt\nFROM ACM_SensorHotspots\nWHERE EquipID = $equipment\n  AND RunID = (SELECT TOP 1 RunID FROM ACM_SensorHotspots WHERE EquipID = $equipment ORDER BY CreatedAt DESC)\nORDER BY MaxAbsZ DESC",
+          "rawSql": "SELECT TOP 20\n    SensorName,\n    ROUND(MaxAbsZ, 2) AS MaxAbsZ,\n    ROUND(LatestAbsZ, 2) AS LatestAbsZ,\n    AboveWarnCount AS WarnCnt,\n    AboveAlertCount AS AlertCnt\nFROM dbo.ACM_SensorHotspots\nWHERE EquipID = $equipment\n  AND RunID = (SELECT TOP 1 RunID FROM dbo.ACM_Runs WHERE EquipID = $equipment ORDER BY StartedAt DESC)\nORDER BY MaxAbsZ DESC",
           "refId": "A"
         }
       ],
@@ -2375,7 +2375,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT DetectorType, Severity, ROUND(ViolationPct, 1) AS ViolationPct, ROUND(MaxZ, 2) AS MaxZ, ROUND(CurrentZ, 2) AS CurrentZ, ActiveDefect\nFROM ACM_SensorDefects\nWHERE EquipID = $equipment\n  AND RunID = (SELECT TOP 1 RunID FROM ACM_SensorDefects WHERE EquipID = $equipment ORDER BY CreatedAt DESC)\nORDER BY ViolationPct DESC",
+          "rawSql": "SELECT DetectorType, Severity, ROUND(ViolationPct, 1) AS ViolationPct, ROUND(MaxZ, 2) AS MaxZ, ROUND(CurrentZ, 2) AS CurrentZ, ActiveDefect\nFROM dbo.ACM_SensorDefects\nWHERE EquipID = $equipment\n  AND RunID = (SELECT TOP 1 RunID FROM dbo.ACM_Runs WHERE EquipID = $equipment ORDER BY StartedAt DESC)\nORDER BY ViolationPct DESC",
           "refId": "A"
         }
       ],
