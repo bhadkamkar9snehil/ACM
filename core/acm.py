@@ -82,7 +82,7 @@ from core.run_metadata_writer import (
 )
 from core.episode_culprits_writer import write_episode_culprits_enhanced
 from core.pipeline_types import validate_data_contract_at_entry
-from core.seasonality import SeasonalPattern  # detect_and_adjust imported inline
+from core.seasonality import SeasonalPattern, detect_and_adjust_safe
 from core.sensor_attribution import build_sensor_analytics_context, persist_contribution_timeline
 from core.adaptive_thresholds import maybe_update_adaptive_thresholds
 from core.smart_coldstart import seed_baseline, classify_noop_reason
@@ -834,14 +834,13 @@ def main() -> None:
         seasonal_patterns: Dict[str, List[SeasonalPattern]] = {}
         seasonal_adjusted = False
         with T.section("seasonality.detect"):
-            try:
-                from core.seasonality import detect_and_adjust as detect_seasonality
-                train, score, seasonal_patterns, seasonal_adjusted = detect_seasonality(train, score, cfg)
-                if seasonal_patterns:
-                    pattern_count = sum(len(ps) for ps in seasonal_patterns.values())
-                    Console.info(f"Seasonal: {pattern_count} patterns in {len(seasonal_patterns)} sensors | adjusted={seasonal_adjusted}", component="SEASON")
-            except Exception as se:
-                Console.warn(f"Seasonality detection skipped: {se}", component="SEASON")
+            train, score, seasonal_patterns, seasonal_adjusted = detect_and_adjust_safe(
+                train=train,
+                score=score,
+                cfg=cfg,
+                logger=Console,
+                equip=equip,
+            )
 
         # ===== Data quality guardrails =====
         low_var_threshold = 1e-4  # Used by feature imputation

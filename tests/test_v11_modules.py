@@ -378,6 +378,37 @@ class TestRefactorHelpers:
         assert "drift_controller_rows" in out
         assert isinstance(out["frame"], pd.DataFrame)
 
+    def test_detect_and_adjust_safe_returns_inputs_on_error(self, monkeypatch):
+        """Seasonality safe wrapper should return original data on internal errors."""
+        from core import seasonality
+
+        def _boom(*args, **kwargs):
+            raise RuntimeError("seasonality fail")
+
+        monkeypatch.setattr(seasonality, "detect_and_adjust", _boom)
+
+        class _Logger:
+            def info(self, *args, **kwargs):
+                pass
+
+            def warn(self, *args, **kwargs):
+                pass
+
+        idx = pd.date_range("2026-01-01", periods=3, freq="h")
+        train = pd.DataFrame({"sensor": [1.0, 2.0, 3.0]}, index=idx)
+        score = pd.DataFrame({"sensor": [1.5, 2.5]}, index=idx[:2])
+        out_train, out_score, patterns, adjusted = seasonality.detect_and_adjust_safe(
+            train=train,
+            score=score,
+            cfg={},
+            logger=_Logger(),
+            equip="FD_FAN",
+        )
+        assert out_train.equals(train)
+        assert out_score.equals(score)
+        assert patterns == {}
+        assert adjusted is False
+
     def test_evaluate_and_maybe_refit_cached_models_no_cache(self):
         """Auto-retrain helper should return no-op when cached models are absent."""
         from core.model_evaluation import evaluate_and_maybe_refit_cached_models
