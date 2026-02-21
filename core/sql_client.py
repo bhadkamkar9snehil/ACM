@@ -736,3 +736,21 @@ def start_acm_run(
             component="RUN",
         )
     return run_id, window_start, window_end, equip_id
+
+
+def get_acm_run_count(
+    sql_client: Any,
+    equip_id: int,
+) -> int:
+    """
+    Return run count for an equipment from ACM_Runs.
+
+    Falls back to 0 on query failure to preserve existing runtime behavior.
+    """
+    try:
+        with sql_client.get_cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM ACM_Runs WHERE EquipID = ?", (int(equip_id),))
+            row = cur.fetchone()
+            return int(row[0]) if row else 0
+    except Exception:
+        return 0

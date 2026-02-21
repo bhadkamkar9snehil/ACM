@@ -105,6 +105,7 @@ from core.sql_client import (
     resolve_equipment_id_required,
     load_config_required_from_sql,
     start_acm_run,
+    get_acm_run_count,
 )
 
 # Data utilities: index hygiene and deduplication helpers.
@@ -343,14 +344,7 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
     )
     
     # Get run count from SQL for interval calculations (completed runs only).
-    run_count = 0
-    try:
-        with sql_client.get_cursor() as cur:
-            cur.execute("SELECT COUNT(*) FROM ACM_Runs WHERE EquipID = ?", (equip_id,))
-            row = cur.fetchone()
-            run_count = row[0] if row else 0
-    except Exception:
-        run_count = 0  # First run or error - will trigger threshold calc
+    run_count = get_acm_run_count(sql_client, equip_id)
     
     # Store run count in config for downstream access.
     if "runtime" not in cfg:
