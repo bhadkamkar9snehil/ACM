@@ -1847,6 +1847,121 @@ class ModelPersistenceStageResult:
         return getattr(self, key)
 
 
+@dataclass
+class ModelAdaptationPersistenceResult:
+    """Typed result payload for combined auto-retrain and persistence stages."""
+    force_retrain: bool
+    cached_models: Optional[Dict[str, Any]]
+    regime_model: Any
+    detectors: Dict[str, Any]
+    saved_model_version: Optional[int]
+    model_state: Optional[Any]
+
+
+def run_model_adaptation_and_persistence_stage(
+    *,
+    section_fn: Any,
+    run_auto_retrain_stage_fn: Any,
+    run_model_persistence_and_lifecycle_stage_fn: Any,
+    cfg: Dict[str, Any],
+    cached_models: Optional[Dict[str, Any]],
+    cached_manifest: Optional[Dict[str, Any]],
+    detectors_just_trained: bool,
+    score_out: Dict[str, Any],
+    regime_quality_ok: bool,
+    current_model_maturity: Optional[str],
+    boolean_only_metrics: List[str],
+    equip: str,
+    logger: Any,
+    record_model_refit_fn: Any,
+    fit_all_detectors_fn: Any,
+    train: "pd.DataFrame",
+    det_flags: Dict[str, bool],
+    output_manager: Any,
+    sql_client: Any,
+    run_id: Optional[str],
+    equip_id: int,
+    regime_model: Any,
+    detectors: Dict[str, Any],
+    detector_cache: Optional[Dict[str, Any]],
+    col_meds: Optional[Dict[str, float]],
+    timing_sections: Optional[Dict[str, Any]],
+    model_state: Optional[Any],
+    regime_state_version: int,
+    update_and_persist_model_lifecycle_fn: Any,
+    load_model_state_safe_fn: Any,
+) -> ModelAdaptationPersistenceResult:
+    """
+    Execute auto-retrain decision and model persistence/lifecycle stages.
+    """
+    with section_fn("models.auto_retrain"):
+        retrain_out = run_auto_retrain_stage_fn(
+            cfg=cfg,
+            cached_models=cached_models,
+            cached_manifest=cached_manifest,
+            detectors_just_trained=detectors_just_trained,
+            score_out=score_out if isinstance(score_out, dict) else {},
+            regime_quality_ok=regime_quality_ok,
+            current_model_maturity=current_model_maturity,
+            boolean_only_metrics=list(boolean_only_metrics),
+            equip=equip,
+            logger=logger,
+            record_model_refit_fn=record_model_refit_fn,
+            fit_all_detectors_fn=fit_all_detectors_fn,
+            train=train,
+            det_flags=det_flags,
+            output_manager=output_manager,
+            sql_client=sql_client,
+            run_id=run_id,
+            equip_id=equip_id,
+            regime_model=regime_model,
+            detectors=detectors,
+        )
+
+    force_retrain = bool(retrain_out.force_retrain)
+    cached_models_out = retrain_out.cached_models
+    regime_model_out = retrain_out.regime_model
+    detectors_out = retrain_out.detectors
+
+    with section_fn("models.persistence.save"):
+        persistence_out = run_model_persistence_and_lifecycle_stage_fn(
+            cached_models=cached_models_out,
+            detector_cache=detector_cache,
+            force_retrain=force_retrain,
+            equip=equip,
+            sql_client=sql_client,
+            equip_id=equip_id,
+            cfg=cfg,
+            train=train,
+            ar1_detector=detectors_out["ar1_detector"],
+            pca_detector=detectors_out["pca_detector"],
+            iforest_detector=detectors_out["iforest_detector"],
+            gmm_detector=detectors_out["gmm_detector"],
+            omr_detector=detectors_out["omr_detector"],
+            regime_model=regime_model_out,
+            col_meds=col_meds,
+            regime_quality_ok=regime_quality_ok,
+            timing_sections=timing_sections,
+            run_id=run_id,
+            model_state=model_state,
+            output_manager=output_manager,
+            regime_state_version=regime_state_version,
+            score_out=score_out if isinstance(score_out, dict) else {},
+            update_and_persist_model_lifecycle_fn=update_and_persist_model_lifecycle_fn,
+            load_model_state_safe_fn=load_model_state_safe_fn,
+            logger=logger,
+        )
+
+    return ModelAdaptationPersistenceResult(
+        force_retrain=force_retrain,
+        cached_models=cached_models_out,
+        regime_model=regime_model_out,
+        detectors=detectors_out,
+        saved_model_version=persistence_out.saved_model_version,
+        model_state=persistence_out.model_state,
+    )
+
+
 def persist_calibration_params_safe(
     equip: str,
     sql_client: Optional[Any],
