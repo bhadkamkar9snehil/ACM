@@ -614,3 +614,53 @@ def calculate_and_persist_thresholds(
         Console.error(f"Adaptive threshold calculation failed: {threshold_e} | fallback=static | trace={traceback.format_exc()[:200]}", component="THRESHOLD",
                       equip_id=equip_id, error_type=type(threshold_e).__name__)
         return {}
+
+
+def maybe_update_adaptive_thresholds(
+    *,
+    train_frame: pd.DataFrame,
+    train_data: pd.DataFrame,
+    cfg: Dict[str, Any],
+    equip_id: int,
+    output_manager: Optional[Any],
+    coldstart_complete: bool,
+    continuous_learning: bool,
+    threshold_update_interval: int,
+    regime_quality_ok: bool,
+    logger: Any,
+) -> bool:
+    """
+    Decide whether thresholds should be refreshed this run and persist if needed.
+
+    Returns:
+        True when thresholds were recalculated and persisted, otherwise False.
+    """
+    run_count = cfg.get("runtime", {}).get("run_count", 0)
+    interval_reached = (run_count % threshold_update_interval == 0) if threshold_update_interval > 0 else True
+    should_update = (
+        (coldstart_complete and not hasattr(cfg, "_thresholds_calculated"))
+        or (continuous_learning and interval_reached)
+    )
+
+    if not should_update or "fused" not in train_frame.columns:
+        return False
+
+    train_fused_np = train_frame["fused"].to_numpy(copy=False)
+    regime_labels_for_thresh = (
+        train_data["regime_label"].to_numpy(copy=False)
+        if "regime_label" in train_data.columns
+        else None
+    )
+
+    calculate_and_persist_thresholds(
+        fused_scores=train_fused_np,
+        cfg=cfg,
+        equip_id=equip_id,
+        output_manager=output_manager,
+        train_index=train_data.index,
+        regime_labels=regime_labels_for_thresh,
+        regime_quality_ok=regime_quality_ok,
+    )
+    cfg._thresholds_calculated = True
+    logger.info(f"Threshold: updated at run {run_count}", component="THRESHOLD")
+    return True

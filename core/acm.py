@@ -84,7 +84,7 @@ from core.episode_culprits_writer import write_episode_culprits_enhanced
 from core.pipeline_types import DataContract, ValidationResult
 from core.seasonality import SeasonalPattern  # detect_and_adjust imported inline
 from core.sensor_attribution import build_sensor_analytics_context, persist_contribution_timeline
-from core.adaptive_thresholds import calculate_and_persist_thresholds
+from core.adaptive_thresholds import maybe_update_adaptive_thresholds
 from core.smart_coldstart import seed_baseline, classify_noop_reason
 from core.detector_orchestrator import (
     score_all_detectors,
@@ -1662,29 +1662,18 @@ def main() -> None:
 
         # ===== Adaptive thresholds =====
         with T.section("thresholds.adaptive"):
-            # Determine whether to update thresholds this run.
-            run_count = cfg.get("runtime", {}).get("run_count", 0)
-            interval_reached = (run_count % threshold_update_interval == 0) if threshold_update_interval > 0 else True
-            should_update = (
-                (coldstart_complete and not hasattr(cfg, '_thresholds_calculated')) or
-                (CONTINUOUS_LEARNING and interval_reached)
+            maybe_update_adaptive_thresholds(
+                train_frame=train_frame,
+                train_data=train,
+                cfg=cfg,
+                equip_id=equip_id,
+                output_manager=output_manager,
+                coldstart_complete=coldstart_complete,
+                continuous_learning=CONTINUOUS_LEARNING,
+                threshold_update_interval=threshold_update_interval,
+                regime_quality_ok=regime_quality_ok,
+                logger=Console,
             )
-            
-            if should_update and "fused" in train_frame.columns:
-                train_fused_np = train_frame["fused"].to_numpy(copy=False)
-                regime_labels_for_thresh = train["regime_label"].to_numpy(copy=False) if "regime_label" in train.columns else None
-                
-                calculate_and_persist_thresholds(
-                    fused_scores=train_fused_np,
-                    cfg=cfg,
-                    equip_id=equip_id,
-                    output_manager=output_manager,
-                    train_index=train.index,
-                    regime_labels=regime_labels_for_thresh,
-                    regime_quality_ok=regime_quality_ok
-                )
-                cfg._thresholds_calculated = True
-                Console.info(f"Threshold: updated at run {run_count}", component="THRESHOLD")
 
         # Regime health labeling and transient detection.
         regime_stats: Dict[int, Dict[str, float]] = {}
@@ -1766,18 +1755,14 @@ def main() -> None:
 
         # ===== Drift controller state =====
         with T.section("drift.controller"):
-            try:
-                if output_manager:
-                    drift_state = drift.build_drift_controller_state(
-                        frame=frame,
-                        cfg=cfg,
-                        score_out=score_out,
-                    )
-                    if drift_state:
-                        rows = output_manager.write_drift_controller(drift_state)
-            except Exception as e:
-                Console.warn(f"Drift controller write failed: {e}", component="DRIFT",
-                             equip=equip, error=str(e)[:200])
+            rows = drift.write_drift_controller_state(
+                output_manager=output_manager,
+                frame=frame,
+                cfg=cfg,
+                score_out=score_out,
+                logger=Console,
+                equip=equip,
+            )
 
         # Normalize episodes schema for report/export.
         episodes, frame = fuse.normalize_episodes_schema(
