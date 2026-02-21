@@ -43,13 +43,16 @@ Manifest structure:
 
 import joblib
 import json
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Dict, Any, Optional, List, Tuple, TYPE_CHECKING
 from datetime import datetime, timezone
 from io import BytesIO
 from dataclasses import dataclass, asdict
 import pandas as pd
 import numpy as np
 from core.observability import Console
+
+if TYPE_CHECKING:
+    from core.fuse import ScoreCalibrator
 
 # Import tracing support (optional)
 try:
@@ -697,10 +700,9 @@ class ModelVersionManager:
         if not calibrators_dict or not self.sql_client or not self.sql_client.conn:
             return
         try:
-            from core.fuse import ScoreCalibrator
             cal_dict = {}
             for name, cal in calibrators_dict.items():
-                if isinstance(cal, ScoreCalibrator):
+                if hasattr(cal, "to_dict") and callable(getattr(cal, "to_dict")):
                     cal_dict[name] = cal.to_dict()
                 elif isinstance(cal, dict):
                     cal_dict[name] = cal
@@ -1657,93 +1659,6 @@ def load_quality_regime_state_if_needed(
         return regime_state, regime_state_version, True
 
     return regime_state, 0, False
-
-
-def load_and_rebuild_detectors_from_sql_cache(
-    *,
-    train: pd.DataFrame,
-    score: pd.DataFrame,
-    equip: str,
-    sql_client: Optional[Any],
-    equip_id: int,
-    cfg: Dict[str, Any],
-    rebuild_from_cache_fn: Any,
-    logger: Any = Console,
-) -> Dict[str, Any]:
-    """
-    Load cached models from SQL, align features, and rebuild detector instances.
-
-    Returns a payload with aligned dataframes and reconstructed detectors.
-    """
-    current_sensors = list(train.columns) if hasattr(train, "columns") else []
-    cached_models, cached_manifest = load_cached_models_with_validation(
-        equip=equip,
-        sql_client=sql_client,
-        equip_id=equip_id,
-        cfg=cfg,
-        train_columns=current_sensors,
-    )
-
-    if cached_models:
-        train, score, current_sensors, cache_compatible = align_current_features_to_cached_manifest(
-            train=train,
-            score=score,
-            cached_manifest=cached_manifest,
-            equip=equip,
-            logger=logger,
-        )
-        if not cache_compatible:
-            cached_models = None
-            cached_manifest = None
-
-    ar1_detector = pca_detector = iforest_detector = gmm_detector = omr_detector = None
-    regime_model = None
-    col_meds = None
-    cached_calibration_params = None
-
-    if cached_models:
-        rebuild_result = rebuild_from_cache_fn(
-            cached_models=cached_models,
-            cached_manifest=cached_manifest,
-            cfg=cfg,
-            equip=equip,
-            current_columns=current_sensors,
-        )
-        ar1_detector = rebuild_result["ar1_detector"]
-        pca_detector = rebuild_result["pca_detector"]
-        iforest_detector = rebuild_result["iforest_detector"]
-        gmm_detector = rebuild_result["gmm_detector"]
-        omr_detector = rebuild_result["omr_detector"]
-        regime_model = rebuild_result.get("regime_model")
-        col_meds = rebuild_result.get("feature_medians")
-
-        # v11.9.0: Preserve train-time calibration across scoring batches.
-        cached_calibration_params = cached_models.get("calibration_params")
-        if cached_calibration_params:
-            logger.info(
-                f"Loaded cached calibration params ({len(cached_calibration_params)} detectors)",
-                component="CAL",
-            )
-
-        if rebuild_result.get("validation_warnings"):
-            for warn in rebuild_result["validation_warnings"]:
-                logger.info(f"Model validation: {warn}", component="MODEL", equip=equip)
-
-    return {
-        "train": train,
-        "score": score,
-        "current_sensors": current_sensors,
-        "cached_models": cached_models,
-        "cached_manifest": cached_manifest,
-        "cached_calibration_params": cached_calibration_params,
-        "ar1_detector": ar1_detector,
-        "pca_detector": pca_detector,
-        "iforest_detector": iforest_detector,
-        "gmm_detector": gmm_detector,
-        "omr_detector": omr_detector,
-        "regime_model": regime_model,
-        "col_meds": col_meds,
-    }
 
 
 def save_trained_models(

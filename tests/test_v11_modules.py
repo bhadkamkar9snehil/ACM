@@ -921,6 +921,68 @@ class TestRefactorHelpers:
         assert out["pca_detector"] is cached_detector
         assert out["iforest_detector"] is cached_detector
 
+    def test_load_and_rebuild_detectors_from_sql_cache_uses_local_rebuild(self, monkeypatch):
+        """SQL cache loader in detector orchestrator should rebuild detectors directly without callback injection."""
+        from core import detector_orchestrator as orch
+
+        train = pd.DataFrame({"a": [1.0, 2.0, 3.0]})
+        score = pd.DataFrame({"a": [1.5, 2.5]})
+        cached_models = {"calibration_params": {"ar1_z": {"med": 0.0, "scale": 1.0}}}
+        cached_manifest = {"train_sensors": ["a"]}
+
+        monkeypatch.setattr(
+            orch,
+            "load_cached_models_with_validation",
+            lambda **kwargs: (cached_models, cached_manifest),
+        )
+        monkeypatch.setattr(
+            orch,
+            "align_current_features_to_cached_manifest",
+            lambda **kwargs: (kwargs["train"], kwargs["score"], ["a"], True),
+        )
+
+        sentinel = object()
+        rebuild_called = {"called": False}
+
+        def _rebuild_detectors_from_cache(**kwargs):
+            rebuild_called["called"] = True
+            return {
+                "ar1_detector": sentinel,
+                "pca_detector": sentinel,
+                "iforest_detector": sentinel,
+                "gmm_detector": None,
+                "omr_detector": None,
+                "regime_model": None,
+                "feature_medians": {"a": 2.0},
+                "validation_warnings": [],
+            }
+
+        monkeypatch.setattr(orch, "rebuild_detectors_from_cache", _rebuild_detectors_from_cache)
+
+        class _Logger:
+            def info(self, *args, **kwargs):
+                pass
+
+            def warn(self, *args, **kwargs):
+                pass
+
+        out = orch.load_and_rebuild_detectors_from_sql_cache(
+            train=train,
+            score=score,
+            equip="FD_FAN",
+            sql_client=object(),
+            equip_id=1,
+            cfg={},
+            logger=_Logger(),
+        )
+
+        assert rebuild_called["called"] is True
+        assert out["ar1_detector"] is sentinel
+        assert out["pca_detector"] is sentinel
+        assert out["iforest_detector"] is sentinel
+        assert out["cached_calibration_params"] == cached_models["calibration_params"]
+        assert out["col_meds"] == {"a": 2.0}
+
     def test_update_and_persist_model_lifecycle_safe_no_deps(self):
         """Lifecycle safe wrapper should return None when SQL/output manager are unavailable."""
         from core.model_lifecycle import update_and_persist_model_lifecycle_safe

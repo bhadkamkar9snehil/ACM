@@ -86,11 +86,11 @@ from core.detector_orchestrator import (
     fit_all_detectors,
     initialize_detectors_for_run,
     compute_stable_feature_hash,
+    load_and_rebuild_detectors_from_sql_cache,
 )
 from core.model_persistence import (
     persist_calibration_params_safe,
     load_manifest_protected_columns,
-    load_and_rebuild_detectors_from_sql_cache,
     restore_detectors_from_runtime_cache,
     load_quality_regime_state_if_needed,
     run_model_persistence_and_lifecycle_stage,

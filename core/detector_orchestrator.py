@@ -26,6 +26,10 @@ from core.observability import Console
 from core.ar1_detector import AR1Detector
 from core.omr import OMRDetector
 from core import correlation, outliers, fuse
+from core.model_persistence import (
+    align_current_features_to_cached_manifest,
+    load_cached_models_with_validation,
+)
 
 
 def score_all_detectors(
@@ -392,7 +396,6 @@ def initialize_detectors_for_run(
             sql_client=sql_client,
             equip_id=equip_id,
             cfg=cfg,
-            rebuild_from_cache_fn=rebuild_detectors_from_cache,
             logger=logger,
         )
         train = cache_restore["train"]
@@ -523,6 +526,89 @@ def initialize_detectors_for_run(
         "cached_calibration_params": cached_calibration_params,
         "detectors_just_trained": detectors_just_trained,
         "use_cache": use_cache,
+    }
+
+
+def load_and_rebuild_detectors_from_sql_cache(
+    *,
+    train: pd.DataFrame,
+    score: pd.DataFrame,
+    equip: str,
+    sql_client: Optional[Any],
+    equip_id: int,
+    cfg: Dict[str, Any],
+    logger: Any = Console,
+) -> Dict[str, Any]:
+    """
+    Load cached models from SQL, align features, and rebuild detector instances.
+    """
+    current_sensors = list(train.columns) if hasattr(train, "columns") else []
+    cached_models, cached_manifest = load_cached_models_with_validation(
+        equip=equip,
+        sql_client=sql_client,
+        equip_id=equip_id,
+        cfg=cfg,
+        train_columns=current_sensors,
+    )
+
+    if cached_models:
+        train, score, current_sensors, cache_compatible = align_current_features_to_cached_manifest(
+            train=train,
+            score=score,
+            cached_manifest=cached_manifest,
+            equip=equip,
+            logger=logger,
+        )
+        if not cache_compatible:
+            cached_models = None
+            cached_manifest = None
+
+    ar1_detector = pca_detector = iforest_detector = gmm_detector = omr_detector = None
+    regime_model = None
+    col_meds = None
+    cached_calibration_params = None
+
+    if cached_models:
+        rebuild_result = rebuild_detectors_from_cache(
+            cached_models=cached_models,
+            cached_manifest=cached_manifest,
+            cfg=cfg,
+            equip=equip,
+            current_columns=current_sensors,
+        )
+        ar1_detector = rebuild_result["ar1_detector"]
+        pca_detector = rebuild_result["pca_detector"]
+        iforest_detector = rebuild_result["iforest_detector"]
+        gmm_detector = rebuild_result["gmm_detector"]
+        omr_detector = rebuild_result["omr_detector"]
+        regime_model = rebuild_result.get("regime_model")
+        col_meds = rebuild_result.get("feature_medians")
+
+        cached_calibration_params = cached_models.get("calibration_params")
+        if cached_calibration_params:
+            logger.info(
+                f"Loaded cached calibration params ({len(cached_calibration_params)} detectors)",
+                component="CAL",
+            )
+
+        if rebuild_result.get("validation_warnings"):
+            for warn in rebuild_result["validation_warnings"]:
+                logger.info(f"Model validation: {warn}", component="MODEL", equip=equip)
+
+    return {
+        "train": train,
+        "score": score,
+        "current_sensors": current_sensors,
+        "cached_models": cached_models,
+        "cached_manifest": cached_manifest,
+        "cached_calibration_params": cached_calibration_params,
+        "ar1_detector": ar1_detector,
+        "pca_detector": pca_detector,
+        "iforest_detector": iforest_detector,
+        "gmm_detector": gmm_detector,
+        "omr_detector": omr_detector,
+        "regime_model": regime_model,
+        "col_meds": col_meds,
     }
 
 

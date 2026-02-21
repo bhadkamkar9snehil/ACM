@@ -786,6 +786,33 @@ Main branch status:
 1. `main` was not touched.
 2. Work remains on refactor integration branch.
 
+### 2026-02-21 - Phase 4 Architecture: Model Persistence Boundary Cleanup
+
+Branch flow used:
+1. `refactor/acm-entrypoint-p4-model-persistence-architecture` (in progress)
+
+Completed:
+1. Removed local circular-import pattern in `ModelVersionManager.save_calibration_params`:
+   - no runtime `from core.fuse import ScoreCalibrator` inside method
+   - switched to runtime duck typing with `to_dict()` serialization contract
+   - added `TYPE_CHECKING` import for static typing only
+2. Moved SQL cache load-and-rebuild orchestration out of `core/model_persistence.py` and into `core/detector_orchestrator.py`:
+   - `load_and_rebuild_detectors_from_sql_cache(...)` now lives in detector orchestration layer
+   - direct call to `rebuild_detectors_from_cache(...)` inside same module
+   - removed callback injection (`rebuild_from_cache_fn`) from runtime path
+3. Removed old implementation from `core/model_persistence.py` with no compatibility wrapper.
+4. Updated orchestrator imports in `core/acm.py` to consume cache-rebuild helper from `core/detector_orchestrator.py`.
+5. Added regression test:
+   - `test_load_and_rebuild_detectors_from_sql_cache_uses_local_rebuild`
+
+Validation completed:
+1. `python -m py_compile core/acm.py core/model_persistence.py core/detector_orchestrator.py tests/test_v11_modules.py` passed.
+2. `pytest tests/test_v11_modules.py -v` passed (67 tests).
+
+Main branch status:
+1. `main` was not touched.
+2. Work remains on refactor phase branch pending integration merge.
+
 ---
 
 ## 18. Guard and Availability Audit (Separate Track)
