@@ -29,6 +29,7 @@ import pandas as pd
 from typing import Dict, Any, Optional, Tuple, List
 from pathlib import Path
 from datetime import datetime, timezone
+from dataclasses import dataclass
 from core.observability import Console
 
 
@@ -591,7 +592,7 @@ def run_auto_retrain_stage(
     equip_id: int,
     regime_model: Optional[Any],
     detectors: Dict[str, Any],
-) -> Dict[str, Any]:
+) -> "AutoRetrainStageResult":
     """
     Run auto-retrain evaluation and apply retrain detector outputs when triggered.
     """
@@ -628,12 +629,25 @@ def run_auto_retrain_stage(
         detectors_out["pca_train_spe"] = retrain_result["pca_train_spe"]
         detectors_out["pca_train_t2"] = retrain_result["pca_train_t2"]
 
-    return {
-        "force_retrain": bool(retrain_out["force_retrain"]),
-        "cached_models": retrain_out["cached_models"],
-        "regime_model": retrain_out["regime_model"],
-        "detectors": detectors_out,
-    }
+    return AutoRetrainStageResult(
+        force_retrain=bool(retrain_out["force_retrain"]),
+        cached_models=retrain_out["cached_models"],
+        regime_model=retrain_out["regime_model"],
+        detectors=detectors_out,
+    )
+
+
+@dataclass
+class AutoRetrainStageResult:
+    """Typed result payload for auto-retrain stage."""
+    force_retrain: bool
+    cached_models: Optional[Dict[str, Any]]
+    regime_model: Optional[Any]
+    detectors: Dict[str, Any]
+
+    def __getitem__(self, key: str) -> Any:
+        """Backward-compatible dict-like access."""
+        return getattr(self, key)
 
 
 def auto_tune_parameters(

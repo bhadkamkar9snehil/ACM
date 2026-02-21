@@ -733,10 +733,10 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
                     "pca_train_t2": pca_train_t2,
                 },
             )
-            force_retrain = bool(retrain_out["force_retrain"])
-            cached_models = retrain_out["cached_models"]
-            regime_model = retrain_out["regime_model"]
-            detectors_after_retrain = retrain_out["detectors"]
+            force_retrain = bool(retrain_out.force_retrain)
+            cached_models = retrain_out.cached_models
+            regime_model = retrain_out.regime_model
+            detectors_after_retrain = retrain_out.detectors
             ar1_detector = detectors_after_retrain["ar1_detector"]
             pca_detector = detectors_after_retrain["pca_detector"]
             iforest_detector = detectors_after_retrain["iforest_detector"]
@@ -774,8 +774,8 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
                 load_model_state_safe_fn=load_model_state_safe,
                 logger=Console,
             )
-        saved_model_version = persistence_out["saved_model_version"]
-        model_state = persistence_out["model_state"]
+        saved_model_version = persistence_out.saved_model_version
+        model_state = persistence_out.model_state
 
         # ===== Phase 6: Calibration (z-score normalization) =====
         # Fit calibrators on TRAIN data, transform SCORE data.

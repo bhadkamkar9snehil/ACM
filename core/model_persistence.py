@@ -1778,7 +1778,7 @@ def run_model_persistence_and_lifecycle_stage(
     load_model_state_safe_fn: Any,
     logger: Any = Console,
     save_trained_models_fn: Any = save_trained_models,
-) -> Dict[str, Any]:
+) -> "ModelPersistenceStageResult":
     """
     Persist trained models and update lifecycle state for the current run.
     """
@@ -1826,12 +1826,25 @@ def run_model_persistence_and_lifecycle_stage(
             logger=logger,
         )
 
-    return {
-        "detectors_fitted_this_run": detectors_fitted_this_run,
-        "models_were_trained": models_were_trained,
-        "saved_model_version": saved_model_version,
-        "model_state": model_state_out,
-    }
+    return ModelPersistenceStageResult(
+        detectors_fitted_this_run=detectors_fitted_this_run,
+        models_were_trained=models_were_trained,
+        saved_model_version=saved_model_version,
+        model_state=model_state_out,
+    )
+
+
+@dataclass
+class ModelPersistenceStageResult:
+    """Typed result payload for model persistence stage."""
+    detectors_fitted_this_run: bool
+    models_were_trained: bool
+    saved_model_version: Optional[int]
+    model_state: Optional[Any]
+
+    def __getitem__(self, key: str) -> Any:
+        """Backward-compatible dict-like access."""
+        return getattr(self, key)
 
 
 def persist_calibration_params_safe(
