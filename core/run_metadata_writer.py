@@ -190,6 +190,22 @@ def serialize_run_exception(exc: Exception) -> str:
         return '{"type":"Exception","message":"<serialization failed>"}'
 
 
+def finalize_noop_run(sql_client: Any, run_id: Optional[str], logger: Any = Console) -> None:
+    """
+    Finalize a run as NOOP with zero row counts.
+    """
+    if not sql_client or not run_id:
+        return
+    sql_client.finalize_run(
+        run_id=run_id,
+        outcome="NOOP",
+        rows_read=0,
+        rows_written=0,
+        err_json=None,
+    )
+    logger.info(f"Finalized NOOP RunID={run_id}", component="RUN")
+
+
 def extract_run_metadata_from_scores(scores: pd.DataFrame, per_regime_enabled: bool = False, regime_count: int = 0) -> dict:
     """
     Extract health and quality metrics from scores dataframe.

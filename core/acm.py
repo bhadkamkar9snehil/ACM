@@ -78,6 +78,7 @@ from core.config_history_writer import log_auto_tune_changes
 from core.output_manager import OutputManager, write_sql_artifacts
 from core.run_metadata_writer import (
     emit_batch_summary,
+    finalize_noop_run,
     finalize_run_with_metadata,
     resolve_run_outcome_from_degradations,
     serialize_run_exception,
@@ -762,8 +763,7 @@ def main() -> None:
                 else:
                     Console.info("Coldstart deferred - insufficient history for training, will retry next run", component="COLDSTART")
 
-                if sql_client and run_id:
-                    sql_client.finalize_run(run_id=run_id, outcome="NOOP", rows_read=0, rows_written=0, err_json=None)
+                finalize_noop_run(sql_client=sql_client, run_id=run_id, logger=Console)
                 return
             
             record_coldstart(equip)
@@ -796,14 +796,7 @@ def main() -> None:
                 outcome = "NOOP"
                 rows_read = 0
                 rows_written = 0
-                if sql_client and run_id:
-                    sql_client.finalize_run(
-                        run_id=run_id,
-                        outcome=outcome,
-                        rows_read=rows_read,
-                        rows_written=rows_written,
-                        err_json=None
-                    )
+                finalize_noop_run(sql_client=sql_client, run_id=run_id, logger=Console)
                 return
         
         Console.info(

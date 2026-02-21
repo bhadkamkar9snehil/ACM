@@ -674,15 +674,19 @@ Completed:
    - `resolve_run_outcome_from_degradations(...)`
 2. Extracted run-exception serialization helper to `core/run_metadata_writer.py`:
    - `serialize_run_exception(...)`
-3. Wired `core/acm.py` to use these helpers in the main try/except block.
-4. Added unit tests in `tests/test_v11_modules.py`:
+3. Extracted NOOP run finalization helper to `core/run_metadata_writer.py`:
+   - `finalize_noop_run(...)`
+4. Wired `core/acm.py` to use these helpers in the main try/except block and NOOP early-return paths.
+5. Added unit tests in `tests/test_v11_modules.py`:
    - `test_resolve_run_outcome_from_degradations`
    - `test_serialize_run_exception_returns_json`
-5. Hardened Obsidian graph generation against Windows file locks:
+   - `test_finalize_noop_run_calls_sql_finalize`
+   - `test_finalize_noop_run_skips_without_run_id`
+6. Hardened Obsidian graph generation against Windows file locks:
    - `scripts/build_acm_obsidian_graph.py` now skips locked note deletions and continues.
 
 Validation completed:
-1. `pytest tests/test_v11_modules.py -q` passed (36 tests).
+1. `pytest tests/test_v11_modules.py -q` passed (38 tests).
 2. `python -c "from core.acm import main; print(callable(main))"` returned `True`.
 3. `python scripts/sql_batch_runner.py --equip WFA_TURBINE_0 --max-batches 1 --dry-run` completed successfully.
 4. Memory refresh:

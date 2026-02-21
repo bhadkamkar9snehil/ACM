@@ -36,7 +36,7 @@ type: agent-memory
 | `[core.regimes]` | 59 | 1 |
 | `[core.resource_monitor]` | 27 | 0 |
 | `[core.rul_estimator]` | 9 | 3 |
-| `[core.run_metadata_writer]` | 9 | 1 |
+| `[core.run_metadata_writer]` | 10 | 1 |
 | `[core.seasonality]` | 20 | 0 |
 | `[core.sensor_attribution]` | 31 | 1 |
 | `[core.smart_coldstart]` | 14 | 1 |

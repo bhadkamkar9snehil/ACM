@@ -649,6 +649,41 @@ class TestRefactorHelpers:
         assert "RuntimeError" in payload
         assert "boom" in payload
 
+    def test_finalize_noop_run_calls_sql_finalize(self):
+        """NOOP finalization helper should write fixed NOOP status payload."""
+        from core.run_metadata_writer import finalize_noop_run
+
+        class _SQL:
+            def __init__(self):
+                self.calls = []
+
+            def finalize_run(self, **kwargs):
+                self.calls.append(kwargs)
+
+        sql = _SQL()
+        finalize_noop_run(sql_client=sql, run_id="r1")
+
+        assert len(sql.calls) == 1
+        assert sql.calls[0]["run_id"] == "r1"
+        assert sql.calls[0]["outcome"] == "NOOP"
+        assert sql.calls[0]["rows_read"] == 0
+        assert sql.calls[0]["rows_written"] == 0
+
+    def test_finalize_noop_run_skips_without_run_id(self):
+        """NOOP finalization helper should no-op when run_id is missing."""
+        from core.run_metadata_writer import finalize_noop_run
+
+        class _SQL:
+            def __init__(self):
+                self.calls = 0
+
+            def finalize_run(self, **kwargs):
+                self.calls += 1
+
+        sql = _SQL()
+        finalize_noop_run(sql_client=sql, run_id=None)
+        assert sql.calls == 0
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
