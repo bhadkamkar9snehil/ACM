@@ -580,6 +580,169 @@ class TestRefactorHelpers:
         )
         assert out == ["a", "b", "c"]
 
+    def test_initialize_detectors_for_run_trains_when_required_detectors_missing(self):
+        """Detector init helper should fit detectors when enabled models are missing."""
+        from core.detector_orchestrator import initialize_detectors_for_run
+
+        train = pd.DataFrame({"a": [1.0, 2.0, 3.0], "b": [2.0, 3.0, 4.0]})
+        score = pd.DataFrame({"a": [1.5, 2.5], "b": [2.5, 3.5]})
+
+        def _load_and_rebuild_detectors_fn(**kwargs):
+            raise AssertionError("cache load should not be called for coldstart batch")
+
+        def _restore_detectors_from_runtime_cache_fn(**kwargs):
+            return {}
+
+        def _load_quality_regime_state_if_needed_fn(**kwargs):
+            return None, 0, False
+
+        fitted = object()
+
+        def _fit_all_detectors_fn(**kwargs):
+            return {
+                "ar1_detector": fitted,
+                "pca_detector": fitted,
+                "iforest_detector": fitted,
+                "gmm_detector": None,
+                "omr_detector": None,
+                "pca_train_spe": np.array([0.1, 0.2, 0.3]),
+                "pca_train_t2": np.array([0.2, 0.3, 0.4]),
+            }
+
+        def _reconcile_detector_flags_fn(**kwargs):
+            return {
+                "ar1_enabled": True,
+                "pca_enabled": True,
+                "iforest_enabled": True,
+                "gmm_enabled": False,
+                "omr_enabled": False,
+            }
+
+        class _Logger:
+            def info(self, *args, **kwargs):
+                pass
+
+            def warn(self, *args, **kwargs):
+                pass
+
+            def error(self, *args, **kwargs):
+                pass
+
+        out = initialize_detectors_for_run(
+            train=train,
+            score=score,
+            cfg={
+                "models": {"use_cache": True},
+                "fusion": {"weights": {"ar1_z": 1.0, "pca_spe_z": 1.0, "iforest_z": 1.0}},
+            },
+            meta={"is_coldstart_run": True},
+            detector_cache=None,
+            output_manager=None,
+            sql_client=None,
+            run_id="r1",
+            equip_id=1,
+            equip="FD_FAN",
+            load_and_rebuild_detectors_fn=_load_and_rebuild_detectors_fn,
+            restore_detectors_from_runtime_cache_fn=_restore_detectors_from_runtime_cache_fn,
+            load_quality_regime_state_if_needed_fn=_load_quality_regime_state_if_needed_fn,
+            fit_all_detectors_fn=_fit_all_detectors_fn,
+            reconcile_detector_flags_fn=_reconcile_detector_flags_fn,
+            logger=_Logger(),
+        )
+
+        assert out["detectors_just_trained"] is True
+        assert out["use_cache"] is False
+        assert out["ar1_detector"] is fitted
+        assert out["pca_detector"] is fitted
+        assert out["iforest_detector"] is fitted
+        assert out["gmm_detector"] is None
+        assert out["omr_detector"] is None
+        assert isinstance(out["pca_train_spe"], np.ndarray)
+        assert isinstance(out["pca_train_t2"], np.ndarray)
+
+    def test_initialize_detectors_for_run_uses_sql_cache_without_refit(self):
+        """Detector init helper should reuse cached detectors when cache payload is valid."""
+        from core.detector_orchestrator import initialize_detectors_for_run
+
+        train = pd.DataFrame({"a": [1.0, 2.0, 3.0]})
+        score = pd.DataFrame({"a": [1.5, 2.5]})
+        cached_detector = object()
+
+        def _load_and_rebuild_detectors_fn(**kwargs):
+            return {
+                "train": kwargs["train"],
+                "score": kwargs["score"],
+                "cached_models": {"pca_model": "ok"},
+                "cached_manifest": {"train_sensors": ["a"]},
+                "cached_calibration_params": {"ar1_z": {"med": 0.0}},
+                "ar1_detector": cached_detector,
+                "pca_detector": cached_detector,
+                "iforest_detector": cached_detector,
+                "gmm_detector": None,
+                "omr_detector": None,
+                "regime_model": None,
+                "col_meds": {"a": 1.5},
+            }
+
+        def _restore_detectors_from_runtime_cache_fn(**kwargs):
+            return {}
+
+        def _load_quality_regime_state_if_needed_fn(**kwargs):
+            return None, 0, False
+
+        def _fit_all_detectors_fn(**kwargs):
+            raise AssertionError("fit should not be called when cache has required detectors")
+
+        def _reconcile_detector_flags_fn(**kwargs):
+            return {
+                "ar1_enabled": True,
+                "pca_enabled": True,
+                "iforest_enabled": True,
+                "gmm_enabled": False,
+                "omr_enabled": False,
+            }
+
+        class _Logger:
+            def info(self, *args, **kwargs):
+                pass
+
+            def warn(self, *args, **kwargs):
+                pass
+
+            def error(self, *args, **kwargs):
+                pass
+
+        out = initialize_detectors_for_run(
+            train=train,
+            score=score,
+            cfg={
+                "models": {"use_cache": True},
+                "fusion": {"weights": {"ar1_z": 1.0, "pca_spe_z": 1.0, "iforest_z": 1.0}},
+            },
+            meta={"is_coldstart_run": False},
+            detector_cache=None,
+            output_manager=None,
+            sql_client=object(),
+            run_id="r1",
+            equip_id=1,
+            equip="FD_FAN",
+            load_and_rebuild_detectors_fn=_load_and_rebuild_detectors_fn,
+            restore_detectors_from_runtime_cache_fn=_restore_detectors_from_runtime_cache_fn,
+            load_quality_regime_state_if_needed_fn=_load_quality_regime_state_if_needed_fn,
+            fit_all_detectors_fn=_fit_all_detectors_fn,
+            reconcile_detector_flags_fn=_reconcile_detector_flags_fn,
+            logger=_Logger(),
+        )
+
+        assert out["use_cache"] is True
+        assert out["detectors_just_trained"] is False
+        assert out["cached_models"] is not None
+        assert out["cached_manifest"] is not None
+        assert out["cached_calibration_params"] is not None
+        assert out["ar1_detector"] is cached_detector
+        assert out["pca_detector"] is cached_detector
+        assert out["iforest_detector"] is cached_detector
+
     def test_update_and_persist_model_lifecycle_safe_no_deps(self):
         """Lifecycle safe wrapper should return None when SQL/output manager are unavailable."""
         from core.model_lifecycle import update_and_persist_model_lifecycle_safe
@@ -731,6 +894,82 @@ class TestRefactorHelpers:
         assert "regime_state" in out_frame.columns
         assert set(out_frame["regime_state"].unique().tolist()) == {"unknown"}
         assert stats == {}
+
+    def test_build_regime_feature_basis_stage_success(self, monkeypatch):
+        """Regime basis helper should return basis payload without degradation on success."""
+        from core import regimes
+
+        idx = pd.date_range("2026-01-01", periods=3, freq="h")
+        train = pd.DataFrame({"a": [1.0, 2.0, 3.0]}, index=idx)
+        score = pd.DataFrame({"a": [1.5, 2.5]}, index=idx[:2])
+        basis_train = pd.DataFrame({"r_a": [0.1, 0.2, 0.3]}, index=idx)
+        basis_score = pd.DataFrame({"r_a": [0.15, 0.25]}, index=idx[:2])
+
+        def _build_feature_basis(**kwargs):
+            return basis_train, basis_score, {"source": "ok"}
+
+        monkeypatch.setattr(regimes, "build_feature_basis", _build_feature_basis)
+        regime_model = type("M", (), {"feature_columns": ["r_a"]})()
+
+        class _Logger:
+            def warn(self, *args, **kwargs):
+                pass
+
+        out = regimes.build_regime_feature_basis_stage(
+            train_features=train,
+            score_features=score,
+            raw_train=train,
+            raw_score=score,
+            pca_detector=None,
+            cfg={"regimes": {"method": "hdbscan"}},
+            regime_model=regime_model,
+            equip="FD_FAN",
+            logger=_Logger(),
+        )
+
+        assert out.degraded is False
+        assert out.regime_basis_train.equals(basis_train)
+        assert out.regime_basis_score.equals(basis_score)
+        assert out.regime_basis_meta == {"source": "ok"}
+        assert out.regime_basis_hash is not None
+        assert out.regime_model is regime_model
+
+    def test_build_regime_feature_basis_stage_marks_degraded_and_resets_model(self, monkeypatch):
+        """Regime basis helper should mark degraded and clear cached model when basis build fails."""
+        from core import regimes
+
+        idx = pd.date_range("2026-01-01", periods=2, freq="h")
+        train = pd.DataFrame({"a": [1.0, 2.0]}, index=idx)
+        score = pd.DataFrame({"a": [1.5, 2.5]}, index=idx)
+
+        def _boom(**kwargs):
+            raise RuntimeError("basis failed")
+
+        monkeypatch.setattr(regimes, "build_feature_basis", _boom)
+        regime_model = type("M", (), {"feature_columns": ["r_a"]})()
+
+        class _Logger:
+            def warn(self, *args, **kwargs):
+                pass
+
+        out = regimes.build_regime_feature_basis_stage(
+            train_features=train,
+            score_features=score,
+            raw_train=train,
+            raw_score=score,
+            pca_detector=None,
+            cfg={},
+            regime_model=regime_model,
+            equip="FD_FAN",
+            logger=_Logger(),
+        )
+
+        assert out.degraded is True
+        assert out.regime_basis_train is None
+        assert out.regime_basis_score is None
+        assert out.regime_basis_meta == {}
+        assert out.regime_basis_hash is None
+        assert out.regime_model is None
 
     def test_apply_transient_state_labels_no_regime_label(self):
         """Transient helper should no-op when regime_label column is absent."""

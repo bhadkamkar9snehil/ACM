@@ -2,7 +2,7 @@
 
 Date: 2026-02-20  
 Owner: Snehil  
-Status: Draft for execution
+Status: Active execution on integration branch
 
 ---
 
@@ -10,47 +10,40 @@ Status: Draft for execution
 
 Updated: 2026-02-21
 
-Completed on `integration/acm-single-entrypoint`:
+Current snapshot:
 
-1. Extracted SQL cached-model load and detector rebuild orchestration from `core/acm.py` into `core/model_persistence.py`.
-2. Extracted regime health labeling and transient labeling flow from `core/acm.py` into `core/regimes.py`.
-3. Extracted cached-model auto-retrain evaluation and optional refit execution from `core/acm.py` into `core/model_evaluation.py`.
-4. Extracted adaptive-threshold update gating from `core/acm.py` into `core/adaptive_thresholds.py`.
-5. Extracted drift-controller payload write path from `core/acm.py` into `core/drift.py`.
-6. Removed redundant baseline-buffer try-wrapper in `core/acm.py` and delegated directly to `OutputManager.update_baseline_buffer()` owner logic.
-7. Added safe lifecycle wrapper `update_and_persist_model_lifecycle_safe()` in `core/model_lifecycle.py` and replaced inline lifecycle try/except in `core/acm.py`.
-8. Updated `tests/test_v11_modules.py` with helper coverage for extracted functions to keep regression checks aligned with refactor state.
-9. Extracted DataContract entry validation flow from `core/acm.py` into `core/pipeline_types.py` via `validate_data_contract_at_entry()`.
-10. Replaced inline DataContract threshold parsing and validation/write logic in `core/acm.py` with a single call to the ownership helper.
-11. Updated `tests/test_v11_modules.py` with direct coverage for `validate_data_contract_at_entry()` pass and failure paths.
-12. Maintained source control isolation by merging unrelated dashboard changes through dedicated `chore/*` branches into integration.
-13. Extracted seasonality safe-execution wrapper into `core/seasonality.py` and removed inline seasonality try/except from `core/acm.py`.
-14. Extracted guardrails safe-execution wrapper into `core/pipeline_types.py` and removed inline guardrails try/except from `core/acm.py`.
-15. Extracted calibration helper internals from `core/acm.py` into `core/fuse.py`:
-   - `apply_contamination_filter_config`
-   - `choose_pca_cache_for_calibration`
-   - `compute_and_set_adaptive_clip`
-   - `compute_pca_train_percentiles`
-   - `collect_enabled_calibrators`
-   - `write_calibration_summary_safe`
-16. Replaced inline calibration helper logic in `core/acm.py` with calls into `core/fuse.py` while preserving calibration stage sequencing and outputs.
-17. Updated `tests/test_v11_modules.py` with direct tests for extracted calibration helpers and re-ran the refactor regression suite.
-18. Extracted calibration-params persistence wrapper from `core/acm.py` into `core/model_persistence.py`:
-   - `persist_calibration_params_safe`
-19. Replaced inline calibration-params persistence try/except in `core/acm.py` with `persist_calibration_params_safe(...)`.
-20. Fixed Obsidian graph link generation in `scripts/build_acm_obsidian_graph.py` to emit vault-safe wikilinks and restored memory health checks to zero broken links after refresh.
-21. Extracted threshold artifact persistence from `core/acm.py` into `core/fuse.py`:
-   - `persist_threshold_artifacts`
-22. Replaced inline per-regime/global threshold write logic in `core/acm.py` with `persist_threshold_artifacts(...)` and updated refactor tests.
-23. Consolidated remaining calibration orchestration from `core/acm.py` into `core/fuse.py`:
-   - `CalibrationStageResult`
-   - `run_calibration_stage`
-24. Replaced inline calibration stage orchestration in `core/acm.py` with a single `fuse.run_calibration_stage(...)` call, preserving sequence and outputs.
-25. Added regression test coverage for `run_calibration_stage` orchestration in `tests/test_v11_modules.py`.
-26. Extracted fusion-result unpack and observability metric emission from `core/acm.py` into `core/fuse.py`:
-   - `apply_fusion_result_and_record_metrics`
-27. Replaced inline fusion result handling in `core/acm.py` with `fuse.apply_fusion_result_and_record_metrics(...)`.
-28. Added regression test coverage for `apply_fusion_result_and_record_metrics` in `tests/test_v11_modules.py`.
+1. Runtime entrypoint migration is complete:
+   - `core/acm_main.py` is removed.
+   - `python -m core.acm` is the only runtime entrypoint.
+2. `core/acm.py` is shrinking:
+   - recent high watermark in this effort: 1758 lines
+   - current: 1360 lines
+3. Extracted and wired into ownership modules:
+   - calibration and fusion orchestration pieces in `core/fuse.py`
+   - NOOP outcome/error/finalization helpers in `core/run_metadata_writer.py`
+   - persist-stage orchestration helpers in `core/output_manager.py`
+   - regime labeling stage orchestration in `core/regimes.py`
+   - data-load stage orchestration in `core/smart_coldstart.py`
+   - early manifest-protection lookup in `core/model_persistence.py`
+   - detector runtime initialization orchestration in `core/detector_orchestrator.py`
+   - regime basis build and compatibility gating in `core/regimes.py`
+4. Tests were updated throughout extraction:
+   - `tests/test_v11_modules.py` currently passes with new helper coverage.
+5. Source control policy has been followed:
+   - all work through `refactor/*` branches merged into `integration/acm-single-entrypoint`
+   - `main` remains untouched.
+
+Progress interpretation:
+
+1. Entrypoint unification and runtime cutover are done.
+2. Monolith extraction is in progress and moving in the right direction.
+3. The orchestrator is lighter than before but still too large for final target.
+
+Remaining structural backlog:
+
+1. Model quality and auto-retrain orchestration still has dense control flow in `core/acm.py`.
+2. Finalization path in `core/acm.py` still includes a long try and finally with many concerns.
+3. Additional cleanup is needed to reduce nested conditional and exception handling in orchestrator path.
 
 Validation executed after each extraction slice:
 
@@ -171,8 +164,12 @@ Each phase has:
 Execution status (current):
 - Phase 1 completed.
 - Phase 2 completed.
-- Phase 6 (entrypoint decommission) completed for runtime path.
-- Phase 4 started (function-owned extraction).
+- Phase 3 completed.
+- Phase 4 in progress.
+- Phase 5 completed for operational usage.
+- Phase 6 completed for runtime decommission (`core/acm_main.py` removed).
+
+Phase 4 extraction highlights:
   - `classify_noop_reason` moved to `core/smart_coldstart.py`.
   - pipeline feature-build wrapper moved to `core/fast_features.py`.
   - SQL/config/run-start helpers moved to `core/sql_client.py`:
@@ -221,7 +218,19 @@ Execution status (current):
     - `shutdown_run_observability` in `core/observability.py`
   - model force-retrain policy extracted from `core/acm.py` to `core/model_evaluation.py`:
     - `evaluate_force_retrain_triggers`
-- Remaining work is structural extraction of monolith responsibilities from `core/acm.py` into ownership modules with parity checks.
+  - detector runtime initialization extracted from `core/acm.py` to `core/detector_orchestrator.py`:
+    - `initialize_detectors_for_run`
+    - includes cache load path, runtime cache restore path, fit-when-missing path, flag reconcile, and required-detector validation
+  - regime basis stage extracted from `core/acm.py` to `core/regimes.py`:
+    - `build_regime_feature_basis_stage`
+    - includes basis hash construction, degraded fallback, and cached regime feature-compatibility reset
+  - Remaining work is structural extraction of monolith responsibilities from `core/acm.py` into ownership modules with parity checks.
+
+Immediate next extraction queue:
+
+1. Continue extracting model quality and retrain decision flow into `core/model_evaluation.py`.
+2. Move remaining finalization orchestration from `core/acm.py` into ownership helper paths where already available.
+3. Continue until `core/acm.py` is primarily high-level stage calls and run-level control flow only.
 
 ## Phase 0 - Baseline and Safety Harness
 
@@ -514,6 +523,12 @@ Refactor is complete when all are true:
 2. No policy changes while doing structure changes.
 3. No "cleanup" mixed with behavior movement unless parity is proven first.
 4. Keep diffs reviewable and reversible.
+5. Wrapper-only refactors are not sufficient:
+   - every extraction PR must remove meaningful inline orchestration logic from `core/acm.py`
+   - helper introduction must be paired with callsite simplification.
+6. Track orchestrator reduction explicitly per PR:
+   - report `core/acm.py` line count before and after
+   - report which inline block was removed or simplified.
 
 ---
 

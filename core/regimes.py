@@ -3899,6 +3899,86 @@ def apply_regime_health_labels(
 
 
 @dataclass
+class RegimeBasisBuildResult:
+    """Result bundle for regime basis build and cached-model compatibility check."""
+    regime_basis_train: Optional[pd.DataFrame]
+    regime_basis_score: Optional[pd.DataFrame]
+    regime_basis_meta: Dict[str, Any]
+    regime_basis_hash: Optional[int]
+    regime_model: Optional[RegimeModel]
+    degraded: bool
+
+
+def build_regime_feature_basis_stage(
+    *,
+    train_features: pd.DataFrame,
+    score_features: pd.DataFrame,
+    raw_train: Optional[pd.DataFrame],
+    raw_score: Optional[pd.DataFrame],
+    pca_detector: Optional[Any],
+    cfg: Dict[str, Any],
+    regime_model: Optional[RegimeModel],
+    equip: str,
+    logger: Any = Console,
+) -> RegimeBasisBuildResult:
+    """
+    Build regime feature basis and ensure cached regime model compatibility.
+    """
+    regime_basis_train: Optional[pd.DataFrame] = None
+    regime_basis_score: Optional[pd.DataFrame] = None
+    regime_basis_meta: Dict[str, Any] = {}
+    regime_basis_hash: Optional[int] = None
+    degraded = False
+
+    try:
+        basis_train, basis_score, basis_meta = build_feature_basis(
+            train_features=train_features,
+            score_features=score_features,
+            raw_train=raw_train,
+            raw_score=raw_score,
+            pca_detector=pca_detector,
+            cfg=cfg,
+        )
+
+        regime_cfg_str = str(cfg.get("regimes", {}))
+        schema_str = ",".join(sorted(basis_train.columns)) + "|" + regime_cfg_str
+        regime_basis_hash = int(hashlib.sha256(schema_str.encode()).hexdigest()[:15], 16)
+        regime_basis_train = basis_train
+        regime_basis_score = basis_score
+        regime_basis_meta = basis_meta
+    except Exception as e:
+        logger.warn(
+            f"Regime basis build failed (regimes will be unavailable): {e}",
+            component="REGIME",
+            equip=equip,
+            error=str(e)[:200],
+        )
+        degraded = True
+
+    if regime_model is not None and (
+        regime_basis_train is None
+        or regime_model.feature_columns != list(regime_basis_train.columns)
+    ):
+        logger.warn(
+            "Cached regime model has different feature columns; will refit.",
+            component="REGIME",
+            equip=equip,
+            cached_cols=regime_model.feature_columns[:5] if regime_model.feature_columns else [],
+            current_cols=list(regime_basis_train.columns)[:5] if regime_basis_train is not None else [],
+        )
+        regime_model = None
+
+    return RegimeBasisBuildResult(
+        regime_basis_train=regime_basis_train,
+        regime_basis_score=regime_basis_score,
+        regime_basis_meta=regime_basis_meta,
+        regime_basis_hash=regime_basis_hash,
+        regime_model=regime_model,
+        degraded=degraded,
+    )
+
+
+@dataclass
 class RegimeLabelingStageResult:
     """Result bundle for regime labeling orchestration."""
     frame: pd.DataFrame

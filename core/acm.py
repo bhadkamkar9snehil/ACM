@@ -23,7 +23,6 @@ from __future__ import annotations
 # Standard library imports
 # ============================
 import argparse
-import hashlib
 import json
 import os
 import sys
@@ -95,18 +94,16 @@ from core.detector_orchestrator import (
     score_all_detectors,
     calibrate_all_detectors,
     fit_all_detectors,
-    get_detector_enable_flags,
-    rebuild_detectors_from_cache,
+    initialize_detectors_for_run,
     compute_stable_feature_hash,
-    reconcile_detector_flags_with_loaded_models,
 )
 from core.model_persistence import (
     save_trained_models,
     persist_calibration_params_safe,
     load_manifest_protected_columns,
+    load_and_rebuild_detectors_from_sql_cache,
     restore_detectors_from_runtime_cache,
     load_quality_regime_state_if_needed,
-    load_and_rebuild_detectors_from_sql_cache,
 )
 from core.model_evaluation import auto_tune_parameters, evaluate_and_maybe_refit_cached_models
 
@@ -861,190 +858,82 @@ def main() -> None:
         regime_model = None
         regime_state = None
         regime_state_version = 0
-        regime_loaded_from_state = False  # Boolean flag replaces legacy string sentinel.
+        regime_loaded_from_state = False
         col_meds = None
-        cached_models = None  # Initialize to avoid UnboundLocalError.
+        cached_models = None
         cached_manifest = None
         previous_weights = None  # Initialize for fusion pipeline.
         reuse_models = False  # File-based caching disabled; models persist to SQL.
-        det_flags = get_detector_enable_flags(cfg)
-        # Extract detector enable flags for use throughout the pipeline.
-        ar1_enabled = det_flags["ar1_enabled"]
-        pca_enabled = det_flags["pca_enabled"]
-        iforest_enabled = det_flags["iforest_enabled"]
-        gmm_enabled = det_flags["gmm_enabled"]
-        omr_enabled = det_flags["omr_enabled"]
-        
-        # v11.7.0 ADAPTIVE LEARNING: Simplified refit logic
-        # If refit requested (from quality triggers), we'll honor it during quality assessment
-        # No deferred refit - if quality says retrain, we retrain
-        refit_requested_but_deferred = False  # Legacy flag, always False now
-        
-        # v11.7.0 ADAPTIVE LEARNING: Simplified cache logic
-        # Use cache unless this is a coldstart batch (fresh training required)
-        # Quality assessment will determine if loaded models need retraining
-        is_coldstart_batch = meta.get('is_coldstart_run', False) if isinstance(meta, dict) else getattr(meta, 'is_coldstart_run', False)
+        cached_calibration_params = None
 
-        use_cache = cfg.get("models", {}).get("use_cache", True) and not is_coldstart_batch
-        cached_calibration_params = None  # v11.9.0: Will be set if loaded from cache
+        def _fit_all_detectors_with_timer(**kwargs: Any) -> Dict[str, Any]:
+            with T.section("train.detector_fit"):
+                return fit_all_detectors(**kwargs)
 
         with T.section("models.load"):
-            if use_cache and detector_cache is None:
-                cache_restore = load_and_rebuild_detectors_from_sql_cache(
-                    train=train,
-                    score=score,
-                    equip=equip,
-                    sql_client=sql_client,
-                    equip_id=equip_id,
-                    cfg=cfg,
-                    rebuild_from_cache_fn=rebuild_detectors_from_cache,
-                    logger=Console,
-                )
-                train = cache_restore["train"]
-                score = cache_restore["score"]
-                cached_models = cache_restore["cached_models"]
-                cached_manifest = cache_restore["cached_manifest"]
-                cached_calibration_params = cache_restore["cached_calibration_params"]
-                ar1_detector = cache_restore["ar1_detector"]
-                pca_detector = cache_restore["pca_detector"]
-                iforest_detector = cache_restore["iforest_detector"]
-                gmm_detector = cache_restore["gmm_detector"]
-                omr_detector = cache_restore["omr_detector"]
-                regime_model = cache_restore["regime_model"]
-                col_meds = cache_restore["col_meds"]
-                        
-            elif detector_cache:
-                restored = restore_detectors_from_runtime_cache(
-                    detector_cache=detector_cache,
-                    logger=Console,
-                )
-                ar1_detector = restored["ar1_detector"]
-                pca_detector = restored["pca_detector"]
-                iforest_detector = restored["iforest_detector"]
-                gmm_detector = restored["gmm_detector"]
-                omr_detector = restored["omr_detector"]
-                regime_model = restored["regime_model"]
-            
-            # Load regime state from SQL if no regime model is loaded.
-            regime_state_loaded, loaded_state_version, loaded_from_state = load_quality_regime_state_if_needed(
-                regime_model=regime_model,
-                equip=equip,
-                equip_id=equip_id,
+            detector_init = initialize_detectors_for_run(
+                train=train,
+                score=score,
+                cfg=cfg,
+                meta=meta,
+                detector_cache=detector_cache,
+                output_manager=output_manager,
                 sql_client=sql_client,
+                run_id=run_id,
+                equip_id=equip_id,
+                equip=equip,
+                load_and_rebuild_detectors_fn=load_and_rebuild_detectors_from_sql_cache,
+                restore_detectors_from_runtime_cache_fn=restore_detectors_from_runtime_cache,
+                load_quality_regime_state_if_needed_fn=load_quality_regime_state_if_needed,
+                fit_all_detectors_fn=_fit_all_detectors_with_timer,
                 logger=Console,
             )
-            if regime_state_loaded is not None:
-                regime_state = regime_state_loaded
-            if loaded_from_state:
-                regime_state_version = loaded_state_version
-                regime_loaded_from_state = True  # Boolean flag replaces string sentinel.
 
-        # Check if we need to fit detectors using ORIGINAL config-based flags.
-        # NOTE: Reconciliation happens AFTER fitting, not before - otherwise we skip training!
-        detectors_missing = not all([
-            ar1_detector or not ar1_enabled,
-            pca_detector or not pca_enabled,
-            iforest_detector or not iforest_enabled,
-        ])
-
-        # v11.7.0 ADAPTIVE LEARNING: No mode check - if models missing or invalid, retrain automatically
-        # This enables quality-driven retraining without manual mode switching
-        detectors_just_trained = False
-        if detectors_missing:
-            Console.info(
-                f"Required models missing or invalid - training fresh models",
-                component="MODEL", equip=equip,
-                reason="missing_detectors" if not cached_models else "validation_failed"
-            )
-            with T.section("train.detector_fit"):
-                fit_result = fit_all_detectors(
-                    train=train, cfg=cfg, **det_flags,
-                    output_manager=output_manager, sql_client=sql_client,
-                    run_id=run_id, equip_id=equip_id, equip=equip,
-                )
-                ar1_detector = fit_result["ar1_detector"]
-                pca_detector = fit_result["pca_detector"]
-                iforest_detector = fit_result["iforest_detector"]
-                gmm_detector = fit_result["gmm_detector"]
-                omr_detector = fit_result["omr_detector"]
-                pca_train_spe = fit_result["pca_train_spe"]
-                pca_train_t2 = fit_result["pca_train_t2"]
-            detectors_just_trained = True
-
-        # AUDIT FIX: Reconcile enable flags with actually loaded/fitted detectors
-        # This ensures consistency between config-based flags and runtime detector availability
-        # NOTE: This MUST happen AFTER fitting, not before - otherwise we skip training!
-        reconciled_flags = reconcile_detector_flags_with_loaded_models(
-            enable_flags=det_flags,
-            ar1_detector=ar1_detector,
-            pca_detector=pca_detector,
-            iforest_detector=iforest_detector,
-            gmm_detector=gmm_detector,
-            omr_detector=omr_detector,
-            equip=equip,
-        )
-        # Update local enable flags with reconciled values for downstream scoring
-        ar1_enabled = reconciled_flags["ar1_enabled"]
-        pca_enabled = reconciled_flags["pca_enabled"]
-        iforest_enabled = reconciled_flags["iforest_enabled"]
-        gmm_enabled = reconciled_flags["gmm_enabled"]
-        omr_enabled = reconciled_flags["omr_enabled"]
-
-        # Validate all enabled detectors are present.
-        missing = []
-        if ar1_enabled and not ar1_detector: missing.append("ar1")
-        if pca_enabled and not pca_detector: missing.append("pca")
-        if iforest_enabled and not iforest_detector: missing.append("iforest")
-        if gmm_enabled and not gmm_detector: missing.append("gmm")
-        if omr_enabled and not omr_detector: missing.append("omr")
-        
-        if missing:
-            Console.error(f"Detector initialization failed: {missing}", component="MODEL", equip=equip)
-            raise RuntimeError(f"Required detector initialization failed: {missing}")
+        train = detector_init["train"]
+        score = detector_init["score"]
+        det_flags = detector_init["det_flags"]
+        ar1_enabled = detector_init["ar1_enabled"]
+        pca_enabled = detector_init["pca_enabled"]
+        iforest_enabled = detector_init["iforest_enabled"]
+        gmm_enabled = detector_init["gmm_enabled"]
+        omr_enabled = detector_init["omr_enabled"]
+        ar1_detector = detector_init["ar1_detector"]
+        pca_detector = detector_init["pca_detector"]
+        iforest_detector = detector_init["iforest_detector"]
+        gmm_detector = detector_init["gmm_detector"]
+        omr_detector = detector_init["omr_detector"]
+        pca_train_spe = detector_init["pca_train_spe"]
+        pca_train_t2 = detector_init["pca_train_t2"]
+        regime_model = detector_init["regime_model"]
+        regime_state = detector_init["regime_state"]
+        regime_state_version = detector_init["regime_state_version"]
+        regime_loaded_from_state = detector_init["regime_loaded_from_state"]
+        col_meds = detector_init["col_meds"]
+        cached_models = detector_init["cached_models"]
+        cached_manifest = detector_init["cached_manifest"]
+        cached_calibration_params = detector_init["cached_calibration_params"]
+        detectors_just_trained = detector_init["detectors_just_trained"]
+        use_cache = detector_init["use_cache"]
 
         # ===== Phase 3: Build regime feature basis (required for labeling) =====
-        # Build regime basis inline; failures should degrade the run, not abort it.
-        regime_basis_train = None
-        regime_basis_score = None
-        regime_basis_meta = {}
-        regime_basis_hash = None
-        
-        try:
-            # v11.4.0: Regime clustering uses RAW SENSOR VALUES ONLY
-            # Regimes represent HOW equipment operates (load, speed, flow, pressure)
-            # Detectors determine IF equipment is healthy within that operating mode
-            # These are orthogonal concerns - detector z-scores are OUTPUTS, not inputs
-            basis_train, basis_score, basis_meta = regimes.build_feature_basis(
-                train_features=train, score_features=score,
-                raw_train=raw_train, raw_score=raw_score,
-                pca_detector=pca_detector, cfg=cfg,
-            )
-            
-            # Schema hash keeps regimes stable once discovered unless inputs change.
-            regime_cfg_str = str(cfg.get("regimes", {}))
-            schema_str = ",".join(sorted(basis_train.columns)) + "|" + regime_cfg_str
-            regime_basis_hash = int(hashlib.sha256(schema_str.encode()).hexdigest()[:15], 16)
-            regime_basis_train = basis_train
-            regime_basis_score = basis_score
-            regime_basis_meta = basis_meta
-        except Exception as e:
-            Console.warn(f"Regime basis build failed (regimes will be unavailable): {e}", 
-                        component="REGIME", equip=equip, error=str(e)[:200])
+        regime_basis_result = regimes.build_regime_feature_basis_stage(
+            train_features=train,
+            score_features=score,
+            raw_train=raw_train,
+            raw_score=raw_score,
+            pca_detector=pca_detector,
+            cfg=cfg,
+            regime_model=regime_model,
+            equip=equip,
+            logger=Console,
+        )
+        regime_basis_train = regime_basis_result.regime_basis_train
+        regime_basis_score = regime_basis_result.regime_basis_score
+        regime_basis_meta = regime_basis_result.regime_basis_meta
+        regime_basis_hash = regime_basis_result.regime_basis_hash
+        regime_model = regime_basis_result.regime_model
+        if regime_basis_result.degraded:
             degradations.append("regime_feature_basis")
-
-        if regime_model is not None:
-            # Only refit if feature columns changed or regime config changed.
-            # 1. Feature columns changed (new sensors added/removed)
-            # 2. Regime config changed (schema hash includes config)
-            if (
-                regime_basis_train is None
-                or regime_model.feature_columns != list(regime_basis_train.columns)
-            ):
-                Console.warn("Cached regime model has different feature columns; will refit.", component="REGIME",
-                             equip=equip,
-                             cached_cols=regime_model.feature_columns[:5] if regime_model.feature_columns else [],
-                             current_cols=list(regime_basis_train.columns)[:5] if regime_basis_train is not None else [])
-                regime_model = None
 
         # ===== Phase 4: Score on SCORE window =====
         # Scoring is delegated to detector_orchestrator.score_all_detectors().

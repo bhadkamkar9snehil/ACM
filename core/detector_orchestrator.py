@@ -326,6 +326,206 @@ def fit_all_detectors(
     return result
 
 
+def initialize_detectors_for_run(
+    *,
+    train: pd.DataFrame,
+    score: pd.DataFrame,
+    cfg: Dict[str, Any],
+    meta: Optional[Any],
+    detector_cache: Optional[Dict[str, Any]],
+    output_manager: Optional[Any],
+    sql_client: Optional[Any],
+    run_id: Optional[str],
+    equip_id: int,
+    equip: str,
+    load_and_rebuild_detectors_fn: Any,
+    restore_detectors_from_runtime_cache_fn: Any,
+    load_quality_regime_state_if_needed_fn: Any,
+    fit_all_detectors_fn: Any = fit_all_detectors,
+    reconcile_detector_flags_fn: Any = None,
+    logger: Any = Console,
+) -> Dict[str, Any]:
+    """
+    Initialize detector runtime state for the current run.
+
+    This helper centralizes the model phase decision flow:
+    1. Resolve config enable flags
+    2. Load from SQL cache or runtime cache when available
+    3. Load regime state when no regime model is loaded
+    4. Fit detectors when required detectors are missing
+    5. Reconcile enable flags with loaded detectors
+    6. Validate all enabled detectors exist
+    """
+    if reconcile_detector_flags_fn is None:
+        reconcile_detector_flags_fn = reconcile_detector_flags_with_loaded_models
+
+    ar1_detector = pca_detector = iforest_detector = gmm_detector = omr_detector = None
+    pca_train_spe = pca_train_t2 = None
+    regime_model = None
+    regime_state = None
+    regime_state_version = 0
+    regime_loaded_from_state = False
+    col_meds = None
+    cached_models = None
+    cached_manifest = None
+    cached_calibration_params = None
+
+    det_flags = get_detector_enable_flags(cfg)
+    ar1_enabled = det_flags["ar1_enabled"]
+    pca_enabled = det_flags["pca_enabled"]
+    iforest_enabled = det_flags["iforest_enabled"]
+    gmm_enabled = det_flags["gmm_enabled"]
+    omr_enabled = det_flags["omr_enabled"]
+
+    is_coldstart_batch = (
+        meta.get("is_coldstart_run", False)
+        if isinstance(meta, dict)
+        else getattr(meta, "is_coldstart_run", False)
+    )
+    use_cache = cfg.get("models", {}).get("use_cache", True) and not is_coldstart_batch
+
+    if use_cache and detector_cache is None:
+        cache_restore = load_and_rebuild_detectors_fn(
+            train=train,
+            score=score,
+            equip=equip,
+            sql_client=sql_client,
+            equip_id=equip_id,
+            cfg=cfg,
+            rebuild_from_cache_fn=rebuild_detectors_from_cache,
+            logger=logger,
+        )
+        train = cache_restore["train"]
+        score = cache_restore["score"]
+        cached_models = cache_restore["cached_models"]
+        cached_manifest = cache_restore["cached_manifest"]
+        cached_calibration_params = cache_restore["cached_calibration_params"]
+        ar1_detector = cache_restore["ar1_detector"]
+        pca_detector = cache_restore["pca_detector"]
+        iforest_detector = cache_restore["iforest_detector"]
+        gmm_detector = cache_restore["gmm_detector"]
+        omr_detector = cache_restore["omr_detector"]
+        regime_model = cache_restore["regime_model"]
+        col_meds = cache_restore["col_meds"]
+    elif detector_cache:
+        restored = restore_detectors_from_runtime_cache_fn(
+            detector_cache=detector_cache,
+            logger=logger,
+        )
+        ar1_detector = restored["ar1_detector"]
+        pca_detector = restored["pca_detector"]
+        iforest_detector = restored["iforest_detector"]
+        gmm_detector = restored["gmm_detector"]
+        omr_detector = restored["omr_detector"]
+        regime_model = restored["regime_model"]
+
+    regime_state_loaded, loaded_state_version, loaded_from_state = load_quality_regime_state_if_needed_fn(
+        regime_model=regime_model,
+        equip=equip,
+        equip_id=equip_id,
+        sql_client=sql_client,
+        logger=logger,
+    )
+    if regime_state_loaded is not None:
+        regime_state = regime_state_loaded
+    if loaded_from_state:
+        regime_state_version = loaded_state_version
+        regime_loaded_from_state = True
+
+    detectors_missing = not all(
+        [
+            ar1_detector or not ar1_enabled,
+            pca_detector or not pca_enabled,
+            iforest_detector or not iforest_enabled,
+        ]
+    )
+
+    detectors_just_trained = False
+    if detectors_missing:
+        logger.info(
+            "Required models missing or invalid - training fresh models",
+            component="MODEL",
+            equip=equip,
+            reason="missing_detectors" if not cached_models else "validation_failed",
+        )
+        fit_result = fit_all_detectors_fn(
+            train=train,
+            cfg=cfg,
+            **det_flags,
+            output_manager=output_manager,
+            sql_client=sql_client,
+            run_id=run_id,
+            equip_id=equip_id,
+            equip=equip,
+        )
+        ar1_detector = fit_result["ar1_detector"]
+        pca_detector = fit_result["pca_detector"]
+        iforest_detector = fit_result["iforest_detector"]
+        gmm_detector = fit_result["gmm_detector"]
+        omr_detector = fit_result["omr_detector"]
+        pca_train_spe = fit_result["pca_train_spe"]
+        pca_train_t2 = fit_result["pca_train_t2"]
+        detectors_just_trained = True
+
+    reconciled_flags = reconcile_detector_flags_fn(
+        enable_flags=det_flags,
+        ar1_detector=ar1_detector,
+        pca_detector=pca_detector,
+        iforest_detector=iforest_detector,
+        gmm_detector=gmm_detector,
+        omr_detector=omr_detector,
+        equip=equip,
+    )
+    ar1_enabled = reconciled_flags["ar1_enabled"]
+    pca_enabled = reconciled_flags["pca_enabled"]
+    iforest_enabled = reconciled_flags["iforest_enabled"]
+    gmm_enabled = reconciled_flags["gmm_enabled"]
+    omr_enabled = reconciled_flags["omr_enabled"]
+
+    missing = []
+    if ar1_enabled and not ar1_detector:
+        missing.append("ar1")
+    if pca_enabled and not pca_detector:
+        missing.append("pca")
+    if iforest_enabled and not iforest_detector:
+        missing.append("iforest")
+    if gmm_enabled and not gmm_detector:
+        missing.append("gmm")
+    if omr_enabled and not omr_detector:
+        missing.append("omr")
+    if missing:
+        logger.error(f"Detector initialization failed: {missing}", component="MODEL", equip=equip)
+        raise RuntimeError(f"Required detector initialization failed: {missing}")
+
+    return {
+        "train": train,
+        "score": score,
+        "det_flags": det_flags,
+        "ar1_enabled": ar1_enabled,
+        "pca_enabled": pca_enabled,
+        "iforest_enabled": iforest_enabled,
+        "gmm_enabled": gmm_enabled,
+        "omr_enabled": omr_enabled,
+        "ar1_detector": ar1_detector,
+        "pca_detector": pca_detector,
+        "iforest_detector": iforest_detector,
+        "gmm_detector": gmm_detector,
+        "omr_detector": omr_detector,
+        "pca_train_spe": pca_train_spe,
+        "pca_train_t2": pca_train_t2,
+        "regime_model": regime_model,
+        "regime_state": regime_state,
+        "regime_state_version": regime_state_version,
+        "regime_loaded_from_state": regime_loaded_from_state,
+        "col_meds": col_meds,
+        "cached_models": cached_models,
+        "cached_manifest": cached_manifest,
+        "cached_calibration_params": cached_calibration_params,
+        "detectors_just_trained": detectors_just_trained,
+        "use_cache": use_cache,
+    }
+
+
 def get_detector_enable_flags(cfg: Dict[str, Any]) -> Dict[str, bool]:
     """
     Determine which detectors are enabled based on fusion weights.
