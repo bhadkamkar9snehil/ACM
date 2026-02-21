@@ -6,6 +6,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added - AGENT-MANAGED ACM MEMORY MECHANISM
+
+- Added repository skill for agent memory:
+  - `skills/acm-codebase-memory/SKILL.md`
+  - `skills/acm-codebase-memory/agents/openai.yaml`
+- Added automation script:
+  - `scripts/manage_acm_agent_memory.py`
+  - supports `refresh`, `health`, `sync-repo-skill`, `sync-local-skill`
+- Added generated agent memory packets:
+  - `docs/obsidian_vault/agent_memory/00_Agent-Memory-Hub.md`
+  - `docs/obsidian_vault/agent_memory/01_Runtime-Critical-Path.md`
+  - `docs/obsidian_vault/agent_memory/02_Module-Ownership.md`
+  - `docs/obsidian_vault/agent_memory/03_SQL-Output-Map.md`
+  - `docs/obsidian_vault/agent_memory/memory_index.json`
+- Added repository-level skill discovery file:
+  - `AGENTS.md`
+- Updated Obsidian guide with command lifecycle and agent-first usage:
+  - `docs/OBSIDIAN_ACM_SKILL_GRAPH_GUIDE.md`
+
 ## [11.16.0] - 2026-02-21
 
 ### Changed - SINGLE ENTRYPOINT REFACTOR CUT INTEGRATION BRANCH

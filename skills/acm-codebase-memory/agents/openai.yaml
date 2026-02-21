@@ -1,0 +1,4 @@
+interface:
+  display_name: "ACM Codebase Memory"
+  short_description: "Agent memory for ACM ownership and runtime flow"
+  default_prompt: "Use $acm-codebase-memory before ACM changes to refresh and load generated codebase memory from Obsidian and skill references."
