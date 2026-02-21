@@ -5,7 +5,6 @@ module: core.detector_orchestrator
 source: core/detector_orchestrator.py
 line_start: 110
 line_end: 181
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.detector_orchestrator.calibrate_all_detectors

@@ -5,7 +5,6 @@ module: core.run_metadata_writer
 source: core/run_metadata_writer.py
 line_start: 407
 line_end: 525
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.run_metadata_writer.emit_batch_summary

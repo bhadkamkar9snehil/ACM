@@ -5,7 +5,6 @@ module: core.run_metadata_writer
 source: core/run_metadata_writer.py
 line_start: 170
 line_end: 222
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.run_metadata_writer.extract_run_metadata_from_scores

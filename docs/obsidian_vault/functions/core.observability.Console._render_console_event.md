@@ -5,7 +5,6 @@ module: core.observability
 source: core/observability.py
 line_start: 1238
 line_end: 1250
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.observability.Console._render_console_event

@@ -5,7 +5,6 @@ module: core.episode_culprits_writer
 source: core/episode_culprits_writer.py
 line_start: 70
 line_end: 182
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.episode_culprits_writer.write_episode_culprits

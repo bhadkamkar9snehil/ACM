@@ -2,7 +2,6 @@
 type: module
 module: core.model_evaluation
 source: core/model_evaluation.py
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.model_evaluation

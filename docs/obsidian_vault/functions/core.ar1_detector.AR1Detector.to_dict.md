@@ -5,7 +5,6 @@ module: core.ar1_detector
 source: core/ar1_detector.py
 line_start: 258
 line_end: 260
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.ar1_detector.AR1Detector.to_dict

@@ -97,7 +97,13 @@ def _resolve_import_from(
     module = node.module or ""
 
     if level == 0 and module.startswith("core"):
-        imports.add(module)
+        if module == "core":
+            for alias in node.names:
+                if alias.name == "*":
+                    continue
+                imports.add(f"core.{alias.name}")
+        else:
+            imports.add(module)
         return imports
 
     if level > 0:
@@ -222,7 +228,7 @@ def _link_to_function(full_name: str) -> str:
     return f"[[functions/{full_name}|{full_name}]]"
 
 
-def _render_module_note(module: ModuleInfo, generated_at: str) -> str:
+def _render_module_note(module: ModuleInfo) -> str:
     imports = sorted(module.core_imports)
     function_links = sorted(module.functions, key=lambda f: (f.line_start, f.full_name))
 
@@ -236,7 +242,6 @@ def _render_module_note(module: ModuleInfo, generated_at: str) -> str:
 type: module
 module: {module.module_name}
 source: {module.source_path}
-generated_at: {generated_at}
 ---
 
 # {module.module_name}
@@ -253,7 +258,7 @@ Summary: {module.doc_summary or "no module docstring summary"}
 """
 
 
-def _render_function_note(function: FunctionInfo, generated_at: str) -> str:
+def _render_function_note(function: FunctionInfo) -> str:
     return f"""---
 type: {function.kind}
 id: {function.full_name}
@@ -261,7 +266,6 @@ module: {function.module_name}
 source: {function.source_path}
 line_start: {function.line_start}
 line_end: {function.line_end}
-generated_at: {generated_at}
 ---
 
 # {function.full_name}
@@ -464,9 +468,9 @@ def build_graph() -> Tuple[int, int]:
     _write(VAULT_DIR / "04_Outputs-and-Status.md", _outputs_note(generated_at))
 
     for module in module_infos:
-        _write(MODULES_DIR / f"{module.module_name}.md", _render_module_note(module, generated_at))
+        _write(MODULES_DIR / f"{module.module_name}.md", _render_module_note(module))
         for symbol in module.functions:
-            _write(FUNCTIONS_DIR / f"{symbol.full_name}.md", _render_function_note(symbol, generated_at))
+            _write(FUNCTIONS_DIR / f"{symbol.full_name}.md", _render_function_note(symbol))
 
     return len(module_infos), all_symbols
 

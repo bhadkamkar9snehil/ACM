@@ -5,7 +5,6 @@ module: core.metrics
 source: core/metrics.py
 line_start: 310
 line_end: 353
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.metrics.compute_comprehensive_metrics

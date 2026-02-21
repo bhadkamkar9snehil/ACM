@@ -5,7 +5,6 @@ module: core.omr
 source: core/omr.py
 line_start: 170
 line_end: 191
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.omr.OMRDetector._validate_input

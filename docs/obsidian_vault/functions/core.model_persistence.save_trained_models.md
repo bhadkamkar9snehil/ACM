@@ -5,7 +5,6 @@ module: core.model_persistence
 source: core/model_persistence.py
 line_start: 1752
 line_end: 1861
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.model_persistence.save_trained_models

@@ -5,7 +5,6 @@ module: core.model_persistence
 source: core/model_persistence.py
 line_start: 357
 line_end: 418
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.model_persistence.save_regime_state

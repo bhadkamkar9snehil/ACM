@@ -5,7 +5,6 @@ module: core.output_manager
 source: core/output_manager.py
 line_start: 3048
 line_end: 3064
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.output_manager.OutputManager.write_seasonal_patterns

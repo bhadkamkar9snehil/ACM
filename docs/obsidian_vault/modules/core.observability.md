@@ -2,7 +2,6 @@
 type: module
 module: core.observability
 source: core/observability.py
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.observability

@@ -5,7 +5,6 @@ module: core.output_manager
 source: core/output_manager.py
 line_start: 3142
 line_end: 3154
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.output_manager.OutputManager.flush_and_finalize

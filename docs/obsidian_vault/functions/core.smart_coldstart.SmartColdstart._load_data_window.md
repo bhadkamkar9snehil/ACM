@@ -5,7 +5,6 @@ module: core.smart_coldstart
 source: core/smart_coldstart.py
 line_start: 484
 line_end: 536
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.smart_coldstart.SmartColdstart._load_data_window

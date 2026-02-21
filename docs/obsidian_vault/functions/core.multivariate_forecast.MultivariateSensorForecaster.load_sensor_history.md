@@ -5,7 +5,6 @@ module: core.multivariate_forecast
 source: core/multivariate_forecast.py
 line_start: 91
 line_end: 175
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.multivariate_forecast.MultivariateSensorForecaster.load_sensor_history

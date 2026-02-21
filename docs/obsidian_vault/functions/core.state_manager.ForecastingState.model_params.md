@@ -5,7 +5,6 @@ module: core.state_manager
 source: core/state_manager.py
 line_start: 51
 line_end: 53
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.state_manager.ForecastingState.model_params

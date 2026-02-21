@@ -5,7 +5,6 @@ module: core.forecast_engine
 source: core/forecast_engine.py
 line_start: 518
 line_end: 559
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.forecast_engine.ForecastEngine._load_forecast_config

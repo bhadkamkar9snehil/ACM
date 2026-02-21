@@ -5,7 +5,6 @@ module: core.observability
 source: core/observability.py
 line_start: 136
 line_end: 143
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.observability._colorize_leading_tag

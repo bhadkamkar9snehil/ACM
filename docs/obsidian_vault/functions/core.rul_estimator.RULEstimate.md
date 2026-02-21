@@ -5,7 +5,6 @@ module: core.rul_estimator
 source: core/rul_estimator.py
 line_start: 40
 line_end: 50
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.rul_estimator.RULEstimate

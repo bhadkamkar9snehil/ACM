@@ -5,7 +5,6 @@ module: core.adaptive_thresholds
 source: core/adaptive_thresholds.py
 line_start: 70
 line_end: 186
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.adaptive_thresholds.AdaptiveThresholdCalculator.calculate_fused_threshold

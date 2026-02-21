@@ -5,7 +5,6 @@ module: core.config_history_writer
 source: core/config_history_writer.py
 line_start: 54
 line_end: 139
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.config_history_writer.write_config_change

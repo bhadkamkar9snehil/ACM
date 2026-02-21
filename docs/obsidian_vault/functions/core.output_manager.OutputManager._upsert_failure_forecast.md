@@ -5,7 +5,6 @@ module: core.output_manager
 source: core/output_manager.py
 line_start: 1339
 line_end: 1351
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.output_manager.OutputManager._upsert_failure_forecast

@@ -5,7 +5,6 @@ module: core.seasonality
 source: core/seasonality.py
 line_start: 357
 line_end: 409
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.seasonality.SeasonalityHandler.adjust_baseline

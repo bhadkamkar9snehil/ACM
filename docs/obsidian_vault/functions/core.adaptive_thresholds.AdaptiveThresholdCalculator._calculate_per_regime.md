@@ -5,7 +5,6 @@ module: core.adaptive_thresholds
 source: core/adaptive_thresholds.py
 line_start: 188
 line_end: 245
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.adaptive_thresholds.AdaptiveThresholdCalculator._calculate_per_regime

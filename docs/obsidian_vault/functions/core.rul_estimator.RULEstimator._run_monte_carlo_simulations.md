@@ -5,7 +5,6 @@ module: core.rul_estimator
 source: core/rul_estimator.py
 line_start: 217
 line_end: 366
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.rul_estimator.RULEstimator._run_monte_carlo_simulations

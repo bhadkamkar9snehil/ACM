@@ -5,7 +5,6 @@ module: core.analytics_builder
 source: core/analytics_builder.py
 line_start: 314
 line_end: 423
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.analytics_builder.AnalyticsBuilder.generate_health_timeline

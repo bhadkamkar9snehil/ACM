@@ -5,7 +5,6 @@ module: core.regimes
 source: core/regimes.py
 line_start: 3855
 line_end: 3898
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.regimes.apply_regime_health_labels

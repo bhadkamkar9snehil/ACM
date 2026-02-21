@@ -2,7 +2,6 @@
 type: module
 module: core.analytics_builder
 source: core/analytics_builder.py
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.analytics_builder

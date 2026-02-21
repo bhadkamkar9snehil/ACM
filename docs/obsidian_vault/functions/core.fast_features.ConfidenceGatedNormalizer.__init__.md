@@ -5,7 +5,6 @@ module: core.fast_features
 source: core/fast_features.py
 line_start: 774
 line_end: 788
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.fast_features.ConfidenceGatedNormalizer.__init__

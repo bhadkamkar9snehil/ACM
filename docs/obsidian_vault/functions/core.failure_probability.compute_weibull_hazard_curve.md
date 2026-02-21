@@ -5,7 +5,6 @@ module: core.failure_probability
 source: core/failure_probability.py
 line_start: 550
 line_end: 600
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.failure_probability.compute_weibull_hazard_curve

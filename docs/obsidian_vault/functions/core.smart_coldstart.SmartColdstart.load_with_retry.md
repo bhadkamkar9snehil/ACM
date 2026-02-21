@@ -5,7 +5,6 @@ module: core.smart_coldstart
 source: core/smart_coldstart.py
 line_start: 320
 line_end: 479
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.smart_coldstart.SmartColdstart.load_with_retry

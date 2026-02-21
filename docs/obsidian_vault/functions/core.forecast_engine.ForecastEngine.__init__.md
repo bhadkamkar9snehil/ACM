@@ -5,7 +5,6 @@ module: core.forecast_engine
 source: core/forecast_engine.py
 line_start: 177
 line_end: 209
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.forecast_engine.ForecastEngine.__init__

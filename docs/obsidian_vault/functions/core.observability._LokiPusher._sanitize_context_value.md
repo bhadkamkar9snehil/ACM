@@ -5,7 +5,6 @@ module: core.observability
 source: core/observability.py
 line_start: 2361
 line_end: 2389
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.observability._LokiPusher._sanitize_context_value

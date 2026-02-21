@@ -5,7 +5,6 @@ module: core.observability
 source: core/observability.py
 line_start: 2870
 line_end: 2957
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.observability._PyroscopePusher._memory_snapshot_to_collapsed

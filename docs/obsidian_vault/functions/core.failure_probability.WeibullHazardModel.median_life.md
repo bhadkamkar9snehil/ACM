@@ -5,7 +5,6 @@ module: core.failure_probability
 source: core/failure_probability.py
 line_start: 524
 line_end: 533
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.failure_probability.WeibullHazardModel.median_life

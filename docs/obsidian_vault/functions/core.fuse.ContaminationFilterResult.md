@@ -5,7 +5,6 @@ module: core.fuse
 source: core/fuse.py
 line_start: 28
 line_end: 40
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.fuse.ContaminationFilterResult

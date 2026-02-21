@@ -5,7 +5,6 @@ module: core.confidence
 source: core/confidence.py
 line_start: 376
 line_end: 424
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.confidence.compute_rul_confidence
