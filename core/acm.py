@@ -1574,21 +1574,13 @@ def main() -> None:
             # Culprits are written via OutputManager.
             
             # === Additional table writes ===
-            # Detector correlation matrix (correlation between detector z-scores).
-            with T.section("persist.detector_correlation"):
-                output_manager.write_detector_correlation_from_scores(frame)
-            
-            # Sensor correlation matrix (from raw sensor data, not feature matrix).
-            with T.section("persist.sensor_correlation"):
-                output_manager.write_sensor_correlations_from_raw(raw_score)
-
-            # Sensor normalized time series (for sensor forecasting).
-            with T.section("persist.sensor_normalized_ts"):
-                rows_written = output_manager.write_sensor_normalized_ts_from_raw(raw_score, max_total_rows=10000)
-
-            # === Seasonal patterns write ===
-            with T.section("persist.seasonal_patterns"):
-                output_manager.write_seasonal_patterns_from_detected(seasonal_patterns)
+            with T.section("persist.additional_artifacts"):
+                output_manager.persist_additional_artifacts(
+                    scores_df=frame,
+                    raw_score=raw_score,
+                    seasonal_patterns=seasonal_patterns,
+                    max_total_rows=10000,
+                )
 
             # ===== Memory cleanup: free large objects no longer needed =====
             # After persist, raw sensor data and selected detector internals are no longer needed.
@@ -1601,15 +1593,16 @@ def main() -> None:
 
             # === Analytics generation ===
             with T.section("outputs.comprehensive_analytics"):
-                # Inject tuned fusion weights into cfg for dashboard reporting.
-                if fusion_weights_used:
-                    cfg.setdefault('fusion', {})['weights'] = dict(fusion_weights_used)
-                
-                analytics_result = output_manager.generate_all_analytics_tables(
-                    scores_df=frame, cfg=cfg, sensor_context=sensor_context
+                analytics_result = output_manager.generate_all_analytics_with_context(
+                    scores_df=frame,
+                    cfg=cfg,
+                    sensor_context=sensor_context,
+                    fusion_weights_used=fusion_weights_used,
                 )
-                table_count = analytics_result.get("sql_tables", 0)
-                Console.info(f"Analytics: tables={table_count}", component="OUTPUTS")
+                Console.info(
+                    f"Analytics: tables={analytics_result.get('sql_tables', 0)}",
+                    component="OUTPUTS",
+                )
 
             # FORECASTING_DISABLED: RUL + forecasting phase is temporarily disabled.
             # To re-enable this phase:

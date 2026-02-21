@@ -627,6 +627,61 @@ class TestRefactorHelpers:
         assert iforest_detector.model is None
         assert omr_detector.model is None
 
+    def test_persist_additional_artifacts_aggregates_counts(self):
+        """Output manager helper should aggregate optional artifact write counts."""
+        from core.output_manager import OutputManager
+
+        output_manager = OutputManager.__new__(OutputManager)
+        output_manager.write_detector_correlation_from_scores = lambda _df: 2
+        output_manager.write_sensor_correlations_from_raw = lambda _df: 3
+        output_manager.write_sensor_normalized_ts_from_raw = lambda _df, max_total_rows=10000: 4
+        output_manager.write_seasonal_patterns_from_detected = lambda _p: 5
+
+        frame = pd.DataFrame({"ar1_z": [0.1, 0.2], "iforest_z": [0.3, 0.4]})
+        raw_score = pd.DataFrame({"sensor": [1.0, 2.0]})
+        result = output_manager.persist_additional_artifacts(
+            scores_df=frame,
+            raw_score=raw_score,
+            seasonal_patterns={"sensor": []},
+        )
+
+        assert result.detector_correlation_rows == 2
+        assert result.sensor_correlation_rows == 3
+        assert result.sensor_normalized_ts_rows == 4
+        assert result.seasonal_pattern_rows == 5
+
+    def test_generate_all_analytics_with_context_injects_fusion_weights(self):
+        """Analytics helper should inject fusion weights and delegate to analytics writer."""
+        from core.output_manager import OutputManager
+
+        output_manager = OutputManager.__new__(OutputManager)
+        captured = {}
+
+        def _fake_generate(scores_df, cfg, sensor_context):
+            captured["scores_df"] = scores_df
+            captured["cfg"] = cfg
+            captured["sensor_context"] = sensor_context
+            return {"sql_tables": 7}
+
+        output_manager.generate_all_analytics_tables = _fake_generate
+
+        scores_df = pd.DataFrame({"fused": [0.1, 0.2]})
+        cfg = {}
+        sensor_context = {"values": pd.DataFrame({"sensor": [1.0]})}
+        result = output_manager.generate_all_analytics_with_context(
+            scores_df=scores_df,
+            cfg=cfg,
+            sensor_context=sensor_context,
+            fusion_weights_used={"ar1_z": 0.6, "iforest_z": 0.4},
+        )
+
+        assert result["sql_tables"] == 7
+        assert "fusion" in cfg
+        assert cfg["fusion"]["weights"]["ar1_z"] == pytest.approx(0.6)
+        assert captured["scores_df"] is scores_df
+        assert captured["cfg"] is cfg
+        assert captured["sensor_context"] is sensor_context
+
     def test_resolve_run_outcome_from_degradations(self):
         """Run metadata helper should map degradation list to DEGRADED outcome and payload."""
         from core.run_metadata_writer import resolve_run_outcome_from_degradations
