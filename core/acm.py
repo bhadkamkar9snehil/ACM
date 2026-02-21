@@ -1458,48 +1458,9 @@ def main() -> None:
                     component="OUTPUTS",
                 )
 
-            # FORECASTING_DISABLED: RUL + forecasting phase is temporarily disabled.
-            # To re-enable this phase:
-            #   1. Restore ForecastEngine imports at top of file (search FORECASTING_DISABLED).
-            #   2. Remove the ForecastEngine = None stub.
-            #   3. Uncomment the block below (remove the leading `# `).
-            #
-            # === RUL + forecasting ===
-            # with T.section("outputs.forecasting"):
-            #     forecast_engine = ForecastEngine(
-            #         sql_client=getattr(output_manager, "sql_client", None),
-            #         output_manager=output_manager,
-            #         equip_id=int(equip_id),
-            #         run_id=str(run_id) if run_id is not None else None,
-            #         config=cfg,
-            #         model_state=model_state,
-            #     )
-            #     forecast_results = forecast_engine.run_forecast()
-            #
-            #     if forecast_results.get('success'):
-            #         Console.info(
-            #             f"Forecast: RUL P10/50/90={forecast_results['rul_p10']:.0f}/{forecast_results['rul_p50']:.0f}/{forecast_results['rul_p90']:.0f}h | tables={len(forecast_results['tables_written'])} | top_sensors={forecast_results['top_sensors']}",
-            #             component="FORECAST",
-            #         )
-            #         # Record RUL metrics for Prometheus.
-            #         try:
-            #             record_rul(
-            #                 equip,
-            #                 rul_hours=float(forecast_results['rul_p50']),
-            #                 p10=float(forecast_results['rul_p10']),
-            #                 p50=float(forecast_results['rul_p50']),
-            #                 p90=float(forecast_results['rul_p90']),
-            #             )
-            #             if 'active_defects' in forecast_results:
-            #                 record_active_defects(equip, int(forecast_results['active_defects']))
-            #         except Exception:
-            #             pass  # OTEL metrics are optional.
-            #     else:
-            #         Console.warn(
-            #             f"Forecast failed: {forecast_results.get('error', 'Unknown')}",
-            #             component="FORECAST", equip=equip, run_id=run_id,
-            #         )
-            #         degradations.append("forecast_failed")
+            # FORECASTING_DISABLED:
+            # Forecast and RUL pipeline is intentionally disabled in current runtime.
+            # Re-enable by restoring ForecastEngine import/stub wiring and forecasting stage.
 
             Console.info("Forecasting/RUL is disabled (FORECASTING_DISABLED).", component="FORECAST")
 
