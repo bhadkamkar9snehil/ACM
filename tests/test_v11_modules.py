@@ -600,6 +600,76 @@ class TestRefactorHelpers:
         assert out_frame.equals(frame)
         assert counts == {}
 
+    def test_run_regime_labeling_stage_returns_labels_and_records_regime(self, monkeypatch):
+        """Regime labeling stage helper should return labels and emit current regime metric."""
+        from core import regimes
+
+        class _Model:
+            def __init__(self):
+                self.cluster_labels_ = {0: "regime_0", 1: "regime_1"}
+                self.model = object()
+
+        def _fake_label(score_df, ctx, score_out, cfg):
+            out_frame = score_out["frame"].copy()
+            out_frame["regime_label"] = np.array([0, 1])
+            return {
+                "frame": out_frame,
+                "regime_model": ctx["regime_model"],
+                "regime_labels": np.array([0, 1]),
+                "regime_labels_train": np.array([0, 0]),
+                "regime_quality_ok": True,
+            }
+
+        definitions_calls = []
+
+        def _fake_write_defs(**kwargs):
+            definitions_calls.append(kwargs)
+            return 1
+
+        monkeypatch.setattr(regimes, "label", _fake_label)
+        monkeypatch.setattr(regimes, "write_regime_definitions_for_audit", _fake_write_defs)
+
+        recorded = []
+
+        def _record_regime(equip, regime_id, regime_label):
+            recorded.append((equip, regime_id, regime_label))
+
+        idx = pd.date_range("2026-01-01", periods=2, freq="h")
+        score_df = pd.DataFrame({"sensor": [1.0, 2.0]}, index=idx)
+        train_df = pd.DataFrame({"sensor": [1.0, 1.5]}, index=idx)
+        frame = pd.DataFrame({"fused": [0.1, 0.2]}, index=idx)
+        model = _Model()
+
+        result = regimes.run_regime_labeling_stage(
+            score_df=score_df,
+            frame=frame,
+            train_df=train_df,
+            cfg={},
+            regime_basis_train=train_df,
+            regime_basis_score=score_df,
+            regime_basis_meta={},
+            regime_basis_hash=123,
+            regime_model=model,
+            regime_loaded_from_state=False,
+            regime_state=None,
+            regime_state_version=5,
+            raw_train=train_df,
+            output_manager=object(),
+            current_model_maturity="LEARNING",
+            equip="FD_FAN",
+            equip_id=1,
+            sql_client=None,
+            record_regime_fn=_record_regime,
+        )
+
+        assert result.regime_model is model
+        assert result.regime_quality_ok is True
+        assert result.regime_state_version == 5
+        assert result.train_regime_labels is not None
+        assert result.score_regime_labels is not None
+        assert recorded == [("FD_FAN", 1, "regime_1")]
+        assert len(definitions_calls) == 1
+
     def test_release_persist_memory_clears_raw_frames_and_detector_models(self):
         """Output manager persist cleanup helper should clear raw frames and detector model pointers."""
         from core.output_manager import OutputManager

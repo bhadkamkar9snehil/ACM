@@ -4,7 +4,7 @@
 from __future__ import annotations
 from collections import deque, Counter
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Literal, Optional, Tuple, Union, TYPE_CHECKING
+from typing import Any, Dict, List, Literal, Optional, Tuple, Union, TYPE_CHECKING, Callable
 import json
 try:
     import orjson  # type: ignore
@@ -3896,6 +3896,158 @@ def apply_regime_health_labels(
         )
 
     return frame, regime_stats
+
+
+@dataclass
+class RegimeLabelingStageResult:
+    """Result bundle for regime labeling orchestration."""
+    frame: pd.DataFrame
+    score_out: Dict[str, Any]
+    regime_model: Optional[RegimeModel]
+    train_regime_labels: Optional[np.ndarray]
+    score_regime_labels: Optional[np.ndarray]
+    regime_quality_ok: bool
+    regime_state_version: int
+    regime_loaded_from_state: bool
+
+
+def run_regime_labeling_stage(
+    score_df: pd.DataFrame,
+    frame: pd.DataFrame,
+    train_df: pd.DataFrame,
+    cfg: Dict[str, Any],
+    regime_basis_train: Optional[pd.DataFrame],
+    regime_basis_score: Optional[pd.DataFrame],
+    regime_basis_meta: Dict[str, Any],
+    regime_basis_hash: Optional[int],
+    regime_model: Optional[RegimeModel],
+    regime_loaded_from_state: bool,
+    regime_state: Optional[Any],
+    regime_state_version: int,
+    raw_train: Optional[pd.DataFrame],
+    output_manager: Optional[Any],
+    current_model_maturity: Optional[str],
+    equip: str,
+    equip_id: int,
+    sql_client: Optional[Any],
+    logger: Any = Console,
+    record_regime_fn: Optional[Callable[..., Any]] = None,
+) -> RegimeLabelingStageResult:
+    """
+    Run regime labeling stage including state reconstruction, labeling, and state persistence.
+    """
+    regime_model_was_trained = False
+
+    if regime_loaded_from_state and regime_state is not None and regime_basis_train is not None:
+        try:
+            regime_model = regime_state_to_model(
+                state=regime_state,
+                feature_columns=list(regime_basis_train.columns),
+                raw_tags=list(raw_train.columns) if raw_train is not None else [],
+                train_hash=regime_basis_hash,
+            )
+        except Exception as e:
+            logger.warn(
+                f"Failed to reconstruct model from state: {e}",
+                component="REGIME_STATE",
+                equip=equip,
+                state_version=getattr(regime_state, "state_version", 0),
+                error=str(e)[:200],
+            )
+            regime_model = None
+            regime_loaded_from_state = False
+
+    regime_ctx: Dict[str, Any] = {
+        "regime_basis_train": regime_basis_train,
+        "regime_basis_score": regime_basis_score,
+        "basis_meta": regime_basis_meta,
+        "regime_model": regime_model,
+        "regime_basis_hash": regime_basis_hash,
+        "X_train": train_df,
+        "model_maturity": current_model_maturity,
+    }
+    regime_out = label(score_df, regime_ctx, {"frame": frame}, cfg)
+    frame = regime_out.get("frame", frame)
+    new_regime_model = regime_out.get("regime_model", regime_model)
+
+    if new_regime_model is not regime_model and new_regime_model is not None:
+        regime_model_was_trained = True
+        regime_model = new_regime_model
+
+    score_regime_labels = regime_out.get("regime_labels")
+    train_regime_labels = regime_out.get("regime_labels_train")
+    regime_quality_ok = bool(regime_out.get("regime_quality_ok", True))
+
+    if train_regime_labels is None and regime_model is not None and regime_basis_train is not None:
+        train_regime_labels = predict_regime(regime_model, regime_basis_train)
+    if score_regime_labels is None and regime_model is not None and regime_basis_score is not None:
+        score_regime_labels = predict_regime(regime_model, regime_basis_score)
+
+    if (
+        record_regime_fn is not None
+        and score_regime_labels is not None
+        and len(score_regime_labels) > 0
+    ):
+        current_regime_id = int(score_regime_labels[-1]) if hasattr(score_regime_labels[-1], "__int__") else 0
+        regime_label = ""
+        if regime_model is not None and hasattr(regime_model, "cluster_labels_"):
+            try:
+                regime_label = regime_model.cluster_labels_.get(current_regime_id, f"regime_{current_regime_id}")
+            except Exception:
+                regime_label = f"regime_{current_regime_id}"
+        record_regime_fn(equip, current_regime_id, regime_label)
+
+    if regime_model_was_trained and regime_model is not None:
+        try:
+            from core.model_persistence import save_regime_state
+
+            regime_cfg_str = str(cfg.get("regimes", {}))
+            config_hash = hashlib.sha256(regime_cfg_str.encode()).hexdigest()[:16]
+            new_state = regime_model_to_state(
+                model=regime_model,
+                equip_id=equip_id,
+                state_version=regime_state_version + 1,
+                config_hash=config_hash,
+                regime_basis_hash=str(regime_basis_hash) if regime_basis_hash else "",
+            )
+            save_regime_state(
+                state=new_state,
+                equip=equip,
+                sql_client=sql_client,
+            )
+            regime_state_version = new_state.state_version
+            logger.info(
+                f"Regime state: saved_v{regime_state_version} | K={new_state.n_clusters}",
+                component="REGIME_STATE",
+            )
+        except Exception as e:
+            logger.warn(
+                f"Failed to save regime state: {e}",
+                component="REGIME_STATE",
+                equip=equip,
+                error_type=type(e).__name__,
+                error=str(e)[:200],
+            )
+
+    write_regime_definitions_for_audit(
+        output_manager=output_manager,
+        regime_model=regime_model,
+        regime_state_version=regime_state_version,
+        current_model_maturity=current_model_maturity,
+        logger=logger,
+        equip=equip,
+    )
+
+    return RegimeLabelingStageResult(
+        frame=frame,
+        score_out=regime_out,
+        regime_model=regime_model,
+        train_regime_labels=train_regime_labels,
+        score_regime_labels=score_regime_labels,
+        regime_quality_ok=regime_quality_ok,
+        regime_state_version=regime_state_version,
+        regime_loaded_from_state=regime_loaded_from_state,
+    )
 
 
 def apply_transient_state_labels(

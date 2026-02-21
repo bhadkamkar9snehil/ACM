@@ -1123,7 +1123,6 @@ def main() -> None:
         # ===== Phase 5: Regimes (before calibration for regime-aware thresholds) =====
         train_regime_labels = None
         score_regime_labels = None
-        regime_model_was_trained = False
         
         # v11.4.0: Load model maturity state BEFORE regimes to control discovery
         # v11.5.0: Override maturity to LEARNING if refit was requested (models just retrained)
@@ -1144,104 +1143,37 @@ def main() -> None:
             current_model_maturity = "LEARNING"
         
         with T.section("regimes.label"):
-            # Reconstruct model from loaded state when available.
-            regime_state_action = "none"
-            if regime_loaded_from_state and regime_state is not None and regime_basis_train is not None:
-                try:
-                    regime_model = regimes.regime_state_to_model(
-                        state=regime_state,
-                        feature_columns=list(regime_basis_train.columns),
-                        raw_tags=list(raw_train.columns) if raw_train is not None else [],
-                        train_hash=regime_basis_hash
-                    )
-                    regime_state_action = f"reconstructed_v{regime_state.state_version}"
-                except Exception as e:
-                    Console.warn(f"Failed to reconstruct model from state: {e}", component="REGIME_STATE",
-                                 equip=equip, state_version=regime_state.state_version, error=str(e)[:200])
-                    regime_model = None
-                    regime_loaded_from_state = False  # Reset flag on reconstruction failure
-            
-            regime_ctx: Dict[str, Any] = {
-                "regime_basis_train": regime_basis_train,
-                "regime_basis_score": regime_basis_score,
-                "basis_meta": regime_basis_meta,
-                "regime_model": regime_model,  # Pass through; no sentinel checks.
-                "regime_basis_hash": regime_basis_hash,
-                "X_train": train,
-                "model_maturity": current_model_maturity,  # MaturityState controls discovery
-            }
-            regime_out = regimes.label(score, regime_ctx, {"frame": frame}, cfg)
-            frame = regime_out.get("frame", frame)
-            new_regime_model = regime_out.get("regime_model", regime_model)
-            
-            # Detect whether a new regime model was trained.
-            if new_regime_model is not regime_model and new_regime_model is not None:
-                regime_model_was_trained = True
-                regime_model = new_regime_model
-            
-            score_regime_labels = regime_out.get("regime_labels")
-            train_regime_labels = regime_out.get("regime_labels_train")
-            regime_quality_ok = bool(regime_out.get("regime_quality_ok", True))
-            if train_regime_labels is None and regime_model is not None and regime_basis_train is not None:
-                train_regime_labels = regimes.predict_regime(regime_model, regime_basis_train)
-            if score_regime_labels is None and regime_model is not None and regime_basis_score is not None:
-                score_regime_labels = regimes.predict_regime(regime_model, regime_basis_score)
-            
-            # Record regime for Prometheus/Grafana observability.
-            if score_regime_labels is not None and len(score_regime_labels) > 0:
-                # Use the most recent regime (last value in score window).
-                current_regime_id = int(score_regime_labels[-1]) if hasattr(score_regime_labels[-1], '__int__') else 0
-                # Try to resolve a human-friendly label from the model.
-                regime_label = ""
-                if regime_model is not None and hasattr(regime_model, 'cluster_labels_'):
-                    try:
-                        regime_label = regime_model.cluster_labels_.get(current_regime_id, f"regime_{current_regime_id}")
-                    except Exception:
-                        regime_label = f"regime_{current_regime_id}"
-                record_regime(equip, current_regime_id, regime_label)
-            
-            # Save regime state if a model was trained.
-            if regime_model_was_trained and regime_model is not None:
-                try:
-                    from core.model_persistence import save_regime_state
-                    
-                    # Generate config hash for change detection
-                    regime_cfg_str = str(cfg.get("regimes", {}))
-                    config_hash = hashlib.sha256(regime_cfg_str.encode()).hexdigest()[:16]
-                    
-                    # Convert model to state
-                    new_state = regimes.regime_model_to_state(
-                        model=regime_model,
-                        equip_id=equip_id,
-                        state_version=regime_state_version + 1,
-                        config_hash=config_hash,
-                        regime_basis_hash=str(regime_basis_hash) if regime_basis_hash else ""
-                    )
-                    
-                    # Save state
-                    save_regime_state(
-                        state=new_state,
-                        equip=equip,
-                        sql_client=sql_client
-                    )
-                    
-                    regime_state_version = new_state.state_version
-                    
-                    Console.info(f"Regime state: saved_v{regime_state_version} | K={new_state.n_clusters}", component="REGIME_STATE")
-                except Exception as e:
-                    Console.warn(f"Failed to save regime state: {e}", component="REGIME_STATE",
-                                 equip=equip, error_type=type(e).__name__, error=str(e)[:200])
-
-            # ALWAYS write regime definitions for the current run if a model exists (for audit).
-            regimes.write_regime_definitions_for_audit(
-                output_manager=output_manager,
+            regime_labeling_result = regimes.run_regime_labeling_stage(
+                score_df=score,
+                frame=frame,
+                train_df=train,
+                cfg=cfg,
+                regime_basis_train=regime_basis_train,
+                regime_basis_score=regime_basis_score,
+                regime_basis_meta=regime_basis_meta,
+                regime_basis_hash=regime_basis_hash,
                 regime_model=regime_model,
+                regime_loaded_from_state=regime_loaded_from_state,
+                regime_state=regime_state,
                 regime_state_version=regime_state_version,
+                raw_train=raw_train,
+                output_manager=output_manager,
                 current_model_maturity=current_model_maturity,
-                logger=Console,
                 equip=equip,
+                equip_id=equip_id,
+                sql_client=sql_client,
+                logger=Console,
+                record_regime_fn=record_regime,
             )
 
+            frame = regime_labeling_result.frame
+            regime_out = regime_labeling_result.score_out
+            regime_model = regime_labeling_result.regime_model
+            train_regime_labels = regime_labeling_result.train_regime_labels
+            score_regime_labels = regime_labeling_result.score_regime_labels
+            regime_quality_ok = regime_labeling_result.regime_quality_ok
+            regime_state_version = regime_labeling_result.regime_state_version
+            regime_loaded_from_state = regime_labeling_result.regime_loaded_from_state
         
         score_out = regime_out
         regime_quality_ok = bool(regime_out.get("regime_quality_ok", True))
