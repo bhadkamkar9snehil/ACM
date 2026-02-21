@@ -663,3 +663,28 @@ Validation completed:
 Main branch status:
 1. `main` was not touched.
 2. Work remains on refactor integration branch.
+
+### 2026-02-21 - Phase 4 Extraction: Outcome and Error Serialization Helpers
+
+Branch flow used:
+1. `refactor/acm-entrypoint-p4-outcome-error-helpers` (in progress)
+
+Completed:
+1. Extracted run-outcome mapping helper to `core/run_metadata_writer.py`:
+   - `resolve_run_outcome_from_degradations(...)`
+2. Extracted run-exception serialization helper to `core/run_metadata_writer.py`:
+   - `serialize_run_exception(...)`
+3. Wired `core/acm.py` to use these helpers in the main try/except block.
+4. Added unit tests in `tests/test_v11_modules.py`:
+   - `test_resolve_run_outcome_from_degradations`
+   - `test_serialize_run_exception_returns_json`
+5. Hardened Obsidian graph generation against Windows file locks:
+   - `scripts/build_acm_obsidian_graph.py` now skips locked note deletions and continues.
+
+Validation completed:
+1. `pytest tests/test_v11_modules.py -q` passed (36 tests).
+2. `python -c "from core.acm import main; print(callable(main))"` returned `True`.
+3. `python scripts/sql_batch_runner.py --equip WFA_TURBINE_0 --max-batches 1 --dry-run` completed successfully.
+4. Memory refresh:
+   - `python scripts/manage_acm_agent_memory.py refresh --sync-repo-skill --sync-local-skill` succeeded with locked-note skip warnings.
+   - `python scripts/manage_acm_agent_memory.py health` passed with `ok=true` and `broken_count=0` when run after refresh completion.

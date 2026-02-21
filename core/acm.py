@@ -79,6 +79,8 @@ from core.output_manager import OutputManager, write_sql_artifacts
 from core.run_metadata_writer import (
     emit_batch_summary,
     finalize_run_with_metadata,
+    resolve_run_outcome_from_degradations,
+    serialize_run_exception,
 )
 from core.episode_culprits_writer import write_episode_culprits_enhanced
 from core.pipeline_types import (
@@ -1853,21 +1855,20 @@ def main() -> None:
                                  equip=equip, cache_path=str(model_cache_path), error=str(e))
 
         # Determine outcome based on degradations.
-        if degradations:
-            outcome = "DEGRADED"
-            err_json = json.dumps({"degraded_steps": degradations[:20]}, ensure_ascii=False)
-            Console.warn(f"Run completed with {len(degradations)} degraded step(s): {degradations[:5]}", 
-                        component="RUN", equip=equip, run_id=run_id)
-        else:
-            outcome = "OK"
+        outcome, degraded_err_json = resolve_run_outcome_from_degradations(degradations)
+        if outcome == "DEGRADED":
+            err_json = degraded_err_json
+            Console.warn(
+                f"Run completed with {len(degradations)} degraded step(s): {degradations[:5]}",
+                component="RUN",
+                equip=equip,
+                run_id=run_id,
+            )
 
     except Exception as e:
         # Capture error for finalization (must be 'FAIL' to match Runs table constraint).
         outcome = "FAIL"
-        try:
-            err_json = json.dumps({"type": e.__class__.__name__, "message": str(e)}, ensure_ascii=False)
-        except Exception:
-            err_json = '{"type":"Exception","message":"<serialization failed>"}'
+        err_json = serialize_run_exception(e)
         
         # ACM_Runs metadata is written in finally block (includes error_message).
         Console.error(f"Exception: {e}", component="RUN",

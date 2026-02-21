@@ -627,6 +627,28 @@ class TestRefactorHelpers:
         assert iforest_detector.model is None
         assert omr_detector.model is None
 
+    def test_resolve_run_outcome_from_degradations(self):
+        """Run metadata helper should map degradation list to DEGRADED outcome and payload."""
+        from core.run_metadata_writer import resolve_run_outcome_from_degradations
+
+        outcome, err_json = resolve_run_outcome_from_degradations(["regime_feature_basis"])
+        assert outcome == "DEGRADED"
+        assert isinstance(err_json, str)
+        assert "degraded_steps" in err_json
+
+        outcome_ok, err_json_ok = resolve_run_outcome_from_degradations([])
+        assert outcome_ok == "OK"
+        assert err_json_ok is None
+
+    def test_serialize_run_exception_returns_json(self):
+        """Run metadata helper should serialize exceptions into stable JSON payload."""
+        from core.run_metadata_writer import serialize_run_exception
+
+        payload = serialize_run_exception(RuntimeError("boom"))
+        assert isinstance(payload, str)
+        assert "RuntimeError" in payload
+        assert "boom" in payload
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
