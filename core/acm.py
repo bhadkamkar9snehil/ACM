@@ -1703,39 +1703,23 @@ def main() -> None:
         # Regime health labeling and transient detection.
         regime_stats: Dict[int, Dict[str, float]] = {}
         transient_counts: Dict[str, int] = {}
-        if not regime_quality_ok and "regime_label" in frame.columns:
-            frame["regime_state"] = "unknown"
-        if regime_model is not None and regime_quality_ok and "regime_label" in frame.columns and "fused" in frame.columns:
-            try:
-                regime_stats = regimes.update_health_labels(regime_model, frame["regime_label"].to_numpy(copy=False), frame["fused"], cfg)
-                frame["regime_state"] = frame["regime_label"].map(lambda x: regime_model.health_labels.get(int(x), "unknown"))
-                summary_df = regimes.build_summary_dataframe(regime_model)
-                if not summary_df.empty:
-                    # Use OutputManager for efficient writing (logical name)
-                    output_manager.write_dataframe(summary_df, "regime_summary")
-            except Exception as e:
-                Console.warn(f"Health labelling skipped: {e}", component="REGIME")
-        if "regime_label" in frame.columns and "regime_state" not in frame.columns:
-            # Map regime labels to descriptive state names.
-            # -1 = UNKNOWN (low confidence), 0+ = named regimes.
-            frame["regime_state"] = frame["regime_label"].map(
-                lambda lbl: "unknown" if lbl == -1 else f"regime_{lbl}"
-            )
+        frame, regime_stats = regimes.apply_regime_health_labels(
+            frame=frame,
+            regime_model=regime_model,
+            regime_quality_ok=regime_quality_ok,
+            cfg=cfg,
+            output_manager=output_manager,
+            logger=Console,
+        )
         
         # Transient state detection.
-        if "regime_label" in frame.columns:
-            with T.section("regimes.transient_detection"):
-                try:
-                    transient_states = regimes.detect_transient_states(
-                        data=score,  # Use original score data for ROC calculation.
-                        regime_labels=frame["regime_label"].to_numpy(copy=False),
-                        cfg=cfg
-                    )
-                    frame["transient_state"] = transient_states
-                    transient_counts = frame["transient_state"].value_counts().to_dict() if "transient_state" in frame.columns else {}
-                except Exception as trans_e:
-                    Console.warn(f"Transient detection failed: {trans_e}", component="TRANSIENT")
-                    frame["transient_state"] = "unknown"
+        with T.section("regimes.transient_detection"):
+            frame, transient_counts = regimes.apply_transient_state_labels(
+                frame=frame,
+                score_data=score,  # Use original score data for ROC calculation.
+                cfg=cfg,
+                logger=Console,
+            )
         
         # Consolidated regime/transient log.
         state_counts = frame["regime_state"].value_counts().to_dict() if "regime_state" in frame.columns else {}

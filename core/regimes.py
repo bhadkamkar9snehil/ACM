@@ -3852,6 +3852,81 @@ def detect_transient_states(
     return states
 
 
+def apply_regime_health_labels(
+    frame: pd.DataFrame,
+    regime_model: Optional[RegimeModel],
+    regime_quality_ok: bool,
+    cfg: Dict[str, Any],
+    output_manager: Optional[Any] = None,
+    logger: Any = Console,
+) -> Tuple[pd.DataFrame, Dict[int, Dict[str, float]]]:
+    """
+    Apply regime health labels to the scoring frame and persist regime summary.
+    """
+    regime_stats: Dict[int, Dict[str, float]] = {}
+
+    if not regime_quality_ok and "regime_label" in frame.columns:
+        frame["regime_state"] = "unknown"
+
+    if (
+        regime_model is not None
+        and regime_quality_ok
+        and "regime_label" in frame.columns
+        and "fused" in frame.columns
+    ):
+        try:
+            regime_stats = update_health_labels(
+                regime_model,
+                frame["regime_label"].to_numpy(copy=False),
+                frame["fused"],
+                cfg,
+            )
+            frame["regime_state"] = frame["regime_label"].map(
+                lambda x: regime_model.health_labels.get(int(x), "unknown")
+            )
+            summary_df = build_summary_dataframe(regime_model)
+            if output_manager is not None and not summary_df.empty:
+                output_manager.write_dataframe(summary_df, "regime_summary")
+        except Exception as e:
+            logger.warn(f"Health labelling skipped: {e}", component="REGIME")
+
+    if "regime_label" in frame.columns and "regime_state" not in frame.columns:
+        frame["regime_state"] = frame["regime_label"].map(
+            lambda lbl: "unknown" if lbl == -1 else f"regime_{lbl}"
+        )
+
+    return frame, regime_stats
+
+
+def apply_transient_state_labels(
+    frame: pd.DataFrame,
+    score_data: pd.DataFrame,
+    cfg: Dict[str, Any],
+    logger: Any = Console,
+) -> Tuple[pd.DataFrame, Dict[str, int]]:
+    """
+    Detect transient operating states and attach them to the scoring frame.
+    """
+    transient_counts: Dict[str, int] = {}
+
+    if "regime_label" not in frame.columns:
+        return frame, transient_counts
+
+    try:
+        transient_states = detect_transient_states(
+            data=score_data,
+            regime_labels=frame["regime_label"].to_numpy(copy=False),
+            cfg=cfg,
+        )
+        frame["transient_state"] = transient_states
+        transient_counts = frame["transient_state"].value_counts().to_dict()
+    except Exception as trans_e:
+        logger.warn(f"Transient detection failed: {trans_e}", component="TRANSIENT")
+        frame["transient_state"] = "unknown"
+
+    return frame, transient_counts
+
+
 def write_regime_occupancy_and_transitions(
     score_regime_labels: Optional[np.ndarray],
     frame: pd.DataFrame,
