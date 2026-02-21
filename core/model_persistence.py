@@ -1861,6 +1861,90 @@ def save_trained_models(
         return None
 
 
+def run_model_persistence_and_lifecycle_stage(
+    *,
+    cached_models: Optional[Dict[str, Any]],
+    detector_cache: Optional[Dict[str, Any]],
+    force_retrain: bool,
+    equip: str,
+    sql_client: Optional[Any],
+    equip_id: int,
+    cfg: Dict[str, Any],
+    train: "pd.DataFrame",
+    ar1_detector: Any,
+    pca_detector: Any,
+    iforest_detector: Any,
+    gmm_detector: Any,
+    omr_detector: Any,
+    regime_model: Any,
+    col_meds: Optional[Dict[str, float]],
+    regime_quality_ok: bool,
+    timing_sections: Optional[Dict[str, Any]],
+    run_id: Optional[str],
+    model_state: Optional[Any],
+    output_manager: Any,
+    regime_state_version: int,
+    score_out: Dict[str, Any],
+    update_and_persist_model_lifecycle_fn: Any,
+    load_model_state_safe_fn: Any,
+    logger: Any = Console,
+    save_trained_models_fn: Any = save_trained_models,
+) -> Dict[str, Any]:
+    """
+    Persist trained models and update lifecycle state for the current run.
+    """
+    detectors_fitted_this_run = (not cached_models and detector_cache is None) or force_retrain
+    models_were_trained = bool(detectors_fitted_this_run)
+    saved_model_version = None
+    model_state_out = model_state
+
+    if models_were_trained:
+        saved_model_version = save_trained_models_fn(
+            equip=equip,
+            sql_client=sql_client,
+            equip_id=equip_id,
+            cfg=cfg,
+            train=train,
+            ar1_detector=ar1_detector,
+            pca_detector=pca_detector,
+            iforest_detector=iforest_detector,
+            gmm_detector=gmm_detector,
+            omr_detector=omr_detector,
+            regime_model=regime_model,
+            col_meds=col_meds,
+            regime_quality_ok=regime_quality_ok,
+            timing_sections=timing_sections,
+            run_id=run_id or "",
+        )
+        model_state_out = update_and_persist_model_lifecycle_fn(
+            sql_client=sql_client,
+            output_manager=output_manager,
+            equip_id=int(equip_id),
+            regime_state_version=regime_state_version,
+            cfg=cfg,
+            train_data=train,
+            run_id=run_id,
+            regime_model=regime_model,
+            score_out=score_out if isinstance(score_out, dict) else {},
+            regime_quality_ok=regime_quality_ok,
+            logger=logger,
+        )
+
+    if model_state_out is None:
+        model_state_out = load_model_state_safe_fn(
+            sql_client=sql_client,
+            equip_id=int(equip_id),
+            logger=logger,
+        )
+
+    return {
+        "detectors_fitted_this_run": detectors_fitted_this_run,
+        "models_were_trained": models_were_trained,
+        "saved_model_version": saved_model_version,
+        "model_state": model_state_out,
+    }
+
+
 def persist_calibration_params_safe(
     equip: str,
     sql_client: Optional[Any],

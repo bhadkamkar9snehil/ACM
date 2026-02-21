@@ -569,6 +569,73 @@ def evaluate_and_maybe_refit_cached_models(
     }
 
 
+def run_auto_retrain_stage(
+    *,
+    cfg: Dict[str, Any],
+    cached_models: Optional[Dict[str, Any]],
+    cached_manifest: Optional[Dict[str, Any]],
+    detectors_just_trained: bool,
+    score_out: Dict[str, Any],
+    regime_quality_ok: bool,
+    current_model_maturity: Optional[str],
+    boolean_only_metrics: List[str],
+    equip: str,
+    logger: Any,
+    record_model_refit_fn: Any,
+    fit_all_detectors_fn: Any,
+    train: pd.DataFrame,
+    det_flags: Dict[str, Any],
+    output_manager: Any,
+    sql_client: Any,
+    run_id: Optional[str],
+    equip_id: int,
+    regime_model: Optional[Any],
+    detectors: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Run auto-retrain evaluation and apply retrain detector outputs when triggered.
+    """
+    retrain_out = evaluate_and_maybe_refit_cached_models(
+        cfg=cfg,
+        cached_models=cached_models,
+        cached_manifest=cached_manifest,
+        detectors_just_trained=detectors_just_trained,
+        score_out=score_out if isinstance(score_out, dict) else {},
+        regime_quality_ok=regime_quality_ok,
+        current_model_maturity=current_model_maturity,
+        boolean_only_metrics=boolean_only_metrics,
+        equip=equip,
+        logger=logger,
+        record_model_refit_fn=record_model_refit_fn,
+        fit_all_detectors_fn=fit_all_detectors_fn,
+        train=train,
+        det_flags=det_flags,
+        output_manager=output_manager,
+        sql_client=sql_client,
+        run_id=run_id,
+        equip_id=equip_id,
+        regime_model=regime_model,
+    )
+
+    retrain_result = retrain_out.get("retrain_result")
+    detectors_out = dict(detectors)
+    if retrain_result is not None:
+        detectors_out["ar1_detector"] = retrain_result["ar1_detector"]
+        detectors_out["pca_detector"] = retrain_result["pca_detector"]
+        detectors_out["iforest_detector"] = retrain_result["iforest_detector"]
+        detectors_out["gmm_detector"] = retrain_result["gmm_detector"]
+        detectors_out["omr_detector"] = retrain_result["omr_detector"]
+        detectors_out["pca_train_spe"] = retrain_result["pca_train_spe"]
+        detectors_out["pca_train_t2"] = retrain_result["pca_train_t2"]
+
+    return {
+        "force_retrain": bool(retrain_out["force_retrain"]),
+        "cached_models": retrain_out["cached_models"],
+        "regime_model": retrain_out["regime_model"],
+        "detectors": detectors_out,
+    }
+
+
 def auto_tune_parameters(
     frame: pd.DataFrame,
     episodes: pd.DataFrame,

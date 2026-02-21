@@ -98,14 +98,14 @@ from core.detector_orchestrator import (
     compute_stable_feature_hash,
 )
 from core.model_persistence import (
-    save_trained_models,
     persist_calibration_params_safe,
     load_manifest_protected_columns,
     load_and_rebuild_detectors_from_sql_cache,
     restore_detectors_from_runtime_cache,
     load_quality_regime_state_if_needed,
+    run_model_persistence_and_lifecycle_stage,
 )
-from core.model_evaluation import auto_tune_parameters, evaluate_and_maybe_refit_cached_models
+from core.model_evaluation import auto_tune_parameters, run_auto_retrain_stage
 
 # Observability: OpenTelemetry + structured logging. Falls back to no-op stubs
 # when observability dependencies are unavailable.
@@ -1024,7 +1024,7 @@ def main() -> None:
         # Quality-driven retraining happens automatically when triggers fire
         force_retrain = False
         with T.section("models.auto_retrain"):
-            retrain_out = evaluate_and_maybe_refit_cached_models(
+            retrain_out = run_auto_retrain_stage(
                 cfg=cfg,
                 cached_models=cached_models,
                 cached_manifest=cached_manifest,
@@ -1044,70 +1044,61 @@ def main() -> None:
                 run_id=run_id,
                 equip_id=equip_id,
                 regime_model=regime_model,
+                detectors={
+                    "ar1_detector": ar1_detector,
+                    "pca_detector": pca_detector,
+                    "iforest_detector": iforest_detector,
+                    "gmm_detector": gmm_detector,
+                    "omr_detector": omr_detector,
+                    "pca_train_spe": pca_train_spe,
+                    "pca_train_t2": pca_train_t2,
+                },
             )
             force_retrain = bool(retrain_out["force_retrain"])
             cached_models = retrain_out["cached_models"]
             regime_model = retrain_out["regime_model"]
-            retrain_result = retrain_out.get("retrain_result")
-            if retrain_result is not None:
-                ar1_detector = retrain_result["ar1_detector"]
-                pca_detector = retrain_result["pca_detector"]
-                iforest_detector = retrain_result["iforest_detector"]
-                gmm_detector = retrain_result["gmm_detector"]
-                omr_detector = retrain_result["omr_detector"]
-                pca_train_spe = retrain_result["pca_train_spe"]
-                pca_train_t2 = retrain_result["pca_train_t2"]
+            detectors_after_retrain = retrain_out["detectors"]
+            ar1_detector = detectors_after_retrain["ar1_detector"]
+            pca_detector = detectors_after_retrain["pca_detector"]
+            iforest_detector = detectors_after_retrain["iforest_detector"]
+            gmm_detector = detectors_after_retrain["gmm_detector"]
+            omr_detector = detectors_after_retrain["omr_detector"]
+            pca_train_spe = detectors_after_retrain["pca_train_spe"]
+            pca_train_t2 = detectors_after_retrain["pca_train_t2"]
 
         # ===== Model persistence: save trained models with versioning =====
-        # `detectors_fitted_this_run` reflects actual fitting activity.
-        detectors_fitted_this_run = (not cached_models and detector_cache is None) or force_retrain
-        models_were_trained = detectors_fitted_this_run  # Clearer: save only if fitted this run
-        saved_model_version = None  # v11.9.0: Track version for calibration params save
-        if models_were_trained:
-            with T.section("models.persistence.save"):
-                col_meds_value = col_meds  # Initialized at function scope.
-                saved_model_version = save_trained_models(
-                    equip=equip,
-                    sql_client=sql_client,
-                    equip_id=equip_id,
-                    cfg=cfg,
-                    train=train,
-                    ar1_detector=ar1_detector,
-                    pca_detector=pca_detector,
-                    iforest_detector=iforest_detector,
-                    gmm_detector=gmm_detector,
-                    omr_detector=omr_detector,
-                    regime_model=regime_model,
-                    col_meds=col_meds_value,
-                    regime_quality_ok=regime_quality_ok,
-                    timing_sections=T.timings if hasattr(T, 'timings') else None,
-                    run_id=run_id,
-                )
-                
-                # Model lifecycle management: track maturity and check promotion.
-                model_state = update_and_persist_model_lifecycle_safe(
-                    sql_client=sql_client,
-                    output_manager=output_manager,
-                    equip_id=int(equip_id),
-                    regime_state_version=regime_state_version,
-                    cfg=cfg,
-                    train_data=train,
-                    run_id=run_id,
-                    regime_model=regime_model,
-                    score_out=score_out if isinstance(score_out, dict) else {},
-                    regime_quality_ok=regime_quality_ok,
-                    logger=Console,
-                )
-
-        # On scoring batches (models_were_trained=False), model_state is still None here
-        # because the lifecycle block above only runs when models are fitted. Load it from
-        # SQL so the batch summary [model] field is populated on every run.
-        if model_state is None:
-            model_state = load_model_state_safe(
+        with T.section("models.persistence.save"):
+            persistence_out = run_model_persistence_and_lifecycle_stage(
+                cached_models=cached_models,
+                detector_cache=detector_cache,
+                force_retrain=force_retrain,
+                equip=equip,
                 sql_client=sql_client,
-                equip_id=int(equip_id),
+                equip_id=equip_id,
+                cfg=cfg,
+                train=train,
+                ar1_detector=ar1_detector,
+                pca_detector=pca_detector,
+                iforest_detector=iforest_detector,
+                gmm_detector=gmm_detector,
+                omr_detector=omr_detector,
+                regime_model=regime_model,
+                col_meds=col_meds,
+                regime_quality_ok=regime_quality_ok,
+                timing_sections=T.timings if hasattr(T, "timings") else None,
+                run_id=run_id,
+                model_state=model_state,
+                output_manager=output_manager,
+                regime_state_version=regime_state_version,
+                score_out=score_out if isinstance(score_out, dict) else {},
+                update_and_persist_model_lifecycle_fn=update_and_persist_model_lifecycle_safe,
+                load_model_state_safe_fn=load_model_state_safe,
                 logger=Console,
             )
+        detectors_fitted_this_run = persistence_out["detectors_fitted_this_run"]
+        models_were_trained = persistence_out["models_were_trained"]
+        saved_model_version = persistence_out["saved_model_version"]
+        model_state = persistence_out["model_state"]
 
         # ===== Phase 6: Calibration (z-score normalization) =====
         # Fit calibrators on TRAIN data, transform SCORE data.
