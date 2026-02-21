@@ -361,7 +361,7 @@ def initialize_detectors_for_run(
     6. Validate all enabled detectors exist
     """
     if reconcile_detector_flags_fn is None:
-        reconcile_detector_flags_fn = reconcile_detector_flags_with_loaded_models
+        raise ValueError("reconcile_detector_flags_fn is required for detector initialization")
 
     ar1_detector = pca_detector = iforest_detector = gmm_detector = omr_detector = None
     pca_train_spe = pca_train_t2 = None

@@ -597,6 +597,12 @@ def finalize_run_with_metadata(
     if not sql_client or not run_id:
         return
 
+    record_data_quality = record_data_quality_fn or (lambda *a, **k: None)
+    record_run = record_run_fn or (lambda *a, **k: None)
+    record_batch_processed = record_batch_processed_fn or (lambda *a, **k: None)
+    record_health_score = record_health_score_fn or (lambda *a, **k: None)
+    record_error = record_error_fn or (lambda *a, **k: None)
+
     try:
         completed_at = datetime.now()
 
@@ -611,8 +617,7 @@ def finalize_run_with_metadata(
                 run_id=run_id,
                 equip_id=equip_id,
             )
-            if callable(record_data_quality_fn):
-                record_data_quality_fn(equip_name, float(data_quality_score) if data_quality_score else 0.0)
+            record_data_quality(equip_name, float(data_quality_score) if data_quality_score else 0.0)
         else:
             run_metadata = {
                 "health_status": "UNKNOWN",
@@ -657,19 +662,17 @@ def finalize_run_with_metadata(
 
         if observability_enabled and started_at:
             duration_seconds = (completed_at - started_at).total_seconds()
-            if callable(record_run_fn):
-                record_run_fn(equip_name, outcome or "OK", duration_seconds)
-            if callable(record_batch_processed_fn):
-                record_batch_processed_fn(
-                    equip_name,
-                    rows=rows_read,
-                    duration_seconds=duration_seconds,
-                    outcome=(outcome or "ok").lower(),
-                )
-            if callable(record_health_score_fn) and run_metadata.get("avg_health_index") is not None:
-                record_health_score_fn(equip_name, float(run_metadata["avg_health_index"]))
-            if callable(record_error_fn) and outcome == "FAIL":
-                record_error_fn(equip_name, str(err_json) if err_json else "Run failed", "RunFailure")
+            record_run(equip_name, outcome or "OK", duration_seconds)
+            record_batch_processed(
+                equip_name,
+                rows=rows_read,
+                duration_seconds=duration_seconds,
+                outcome=(outcome or "ok").lower(),
+            )
+            if run_metadata.get("avg_health_index") is not None:
+                record_health_score(equip_name, float(run_metadata["avg_health_index"]))
+            if outcome == "FAIL":
+                record_error(equip_name, str(err_json) if err_json else "Run failed", "RunFailure")
 
     except Exception as e:
         logger.error(

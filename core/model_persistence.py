@@ -496,16 +496,20 @@ class ModelVersionManager:
         self.equip = equip
         self.sql_client = sql_client
         self.equip_id = equip_id
-        
-        if not sql_client or equip_id is None:
-            Console.error("SQL client and equip_id required", component="MODEL", equipment=equip, equip_id=equip_id)
+
+        if sql_client is None or equip_id is None:
+            raise ValueError(
+                f"ModelVersionManager requires sql_client and equip_id. "
+                f"Received sql_client={type(sql_client).__name__}, equip_id={equip_id}."
+            )
+        if getattr(sql_client, "conn", None) is None:
+            raise ValueError(
+                "ModelVersionManager requires an active SQL connection (sql_client.conn is None). "
+                "Connect SQL before constructing manager."
+            )
     
     def get_latest_version(self) -> Optional[int]:
         """Get the latest model version number from SQL ModelRegistry."""
-        if not self.sql_client or self.equip_id is None:
-            Console.warn("Cannot get latest version - SQL client/equip_id missing", component="MODEL", equipment=self.equip, equip_id=self.equip_id)
-            return None
-        
         return self._get_latest_version_from_sql()
     
     def get_next_version(self) -> int:
@@ -541,12 +545,6 @@ class ModelVersionManager:
             span_context.__enter__()
         
         try:
-            if not self.sql_client or self.equip_id is None:
-                Console.error("Cannot save models - SQL client/equip_id missing", component="MODEL", equipment=self.equip, equip_id=self.equip_id)
-                if span_context and hasattr(span_context, '_span') and span_context._span:
-                    span_context._span.set_attribute("acm.error", True)
-                raise ValueError("SQL client and equip_id required for model persistence")
-            
             # Determine version
             if version is None:
                 version = self.get_next_version()
@@ -595,11 +593,7 @@ class ModelVersionManager:
         - Note: mhal_params removed v9.1.0 (MHAL deprecated)
         """
         Console.info(f"Saving models to SQL ModelRegistry v{version}...", component="MODEL-SQL")
-        
-        if not self.sql_client.conn:
-            Console.warn("SQL connection not available", component="MODEL-SQL", equipment=self.equip, equip_id=self.equip_id)
-            return 0
-        
+
         cursor = self.sql_client.conn.cursor()
         saved_count = 0
         errors = []
@@ -697,7 +691,7 @@ class ModelVersionManager:
         persist calibration as a separate INSERT to the same version.
         This ensures scoring batches reuse training-time normalization.
         """
-        if not calibrators_dict or not self.sql_client or not self.sql_client.conn:
+        if not calibrators_dict:
             return
         try:
             cal_dict = {}
@@ -756,9 +750,6 @@ class ModelVersionManager:
         Returns:
             Number of rows deleted
         """
-        if not self.sql_client or not self.sql_client.conn:
-            return 0
-        
         try:
             cur = self.sql_client.cursor()
             
@@ -825,8 +816,6 @@ class ModelVersionManager:
             manifest dict with at least ``train_sensors`` list, or None if no
             models exist for this equipment.
         """
-        if not self.sql_client or self.equip_id is None:
-            return None
         try:
             version = self._get_latest_version_from_sql()
             if version is None:
@@ -869,11 +858,7 @@ class ModelVersionManager:
             Tuple of (models_dict, manifest_dict) or None if not found
         """
         Console.info(f"Loading models from SQL ModelRegistry v{version}...", component="MODEL-SQL")
-        
-        if not self.sql_client or not self.sql_client.conn:
-            Console.warn("SQL connection not available", component="MODEL-SQL", equipment=self.equip, equip_id=self.equip_id, version=version)
-            return None
-        
+
         try:
             cursor = self.sql_client.conn.cursor()
             
@@ -998,14 +983,7 @@ class ModelVersionManager:
             
             if span_context and hasattr(span_context, '_span') and span_context._span:
                 span_context._span.set_attribute("acm.model_version", version)
-            
-            # SQL-ONLY MODE: Load from SQL ModelRegistry only
-            if not self.sql_client or self.equip_id is None:
-                Console.warn("Cannot load models - SQL client/equip_id missing", component="MODEL", equipment=self.equip, equip_id=self.equip_id)
-                if span_context and hasattr(span_context, '_span') and span_context._span:
-                    span_context._span.set_attribute("acm.error", True)
-                return None, None
-            
+
             result = self._load_models_from_sql(version)
             if result:
                 sql_models, sql_manifest = result
@@ -1186,11 +1164,7 @@ class ModelVersionManager:
             List of version metadata dicts
         """
         versions = []
-        
-        if not self.sql_client or self.equip_id is None:
-            Console.warn("Cannot list versions - SQL client/equip_id missing", component="MODEL", equipment=self.equip, equip_id=self.equip_id)
-            return versions
-        
+
         try:
             cur = self.sql_client.cursor()
             cur.execute("""
@@ -1437,6 +1411,9 @@ def load_cached_models_with_validation(
     Returns:
         Tuple of (cached_models dict, cached_manifest dict) or (None, None) if invalid
     """
+    if sql_client is None:
+        return None, None
+
     try:
         Console.info(f"Loading cached models for equip={equip}, equip_id={equip_id}", component="MODEL-LOAD")
         model_manager = ModelVersionManager(

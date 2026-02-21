@@ -87,6 +87,7 @@ from core.detector_orchestrator import (
     initialize_detectors_for_run,
     compute_stable_feature_hash,
     load_and_rebuild_detectors_from_sql_cache,
+    reconcile_detector_flags_with_loaded_models,
 )
 from core.model_persistence import (
     persist_calibration_params_safe,
@@ -744,6 +745,7 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
                 restore_detectors_from_runtime_cache_fn=restore_detectors_from_runtime_cache,
                 load_quality_regime_state_if_needed_fn=load_quality_regime_state_if_needed,
                 fit_all_detectors_fn=_fit_all_detectors_with_timer,
+                reconcile_detector_flags_fn=reconcile_detector_flags_with_loaded_models,
                 logger=Console,
             )
 

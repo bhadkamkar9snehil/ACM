@@ -983,6 +983,66 @@ class TestRefactorHelpers:
         assert out["cached_calibration_params"] == cached_models["calibration_params"]
         assert out["col_meds"] == {"a": 2.0}
 
+    def test_model_version_manager_requires_connected_sql_context(self):
+        """ModelVersionManager should fail fast when SQL context invariants are not satisfied."""
+        from core.model_persistence import ModelVersionManager
+
+        with pytest.raises(ValueError):
+            ModelVersionManager(equip="FD_FAN", sql_client=None, equip_id=1)
+
+        class _SqlNoConn:
+            conn = None
+
+        with pytest.raises(ValueError):
+            ModelVersionManager(equip="FD_FAN", sql_client=_SqlNoConn(), equip_id=1)
+
+    def test_initialize_detectors_for_run_requires_reconcile_fn(self):
+        """Detector init should fail fast when reconcile callback is not provided."""
+        from core.detector_orchestrator import initialize_detectors_for_run
+
+        train = pd.DataFrame({"a": [1.0, 2.0]})
+        score = pd.DataFrame({"a": [1.5]})
+
+        def _load_and_rebuild_detectors_fn(**kwargs):
+            return {
+                "train": kwargs["train"],
+                "score": kwargs["score"],
+                "cached_models": None,
+                "cached_manifest": None,
+                "cached_calibration_params": None,
+                "ar1_detector": None,
+                "pca_detector": None,
+                "iforest_detector": None,
+                "gmm_detector": None,
+                "omr_detector": None,
+                "regime_model": None,
+                "col_meds": None,
+            }
+
+        def _restore_detectors_from_runtime_cache_fn(**kwargs):
+            return {}
+
+        def _load_quality_regime_state_if_needed_fn(**kwargs):
+            return None, 0, False
+
+        with pytest.raises(ValueError):
+            initialize_detectors_for_run(
+                train=train,
+                score=score,
+                cfg={"models": {"use_cache": False}, "fusion": {"weights": {"ar1_z": 0, "pca_spe_z": 0, "iforest_z": 0}}},
+                meta={"is_coldstart_run": False},
+                detector_cache=None,
+                output_manager=None,
+                sql_client=None,
+                run_id="r1",
+                equip_id=1,
+                equip="FD_FAN",
+                load_and_rebuild_detectors_fn=_load_and_rebuild_detectors_fn,
+                restore_detectors_from_runtime_cache_fn=_restore_detectors_from_runtime_cache_fn,
+                load_quality_regime_state_if_needed_fn=_load_quality_regime_state_if_needed_fn,
+                reconcile_detector_flags_fn=None,
+            )
+
     def test_update_and_persist_model_lifecycle_safe_no_deps(self):
         """Lifecycle safe wrapper should return None when SQL/output manager are unavailable."""
         from core.model_lifecycle import update_and_persist_model_lifecycle_safe

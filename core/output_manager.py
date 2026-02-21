@@ -910,8 +910,6 @@ class OutputManager:
             return 0
 
         inserted = 0
-        if self.sql_client is None:
-            return 0
         cursor_factory = lambda: cast(Any, self.sql_client).cursor()
 
         # Optional: skip if the table doesn't exist (avoids noisy logs on dev DBs)
