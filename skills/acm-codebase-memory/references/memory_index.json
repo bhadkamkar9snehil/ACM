@@ -1,11 +1,11 @@
 {
-  "generated_at": "2026-02-21T03:41:53+00:00",
+  "generated_at": "2026-02-21T04:18:01+00:00",
   "module_count": 36,
   "modules": [
     {
       "module_name": "core.acm",
       "source_path": "core/acm.py",
-      "symbol_count": 18,
+      "symbol_count": 13,
       "core_import_count": 15,
       "core_imports": [
         "core.adaptive_thresholds",
@@ -199,7 +199,7 @@
     {
       "module_name": "core.model_lifecycle",
       "source_path": "core/model_lifecycle.py",
-      "symbol_count": 17,
+      "symbol_count": 18,
       "core_import_count": 1,
       "core_imports": [
         "core.observability"
