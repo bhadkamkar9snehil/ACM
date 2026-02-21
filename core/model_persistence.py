@@ -1593,6 +1593,75 @@ def align_current_features_to_cached_manifest(
     return train, score, cached_sensors, True
 
 
+def restore_detectors_from_runtime_cache(
+    detector_cache: Optional[Dict[str, Any]],
+    logger: Any = Console,
+) -> Dict[str, Any]:
+    """
+    Restore detector instances from in-memory runtime cache payload.
+    """
+    result: Dict[str, Any] = {
+        "ar1_detector": None,
+        "pca_detector": None,
+        "iforest_detector": None,
+        "gmm_detector": None,
+        "omr_detector": None,
+        "regime_model": None,
+        "cache_complete": False,
+    }
+
+    if not detector_cache:
+        return result
+
+    ar1_detector = detector_cache.get("ar1")
+    pca_detector = detector_cache.get("pca")
+    iforest_detector = detector_cache.get("iforest")
+    gmm_detector = detector_cache.get("gmm")
+    regime_model = detector_cache.get("regime_model")
+
+    if regime_model is not None and detector_cache.get("regime_basis_hash"):
+        # Preserve fit-time quality flags in model metadata; only attach basis hash.
+        regime_model.train_hash = detector_cache["regime_basis_hash"]
+
+    cache_complete = all([ar1_detector, pca_detector, iforest_detector])
+    if not cache_complete:
+        logger.warn("Cached detectors incomplete; will re-fit", component="MODEL")
+        return result
+
+    result["ar1_detector"] = ar1_detector
+    result["pca_detector"] = pca_detector
+    result["iforest_detector"] = iforest_detector
+    result["gmm_detector"] = gmm_detector
+    result["regime_model"] = regime_model
+    result["cache_complete"] = True
+    return result
+
+
+def load_quality_regime_state_if_needed(
+    regime_model: Optional[Any],
+    equip: str,
+    equip_id: int,
+    sql_client: Any,
+    logger: Any = Console,
+) -> Tuple[Optional[RegimeState], int, bool]:
+    """
+    Load regime state from SQL when no regime model is currently available.
+    """
+    if regime_model is not None:
+        return None, 0, False
+
+    regime_state = load_regime_state(equip=equip, equip_id=equip_id, sql_client=sql_client)
+    if regime_state is not None and regime_state.quality_ok:
+        regime_state_version = regime_state.state_version
+        logger.info(
+            f"Regime loaded from state_v{regime_state_version} | K={regime_state.n_clusters}",
+            component="REGIME",
+        )
+        return regime_state, regime_state_version, True
+
+    return regime_state, 0, False
+
+
 def save_trained_models(
     equip: str,
     sql_client: Optional[Any],
