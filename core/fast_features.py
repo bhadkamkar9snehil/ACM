@@ -10,6 +10,7 @@ from __future__ import annotations
 import warnings
 from typing import Any, List, Optional, Tuple, Literal, Dict
 import inspect
+from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
@@ -1371,3 +1372,124 @@ def impute_features(
         raise RuntimeError("[FEAT] No usable feature columns after imputation")
     
     return train, score, cols_to_drop
+
+
+@dataclass
+class FeaturePreparationResult:
+    """Result bundle for feature preparation stage."""
+    train: pd.DataFrame
+    score: pd.DataFrame
+    raw_train: pd.DataFrame
+    raw_score: pd.DataFrame
+    seasonal_patterns: Dict[str, List[Any]]
+    train_feature_hash: str
+    current_train_columns: List[str]
+    refit_requested: bool
+
+
+def _is_coldstart_meta(meta: Any) -> bool:
+    """Return True if current run meta indicates coldstart run."""
+    if isinstance(meta, dict):
+        return bool(meta.get("is_coldstart_run", False))
+    return bool(getattr(meta, "is_coldstart_run", False))
+
+
+def run_feature_preparation_stage(
+    *,
+    train: pd.DataFrame,
+    score: pd.DataFrame,
+    cfg: Dict[str, Any],
+    meta: Any,
+    output_manager: Any,
+    sql_client: Any,
+    run_id: str,
+    equip_id: int,
+    equip: str,
+    section_fn: Any,
+    detect_and_adjust_fn: Any,
+    run_data_guardrails_fn: Any,
+    load_manifest_protected_columns_fn: Any,
+    compute_feature_hash_fn: Any,
+) -> FeaturePreparationResult:
+    """
+    Execute feature preparation sequence used by ACM pipeline.
+
+    Stage order:
+    1. Seasonality detect/adjust
+    2. Data guardrails
+    3. Preserve raw train/score copies
+    4. Feature build
+    5. Manifest-protected feature resolve
+    6. Feature imputation and pruning
+    7. Feature hash
+    8. Refit flag read
+    """
+    seasonal_patterns: Dict[str, List[Any]] = {}
+    with section_fn("seasonality.detect"):
+        train, score, seasonal_patterns, _ = detect_and_adjust_fn(
+            train=train,
+            score=score,
+            cfg=cfg,
+            logger=Console,
+            equip=equip,
+        )
+
+    low_var_threshold = 1e-4
+    with section_fn("data.guardrails"):
+        guardrail_result = run_data_guardrails_fn(
+            train=train,
+            score=score,
+            meta=meta,
+            cfg=cfg,
+            output_manager=output_manager,
+            run_id=run_id,
+            equip_id=equip_id,
+            equip=equip,
+            logger=Console,
+        )
+        low_var_threshold = guardrail_result.low_var_threshold
+
+    raw_train = train.copy()
+    raw_score = score.copy()
+
+    with section_fn("features.build"):
+        train, score = build_features_for_pipeline(train=train, score=score, cfg=cfg, equip=equip)
+
+    manifest_protected_columns = load_manifest_protected_columns_fn(
+        sql_client=sql_client,
+        equip=equip,
+        equip_id=equip_id,
+        cfg=cfg,
+        is_coldstart_run=_is_coldstart_meta(meta),
+        logger=Console,
+    )
+
+    with section_fn("features.impute"):
+        train, score, _ = impute_features(
+            train=train,
+            score=score,
+            low_var_threshold=low_var_threshold,
+            output_manager=output_manager,
+            run_id=run_id,
+            equip_id=equip_id,
+            equip=equip,
+            protected_columns=manifest_protected_columns,
+        )
+
+    current_train_columns = list(train.columns)
+    with section_fn("features.hash"):
+        train_feature_hash = compute_feature_hash_fn(train, equip)
+
+    with section_fn("models.refit_flag"):
+        refit_requested = output_manager.check_refit_request()
+
+    return FeaturePreparationResult(
+        train=train,
+        score=score,
+        raw_train=raw_train,
+        raw_score=raw_score,
+        seasonal_patterns=seasonal_patterns,
+        train_feature_hash=train_feature_hash,
+        current_train_columns=current_train_columns,
+        refit_requested=bool(refit_requested),
+    )

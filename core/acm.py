@@ -57,7 +57,7 @@ from core.pipeline_types import (
     run_data_guardrails_safe,
     validate_data_contract_at_entry,
 )
-from core.seasonality import SeasonalPattern, detect_and_adjust_safe
+from core.seasonality import detect_and_adjust_safe
 from core.sensor_attribution import build_sensor_analytics_context
 from core.adaptive_thresholds import maybe_update_adaptive_thresholds
 from core.smart_coldstart import seed_baseline_safe, load_and_validate_data_stage
@@ -107,7 +107,7 @@ from core.sql_client import (
 )
 
 # Data utilities: index hygiene and deduplication helpers.
-from core.fast_features import ensure_local_index, deduplicate_index, build_features_for_pipeline
+from core.fast_features import ensure_local_index, deduplicate_index
 
 from utils.timer import Timer, enable_timer_metrics  # type: ignore
 from core.resource_monitor import enable_resource_metrics
@@ -442,79 +442,31 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
                 logger=Console,
             )
 
-        # ===== Seasonality detection and adjustment =====
-        # Detect daily/weekly cycles and optionally adjust data to reduce
-        # false positives from predictable seasonality.
-        seasonal_patterns: Dict[str, List[SeasonalPattern]] = {}
-        with T.section("seasonality.detect"):
-            train, score, seasonal_patterns, _ = detect_and_adjust_safe(
-                train=train,
-                score=score,
-                cfg=cfg,
-                logger=Console,
-                equip=equip,
-            )
-
-        # ===== Data quality guardrails =====
-        low_var_threshold = 1e-4  # Used by feature imputation
-        with T.section("data.guardrails"):
-            guardrail_result = run_data_guardrails_safe(
-                train=train,
-                score=score,
-                meta=meta,
-                cfg=cfg,
-                output_manager=output_manager,
-                run_id=run_id,
-                equip_id=equip_id,
-                equip=equip,
-                logger=Console,
-            )
-            low_var_threshold = guardrail_result.low_var_threshold
-
-        # Preserve raw sensor data before feature engineering (needed for regime basis).
-        raw_train = train.copy()
-        raw_score = score.copy()
-
-        # ===== Feature construction (detectors require engineered features) =====
-        with T.section("features.build"):
-            train, score = build_features_for_pipeline(train=train, score=score, cfg=cfg, equip=equip)
-
-        # ===== Resolve protected feature columns from cached model manifest =====
-        # Do a lightweight SQL manifest-only fetch (no model blobs) so that we
-        # know which feature columns the currently-saved detectors were trained on.
-        # These columns must survive the low-variance filter below - the
-        # baseline-derived train split used in scoring batches can temporarily
-        # have near-zero variance for features that were fine at training time,
-        # causing a spurious 632 630 mismatch that forces a full retrain every
-        # scoring batch.  Full model objects are still loaded later in
-        # models.load as normal.
-        _manifest_protected_columns = load_manifest_protected_columns(
-            sql_client=sql_client,
-            equip=equip,
-            equip_id=equip_id,
+        # ===== Feature preparation =====
+        feature_stage = fast_features.run_feature_preparation_stage(
+            train=train,
+            score=score,
             cfg=cfg,
-            is_coldstart_run=bool(
-                meta.get("is_coldstart_run", False)
-                if isinstance(meta, dict)
-                else getattr(meta, "is_coldstart_run", False)
-            ),
-            logger=Console,
+            meta=meta,
+            output_manager=output_manager,
+            sql_client=sql_client,
+            run_id=run_id,
+            equip_id=equip_id,
+            equip=equip,
+            section_fn=T.section,
+            detect_and_adjust_fn=detect_and_adjust_safe,
+            run_data_guardrails_fn=run_data_guardrails_safe,
+            load_manifest_protected_columns_fn=load_manifest_protected_columns,
+            compute_feature_hash_fn=compute_stable_feature_hash,
         )
-
-        # ===== Impute missing values in feature space (detectors require clean data) =====
-        with T.section("features.impute"):
-            train, score, _ = fast_features.impute_features(
-                train, score, low_var_threshold, output_manager, run_id, equip_id, equip,
-                protected_columns=_manifest_protected_columns,
-            )
-
-        current_train_columns = list(train.columns)
-        with T.section("features.hash"):
-            train_feature_hash = compute_stable_feature_hash(train, equip)
-
-        # Respect refit requests captured in SQL.
-        with T.section("models.refit_flag"):
-            refit_requested = output_manager.check_refit_request()
+        train = feature_stage.train
+        score = feature_stage.score
+        raw_train = feature_stage.raw_train
+        raw_score = feature_stage.raw_score
+        seasonal_patterns = feature_stage.seasonal_patterns
+        train_feature_hash = feature_stage.train_feature_hash
+        current_train_columns = feature_stage.current_train_columns
+        refit_requested = feature_stage.refit_requested
 
         # ===== Phase 2: Load or fit detectors =====
         ar1_detector = pca_detector = iforest_detector = gmm_detector = omr_detector = None
