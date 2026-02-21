@@ -542,6 +542,38 @@ class TestRefactorHelpers:
                 logger=_Logger(),
             )
 
+    def test_run_data_guardrails_safe_returns_default_on_error(self, monkeypatch):
+        """Guardrails safe wrapper should return default low_var_threshold on errors."""
+        from core import pipeline_types
+
+        def _boom(*args, **kwargs):
+            raise RuntimeError("guardrail fail")
+
+        monkeypatch.setattr(pipeline_types, "run_data_guardrails", _boom)
+
+        class _Logger:
+            def warn(self, *args, **kwargs):
+                pass
+
+        idx = pd.date_range("2026-01-01", periods=2, freq="h")
+        train = pd.DataFrame({"sensor": [1.0, 1.0]}, index=idx)
+        score = pd.DataFrame({"sensor": [1.0]}, index=idx[:1])
+        meta = type("Meta", (), {"dropped_cols": []})()
+
+        out = pipeline_types.run_data_guardrails_safe(
+            train=train,
+            score=score,
+            meta=meta,
+            cfg={},
+            output_manager=None,
+            run_id=1,
+            equip_id=1,
+            equip="FD_FAN",
+            logger=_Logger(),
+        )
+        assert out.low_var_threshold == pytest.approx(1e-4)
+        assert out.low_var_features == []
+
     def test_apply_regime_health_labels_sets_unknown_when_quality_bad(self):
         """Regime health helper should mark unknown when quality is not acceptable."""
         from core.regimes import apply_regime_health_labels

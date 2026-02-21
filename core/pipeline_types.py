@@ -599,6 +599,44 @@ def run_data_guardrails(
     return result
 
 
+def run_data_guardrails_safe(
+    train: pd.DataFrame,
+    score: pd.DataFrame,
+    meta: Any,
+    cfg: Dict[str, Any],
+    output_manager: Any,
+    run_id: int,
+    equip_id: int,
+    equip: str,
+    logger: Any,
+) -> GuardrailResult:
+    """
+    Safe wrapper around run_data_guardrails().
+
+    Returns a default GuardrailResult when guardrail execution fails.
+    """
+    try:
+        return run_data_guardrails(
+            train=train,
+            score=score,
+            meta=meta,
+            cfg=cfg,
+            output_manager=output_manager,
+            run_id=run_id,
+            equip_id=equip_id,
+            equip=equip,
+        )
+    except Exception as e:
+        logger.warn(
+            f"Guardrail checks skipped: {e}",
+            component="DATA",
+            equip=equip,
+            error_type=type(e).__name__,
+            error=str(e)[:200],
+        )
+        return GuardrailResult(low_var_threshold=1e-4)
+
+
 def validate_data_contract_at_entry(
     train: pd.DataFrame,
     score: pd.DataFrame,
@@ -700,5 +738,6 @@ __all__ = [
     "FeatureMatrix",
     "GuardrailResult",
     "run_data_guardrails",
+    "run_data_guardrails_safe",
     "validate_data_contract_at_entry",
 ]

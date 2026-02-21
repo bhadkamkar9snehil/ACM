@@ -81,7 +81,10 @@ from core.run_metadata_writer import (
     finalize_run_with_metadata,
 )
 from core.episode_culprits_writer import write_episode_culprits_enhanced
-from core.pipeline_types import validate_data_contract_at_entry
+from core.pipeline_types import (
+    run_data_guardrails_safe,
+    validate_data_contract_at_entry,
+)
 from core.seasonality import SeasonalPattern, detect_and_adjust_safe
 from core.sensor_attribution import build_sensor_analytics_context, persist_contribution_timeline
 from core.adaptive_thresholds import maybe_update_adaptive_thresholds
@@ -845,22 +848,18 @@ def main() -> None:
         # ===== Data quality guardrails =====
         low_var_threshold = 1e-4  # Used by feature imputation
         with T.section("data.guardrails"):
-            try:
-                from core.pipeline_types import run_data_guardrails
-                guardrail_result = run_data_guardrails(
-                    train=train,
-                    score=score,
-                    meta=meta,
-                    cfg=cfg,
-                    output_manager=output_manager,
-                    run_id=run_id,
-                    equip_id=equip_id,
-                    equip=equip,
-                )
-                low_var_threshold = guardrail_result.low_var_threshold
-            except Exception as g_e:
-                Console.warn(f"Guardrail checks skipped: {g_e}", component="DATA",
-                             equip=equip, error_type=type(g_e).__name__, error=str(g_e)[:200])
+            guardrail_result = run_data_guardrails_safe(
+                train=train,
+                score=score,
+                meta=meta,
+                cfg=cfg,
+                output_manager=output_manager,
+                run_id=run_id,
+                equip_id=equip_id,
+                equip=equip,
+                logger=Console,
+            )
+            low_var_threshold = guardrail_result.low_var_threshold
 
         # Preserve raw sensor data before feature engineering (needed for regime basis).
         raw_train = train.copy()
