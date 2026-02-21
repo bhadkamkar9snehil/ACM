@@ -1728,36 +1728,20 @@ def main() -> None:
 
         # ===== Phase 8: Drift =====
         with T.section("drift"):
-            score_out["frame"] = frame # type: ignore
-            score_out = drift.compute(score, score_out, cfg)
-            frame = score_out["frame"]
-
-        # Load previous drift mode for hysteresis continuity.
-        _prev_drift_mode = drift.load_previous_drift_mode(
-            sql_client=sql_client,
-            equip_id=equip_id,
-            default_mode="FAULT",
-        )
-
-        # Multi-feature drift detection (drift.compute_drift_alert_mode()).
-        frame = drift.compute_drift_alert_mode(
-            frame=frame,
-            cfg=cfg,
-            regime_quality_ok=regime_quality_ok,
-            equip=equip,
-            prev_alert_mode=_prev_drift_mode,
-        )
-
-        # ===== Drift controller state =====
-        with T.section("drift.controller"):
-            rows = drift.write_drift_controller_state(
-                output_manager=output_manager,
+            drift_out = drift.run_drift_pipeline(
+                score_data=score,
                 frame=frame,
-                cfg=cfg,
                 score_out=score_out,
-                logger=Console,
+                cfg=cfg,
+                regime_quality_ok=regime_quality_ok,
                 equip=equip,
+                sql_client=sql_client,
+                equip_id=equip_id,
+                output_manager=output_manager,
+                logger=Console,
             )
+            frame = drift_out["frame"]
+            score_out = drift_out["score_out"]
 
         # Normalize episodes schema for report/export.
         episodes, frame = fuse.normalize_episodes_schema(
