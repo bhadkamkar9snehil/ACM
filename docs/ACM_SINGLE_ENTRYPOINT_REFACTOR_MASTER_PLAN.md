@@ -785,3 +785,75 @@ Validation completed:
 Main branch status:
 1. `main` was not touched.
 2. Work remains on refactor integration branch.
+
+---
+
+## 18. Guard and Availability Audit (Separate Track)
+
+Objective:
+1. Reduce repeated defensive checks inside deep runtime paths.
+2. Keep only checks that protect true optional components or boundary IO.
+3. Enforce fail-fast once at startup and once per stage boundary.
+
+Audit snapshot (2026-02-21):
+1. Highest guard density files:
+   - `core/output_manager.py`: `except Exception` and repeated SQL health checks
+   - `core/model_persistence.py`: repeated `sql_client/equip_id` guards in class methods
+   - `core/regimes.py`: many broad exception guards in algorithm and write paths
+   - `core/observability.py`: optional dependency guards (mostly valid)
+2. Orchestrator (`core/acm.py`) is now much cleaner but still relies on downstream modules that remain over-defensive.
+
+### 18.1 Where checks should exist (keep)
+
+1. Process bootstrap checks in `core/acm.py`:
+   - module import availability for optional observability
+   - SQL connectivity and health check before run start
+   - config and equipment resolution before pipeline execution
+2. External boundary checks:
+   - SQL writes and transaction commits
+   - optional observability exporters
+   - optional forecasting components while forecasting is disabled
+3. Finalization safety:
+   - run finalize path should remain best-effort and non-crashing.
+
+### 18.2 Where checks should be consolidated (remove repetition)
+
+1. `core/model_persistence.py`:
+   - move `sql_client/equip_id` validation to constructor or one stage entry function
+   - remove repeated method-level checks that duplicate the same invariant
+2. `core/output_manager.py`:
+   - keep one SQL readiness gate at transaction entry
+   - reduce per-method repeated health probing when inside a healthy transaction
+3. `core/detector_orchestrator.py`:
+   - remove helper-injection availability checks in runtime path
+   - keep strict detector presence validation only once after load/fit
+4. `core/run_metadata_writer.py`:
+   - keep only top-level finalize preconditions (`sql_client`, `run_id`)
+   - remove nested optional callback checks in runtime-only code paths by passing required callables from orchestrator.
+
+### 18.3 Guard policy by category
+
+1. Mandatory runtime dependencies:
+   - validated once at startup
+   - no repeated `is None` checks in deep business logic
+2. Optional features:
+   - validated at feature boundary only
+   - no repeated checks within feature internals
+3. Data quality and model validity checks:
+   - keep as business rules (not defensive noise)
+   - these are not dead guards and must remain.
+
+### 18.4 Execution order for cleanup
+
+1. Pass A: `core/model_persistence.py`
+   - convert repeated client/id guards to one invariant gate
+2. Pass B: `core/output_manager.py`
+   - normalize transaction health checks and remove duplicates
+3. Pass C: `core/run_metadata_writer.py`
+   - simplify callback availability branching for runtime path
+4. Pass D: `core/detector_orchestrator.py`
+   - remove helper-availability fallback checks not needed in production path
+5. After each pass:
+   - run `python -m py_compile` on touched modules
+   - run `pytest tests/test_v11_modules.py -v`
+   - run one batch dry-run through `scripts/sql_batch_runner.py`.
