@@ -23,7 +23,7 @@
         "iconColor": "#C4162A",
         "name": "Anomaly Episodes",
         "rawQuery": true,
-        "rawSql": "SELECT StartEntryDateTime AS time, 'Episode: ' + ISNULL(Severity,'') + ' | ' + ISNULL(PrimaryDetector,'') AS text, 'EPISODE' AS tags\nFROM ACM_Episodes\nWHERE EquipID = $equipment\n  AND StartEntryDateTime BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY StartEntryDateTime ASC",
+        "rawSql": "SELECT StartTime AS time, 'Episode: ' + ISNULL(Severity,'') + ' | ' + ISNULL(PrimaryDetector,'') AS text, 'EPISODE' AS tags\nFROM dbo.ACM_Episodes\nWHERE EquipID = $equipment\n  AND StartTime BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY StartTime ASC",
         "type": "table"
       },
       {
@@ -247,7 +247,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT TOP 1 Zone\nFROM ACM_HealthTimeline\nWHERE EquipID = $equipment\nORDER BY Timestamp DESC",
+          "rawSql": "SELECT TOP 1 HealthZone\nFROM dbo.ACM_HealthTimeline\nWHERE EquipID = $equipment\nORDER BY Timestamp DESC",
           "refId": "A"
         }
       ],
@@ -667,7 +667,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT Zone AS metric, COUNT(*) AS value\nFROM ACM_HealthTimeline\nWHERE EquipID = $equipment\n  AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nGROUP BY Zone\nORDER BY value DESC",
+          "rawSql": "SELECT HealthZone AS metric, COUNT(*) AS value\nFROM dbo.ACM_HealthTimeline\nWHERE EquipID = $equipment\n  AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nGROUP BY HealthZone\nORDER BY value DESC",
           "refId": "A"
         }
       ],
@@ -1789,7 +1789,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "StartEntryDateTime"
+              "options": "StartTime"
             },
             "properties": [
               {
@@ -1822,7 +1822,7 @@
         "sortBy": [
           {
             "desc": true,
-            "displayName": "StartEntryDateTime"
+            "displayName": "StartTime"
           }
         ]
       },
@@ -2585,7 +2585,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT Timestamp AS time, Zone AS value\nFROM ACM_HealthTimeline\nWHERE EquipID = $equipment\n  AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY Timestamp ASC",
+          "rawSql": "SELECT Timestamp AS time, HealthZone AS value\nFROM dbo.ACM_HealthTimeline\nWHERE EquipID = $equipment\n  AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY Timestamp ASC",
           "refId": "A"
         }
       ],
@@ -3546,7 +3546,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "StartEntryDateTime"
+              "options": "StartTime"
             },
             "properties": [
               {
@@ -3579,7 +3579,7 @@
         "sortBy": [
           {
             "desc": true,
-            "displayName": "StartEntryDateTime"
+            "displayName": "StartTime"
           }
         ]
       },
@@ -4093,14 +4093,14 @@
           "type": "mssql",
           "uid": "mssql-ds"
         },
-        "definition": "SELECT EquipID AS __value, EquipCode AS __text FROM Equipment WHERE Status = 'Active' ORDER BY EquipCode",
+        "definition": "SELECT EquipID AS __value, EquipCode AS __text FROM dbo.Equipment ORDER BY EquipCode",
         "hide": 0,
         "includeAll": false,
         "label": "Equipment",
         "multi": false,
         "name": "equipment",
         "options": [],
-        "query": "SELECT EquipID AS __value, EquipCode AS __text FROM Equipment WHERE Status = 'Active' ORDER BY EquipCode",
+        "query": "SELECT EquipID AS __value, EquipCode AS __text FROM dbo.Equipment ORDER BY EquipCode",
         "refresh": 2,
         "regex": "",
         "sort": 1,
@@ -4112,14 +4112,14 @@
           "type": "mssql",
           "uid": "mssql-ds"
         },
-        "definition": "SELECT EquipCode AS __value, EquipCode AS __text FROM Equipment WHERE Status = 'Active' ORDER BY EquipCode",
+        "definition": "SELECT EquipCode AS __value, EquipCode AS __text FROM dbo.Equipment WHERE EquipID = $equipment",
         "hide": 2,
         "includeAll": false,
         "label": "EquipCode",
         "multi": false,
         "name": "equipment_code",
         "options": [],
-        "query": "SELECT EquipCode AS __value, EquipCode AS __text FROM Equipment WHERE EquipID = $equipment",
+        "query": "SELECT EquipCode AS __value, EquipCode AS __text FROM dbo.Equipment WHERE EquipID = $equipment",
         "refresh": 2,
         "regex": "",
         "sort": 0,
