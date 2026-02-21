@@ -102,18 +102,11 @@ _OBSERVABILITY_AVAILABLE = True
 from core.sql_client import (
     execute_with_deadlock_retry,
     connect_acm_sql,
-    resolve_equipment_id_required,
-    load_config_required_from_sql,
-    start_acm_run,
-    get_acm_run_count,
-    apply_cli_window_overrides,
+    bootstrap_acm_run_state,
 )
 
 # Data utilities: index hygiene and deduplication helpers.
 from core.fast_features import ensure_local_index, deduplicate_index, build_features_for_pipeline
-
-# Config utilities: signature and loader helpers.
-from utils.config_dict import compute_config_signature
 
 from utils.timer import Timer, enable_timer_metrics  # type: ignore
 from core.resource_monitor import enable_resource_metrics
@@ -143,11 +136,8 @@ def _configure_logging(logging_cfg, args):
 
 
 # Backwards-compat breadcrumbs for helpers extracted from this module.
-# _compute_config_signature -> utils/config_dict.py::compute_config_signature()
 # _ensure_local_index -> core/fast_features.py::ensure_local_index()
-# _get_equipment_id -> core/sql_client.py::resolve_equipment_id_required()
-# _load_config -> core/sql_client.py::load_config_required_from_sql()
-# _sql_start_run -> core/sql_client.py::start_acm_run()
+# bootstrap run state -> core/sql_client.py::bootstrap_acm_run_state()
 
 
 # =======================
@@ -168,12 +158,8 @@ def _continuous_learning_enabled(cfg: Dict[str, Any]) -> bool:
 # ========================================================================
 # _sql_finalize_run -> sql_client.py::SQLClient.finalize_run()
 # _execute_with_deadlock_retry -> sql_client.py::execute_with_deadlock_retry()
-# _get_equipment_id -> sql_client.py::resolve_equipment_id_required()
-# _load_config -> sql_client.py::load_config_required_from_sql()
-# _sql_start_run -> sql_client.py::start_acm_run()
 # _deduplicate_index -> fast_features.py::deduplicate_index()
 # _ensure_local_index -> fast_features.py::ensure_local_index()
-# _compute_config_signature -> config_dict.py::compute_config_signature()
 # _score_all_detectors -> detector_orchestrator.py
 # _calibrate_all_detectors -> detector_orchestrator.py
 # _fit_all_detectors -> detector_orchestrator.py
@@ -287,24 +273,24 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
         raise SystemExit(1)
 
     with T.section("startup"):
-        # Load config from SQL (no CSV fallback; SQL is the source of truth).
-        cfg = load_config_required_from_sql(sql_client, equipment_name=equip, logger=Console)
-        
-        # Deep copy config to prevent accidental mutation across phases.
-        import copy
-        cfg = copy.deepcopy(cfg)
-        
-        logging_cfg = (cfg.get("logging") or {})
-    _configure_logging(logging_cfg, args)
+        bootstrap = bootstrap_acm_run_state(
+            sql_client=sql_client,
+            equip=equip,
+            args=args,
+            deadlock_retry_func=execute_with_deadlock_retry,
+            logger=Console,
+        )
+    cfg = bootstrap.cfg
+    equip_id = bootstrap.equip_id
+    config_signature = bootstrap.config_signature
+    run_count = bootstrap.run_count
+    run_id = bootstrap.run_id
+    win_start = bootstrap.win_start
+    win_end = bootstrap.win_end
+    cli_overrides = bootstrap.cli_overrides
 
-    # Get equipment ID from SQL (already resolved during config loading)
-    equip_id = resolve_equipment_id_required(equip, sql_client)
-    if not hasattr(cfg, '_equip_id') or cfg._equip_id == 0:
-        cfg._equip_id = equip_id
-    
-    # Compute and store config signature for cache validation.
-    config_signature = compute_config_signature(cfg)
-    cfg["_signature"] = config_signature
+    logging_cfg = cfg.get("logging") or {}
+    _configure_logging(logging_cfg, args)
 
     # Continuous learning is controlled exclusively by config.
     CONTINUOUS_LEARNING = _continuous_learning_enabled(cfg)
@@ -336,13 +322,6 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
         equip_id=equip_id
     )
     
-    # Get run count from SQL for interval calculations (completed runs only).
-    run_count = get_acm_run_count(sql_client, equip_id)
-    
-    # Store run count in config for downstream access.
-    if "runtime" not in cfg:
-        cfg["runtime"] = {}
-    cfg["runtime"]["run_count"] = run_count
     # Consolidated startup log.
     continuous_learning_str = "true" if CONTINUOUS_LEARNING else "false"
     force_retrain_str = "true" if force_retraining else "false"
@@ -368,43 +347,9 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
     regime_quality_ok: bool = True
     refit_requested: bool = False
 
-    # ===== SQL: Start run (window discovery) =====
-    # SQL client is already connected at this point.
-    run_id: Optional[str] = None
-    win_start: Optional[pd.Timestamp] = None
-    win_end: Optional[pd.Timestamp] = None
-    
-    # Track CLI overrides for consolidated logging.
-    cli_overrides = []
-
-    # Start the run in SQL.
-    run_id, win_start, win_end, equip_id = start_acm_run(
-        cli=sql_client,
-        cfg=cfg,
-        equip_code=equip,
-        deadlock_retry_func=execute_with_deadlock_retry,
-        logger=Console,
-    )
-    
-    # Fail-fast: ensure EquipID is valid immediately after SQL lookup.
-    if equip_id <= 0:
-        raise RuntimeError(
-            f"EquipID is required and must be a positive integer. "
-            f"Current value: {equip_id}. Equipment '{equip}' not found in Equipment table."
-        )
-    
     # Update observability context with run_id for trace/metric/log tagging.
     set_acm_context(run_id=run_id, equip_id=equip_id)
-    
-    # Override window if CLI args provided (e.g., backfill).
-    win_start, win_end, cli_overrides = apply_cli_window_overrides(
-        win_start=win_start,
-        win_end=win_end,
-        start_time_arg=args.start_time,
-        end_time_arg=args.end_time,
-        logger=Console,
-    )
-    
+
     if cli_overrides:
         Console.info(f"CLI overrides: {', '.join(cli_overrides)}", component="RUN")
 

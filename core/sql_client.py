@@ -33,6 +33,7 @@ from contextlib import contextmanager
 import configparser
 from pathlib import Path
 import pandas as pd
+from dataclasses import dataclass
 
 try:
     import pyodbc
@@ -739,6 +740,19 @@ def start_acm_run(
     return run_id, window_start, window_end, equip_id
 
 
+@dataclass
+class AcmRunBootstrapState:
+    """Typed bootstrap payload for ACM run startup."""
+    cfg: Dict[str, Any]
+    equip_id: int
+    config_signature: str
+    run_count: int
+    run_id: str
+    win_start: Any
+    win_end: Any
+    cli_overrides: list[str]
+
+
 def get_acm_run_count(
     sql_client: Any,
     equip_id: int,
@@ -786,3 +800,65 @@ def apply_cli_window_overrides(
                 logger.warn(f"Failed to parse --end-time: {e}", component="RUN")
 
     return win_start, win_end, overrides
+
+
+def bootstrap_acm_run_state(
+    *,
+    sql_client: Any,
+    equip: str,
+    args: Any,
+    deadlock_retry_func: Optional[Callable] = None,
+    logger: Optional[Any] = None,
+) -> AcmRunBootstrapState:
+    """
+    Build run bootstrap state: config, ids, signature, run window, and CLI overrides.
+    """
+    import copy
+    from utils.config_dict import compute_config_signature
+
+    cfg = load_config_required_from_sql(sql_client, equipment_name=equip, logger=logger)
+    cfg = copy.deepcopy(cfg)
+
+    equip_id = resolve_equipment_id_required(equip, sql_client)
+    if not hasattr(cfg, "_equip_id") or cfg._equip_id == 0:
+        cfg._equip_id = equip_id
+
+    config_signature = compute_config_signature(cfg)
+    cfg["_signature"] = config_signature
+
+    run_count = get_acm_run_count(sql_client, equip_id)
+    if "runtime" not in cfg:
+        cfg["runtime"] = {}
+    cfg["runtime"]["run_count"] = run_count
+
+    run_id, win_start, win_end, equip_id = start_acm_run(
+        cli=sql_client,
+        cfg=cfg,
+        equip_code=equip,
+        deadlock_retry_func=deadlock_retry_func,
+        logger=logger,
+    )
+    if equip_id <= 0:
+        raise RuntimeError(
+            f"EquipID is required and must be a positive integer. "
+            f"Current value: {equip_id}. Equipment '{equip}' not found in Equipment table."
+        )
+
+    win_start, win_end, cli_overrides = apply_cli_window_overrides(
+        win_start=win_start,
+        win_end=win_end,
+        start_time_arg=getattr(args, "start_time", None),
+        end_time_arg=getattr(args, "end_time", None),
+        logger=logger,
+    )
+
+    return AcmRunBootstrapState(
+        cfg=cfg,
+        equip_id=int(equip_id),
+        config_signature=config_signature,
+        run_count=int(run_count),
+        run_id=str(run_id),
+        win_start=win_start,
+        win_end=win_end,
+        cli_overrides=cli_overrides,
+    )
