@@ -62,6 +62,7 @@ from core.analytics_builder import (
     AnalyticsConstants as _AnalyticsConstants,  # Re-exported for backward compat
     health_index as _health_index_impl,
 )
+from core.sensor_attribution import build_contribution_timeline
 
 # V11: Confidence model for health and episode confidence
 try:
@@ -553,6 +554,29 @@ class OutputManager:
                     cur.close()
             except Exception:
                 pass
+
+    @staticmethod
+    def _is_non_empty_dataframe(df: Optional[pd.DataFrame]) -> bool:
+        """Return True when DataFrame exists and has at least one row."""
+        return df is not None and not df.empty
+
+    def _can_write_dataframe(self, df: Optional[pd.DataFrame], require_healthy_sql: bool = True) -> bool:
+        """Centralized write gate for DataFrame payloads."""
+        if require_healthy_sql:
+            if not self._check_sql_health():
+                return False
+        elif self.sql_client is None:
+            return False
+        return self._is_non_empty_dataframe(df)
+
+    def _can_write_payload(self, payload: Any, require_healthy_sql: bool = True) -> bool:
+        """Centralized write gate for dict/list payloads."""
+        if require_healthy_sql:
+            if not self._check_sql_health():
+                return False
+        elif self.sql_client is None:
+            return False
+        return bool(payload)
     
     def _prepare_dataframe_for_sql(self, df: pd.DataFrame, non_numeric_cols: Optional[set] = None) -> pd.DataFrame:
         """Prepare DataFrame for SQL insertion with robust type coercion (SQL Server safe)."""
@@ -857,7 +881,7 @@ class OutputManager:
         """Generic SQL table writer with RunID/EquipID injection and upsert routing."""
         with Span("persist.write", table=table_name, delete_existing=delete_existing) if _OBSERVABILITY_AVAILABLE and Span else nullcontext() as span:
             try:
-                if not self._check_sql_health() or df is None or df.empty:
+                if not self._can_write_dataframe(df):
                     return 0
 
                 sql_df = df.copy()
@@ -1165,7 +1189,7 @@ class OutputManager:
                 }])
 
             elif df is not None:
-                if df.empty:
+                if not self._is_non_empty_dataframe(df):
                     return 0
                 sql_df = df.copy()
                 if 'RunID' not in sql_df.columns:
@@ -1210,9 +1234,7 @@ class OutputManager:
         Returns:
             Number of rows written
         """
-        if df is None or df.empty:
-            return 0
-        if not self._check_sql_health():
+        if not self._can_write_dataframe(df):
             return 0
         
         try:
@@ -1286,7 +1308,7 @@ class OutputManager:
           - TrainFeatures   (nullable, INT)
           - CreatedAt       (server default)
         """
-        if df.empty or self.sql_client is None:
+        if not self._can_write_dataframe(df, require_healthy_sql=False):
             return 0
 
         try:
@@ -1357,7 +1379,7 @@ class OutputManager:
         FORECAST-WRITE-01: Write health forecast using bulk insert.
         v10 schema: ACM_HealthForecast has (RunID, EquipID, Timestamp, ForecastHealth, CI_Lower, CI_Upper, Method, CreatedAt)
         """
-        if df.empty or self.sql_client is None:
+        if not self._can_write_dataframe(df, require_healthy_sql=False):
             return 0
         
         try:
@@ -1372,7 +1394,7 @@ class OutputManager:
         FORECAST-WRITE-02: Write failure forecast using bulk insert.
         v10 schema: ACM_FailureForecast has (RunID, EquipID, Timestamp, FailureProb, ThresholdUsed, Method, CreatedAt)
         """
-        if df.empty or self.sql_client is None:
+        if not self._can_write_dataframe(df, require_healthy_sql=False):
             return 0
         
         try:
@@ -1388,7 +1410,7 @@ class OutputManager:
         Primary key is (RunID, EquipID, DetectorName, Timestamp), so update if exists.
         Schema: RunID, EquipID, DetectorName, Timestamp, ForecastValue, CiLower, CiUpper, ForecastStd, Method, CreatedAt
         """
-        if df.empty or self.sql_client is None:
+        if not self._can_write_dataframe(df, require_healthy_sql=False):
             return 0
         
         # Ensure all required columns exist with defaults before upsert
@@ -1464,7 +1486,7 @@ class OutputManager:
         FORECAST-WRITE-04: Write sensor forecast using bulk insert.
         v10 schema: ACM_SensorForecast has (RunID, EquipID, SensorName, Timestamp, ForecastValue, CiLower, CiUpper, ForecastStd, Method, RegimeLabel, CreatedAt)
         """
-        if df.empty or self.sql_client is None:
+        if not self._can_write_dataframe(df, require_healthy_sql=False):
             return 0
         
         try:
@@ -2122,7 +2144,7 @@ class OutputManager:
         Returns:
             Number of rows written
         """
-        if not self._check_sql_health() or df_events is None or df_events.empty:
+        if not self._can_write_dataframe(df_events):
             return 0
         try:
             df = df_events.copy()
@@ -2199,7 +2221,7 @@ class OutputManager:
         Returns:
             Number of rows written
         """
-        if not self._check_sql_health() or df_reg is None or df_reg.empty:
+        if not self._can_write_dataframe(df_reg):
             return 0
         try:
             df = df_reg.copy()
@@ -2220,7 +2242,7 @@ class OutputManager:
         Returns:
             Number of rows written
         """
-        if not self._check_sql_health() or not model_row:
+        if not self._can_write_payload(model_row):
             return 0
         try:
             # v11.1.5: Map legacy model_row keys to ACM_PCA_Models schema
@@ -2278,7 +2300,7 @@ class OutputManager:
         Args:
             detector_correlations: Nested dict {detector1: {detector2: correlation}}
         """
-        if not self._check_sql_health() or not detector_correlations:
+        if not self._can_write_payload(detector_correlations):
             return 0
         try:
             # PERFORMANCE FIX: Single list comprehension instead of nested append loops
@@ -2339,7 +2361,7 @@ class OutputManager:
         Args:
             drift_df: DataFrame with Timestamp, DriftValue, optionally DriftState
         """
-        if not self._check_sql_health() or drift_df is None or drift_df.empty:
+        if not self._can_write_dataframe(drift_df):
             return 0
         try:
             df = drift_df.copy()
@@ -2370,7 +2392,7 @@ class OutputManager:
         Returns:
             Number of rows written
         """
-        if not self._check_sql_health() or scores_df is None or scores_df.empty:
+        if not self._can_write_dataframe(scores_df):
             return 0
         
         try:
@@ -2482,7 +2504,7 @@ class OutputManager:
             corr_matrix: Pandas correlation matrix (sensors x sensors)
             corr_type: 'pearson' or 'spearman'
         """
-        if not self._check_sql_health() or corr_matrix is None or corr_matrix.empty:
+        if not self._can_write_dataframe(corr_matrix):
             return 0
         try:
             import numpy as np
@@ -2563,7 +2585,7 @@ class OutputManager:
         Args:
             dropped_features: List of dicts with keys: FeatureName, DropReason, DropValue, Threshold
         """
-        if not self._check_sql_health() or not dropped_features:
+        if not self._can_write_payload(dropped_features):
             return 0
         try:
             df = pd.DataFrame(dropped_features)
@@ -2580,7 +2602,7 @@ class OutputManager:
         Args:
             calibration_data: List of dicts with DetectorType, CalibrationScore, etc.
         """
-        if not self._check_sql_health() or not calibration_data:
+        if not self._can_write_payload(calibration_data):
             return 0
         try:
             df = pd.DataFrame(calibration_data)
@@ -2597,7 +2619,7 @@ class OutputManager:
         Args:
             occupancy_data: List of dicts with RegimeLabel, DwellTimeHours, DwellFraction, etc.
         """
-        if not self._check_sql_health() or not occupancy_data:
+        if not self._can_write_payload(occupancy_data):
             return 0
         try:
             df = pd.DataFrame(occupancy_data)
@@ -2616,7 +2638,7 @@ class OutputManager:
         Args:
             transition_matrix: Nested dict {from_regime: {to_regime: count}}
         """
-        if not self._check_sql_health() or not transition_matrix:
+        if not self._can_write_payload(transition_matrix):
             return 0
         try:
             run_id = self.run_id
@@ -2649,7 +2671,7 @@ class OutputManager:
         Args:
             contributions_df: DataFrame with Timestamp, DetectorType, ContributionPct
         """
-        if not self._check_sql_health() or contributions_df is None or contributions_df.empty:
+        if not self._can_write_dataframe(contributions_df):
             return 0
         try:
             df = contributions_df.copy()
@@ -2659,6 +2681,31 @@ class OutputManager:
         except Exception as e:
             Console.warn(f"write_contribution_timeline failed: {e}", component="OUTPUT", error=str(e)[:200])
             return 0
+
+    def write_contribution_timeline_from_frame(
+        self,
+        frame: pd.DataFrame,
+        fusion_weights: Optional[Dict[str, float]],
+        equip: str = "",
+    ) -> int:
+        """
+        Build and persist detector contribution timeline from score frame.
+        """
+        if not fusion_weights:
+            return 0
+        try:
+            contrib_df = build_contribution_timeline(frame, fusion_weights)
+            if not self._is_non_empty_dataframe(contrib_df):
+                return 0
+            return self.write_contribution_timeline(contrib_df)
+        except Exception as e:
+            Console.warn(
+                f"Contribution timeline write failed: {e}",
+                component="CONTRIB",
+                equip=equip,
+                error=str(e)[:200],
+            )
+            return 0
     
     def write_regime_promotion_log(self, promotions: List[Dict[str, Any]]) -> int:
         """Write regime maturity promotions to ACM_RegimePromotionLog.
@@ -2666,7 +2713,7 @@ class OutputManager:
         Args:
             promotions: List of dicts with RegimeLabel, FromState, ToState, Reason, etc.
         """
-        if not self._check_sql_health() or not promotions:
+        if not self._can_write_payload(promotions):
             return 0
         try:
             df = pd.DataFrame(promotions)
@@ -2762,7 +2809,7 @@ class OutputManager:
         Returns:
             Number of records written (0 if failed or disabled)
         """
-        if not self._check_sql_health() or not tuning_diagnostics:
+        if not self._can_write_payload(tuning_diagnostics):
             return 0
             
         try:
@@ -2789,9 +2836,6 @@ class OutputManager:
                 return 0
             
             # SQL mode: Write to ACM_RunMetrics in EAV format
-            if not self.sql_client:
-                return 0
-                
             timestamp_now = pd.Timestamp.now()
             insert_records = [
                 (self.run_id, int(self.equip_id), f"fusion.weight.{row['detector_name']}", 
@@ -3014,7 +3058,7 @@ class OutputManager:
         Args:
             controller_state: Dict with ControllerState, Threshold, Sensitivity, etc.
         """
-        if not self._check_sql_health() or not controller_state:
+        if not self._can_write_payload(controller_state):
             return 0
         try:
             row = dict(controller_state)
@@ -3032,7 +3076,7 @@ class OutputManager:
             regime_defs: List of dicts with RegimeID, RegimeName, CentroidJSON, etc.
             version: Regime model version number
         """
-        if not self._check_sql_health() or not regime_defs:
+        if not self._can_write_payload(regime_defs):
             return 0
         try:
             df = pd.DataFrame(regime_defs)
@@ -3052,7 +3096,7 @@ class OutputManager:
         
         Note: ACM_ActiveModels has EquipID only (no RunID), so we delete by EquipID before insert.
         """
-        if not self._check_sql_health() or not model_state:
+        if not self._can_write_payload(model_state):
             return 0
         try:
             row = dict(model_state)
@@ -3081,7 +3125,7 @@ class OutputManager:
         Args:
             validation_result: Dict with Passed, RowsValidated, ColumnsValidated, IssuesJSON, etc.
         """
-        if not self._check_sql_health() or not validation_result:
+        if not self._can_write_payload(validation_result):
             return 0
         try:
             row = dict(validation_result)
@@ -3099,7 +3143,7 @@ class OutputManager:
         Args:
             patterns: List of dicts with SensorName, PatternType, PeriodHours, Amplitude, etc.
         """
-        if not self._check_sql_health() or not patterns:
+        if not self._can_write_payload(patterns):
             return 0
         try:
             df = pd.DataFrame(patterns)
