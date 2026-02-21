@@ -2255,6 +2255,35 @@ class OutputManager:
         except Exception as e:
             Console.warn(f"write_detector_correlation failed: {e}", component="OUTPUT", error=str(e)[:200])
             return 0
+
+    def write_detector_correlation_from_scores(self, scores_df: pd.DataFrame) -> int:
+        """
+        Build detector correlation matrix from score frame and persist it.
+        """
+        if scores_df is None or scores_df.empty:
+            return 0
+        try:
+            z_cols = [c for c in scores_df.columns if c.endswith("_z") and c not in ["drift_z"]]
+            if len(z_cols) < 2:
+                return 0
+
+            z_df = scores_df[z_cols].dropna(how="all")
+            if len(z_df) <= 10:
+                return 0
+
+            z_variances = z_df.var()
+            z_cols_with_variance = z_variances[z_variances > 1e-10].index.tolist()
+            if len(z_cols_with_variance) < 2:
+                return 0
+
+            corr_matrix = z_df[z_cols_with_variance].corr(method="pearson")
+            det_corr = {
+                d1: {d2: corr_matrix.loc[d1, d2] for d2 in corr_matrix.columns}
+                for d1 in corr_matrix.index
+            }
+            return self.write_detector_correlation(det_corr)
+        except Exception:
+            return 0  # Optional artifact write
     
     def write_drift_series(self, drift_df: pd.DataFrame) -> int:
         """Write drift detection time series to ACM_DriftSeries.
@@ -2455,6 +2484,30 @@ class OutputManager:
         except Exception as e:
             Console.warn(f"write_sensor_correlations failed: {e}", component="OUTPUT", error=str(e)[:200])
             return 0
+
+    def write_sensor_correlations_from_raw(self, raw_score: Optional[pd.DataFrame]) -> int:
+        """
+        Build sensor correlation matrix from raw sensor frame and persist it.
+        """
+        if raw_score is None or not hasattr(raw_score, "corr") or raw_score.shape[1] < 2:
+            return 0
+        try:
+            sensor_cols = [
+                c for c in raw_score.columns
+                if raw_score[c].dtype in ["float64", "float32", "int64", "int32"]
+            ]
+            if len(sensor_cols) < 2:
+                return 0
+
+            sensor_variances = raw_score[sensor_cols].var()
+            sensor_cols_with_variance = sensor_variances[sensor_variances > 1e-10].index.tolist()
+            if len(sensor_cols_with_variance) < 2:
+                return 0
+
+            sensor_corr = raw_score[sensor_cols_with_variance].corr(method="pearson")
+            return self.write_sensor_correlations(sensor_corr, corr_type="pearson")
+        except Exception:
+            return 0  # Optional artifact write
     
     def write_feature_drop_log(self, dropped_features: List[Dict[str, Any]]) -> int:
         """Write dropped features log to ACM_FeatureDropLog.
@@ -3008,6 +3061,67 @@ class OutputManager:
             return self.write_table('ACM_SeasonalPatterns', df, delete_existing=True)
         except Exception as e:
             Console.warn(f"write_seasonal_patterns failed: {e}", component="OUTPUT", error=str(e)[:200])
+            return 0
+
+    def write_sensor_normalized_ts_from_raw(self, raw_score: Optional[pd.DataFrame], max_total_rows: int = 10000) -> int:
+        """
+        Sample raw sensor frame and persist normalized sensor time series rows.
+        """
+        if raw_score is None or len(raw_score) == 0:
+            return 0
+        try:
+            sensor_cols = [
+                c for c in raw_score.columns
+                if raw_score[c].dtype in ["float64", "float32", "int64", "int32"]
+            ]
+            if not sensor_cols:
+                return 0
+
+            max_timestamps = max(100, int(max_total_rows) // len(sensor_cols))
+            sample_frame = raw_score
+            if len(raw_score) > max_timestamps:
+                step = max(1, len(raw_score) // max_timestamps)
+                sample_frame = raw_score.iloc[::step]
+
+            return self.write_sensor_normalized_ts(sample_frame, sensor_cols)
+        except Exception as e:
+            Console.warn(
+                f"Sensor normalized TS write failed: {e}",
+                component="PERSIST",
+                error_type=type(e).__name__,
+                error=str(e)[:200],
+            )
+            return 0
+
+    def write_seasonal_patterns_from_detected(self, seasonal_patterns: Optional[Dict[str, List[Any]]]) -> int:
+        """
+        Flatten detected seasonal patterns and persist them to SQL.
+        """
+        if not seasonal_patterns:
+            return 0
+        try:
+            pattern_list: List[Dict[str, Any]] = []
+            for sensor_name, patterns in seasonal_patterns.items():
+                for pattern in patterns:
+                    pattern_dict = pattern.to_dict()
+                    pattern_dict["SensorName"] = sensor_name
+                    pattern_dict["PatternType"] = pattern_dict.pop("period_type", "DAILY")
+                    pattern_dict["PeriodHours"] = pattern_dict.pop("period_hours", 24.0)
+                    pattern_dict["Amplitude"] = pattern_dict.pop("amplitude", 0.0)
+                    pattern_dict["PhaseShift"] = pattern_dict.pop("phase_shift", 0.0)
+                    pattern_dict["Confidence"] = pattern_dict.pop("confidence", 0.5)
+                    pattern_dict.pop("sensor", None)
+                    pattern_list.append(pattern_dict)
+            if not pattern_list:
+                return 0
+            return self.write_seasonal_patterns(pattern_list)
+        except Exception as e:
+            Console.warn(
+                f"Seasonal patterns write failed: {e}",
+                component="PERSIST",
+                error_type=type(e).__name__,
+                error=str(e)[:200],
+            )
             return 0
     
     

@@ -18,6 +18,41 @@ import pandas as pd
 from core.observability import Console
 
 
+def classify_noop_reason(
+    train: Optional[pd.DataFrame],
+    score: Optional[pd.DataFrame],
+    meta: Optional[Any] = None,
+    coldstart_complete: Optional[bool] = None,
+) -> str:
+    """
+    Deterministic NOOP classification used by the ACM pipeline.
+
+    Priority:
+    1) Explicit reason from meta.noop_reason / meta['noop_reason']
+    2) Fallback inference from train/score and coldstart_complete
+    """
+    if meta is not None:
+        try:
+            if isinstance(meta, dict):
+                reason = str(meta.get("noop_reason", "")).strip()
+            else:
+                reason = str(getattr(meta, "noop_reason", "")).strip()
+            if reason:
+                return reason
+        except Exception:
+            pass
+
+    if train is None or score is None:
+        if coldstart_complete is False:
+            return "COLDSTART_DEFERRED"
+        return "SCORING_NO_DATA"
+
+    if hasattr(score, "__len__") and len(score) == 0:
+        return "SCORING_NO_DATA"
+
+    return "UNKNOWN_NOOP"
+
+
 class ColdstartState:
     """Represents the current coldstart state for an equipment."""
     

@@ -6,6 +6,81 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [11.16.0] - 2026-02-21
+
+### Changed - SINGLE ENTRYPOINT REFACTOR CUT INTEGRATION BRANCH
+
+#### Entrypoint Consolidation (core/acm.py, core/acm_main.py, scripts/sql_batch_runner.py)
+- `core/acm.py` is now the active operational runtime surface and carries the full orchestrator path.
+- `core/acm_main.py` has been removed from the active runtime code path in this refactor stream.
+- Batch automation paths are aligned to `python -m core.acm`.
+- CLI parser ownership is centralized through `build_arg_parser()` in `core/acm.py`.
+- Added `run_pipeline(args: argparse.Namespace)` adapter for parsed-namespace execution flow.
+
+#### Function-Owned Extraction from Monolith (core/acm.py plus owner modules)
+- Moved NOOP reason classification into `core/smart_coldstart.py`:
+  - `classify_noop_reason(...)`
+- Moved pipeline feature wrapper into `core/fast_features.py`:
+  - `build_features_for_pipeline(...)`
+- Added SQL/bootstrap ownership helpers in `core/sql_client.py`:
+  - `connect_acm_sql(...)`
+  - `resolve_equipment_id_required(...)`
+  - `load_config_required_from_sql(...)`
+  - `start_acm_run(...)`
+- Added retrain trigger evaluation helper in `core/model_evaluation.py`:
+  - `evaluate_force_retrain_triggers(...)`
+- Added drift state helpers in `core/drift.py`:
+  - `load_previous_drift_mode(...)`
+  - `build_drift_controller_state(...)`
+- Added calibration payload builders in `core/fuse.py`:
+  - `build_per_regime_threshold_rows(...)`
+  - `build_threshold_rows(...)`
+  - `build_calibration_summary_rows(...)`
+- Added regime persistence payload helpers in `core/regimes.py`:
+  - `write_regime_occupancy_and_transitions(...)`
+  - `write_regime_definitions_for_audit(...)`
+- Added sensor analytics helpers in `core/sensor_attribution.py`:
+  - `build_sensor_analytics_context(...)`
+  - `persist_contribution_timeline(...)`
+
+#### Run Summary and Finalization Extraction (core/run_metadata_writer.py, core/observability.py, core/acm.py)
+- Added run-summary helper in `core/run_metadata_writer.py`:
+  - `emit_batch_summary(...)`
+- Added run-finalization helper in `core/run_metadata_writer.py`:
+  - `finalize_run_with_metadata(...)`
+- Refactored `extract_data_quality_score(...)` to strict SQL-query path with clear defaults.
+- Added observability closeout helpers in `core/observability.py`:
+  - `close_run_span(...)`
+  - `shutdown_run_observability(...)`
+- `core/acm.py` now calls these helpers from `finally` to reduce duplicated finalization code.
+
+#### OutputManager Convenience Writers (core/output_manager.py)
+- Added wrapper writers to keep orchestration cleaner while preserving SQL semantics:
+  - `write_detector_correlation_from_scores(...)`
+  - `write_sensor_correlations_from_raw(...)`
+  - `write_sensor_normalized_ts_from_raw(...)`
+  - `write_seasonal_patterns_from_detected(...)`
+
+### Changed - DOCUMENTATION AND OPERATIONAL GUIDANCE
+
+#### Active Docs Updated
+- Updated operational entrypoint references to `python -m core.acm` in:
+  - `docs/ACM_SYSTEM_OVERVIEW.md`
+  - `docs/QUICK_TEST_GUIDE.md`
+  - `docs/SOURCE_CONTROL_PRACTICES.md`
+- Added and maintained active refactor execution plan:
+  - `docs/ACM_SINGLE_ENTRYPOINT_REFACTOR_MASTER_PLAN.md`
+- Added superseded marker document:
+  - `docs/ACM Main Refactoring Analysis - Action.md`
+
+### Notes
+- This integration change set is structural and ownership-focused.
+- Target behavior remains unchanged by design:
+  - run outcomes (`OK`, `DEGRADED`, `NOOP`, `FAIL`)
+  - SQL run lifecycle semantics
+  - detector, regime, fusion, and drift analytical behavior
+- Forecasting remains disabled in this stream.
+
 ## [11.15.5] - 2026-02-20
 
 ### Fixed - DRIFT HYSTERESIS STATE CONTINUITY
@@ -438,7 +513,7 @@ Using detector z-scores in regime clustering created a CIRCULAR DEPENDENCY:
     :r scripts/sql/patches/2025-11-19_migrate_runlog_runid_to_uniqueidentifier.sql
     :r scripts/sql/20_stored_procs.sql   -- (optional redeploy to ensure latest SP signature)
     ```
-    Then rerun: `python -m core.acm_main --equip FD_FAN`.
+    Then rerun: `python -m core.acm --equip FD_FAN`.
   - **Impact**: Start-run succeeds; RunID values become stable GUIDs across related tables; resolves coldstart blocking error.
   - **Data Safety**: Legacy bigint RunIDs preserved in `RunID_bigint_backup` column for audit; can be dropped later (backlog item SQL-60).
   - **Follow-up**: Add runtime schema check to log actionable warning when detected mismatch instead of hard failure (BACKLOG: SQL-61).

@@ -14,7 +14,7 @@
 python tools/truncate_acm_tables.py
 
 # Run single batch
-python -m core.acm_main --equip FD_FAN
+python -m core.acm --equip FD_FAN
 
 # Check results
 python tools/check_counts.py
@@ -105,7 +105,7 @@ SELECT TOP 5 * FROM ACM_RUL_Summary WHERE EquipID = 1 AND Method IS NULL;
 ```powershell
 # Run all tests sequentially (30 min)
 python tools/truncate_acm_tables.py; `
-python -m core.acm_main --equip FD_FAN; `
+python -m core.acm --equip FD_FAN; `
 python scripts/sql_batch_runner.py --equip FD_FAN --tick-minutes 1440 --max-batches 100 --start-from-beginning; `
 python tools/check_counts.py
 ```

@@ -503,7 +503,9 @@ class _Config:
     pyroscope_endpoint: str = DEFAULT_PYROSCOPE_ENDPOINT
     equipment: str = ""
     equip_id: int = 0
-    run_id: str = ""
+    run_id: str = "unknown"
+    max_span_attributes: int = 32
+    max_span_attribute_value_len: int = 256
 
 _config = _Config()
 _tracer: Optional[Any] = None
@@ -545,6 +547,34 @@ def _check_endpoint_reachable(endpoint: str, timeout: float = 1.0) -> bool:
         return result == 0
     except Exception:
         return False
+
+
+def _normalize_run_id(run_id: Optional[str]) -> str:
+    """Return a non-empty run_id."""
+    if run_id is None:
+        return "unknown"
+    value = str(run_id).strip()
+    return value or "unknown"
+
+
+def _metric_attrs(
+    equipment: str = "",
+    run_id: str = "",
+    **extra: Any,
+) -> Dict[str, Any]:
+    """Build metric attributes with mandatory run_id for correlation."""
+    attrs: Dict[str, Any] = {}
+    equip_val = equipment or _config.equipment
+    if equip_val:
+        attrs["equipment"] = equip_val
+    attrs["run_id"] = run_id or _config.run_id or "unknown"
+    for key, value in extra.items():
+        if value is None:
+            continue
+        if isinstance(value, str) and not value:
+            continue
+        attrs[key] = value
+    return attrs
 
 
 # =============================================================================
@@ -599,14 +629,14 @@ def init(
         _config.loki_endpoint = loki_endpoint
         _config.equipment = equipment
         _config.equip_id = equip_id
-        _config.run_id = run_id
+        _config.run_id = _normalize_run_id(run_id)
         
         # Bind context to structlog
         structlog.contextvars.clear_contextvars()
         structlog.contextvars.bind_contextvars(
             equipment=equipment,
             equip_id=equip_id,
-            run_id=run_id,
+            run_id=_config.run_id,
         )
         
         # Collect enabled services for a single consolidated log line
@@ -614,16 +644,32 @@ def init(
 
         # Loki log pusher (native Loki API, not OTLP)
         if enable_loki:
+            loki_batch_size = int(os.getenv("ACM_LOKI_BATCH_SIZE", "100"))
+            loki_queue_maxsize = int(os.getenv("ACM_LOKI_QUEUE_MAXSIZE", "50000"))
+            loki_flush_interval_s = float(os.getenv("ACM_LOKI_FLUSH_INTERVAL_S", "5.0"))
+            loki_drop_policy = os.getenv("ACM_LOKI_DROP_POLICY", "drop_oldest").strip().lower()
+            if loki_batch_size <= 0:
+                loki_batch_size = 100
+            if loki_queue_maxsize <= 0:
+                loki_queue_maxsize = 50000
+            if loki_flush_interval_s <= 0:
+                loki_flush_interval_s = 5.0
+            if loki_drop_policy not in {"drop_oldest", "drop_newest"}:
+                loki_drop_policy = "drop_oldest"
             _loki_pusher = _LokiPusher(
                 endpoint=f"{loki_endpoint}/loki/api/v1/push",
                 labels={
                     "app": "acm",
                     "service": service_name, 
-                    "equipment": equipment or "unknown"
+                    "equipment": equipment or "unknown",
                 },
+                batch_size=loki_batch_size,
+                max_queue_size=loki_queue_maxsize,
+                flush_interval_s=loki_flush_interval_s,
+                drop_policy=loki_drop_policy,
             )
             if _loki_pusher._connected:
-                _otel_services = [f"loki={loki_endpoint}"]
+                _otel_services.append(f"loki={loki_endpoint}")
             else:
                 Console.warn(f"Loki not connected at {loki_endpoint}", component="OTEL", endpoint=loki_endpoint, service="loki")
         
@@ -645,7 +691,7 @@ def init(
                             "service_name": service_name,  # Standard Grafana label
                             "equipment": equipment or "unknown",
                             "equip_id": str(equip_id),
-                            "run_id": run_id or "unknown",
+                            "run_id": _config.run_id,
                         },
                     )
                     _pyroscope_enabled = True
@@ -766,6 +812,18 @@ def init(
                     "acm_model_refits_total",
                     description="Model refit/retrain events",
                 )
+                _metrics["loki_logs_dropped"] = _meter.create_counter(
+                    "acm_loki_logs_dropped_total",
+                    description="Loki log entries dropped due to queue pressure",
+                )
+                _metrics["loki_logs_sent"] = _meter.create_counter(
+                    "acm_loki_logs_sent_total",
+                    description="Loki log entries successfully pushed",
+                )
+                _metrics["loki_push_failures"] = _meter.create_counter(
+                    "acm_loki_push_failures_total",
+                    description="Failed Loki push attempts",
+                )
                 
                 # ===== GAUGE METRICS (current values) =====
                 _metrics["health_score"] = _meter.create_gauge(
@@ -795,6 +853,10 @@ def init(
                 _metrics["data_quality"] = _meter.create_gauge(
                     "acm_data_quality_score",
                     description="Data quality score (0-100)",
+                )
+                _metrics["loki_queue_depth"] = _meter.create_gauge(
+                    "acm_loki_queue_depth",
+                    description="Current Loki pusher queue depth",
                 )
                 
                 # ===== RESOURCE METRICS =====
@@ -975,6 +1037,37 @@ def stop_profiling() -> None:
         pass
 
 
+def close_run_span(
+    span_ctx: Optional[Any],
+    root_span: Optional[Any],
+    outcome: str,
+    rows_read: int,
+    rows_written: int,
+) -> None:
+    """Close root span for a run and attach terminal attributes."""
+    if span_ctx is None:
+        return
+    try:
+        if root_span is not None:
+            root_span.set_attribute("acm.outcome", outcome)
+            root_span.set_attribute("acm.rows_read", rows_read)
+            root_span.set_attribute("acm.rows_written", rows_written)
+        span_ctx.__exit__(None, None, None)
+    except Exception:
+        pass
+
+
+def shutdown_run_observability(enabled: bool) -> None:
+    """Stop profiling and flush observability providers."""
+    if not enabled:
+        return
+    try:
+        stop_profiling()
+        shutdown()
+    except Exception:
+        pass
+
+
 def get_trace_context() -> Dict[str, Optional[str]]:
     """Get the current trace context (trace_id and span_id).
     
@@ -1046,7 +1139,9 @@ def set_context(
     if equip_id is not None:
         _config.equip_id = equip_id
     if run_id is not None:
-        _config.run_id = run_id
+        _config.run_id = _normalize_run_id(run_id)
+    else:
+        _config.run_id = _normalize_run_id(_config.run_id)
     
     # Update structlog context.
     structlog.contextvars.bind_contextvars(
@@ -1118,8 +1213,7 @@ class Console:
             event["equipment"] = _config.equipment
         if _config.equip_id:
             event["equip_id"] = _config.equip_id
-        if _config.run_id:
-            event["run_id"] = _config.run_id
+        event["run_id"] = _normalize_run_id(_config.run_id)
         if kwargs:
             event.update(kwargs)
         return event
@@ -1417,6 +1511,54 @@ class Span:
         Phase identification is via span attributes (acm.phase), not service.name.
         """
         return _tracer
+
+    @staticmethod
+    def _sanitize_attribute_key(key: Any) -> str:
+        """Normalize custom attribute keys to a bounded OTEL-safe token."""
+        raw = str(key).strip().replace(" ", "_")
+        safe = re.sub(r"[^A-Za-z0-9_.-]", "_", raw)
+        return (safe or "attr")[:64]
+
+    @staticmethod
+    def _sanitize_attribute_value(value: Any, max_len: int) -> Any:
+        """Normalize attribute values to OTEL-compatible primitive types."""
+        if value is None:
+            return None
+        if isinstance(value, (bool, int, float)):
+            return value
+        if isinstance(value, str):
+            return value[:max_len]
+        # Preserve list-like values as list of strings for compatibility.
+        if isinstance(value, (list, tuple, set)):
+            return [str(v)[:max_len] for v in list(value)[:10]]
+        return str(value)[:max_len]
+
+    def _set_standard_attributes(self, category: str, phase: str) -> None:
+        """Set standard ACM span attributes once."""
+        if self._span is None:
+            return
+        self._span.set_attribute("acm.service", _config.service_name)
+        if _config.equipment:
+            self._span.set_attribute("acm.equipment", _config.equipment)
+        if _config.equip_id:
+            self._span.set_attribute("acm.equip_id", _config.equip_id)
+        self._span.set_attribute("acm.run_id", _normalize_run_id(_config.run_id))
+        self._span.set_attribute("acm.category", category)
+        self._span.set_attribute("acm.phase", phase)
+
+    def _set_custom_attributes(self) -> None:
+        """Set bounded caller-provided span attributes."""
+        if self._span is None or not self.attributes:
+            return
+        max_attrs = max(1, int(getattr(_config, "max_span_attributes", 32)))
+        max_len = max(32, int(getattr(_config, "max_span_attribute_value_len", 256)))
+        for idx, (key, value) in enumerate(self.attributes.items()):
+            if idx >= max_attrs:
+                self._span.set_attribute("acm.custom_attrs_truncated", True)
+                break
+            safe_key = self._sanitize_attribute_key(key)
+            safe_val = self._sanitize_attribute_value(value, max_len=max_len)
+            self._span.set_attribute(f"acm.{safe_key}", safe_val)
     
     def __enter__(self) -> "Span":
         self._start_time = time.perf_counter()
@@ -1448,20 +1590,10 @@ class Span:
             )
             self._context_token = otel_trace.use_span(self._span, end_on_exit=False)
             self._context_token.__enter__()
-            
-            # Add standard attributes
-            self._span.set_attribute("acm.service", _config.service_name)  # Always "acm-pipeline"
-            if _config.equipment:
-                self._span.set_attribute("acm.equipment", _config.equipment)
-            if _config.equip_id:
-                self._span.set_attribute("acm.equip_id", _config.equip_id)
-            if _config.run_id:
-                self._span.set_attribute("acm.run_id", _config.run_id)
-            
-            # Add span category for easier filtering
+
+            # Add span category for easier filtering.
             category = self.name.split(".")[0]
-            self._span.set_attribute("acm.category", category)
-            
+
             # Add high-level phase for grouping and COLORING in Tempo (v10.3.0)
             # Map category to broader phase groups - each phase gets a distinct color
             # Categories extracted from all T.section() calls in acm_main.py
@@ -1488,22 +1620,8 @@ class Span:
                 "finalize": "finalize", "shutdown": "finalize",
             }
             phase = phase_map.get(category, category)
-            self._span.set_attribute("acm.phase", phase)
-            
-            # v11.1.6: Removed "virtual service.name" hack - was setting different service.name
-            # per span which is semantically wrong. Use acm.phase attribute for Tempo filtering.
-            # Keep parent service reference for correlation
-            self._span.set_attribute("acm.service", _config.service_name)  # Always "acm-pipeline"
-            if _config.equipment:
-                self._span.set_attribute("acm.equipment", _config.equipment)
-            if _config.equip_id:
-                self._span.set_attribute("acm.equip_id", _config.equip_id)
-            if _config.run_id:
-                self._span.set_attribute("acm.run_id", _config.run_id)
-            
-            # Add custom attributes from caller
-            for key, value in self.attributes.items():
-                self._span.set_attribute(f"acm.{key}", value)
+            self._set_standard_attributes(category=category, phase=phase)
+            self._set_custom_attributes()
             
             # Set trace context in Pyroscope for profile-to-trace correlation
             if _pyroscope_pusher is not None:
@@ -1540,29 +1658,27 @@ class Span:
         
         # Get context for metrics
         equipment = _config.equipment or "unknown"
-        run_id = _config.run_id or ""
+        run_id = _normalize_run_id(_config.run_id)
         parts = self.name.split(".")
         parent = parts[0] if parts else self.name
         
         # Record stage duration metric
         if _meter and "stage_duration" in _metrics:
-            attrs = {
-                "stage": self.name,  # Full hierarchical name
-                "parent": parent,     # Top-level category
-                "equipment": equipment
-            }
-            if run_id:
-                attrs["run_id"] = run_id
+            attrs = _metric_attrs(
+                equipment=equipment,
+                run_id=run_id,
+                stage=self.name,  # Full hierarchical name
+                parent=parent,    # Top-level category
+            )
             _metrics["stage_duration"].record(elapsed, attrs)
         
         # Record resource metrics (memory per module per equipment per run)
         if self.track_resources and _meter:
-            resource_attrs = {
-                "section": self.name,
-                "equipment": equipment
-            }
-            if run_id:
-                resource_attrs["run_id"] = run_id
+            resource_attrs = _metric_attrs(
+                equipment=equipment,
+                run_id=run_id,
+                section=self.name,
+            )
             
             # Memory at end of section
             if "memory_rss_mb" in _metrics:
@@ -1614,7 +1730,10 @@ class Span:
     def set_attribute(self, key: str, value: Any) -> None:
         """Add attribute to current span."""
         if self._span is not None:
-            self._span.set_attribute(key, value)
+            safe_key = key if key.startswith("acm.") else f"acm.{self._sanitize_attribute_key(key)}"
+            max_len = max(32, int(getattr(_config, "max_span_attribute_value_len", 256)))
+            safe_val = self._sanitize_attribute_value(value, max_len=max_len)
+            self._span.set_attribute(safe_key, safe_val)
 
 
 def traced(name: str, track_resources: bool = True):
@@ -1658,10 +1777,8 @@ def record_run(equipment: str, outcome: str, duration_s: float) -> None:
 
 def record_batch_processed(equipment: str, rows: int = 0, duration_seconds: float = 0.0, **kwargs) -> None:
     """Record batch rows processed."""
-    if _meter and "rows_processed" in _metrics:
-        _metrics["rows_processed"].add(rows, {"equipment": equipment})
-    if _loki_pusher:
-        _loki_pusher.log("info", f"Batch processed: {rows} rows in {duration_seconds:.1f}s", equipment=equipment, rows=rows, duration_seconds=duration_seconds)
+    # Preserve backward-compatible API while using canonical batch metrics path.
+    record_batch(equipment, rows=rows, duration_s=duration_seconds)
 
 
 def record_health(equipment: str, health: float) -> None:
@@ -1808,20 +1925,16 @@ def record_memory(current_mb: float, peak_mb: float = 0.0,
     """
     # Get run_id from context if not provided
     if not run_id:
-        run_id = _config.run_id or ""
+        run_id = _normalize_run_id(_config.run_id)
+    else:
+        run_id = _normalize_run_id(run_id)
     
     if _meter:
         if "memory_rss_mb" in _metrics:
-            attrs = {"equipment": equipment}
-            if section:
-                attrs["section"] = section
-            if run_id:
-                attrs["run_id"] = run_id
+            attrs = _metric_attrs(equipment=equipment, run_id=run_id, section=section or None)
             _metrics["memory_rss_mb"].set(current_mb, attrs)
         if "memory_peak_mb" in _metrics and peak_mb > 0:
-            peak_attrs = {"equipment": equipment}
-            if run_id:
-                peak_attrs["run_id"] = run_id
+            peak_attrs = _metric_attrs(equipment=equipment, run_id=run_id)
             _metrics["memory_peak_mb"].set(peak_mb, peak_attrs)
     
     # Log to Loki with structured data only (no console spam)
@@ -1886,12 +1999,12 @@ def record_section_resources(section: str, duration_s: float,
     """
     # Get run_id from context if not provided
     if not run_id:
-        run_id = _config.run_id or ""
+        run_id = _normalize_run_id(_config.run_id)
+    else:
+        run_id = _normalize_run_id(run_id)
     
     if _meter:
-        attrs = {"equipment": equipment, "section": section}
-        if run_id:
-            attrs["run_id"] = run_id
+        attrs = _metric_attrs(equipment=equipment, run_id=run_id, section=section)
         
         if "section_duration" in _metrics:
             _metrics["section_duration"].record(duration_s, attrs)
@@ -1900,9 +2013,7 @@ def record_section_resources(section: str, duration_s: float,
             _metrics["memory_delta_mb"].set(mem_delta_mb, attrs)
         
         if "memory_rss_mb" in _metrics:
-            mem_attrs = {"equipment": equipment, "section": section}
-            if run_id:
-                mem_attrs["run_id"] = run_id
+            mem_attrs = _metric_attrs(equipment=equipment, run_id=run_id, section=section)
             _metrics["memory_rss_mb"].set(mem_end_mb, mem_attrs)
         
         if "cpu_percent" in _metrics and cpu_avg_pct > 0:
@@ -2141,16 +2252,46 @@ class _LokiPusher:
         - On 429 (rate limit), backs off with exponential delay
     """
     
-    def __init__(self, endpoint: str, labels: Dict[str, str], batch_size: int = 100):
+    def __init__(
+        self,
+        endpoint: str,
+        labels: Dict[str, str],
+        batch_size: int = 100,
+        max_queue_size: int = 50000,
+        flush_interval_s: float = 5.0,
+        drop_policy: str = "drop_oldest",
+        max_context_keys: int = 32,
+        max_context_value_len: int = 512,
+        max_line_chars: int = 4096,
+    ):
         self._endpoint = endpoint
         self._base_labels = labels  # Static labels: app, service, equipment
-        self._batch_size = batch_size
-        self._queue: queue.Queue = queue.Queue()
+        self._batch_size = max(1, batch_size)
+        self._max_queue_size = max(1, max_queue_size)
+        self._flush_interval_s = max(0.5, flush_interval_s)
+        self._drop_policy = drop_policy if drop_policy in {"drop_oldest", "drop_newest"} else "drop_oldest"
+        self._max_context_keys = max(1, max_context_keys)
+        self._max_context_value_len = max(32, max_context_value_len)
+        self._max_line_chars = max(256, max_line_chars)
+
+        self._queue: queue.Queue = queue.Queue(maxsize=self._max_queue_size)
+        self._retry_batch: List[tuple[str, Dict[str, str], str]] = []
+        self._retry_lock = threading.Lock()
+        self._stats_lock = threading.Lock()
+        self._stats: Dict[str, int] = {
+            "enqueued": 0,
+            "sent": 0,
+            "dropped": 0,
+            "push_failures": 0,
+        }
         self._stop = threading.Event()
         self._connected = False
         self._backoff_until = 0.0  # Timestamp until which we should back off
         self._consecutive_failures = 0
-        
+        self._last_health_report_ts = 0.0
+        self._health_report_interval_s = 30.0
+        self._last_drop_warn_ts = 0.0
+
         # Test connection
         try:
             req = urllib.request.Request(
@@ -2161,11 +2302,149 @@ class _LokiPusher:
                 self._connected = resp.status == 200
         except Exception:
             self._connected = False
-        
+
         if self._connected:
             # Background flush thread
             self._thread = threading.Thread(target=self._flush_loop, daemon=True)
             self._thread.start()
+
+    def _internal_log(self, message: str) -> None:
+        """Console-only internal diagnostics with standard rendering (no Loki push)."""
+        try:
+            raw_event = Console._build_event_dict("debug", message, component="LOKI")
+            event = _process_event_with_structlog(raw_event)
+            print(_render_console_with_structlog(event), flush=True)
+        except Exception:
+            try:
+                print(f"[LOKI] {message}", flush=True)
+            except Exception:
+                pass
+
+    def _metric_attrs(self) -> Dict[str, str]:
+        return {
+            "equipment": _config.equipment or "unknown",
+            "run_id": _normalize_run_id(_config.run_id),
+        }
+
+    def _record_counter_metric(self, metric_key: str, value: int, **attrs: str) -> None:
+        if _meter and metric_key in _metrics:
+            metric_attrs = self._metric_attrs()
+            metric_attrs.update(attrs)
+            try:
+                _metrics[metric_key].add(value, metric_attrs)
+            except Exception:
+                pass
+
+    def _record_gauge_metric(self, metric_key: str, value: int, **attrs: str) -> None:
+        if _meter and metric_key in _metrics:
+            metric_attrs = self._metric_attrs()
+            metric_attrs.update(attrs)
+            try:
+                _metrics[metric_key].set(value, metric_attrs)
+            except Exception:
+                pass
+
+    def _update_queue_depth_metric(self) -> None:
+        depth = self._queue.qsize()
+        with self._retry_lock:
+            depth += len(self._retry_batch)
+        self._record_gauge_metric("loki_queue_depth", depth)
+
+    def _inc_stat(self, key: str, delta: int = 1) -> None:
+        with self._stats_lock:
+            self._stats[key] = self._stats.get(key, 0) + delta
+
+    def _snapshot_stats(self) -> Dict[str, int]:
+        with self._stats_lock:
+            return dict(self._stats)
+
+    def _sanitize_context_value(self, value: Any) -> Any:
+        """Convert arbitrary context values to bounded, JSON-safe values."""
+        if value is None:
+            return None
+        if isinstance(value, (bool, int, float)):
+            return value
+        if isinstance(value, str):
+            return value[:self._max_context_value_len]
+        if isinstance(value, (list, tuple, set)):
+            out: List[Any] = []
+            for item in list(value)[:10]:
+                out.append(self._sanitize_context_value(item))
+            return out
+        if isinstance(value, dict):
+            out_dict: Dict[str, Any] = {}
+            for idx, (k, v) in enumerate(value.items()):
+                if idx >= 10:
+                    out_dict["_truncated"] = True
+                    break
+                out_dict[str(k)[:64]] = self._sanitize_context_value(v)
+            return out_dict
+
+        iso = getattr(value, "isoformat", None)
+        if callable(iso):
+            try:
+                return str(iso())[:self._max_context_value_len]
+            except Exception:
+                pass
+        return str(value)[:self._max_context_value_len]
+
+    def _build_log_line(self, message: str, context: Dict[str, Any]) -> str:
+        """Build Loki line payload preserving structured context without label explosion."""
+        clean_context: Dict[str, Any] = {}
+        for idx, (key, value) in enumerate(context.items()):
+            if idx >= self._max_context_keys:
+                clean_context["_truncated_keys"] = True
+                break
+            safe_key = str(key)[:64]
+            clean_context[safe_key] = self._sanitize_context_value(value)
+
+        payload: Dict[str, Any] = {"event": str(message)}
+        if clean_context:
+            payload["context"] = clean_context
+
+        line = json.dumps(payload, separators=(",", ":"), default=str)
+        if len(line) > self._max_line_chars and clean_context:
+            payload["context"] = {
+                "_truncated": True,
+                "keys": list(clean_context.keys())[:8],
+            }
+            line = json.dumps(payload, separators=(",", ":"), default=str)
+        if len(line) > self._max_line_chars:
+            line = line[: self._max_line_chars - 3] + "..."
+        return line
+
+    def _enqueue_entry(self, entry: tuple[str, Dict[str, str], str], level: str) -> None:
+        """Queue one Loki line with bounded-memory policy."""
+        try:
+            self._queue.put_nowait(entry)
+            self._inc_stat("enqueued", 1)
+        except queue.Full:
+            if self._drop_policy == "drop_oldest":
+                try:
+                    self._queue.get_nowait()
+                    self._inc_stat("dropped", 1)
+                    self._record_counter_metric("loki_logs_dropped", 1, reason="drop_oldest", level=level)
+                except queue.Empty:
+                    pass
+                try:
+                    self._queue.put_nowait(entry)
+                    self._inc_stat("enqueued", 1)
+                except queue.Full:
+                    self._inc_stat("dropped", 1)
+                    self._record_counter_metric("loki_logs_dropped", 1, reason="drop_newest", level=level)
+            else:
+                self._inc_stat("dropped", 1)
+                self._record_counter_metric("loki_logs_dropped", 1, reason="drop_newest", level=level)
+
+            now = time.time()
+            if now - self._last_drop_warn_ts >= 10.0:
+                self._last_drop_warn_ts = now
+                self._internal_log(
+                    f"queue pressure: dropped={self._snapshot_stats().get('dropped', 0)} "
+                    f"queue={self._queue.qsize()}/{self._max_queue_size} policy={self._drop_policy}"
+                )
+        finally:
+            self._update_queue_depth_metric()
     
     def log(self, level: str, message: str, component: Optional[str] = None, **context) -> None:
         """Queue a structured log record for Loki.
@@ -2227,11 +2506,12 @@ class _LokiPusher:
             labels["section"] = str(context.pop("section"))
         if context.get("parent"):
             labels["parent"] = str(context.pop("parent"))
-        if _config.run_id:
-            labels["run_id"] = _config.run_id
-        
-        # Queue the entry: (timestamp, labels_dict, message)
-        self._queue.put((ts_ns, labels, message))
+        context_run_id = context.pop("run_id", None)
+        labels["run_id"] = _normalize_run_id(context_run_id or _config.run_id)
+
+        line = self._build_log_line(message, context)
+        # Queue the entry: (timestamp, labels_dict, message_line)
+        self._enqueue_entry((ts_ns, labels, line), level=level)
     
     def _flush_loop(self) -> None:
         """Background thread that flushes logs to Loki with rate limiting."""
@@ -2240,14 +2520,15 @@ class _LokiPusher:
             now = time.time()
             if now < self._backoff_until:
                 # Still in backoff - wait
-                time.sleep(min(1.0, self._backoff_until - now))
+                self._stop.wait(min(1.0, self._backoff_until - now))
                 continue
-            
+
             self._flush_batch()
-            time.sleep(5.0)  # Flush every 5 seconds (not 2)
-        self._flush_batch()  # Final flush
+            self._maybe_report_health()
+            self._stop.wait(self._flush_interval_s)
+        self._flush_batch(force=True)  # Final flush attempt
     
-    def _flush_batch(self) -> None:
+    def _flush_batch(self, force: bool = False) -> None:
         """Flush queued logs to Loki.
         
         Since each log can have different labels (level, component), we need to
@@ -2262,14 +2543,24 @@ class _LokiPusher:
             ]
         }
         """
-        batch = []
+        # Respect backoff unless forced (shutdown drain).
+        if not force and time.time() < self._backoff_until:
+            return
+
+        batch: List[tuple[str, Dict[str, str], str]] = []
+        with self._retry_lock:
+            if self._retry_batch:
+                take = min(self._batch_size, len(self._retry_batch))
+                batch.extend(self._retry_batch[:take])
+                self._retry_batch = self._retry_batch[take:]
         while len(batch) < self._batch_size:
             try:
                 batch.append(self._queue.get_nowait())
             except queue.Empty:
                 break
-        
+
         if not batch:
+            self._update_queue_depth_metric()
             return
         
         # Group by label set (convert dict to frozenset for hashing)
@@ -2289,7 +2580,31 @@ class _LokiPusher:
                 "values": stream_data["values"]
             })
         payload = {"streams": streams_list}
-        
+
+        ok, reason = self._push_payload(payload)
+        if ok:
+            sent_count = len(batch)
+            self._inc_stat("sent", sent_count)
+            self._record_counter_metric("loki_logs_sent", sent_count)
+        else:
+            # Preserve batch for retry instead of dropping.
+            with self._retry_lock:
+                self._retry_batch = batch + self._retry_batch
+                # Cap retry buffer to avoid unbounded memory during prolonged outages.
+                max_retry = self._batch_size * 20
+                if len(self._retry_batch) > max_retry:
+                    overflow = len(self._retry_batch) - max_retry
+                    self._retry_batch = self._retry_batch[:max_retry]
+                    self._inc_stat("dropped", overflow)
+                    self._record_counter_metric("loki_logs_dropped", overflow, reason="retry_overflow", level="error")
+            self._inc_stat("push_failures", 1)
+            self._record_counter_metric("loki_push_failures", 1, reason=reason)
+            if reason != "rate_limited":
+                self._internal_log(f"push failed ({reason}); queued for retry")
+        self._update_queue_depth_metric()
+
+    def _push_payload(self, payload: Dict[str, Any]) -> tuple[bool, str]:
+        """Push payload to Loki and return (success, reason)."""
         try:
             data = json.dumps(payload).encode("utf-8")
             req = urllib.request.Request(
@@ -2298,35 +2613,93 @@ class _LokiPusher:
                 headers={"Content-Type": "application/json"},
                 method="POST"
             )
-            with urllib.request.urlopen(req, timeout=5) as resp:
-                # Success - reset backoff
+            with urllib.request.urlopen(req, timeout=5):
+                # Success - reset backoff.
                 self._consecutive_failures = 0
                 self._backoff_until = 0.0
+                return True, "ok"
         except urllib.error.HTTPError as e:
             if e.code == 429:
-                # Rate limited - exponential backoff
+                # Rate limited - exponential backoff.
                 self._consecutive_failures += 1
                 backoff_secs = min(60.0, 2.0 ** self._consecutive_failures)
                 self._backoff_until = time.time() + backoff_secs
-                # Only log first occurrence
-                if self._consecutive_failures == 1:
-                    print(f"[LOKI] Rate limited (429), backing off {backoff_secs:.0f}s")
-            elif not hasattr(self, '_http_error_logged'):
-                # Log other HTTP errors once (don't spam)
-                print(f"[LOKI] Push failed: {e.code} {e.reason}")
-                self._http_error_logged = True
+                self._internal_log(f"rate limited (429), backing off {backoff_secs:.0f}s")
+                return False, "rate_limited"
+            # Other HTTP errors (e.g., 5xx) should also back off to avoid hammering.
+            self._consecutive_failures += 1
+            backoff_secs = min(60.0, 2.0 ** self._consecutive_failures)
+            self._backoff_until = time.time() + backoff_secs
+            self._internal_log(f"http error {e.code}, backing off {backoff_secs:.0f}s")
+            return False, f"http_{e.code}"
+        except urllib.error.URLError:
+            self._consecutive_failures += 1
+            backoff_secs = min(60.0, 2.0 ** self._consecutive_failures)
+            self._backoff_until = time.time() + backoff_secs
+            return False, "url_error"
         except Exception:
-            pass  # Don't crash on other failures
+            self._consecutive_failures += 1
+            backoff_secs = min(60.0, 2.0 ** self._consecutive_failures)
+            self._backoff_until = time.time() + backoff_secs
+            return False, "exception"
+
+    def _maybe_report_health(self, force: bool = False) -> None:
+        """Emit periodic internal health summary for visibility under pressure."""
+        now = time.time()
+        if not force and now - self._last_health_report_ts < self._health_report_interval_s:
+            return
+        self._last_health_report_ts = now
+        stats = self._snapshot_stats()
+        retry_depth = 0
+        with self._retry_lock:
+            retry_depth = len(self._retry_batch)
+        queue_depth = self._queue.qsize()
+        backoff_remaining = max(0.0, self._backoff_until - now)
+        if force or stats["dropped"] > 0 or stats["push_failures"] > 0 or retry_depth > 0:
+            self._internal_log(
+                f"health sent={stats['sent']} enqueued={stats['enqueued']} dropped={stats['dropped']} "
+                f"failures={stats['push_failures']} queue={queue_depth}/{self._max_queue_size} "
+                f"retry={retry_depth} backoff_s={backoff_remaining:.1f}"
+            )
     
     def _flush_all(self) -> None:
         """Drain the queue completely."""
-        while True:
+        stalled = 0
+        while stalled < 5:
             try:
-                self._flush_batch()
-                if self._queue.empty():
+                with self._retry_lock:
+                    retry_len_before = len(self._retry_batch)
+                queue_before = self._queue.qsize()
+                if retry_len_before == 0 and queue_before == 0:
                     break
+                self._flush_batch(force=True)
+                with self._retry_lock:
+                    retry_len_after = len(self._retry_batch)
+                queue_after = self._queue.qsize()
+                if retry_len_after >= retry_len_before and queue_after >= queue_before:
+                    stalled += 1
+                else:
+                    stalled = 0
             except Exception:
                 break
+        # Any residue after bounded drain attempts is explicit shutdown loss.
+        with self._retry_lock:
+            remaining_retry = len(self._retry_batch)
+            if remaining_retry:
+                self._retry_batch = []
+        remaining_queue = self._queue.qsize()
+        remaining_total = remaining_retry + remaining_queue
+        if remaining_total > 0:
+            for _ in range(remaining_queue):
+                try:
+                    self._queue.get_nowait()
+                except queue.Empty:
+                    break
+            self._inc_stat("dropped", remaining_total)
+            self._record_counter_metric("loki_logs_dropped", remaining_total, reason="shutdown_unsent", level="error")
+            self._internal_log(f"shutdown drop: {remaining_total} unsent log(s) discarded")
+        self._update_queue_depth_metric()
+        self._maybe_report_health(force=True)
     
     def close(self) -> None:
         """Stop background thread and flush remaining logs."""
@@ -2654,6 +3027,7 @@ class _PyroscopePusher:
             'yappi', 'tracemalloc', '_yappi', 'threading_bootstrap',
             'weakrefset', '_weakrefset', 'profile_thread_callback',
         }
+        APP_HINTS = ("/core/", "\\core\\", "/scripts/", "\\scripts\\")
 
         try:
             stats = snapshot.statistics('traceback')
@@ -2713,7 +3087,14 @@ class _PyroscopePusher:
                     component="PROFILE",
                     skip_loki=True,
                 )
-        except Exception:
+        except Exception as e:
+            Console.warn(
+                f"Failed to render top memory allocations: {e}",
+                component="PROFILE",
+                error_type=type(e).__name__,
+                error=str(e)[:200],
+                skip_loki=True,
+            )
             return
     
     def _stats_to_collapsed(self, stats) -> List[str]:
@@ -2901,6 +3282,8 @@ __all__ = [
     "log_timer",
     "start_profiling",
     "stop_profiling",
+    "close_run_span",
+    "shutdown_run_observability",
     "profile_section",
     "get_tracer",
     "get_meter",

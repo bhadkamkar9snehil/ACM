@@ -1363,7 +1363,7 @@ python scripts/sql_batch_runner.py \
 ### 14.4 Testing: acm_main.py
 
 ```powershell
-python -m core.acm_main \
+python -m core.acm \
     --equip FD_FAN \
     --start-time "2024-01-01T00:00:00" \
     --end-time "2024-01-31T23:59:59"
@@ -1488,7 +1488,7 @@ sqlcmd -S "server\instance" -d ACM -E -Q "SELECT RegimeLabel, COUNT(*) AS N FROM
 
 ```powershell
 # Force retrain all detectors
-python -m core.acm_main --equip FD_FAN --clear-cache
+python -m core.acm --equip FD_FAN --clear-cache
 
 # Reset coldstart state for equipment
 sqlcmd -S "server\instance" -d ACM -E -Q "DELETE FROM ACM_ColdstartState WHERE EquipID = 1"

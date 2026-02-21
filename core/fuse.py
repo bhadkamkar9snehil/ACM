@@ -1293,6 +1293,84 @@ class ScoreCalibrator:
         return z_clipped, z_raw
 
 
+def build_per_regime_threshold_rows(
+    calibrators: List[Tuple[str, "ScoreCalibrator"]],
+) -> List[Dict[str, Any]]:
+    """
+    Build per-regime threshold transparency rows from fitted calibrators.
+    """
+    rows: List[Dict[str, Any]] = []
+    for detector_name, calibrator in calibrators:
+        for regime_id in sorted(calibrator.regime_thresh_.keys()):
+            med_r, scale_r = calibrator.regime_params_[regime_id]
+            thresh_z = calibrator.regime_thresh_[regime_id]
+            rows.append(
+                {
+                    "detector": detector_name,
+                    "regime": int(regime_id),
+                    "median": float(med_r),
+                    "scale": float(scale_r),
+                    "z_threshold": float(thresh_z),
+                    "global_median": float(calibrator.med),
+                    "global_scale": float(calibrator.scale),
+                }
+            )
+    return rows
+
+
+def build_threshold_rows(
+    calibrators: List[Tuple[str, "ScoreCalibrator"]],
+) -> List[Dict[str, Any]]:
+    """
+    Build global + per-regime threshold rows for ACM thresholds artifact.
+    """
+    rows: List[Dict[str, Any]] = []
+    for detector_name, calibrator in calibrators:
+        rows.append(
+            {
+                "detector": detector_name,
+                "regime": "GLOBAL",
+                "median": float(calibrator.med),
+                "scale": float(calibrator.scale),
+                "z_threshold": float(calibrator.q_z),
+                "raw_threshold": float(calibrator.q_thresh),
+            }
+        )
+        for regime_id, regime_thresh in calibrator.regime_thresh_.items():
+            med_r, scale_r = calibrator.regime_params_.get(regime_id, (calibrator.med, calibrator.scale))
+            rows.append(
+                {
+                    "detector": detector_name,
+                    "regime": int(regime_id),
+                    "median": float(med_r),
+                    "scale": float(scale_r),
+                    "z_threshold": float(regime_thresh),
+                    "raw_threshold": float(med_r + regime_thresh * max(scale_r, 1e-9)),
+                }
+            )
+    return rows
+
+
+def build_calibration_summary_rows(
+    calibrators: List[Tuple[str, "ScoreCalibrator"]],
+) -> List[Dict[str, Any]]:
+    """
+    Build calibration summary payload rows for SQL write.
+    """
+    rows: List[Dict[str, Any]] = []
+    for detector_name, calibrator in calibrators:
+        rows.append(
+            {
+                "DetectorType": detector_name,
+                "CalibrationScore": float(calibrator.q_z) if hasattr(calibrator, "q_z") else 0.0,
+                "Median": float(calibrator.med) if hasattr(calibrator, "med") else 0.0,
+                "Scale": float(calibrator.scale) if hasattr(calibrator, "scale") else 0.0,
+                "NumRegimes": len(calibrator.regime_thresh_) if hasattr(calibrator, "regime_thresh_") else 0,
+            }
+        )
+    return rows
+
+
 @dataclass
 class EpisodeParams:
     """Parameters for episode detection with hysteresis.

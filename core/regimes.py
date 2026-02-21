@@ -3852,4 +3852,130 @@ def detect_transient_states(
     return states
 
 
+def write_regime_occupancy_and_transitions(
+    score_regime_labels: Optional[np.ndarray],
+    frame: pd.DataFrame,
+    output_manager: Optional[Any],
+    logger: Any = Console,
+    equip: str = "",
+) -> Tuple[int, int]:
+    """
+    Persist regime occupancy and transition aggregates for the current score window.
+    """
+    occupancy_count = 0
+    transition_count = 0
+
+    try:
+        if score_regime_labels is None or len(score_regime_labels) == 0 or output_manager is None:
+            return occupancy_count, transition_count
+
+        regime_series = pd.Series(score_regime_labels)
+        regime_counts = regime_series.value_counts()
+        total_points = len(score_regime_labels)
+
+        sampling_interval_h = 1.0
+        if "Timestamp" in frame.columns and len(frame) > 1:
+            try:
+                ts_diff = pd.to_datetime(frame["Timestamp"]).diff().dropna()
+                if len(ts_diff) > 0:
+                    sampling_interval_h = ts_diff.median().total_seconds() / 3600.0
+            except Exception:
+                pass
+
+        occupancy_data: List[Dict[str, Any]] = []
+        for regime_id, count in regime_counts.items():
+            occupancy_data.append(
+                {
+                    "RegimeLabel": str(regime_id),
+                    "DwellTimeHours": float(count * sampling_interval_h),
+                    "DwellFraction": float(count / total_points) if total_points > 0 else 0.0,
+                    "PointCount": int(count),
+                }
+            )
+        if occupancy_data:
+            occupancy_count = output_manager.write_regime_occupancy(occupancy_data)
+
+        if len(score_regime_labels) > 1:
+            transitions: Dict[str, Dict[str, int]] = {}
+            for i in range(1, len(score_regime_labels)):
+                from_r = str(score_regime_labels[i - 1])
+                to_r = str(score_regime_labels[i])
+                if from_r != to_r:
+                    if from_r not in transitions:
+                        transitions[from_r] = {}
+                    transitions[from_r][to_r] = transitions[from_r].get(to_r, 0) + 1
+            if transitions:
+                transition_count = output_manager.write_regime_transitions(transitions)
+
+        if occupancy_count > 0 or transition_count > 0:
+            logger.info(
+                f"Regime analysis: occupancy={occupancy_count} | transitions={transition_count}",
+                component="REGIME",
+            )
+    except Exception as e:
+        logger.warn(
+            f"Regime occupancy/transitions write failed: {e}",
+            component="REGIME",
+            equip=equip,
+            error=str(e)[:200],
+        )
+
+    return occupancy_count, transition_count
+
+
+def write_regime_definitions_for_audit(
+    output_manager: Optional[Any],
+    regime_model: Optional[Any],
+    regime_state_version: int,
+    current_model_maturity: Optional[str],
+    logger: Any = Console,
+    equip: str = "",
+) -> int:
+    """
+    Persist current run regime definitions for auditability.
+    """
+    if not output_manager or regime_model is None or not getattr(regime_model, "model", None):
+        return 0
+
+    try:
+        regime_defs: List[Dict[str, Any]] = []
+        centroids = regime_model.cluster_centers_
+        labels = getattr(regime_model.model, "labels_", [])
+        unique_labels = np.unique(labels)
+        valid_labels = unique_labels[unique_labels >= 0]
+        model_silhouette = regime_model.meta.get("fit_score")
+        model_silhouette = (
+            float(model_silhouette)
+            if model_silhouette is not None and not np.isnan(model_silhouette)
+            else None
+        )
+
+        for i, centroid in enumerate(centroids):
+            regime_id = int(valid_labels[i]) if i < len(valid_labels) else i
+            regime_defs.append(
+                {
+                    "RegimeID": regime_id,
+                    "RegimeName": f"Regime_{regime_id}",
+                    "CentroidJSON": json.dumps(centroid.tolist()),
+                    "FeatureColumns": json.dumps(getattr(regime_model, "feature_columns", [])),
+                    "DataPointCount": int(np.sum(np.array(labels) == regime_id)) if len(labels) > 0 else 0,
+                    "SilhouetteScore": model_silhouette,
+                    "MaturityState": current_model_maturity or "UNKNOWN",
+                }
+            )
+
+        regime_defs_count = output_manager.write_regime_definitions(regime_defs, version=regime_state_version)
+        if regime_defs_count > 0:
+            logger.info(f"Wrote {regime_defs_count} regime definitions for audit", component="REGIME")
+        return regime_defs_count
+    except Exception as e:
+        logger.warn(
+            f"Failed to write regime definitions: {e}",
+            component="REGIME",
+            equip=equip,
+            error=str(e)[:200],
+        )
+        return 0
+
+
 

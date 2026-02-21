@@ -916,7 +916,7 @@ class SQLBatchRunner:
         adaptively whether to train or score.
         """
         cmd = [
-            sys.executable, "-m", "core.acm_main",
+            sys.executable, "-m", "core.acm",
             "--equip", equip_name,
         ]
         
