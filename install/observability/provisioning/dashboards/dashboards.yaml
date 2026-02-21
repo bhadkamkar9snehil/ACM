@@ -7,20 +7,8 @@ providers:
     folder: 'ACM'
     folderUid: 'acm-folder'
     type: file
-    disableDeletion: false
+    disableDeletion: true
     editable: true
     updateIntervalSeconds: 30
     options:
       path: /etc/grafana/dashboards
-
-  # Archived dashboards — shown in "ACM Archive" folder in Grafana
-  - name: 'ACM Archive'
-    orgId: 1
-    folder: 'ACM Archive'
-    folderUid: 'acm-archive-folder'
-    type: file
-    disableDeletion: false
-    editable: false
-    updateIntervalSeconds: 300
-    options:
-      path: /etc/grafana/dashboards/archive

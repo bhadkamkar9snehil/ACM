@@ -745,7 +745,7 @@
       "targets": [
         {
           "datasource": { "type": "mssql", "uid": "mssql-ds" },
-          "rawSql": "SELECT TOP 50\n  eq.EquipCode AS Equipment,\n  rs.Status,\n  rs.RowsProcessed,\n  rs.EpisodesDetected,\n  rs.ProcessingTimeMs,\n  CONVERT(varchar(19), rs.CreatedAt, 120) AS CreatedAt,\n  LEFT(ISNULL(rs.ErrorMessage, ''), 80) AS ErrorMessage\nFROM dbo.ACM_RunSummary rs\nJOIN dbo.Equipments eq ON eq.EquipID = rs.EquipID\nWHERE rs.CreatedAt >= DATEADD(day, -1, GETUTCDATE())\nORDER BY rs.CreatedAt DESC",
+          "rawSql": "SELECT TOP 50\n  eq.EquipCode AS Equipment,\n  r.HealthStatus AS Status,\n  r.ScoreRowCount AS RowsProcessed,\n  r.EpisodeCount AS EpisodesDetected,\n  r.DurationSeconds * 1000 AS ProcessingTimeMs,\n  CONVERT(varchar(19), r.StartedAt, 120) AS StartedAt,\n  LEFT(ISNULL(r.ErrorMessage, ''), 80) AS ErrorMessage\nFROM dbo.ACM_Runs r\nJOIN dbo.Equipments eq ON eq.EquipID = r.EquipID\nWHERE r.StartedAt >= DATEADD(day, -1, GETUTCDATE())\nORDER BY r.StartedAt DESC",
           "format": "table",
           "refId": "A"
         }
