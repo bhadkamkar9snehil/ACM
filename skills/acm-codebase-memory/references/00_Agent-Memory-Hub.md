@@ -33,3 +33,9 @@ This note is generated for agent-first ACM context loading.
 `python scripts/manage_acm_agent_memory.py refresh --sync-repo-skill --sync-local-skill`
 2. Health check:
 `python scripts/manage_acm_agent_memory.py health`
+
+## Grafana Guardrail
+1. For dashboard color gradients use `continuous-RdYlGr`.
+2. Never use `continuous-RdYlGn`.
+3. Validate palettes with:
+`python skills/grafana-dashboard-ops/scripts/validate_grafana_palette_modes.py`

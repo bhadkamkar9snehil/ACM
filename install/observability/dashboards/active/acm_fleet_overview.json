@@ -1339,7 +1339,7 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "continuous-RdYlGn"
+            "mode": "continuous-RdYlGr"
           },
           "custom": {
             "axisBorderShow": false,

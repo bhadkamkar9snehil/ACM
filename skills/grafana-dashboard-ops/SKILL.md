@@ -32,12 +32,14 @@ docker logs --tail 300 acm-grafana
 Run:
 
 ```powershell
+python skills/grafana-dashboard-ops/scripts/validate_grafana_palette_modes.py
 python skills/grafana-dashboard-ops/scripts/validate_acm_dashboards.py
 python skills/grafana-dashboard-ops/scripts/validate_grafana_api_queries.py
 ```
 
 This script checks:
 - duplicate dashboard UIDs
+- invalid Grafana palette mode IDs (for example, reject `continuous-RdYlGn`)
 - datasource UID consistency in panel targets
 - SQL query execution against ACM SQL Server with macro substitutions
 - runtime execution through Grafana `/api/ds/query` for active dashboards
@@ -49,6 +51,7 @@ This script checks:
 3. Match current table columns; do not assume historical columns.
 4. Do not provision archive dashboards in the active provider path.
 5. Keep dashboard files synchronized between both dashboard directories.
+6. Use only Grafana-supported color modes. For red-yellow-green gradients use `continuous-RdYlGr`, never `continuous-RdYlGn`.
 
 ## References
 
