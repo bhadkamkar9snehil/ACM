@@ -673,6 +673,38 @@ def load_model_state_safe(
         return None
 
 
+def resolve_maturity_for_regime_stage(
+    *,
+    sql_client: Any,
+    equip_id: int,
+    refit_requested: bool,
+    logger: Any = Console,
+) -> Optional[str]:
+    """
+    Resolve maturity string used by regime discovery/labeling stage.
+
+    Behavior:
+    1. Load current model maturity from SQL.
+    2. If refit is requested and maturity is CONVERGED, return LEARNING so
+       regime rediscovery can proceed in the same run.
+    """
+    model_state = load_model_state_safe(sql_client, equip_id, logger=logger)
+    if model_state is None:
+        return None
+
+    maturity = model_state.maturity.value
+    logger.info(f"Model maturity: {maturity}", component="LIFECYCLE")
+
+    if refit_requested and maturity == "CONVERGED":
+        logger.info(
+            "Refit requested with CONVERGED state - overriding to LEARNING to allow regime rediscovery",
+            component="LIFECYCLE",
+        )
+        return "LEARNING"
+
+    return maturity
+
+
 def get_active_model_dict(
     state: ModelState,
     regime_version: Optional[int] = None,

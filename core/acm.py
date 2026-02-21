@@ -123,7 +123,7 @@ from utils.version import __version__ as ACM_VERSION
 from core.model_lifecycle import (
     BOOLEAN_ONLY_METRICS,
     load_model_state_safe,
-    load_model_state_from_sql,
+    resolve_maturity_for_regime_stage,
     update_and_persist_model_lifecycle_safe,
 )
 
@@ -140,19 +140,6 @@ def _configure_logging(logging_cfg, args):
 # _ensure_local_index -> core/fast_features.py::ensure_local_index()
 # bootstrap run state -> core/sql_client.py::bootstrap_acm_run_state()
 
-
-# =======================
-# SQL helpers (local)
-# Kept here for tight integration with run orchestration.
-# =======================
-def _continuous_learning_enabled(cfg: Dict[str, Any]) -> bool:
-    """
-    Continuous learning is a core ACM capability and is always enabled.
-
-    The legacy config toggle is intentionally ignored.
-    """
-    _ = cfg
-    return True
 
 # ========================================================================
 # Extracted helpers (now owned by dedicated modules)
@@ -264,8 +251,6 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
     Console.info("Connecting to SQL Server...", component="SQL")
     try:
         sql_client = connect_acm_sql(cfg={}, logger=Console)
-        if sql_client is None:
-            raise RuntimeError("connect_acm_sql returned None")
         Console.ok("SQL connection established", component="SQL")
     except Exception as e:
         Console.error(f"SQL connection failed: {e}", component="SQL",
@@ -293,8 +278,8 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
     logging_cfg = cfg.get("logging") or {}
     _configure_logging(logging_cfg, args)
 
-    # Continuous learning is controlled exclusively by config.
-    CONTINUOUS_LEARNING = _continuous_learning_enabled(cfg)
+    # Continuous learning is a core ACM capability and always enabled.
+    CONTINUOUS_LEARNING = True
 
     # Continuous learning settings.
     cl_cfg = cfg.get("continuous_learning", {})
@@ -635,21 +620,12 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
         
         # v11.4.0: Load model maturity state BEFORE regimes to control discovery
         # v11.5.0: Override maturity to LEARNING if refit was requested (models just retrained)
-        current_model_maturity: Optional[str] = None
-        if sql_client and equip_id:
-            early_model_state = load_model_state_from_sql(sql_client, equip_id)
-            if early_model_state is not None:
-                current_model_maturity = early_model_state.maturity.value
-                Console.info(f"Model maturity: {current_model_maturity}", component="LIFECYCLE")
-        
-        # v11.5.0 FIX: If refit was requested, detectors were retrained - must allow regime rediscovery
-        # Otherwise CONVERGED state blocks regime discovery but cached regime model is stale/missing
-        if refit_requested and current_model_maturity == "CONVERGED":
-            Console.info(
-                "Refit requested with CONVERGED state - overriding to LEARNING to allow regime rediscovery",
-                component="LIFECYCLE"
-            )
-            current_model_maturity = "LEARNING"
+        current_model_maturity = resolve_maturity_for_regime_stage(
+            sql_client=sql_client,
+            equip_id=equip_id,
+            refit_requested=refit_requested,
+            logger=Console,
+        )
         
         with T.section("regimes.label"):
             regime_labeling_result = regimes.run_regime_labeling_stage(
@@ -935,12 +911,11 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
 
         # ===== Rolling baseline buffer: update with latest raw SCORE =====
         with T.section("baseline.buffer_write"):
-            if raw_score is not None:
-                output_manager.update_baseline_buffer(
-                    score_numeric=raw_score,
-                    cfg=cfg,
-                    coldstart_complete=coldstart_complete,
-                )
+            output_manager.update_baseline_buffer(
+                score_numeric=raw_score,
+                cfg=cfg,
+                coldstart_complete=coldstart_complete,
+            )
 
         sensor_context: Optional[Dict[str, Any]] = None
         with T.section("sensor.context"):
