@@ -13,7 +13,8 @@ Date: November 13, 2025
 """
 
 from datetime import datetime, timedelta
-from typing import Optional, Tuple, Dict, Any
+from typing import Optional, Tuple, Dict, Any, Callable
+from dataclasses import dataclass
 import pandas as pd
 from core.observability import Console
 
@@ -51,6 +52,136 @@ def classify_noop_reason(
         return "SCORING_NO_DATA"
 
     return "UNKNOWN_NOOP"
+
+
+@dataclass
+class DataLoadStageResult:
+    """Result bundle for load-data stage orchestration."""
+    train: Optional[pd.DataFrame]
+    score: Optional[pd.DataFrame]
+    meta: Optional[Any]
+    coldstart_complete: bool
+    should_continue: bool
+
+
+def load_and_validate_data_stage(
+    *,
+    sql_client: Any,
+    equip: str,
+    equip_id: int,
+    cfg: Dict[str, Any],
+    args: Any,
+    output_manager: Any,
+    win_start: Optional[pd.Timestamp],
+    win_end: Optional[pd.Timestamp],
+    ensure_local_index_fn: Callable[[pd.DataFrame], pd.DataFrame],
+    deduplicate_index_fn: Callable[[pd.DataFrame, str, str], Tuple[pd.DataFrame, int]],
+    validate_data_contract_fn: Callable[..., Any],
+    finalize_noop_run_fn: Callable[..., None],
+    record_coldstart_fn: Callable[[str], None],
+    refit_requested: bool,
+    run_id: Optional[str],
+    logger: Any = Console,
+) -> DataLoadStageResult:
+    """
+    Load data window, handle coldstart/NOOP, normalize index, deduplicate, and validate contract.
+    """
+    coldstart_manager = SmartColdstart(
+        sql_client=sql_client,
+        equip_id=equip_id,
+        equip_name=equip,
+        stage="score",
+    )
+    historical_replay = bool(getattr(args, "start_time", None))
+    coldstart_cfg = cfg.get("coldstart", {})
+    max_attempts = int(coldstart_cfg.get("max_attempts", 3))
+    train, score, meta, coldstart_complete = coldstart_manager.load_with_retry(
+        cfg=cfg,
+        output_manager=output_manager,
+        start_time=win_start,
+        end_time=win_end,
+        max_attempts=max_attempts,
+        historical_replay=historical_replay,
+        equipment=equip,
+    )
+
+    if not coldstart_complete:
+        reason = classify_noop_reason(
+            train,
+            score,
+            meta=meta,
+            coldstart_complete=coldstart_complete,
+        )
+        if reason == "SCORING_NO_DATA":
+            logger.info("NOOP - no new data in historian window (models exist)", component="COLDSTART")
+        else:
+            logger.info(
+                "Coldstart deferred - insufficient history for training, will retry next run",
+                component="COLDSTART",
+            )
+        finalize_noop_run_fn(sql_client=sql_client, run_id=run_id, logger=logger)
+        return DataLoadStageResult(
+            train=train,
+            score=score,
+            meta=meta,
+            coldstart_complete=coldstart_complete,
+            should_continue=False,
+        )
+
+    record_coldstart_fn(equip)
+    train = ensure_local_index_fn(train)
+    score = ensure_local_index_fn(score)
+
+    train, train_dups = deduplicate_index_fn(train, "TRAIN", equip)
+    score, score_dups = deduplicate_index_fn(score, "SCORE", equip)
+    if isinstance(meta, dict):
+        meta["dup_timestamps_removed"] = int(train_dups + score_dups)
+    else:
+        setattr(meta, "dup_timestamps_removed", int(train_dups + score_dups))
+
+    validate_data_contract_fn(
+        train=train,
+        score=score,
+        meta=meta,
+        refit_requested=refit_requested,
+        cfg=cfg,
+        output_manager=output_manager,
+        equip_id=equip_id,
+        equip=equip,
+        run_id=run_id,
+        logger=logger,
+    )
+
+    if len(score) == 0:
+        logger.warn(
+            "SCORE window empty after cleaning; marking run as NOOP",
+            component="DATA",
+            equip=equip,
+            run_id=run_id,
+        )
+        finalize_noop_run_fn(sql_client=sql_client, run_id=run_id, logger=logger)
+        return DataLoadStageResult(
+            train=train,
+            score=score,
+            meta=meta,
+            coldstart_complete=coldstart_complete,
+            should_continue=False,
+        )
+
+    logger.info(
+        f"[DATA] timestamp={meta.timestamp_col} cadence_ok={meta.cadence_ok} "
+        f"kept={len(meta.kept_cols)} drop={len(meta.dropped_cols)} "
+        f"tz_stripped={getattr(meta, 'tz_stripped', 0)} "
+        f"future_drop={getattr(meta, 'future_rows_dropped', 0)} "
+        f"dup_removed={getattr(meta, 'dup_timestamps_removed', 0)}"
+    )
+    return DataLoadStageResult(
+        train=train,
+        score=score,
+        meta=meta,
+        coldstart_complete=coldstart_complete,
+        should_continue=True,
+    )
 
 
 class ColdstartState:

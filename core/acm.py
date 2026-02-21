@@ -90,7 +90,7 @@ from core.pipeline_types import (
 from core.seasonality import SeasonalPattern, detect_and_adjust_safe
 from core.sensor_attribution import build_sensor_analytics_context, persist_contribution_timeline
 from core.adaptive_thresholds import maybe_update_adaptive_thresholds
-from core.smart_coldstart import seed_baseline, classify_noop_reason
+from core.smart_coldstart import seed_baseline, load_and_validate_data_stage
 from core.detector_orchestrator import (
     score_all_detectors,
     calibrate_all_detectors,
@@ -730,82 +730,34 @@ def main() -> None:
     try:
         # ===== Phase 1: Load data from SQL =====
         with T.section("load_data"):
-            from core.smart_coldstart import SmartColdstart
-            
-            coldstart_manager = SmartColdstart(
+            load_stage = load_and_validate_data_stage(
                 sql_client=sql_client,
+                equip=equip,
                 equip_id=equip_id,
-                equip_name=equip,
-                stage='score'
-            )
-            
-            # Historical replay: expand windows forward when start_time is explicit.
-            historical_replay = bool(args.start_time)
-            
-            # Access coldstart config using dict-style access to avoid AttributeError
-            coldstart_cfg = cfg.get("coldstart", {})
-            max_attempts = int(coldstart_cfg.get("max_attempts", 3))  # Default to 3 if not set
-            train, score, meta, coldstart_complete = coldstart_manager.load_with_retry(
-                cfg=cfg,  # must be dict-like (supports .get)
+                cfg=cfg,
+                args=args,
                 output_manager=output_manager,
-                start_time=win_start,
-                end_time=win_end,
-                max_attempts=max_attempts,
-                historical_replay=historical_replay,
-                equipment=equip,
+                win_start=win_start,
+                win_end=win_end,
+                ensure_local_index_fn=ensure_local_index,
+                deduplicate_index_fn=deduplicate_index,
+                validate_data_contract_fn=validate_data_contract_at_entry,
+                finalize_noop_run_fn=finalize_noop_run,
+                record_coldstart_fn=record_coldstart,
+                refit_requested=refit_requested,
+                run_id=run_id,
+                logger=Console,
             )
-            
-            if not coldstart_complete:
-                reason = classify_noop_reason(train, score, meta=meta, coldstart_complete=coldstart_complete)
-
-                if reason == "SCORING_NO_DATA":
-                    Console.info("NOOP - no new data in historian window (models exist)", component="COLDSTART")
-                else:
-                    Console.info("Coldstart deferred - insufficient history for training, will retry next run", component="COLDSTART")
-
-                finalize_noop_run(sql_client=sql_client, run_id=run_id, logger=Console)
-                return
-            
-            record_coldstart(equip)
-            train = ensure_local_index(train)
-            score = ensure_local_index(score)
-            
-            # Deduplicate indices early to prevent O(n^2) hotspots and silent data loss.
-            train, train_dups = deduplicate_index(train, "TRAIN", equip)
-            score, score_dups = deduplicate_index(score, "SCORE", equip)
-            meta.dup_timestamps_removed = int(train_dups + score_dups)
-
-            with T.section("data.contract"):
-                validate_data_contract_at_entry(
-                    train=train,
-                    score=score,
-                    meta=meta,
-                    refit_requested=refit_requested,
-                    cfg=cfg,
-                    output_manager=output_manager,
-                    equip_id=equip_id,
-                    equip=equip,
-                    run_id=run_id,
-                    logger=Console,
-                )
-
-            # Stop Here    
-            if len(score) == 0:
-                Console.warn("SCORE window empty after cleaning; marking run as NOOP", component="DATA",
-                             equip=equip, run_id=run_id)
+            if not load_stage.should_continue:
                 outcome = "NOOP"
                 rows_read = 0
                 rows_written = 0
-                finalize_noop_run(sql_client=sql_client, run_id=run_id, logger=Console)
                 return
-        
-        Console.info(
-            f"[DATA] timestamp={meta.timestamp_col} cadence_ok={meta.cadence_ok} "
-            f"kept={len(meta.kept_cols)} drop={len(meta.dropped_cols)} "
-            f"tz_stripped={getattr(meta, 'tz_stripped', 0)} "
-            f"future_drop={getattr(meta, 'future_rows_dropped', 0)} "
-            f"dup_removed={getattr(meta, 'dup_timestamps_removed', 0)}"
-        )
+            train = load_stage.train
+            score = load_stage.score
+            meta = load_stage.meta
+            coldstart_complete = load_stage.coldstart_complete
+
         T.log("data_split_complete", train_rows=train.shape[0], train_cols=train.shape[1], score_rows=score.shape[0], score_cols=score.shape[1])
         
         # ===== Adaptive rolling baseline (cold-start helper) =====

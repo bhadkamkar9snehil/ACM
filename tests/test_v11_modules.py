@@ -342,6 +342,103 @@ class TestRefactorHelpers:
         )
         assert updated is False
 
+    def test_load_and_validate_data_stage_returns_noop_when_coldstart_incomplete(self, monkeypatch):
+        """Data load stage helper should finalize NOOP and stop pipeline when coldstart is incomplete."""
+        from core import smart_coldstart as sc
+
+        class _ColdstartManager:
+            def __init__(self, **kwargs):
+                pass
+
+            def load_with_retry(self, **kwargs):
+                return None, None, {"noop_reason": "SCORING_NO_DATA"}, False
+
+        monkeypatch.setattr(sc, "SmartColdstart", _ColdstartManager)
+        finalize_calls = []
+
+        def _finalize_noop(**kwargs):
+            finalize_calls.append(kwargs)
+
+        out = sc.load_and_validate_data_stage(
+            sql_client=object(),
+            equip="FD_FAN",
+            equip_id=1,
+            cfg={},
+            args=type("Args", (), {"start_time": None})(),
+            output_manager=object(),
+            win_start=None,
+            win_end=None,
+            ensure_local_index_fn=lambda df: df,
+            deduplicate_index_fn=lambda df, kind, equip: (df, 0),
+            validate_data_contract_fn=lambda **kwargs: None,
+            finalize_noop_run_fn=_finalize_noop,
+            record_coldstart_fn=lambda equip: None,
+            refit_requested=False,
+            run_id="r1",
+        )
+
+        assert out.should_continue is False
+        assert out.coldstart_complete is False
+        assert len(finalize_calls) == 1
+
+    def test_load_and_validate_data_stage_success_path_sets_dedup_counts(self, monkeypatch):
+        """Data load stage helper should normalize, deduplicate, validate, and continue when data is ready."""
+        from core import smart_coldstart as sc
+
+        class _Meta:
+            def __init__(self):
+                self.timestamp_col = "Timestamp"
+                self.cadence_ok = True
+                self.kept_cols = ["sensor_a"]
+                self.dropped_cols = []
+                self.tz_stripped = 0
+                self.future_rows_dropped = 0
+                self.dup_timestamps_removed = 0
+
+        idx = pd.date_range("2026-01-01", periods=2, freq="h")
+        train = pd.DataFrame({"sensor_a": [1.0, 2.0]}, index=idx)
+        score = pd.DataFrame({"sensor_a": [1.1, 2.1]}, index=idx)
+        meta = _Meta()
+
+        class _ColdstartManager:
+            def __init__(self, **kwargs):
+                pass
+
+            def load_with_retry(self, **kwargs):
+                return train.copy(), score.copy(), meta, True
+
+        monkeypatch.setattr(sc, "SmartColdstart", _ColdstartManager)
+        validate_calls = []
+        coldstart_calls = []
+
+        def _validate_contract(**kwargs):
+            validate_calls.append(kwargs)
+
+        out = sc.load_and_validate_data_stage(
+            sql_client=object(),
+            equip="FD_FAN",
+            equip_id=1,
+            cfg={},
+            args=type("Args", (), {"start_time": None})(),
+            output_manager=object(),
+            win_start=None,
+            win_end=None,
+            ensure_local_index_fn=lambda df: df,
+            deduplicate_index_fn=lambda df, kind, equip: (df, 1 if kind == "TRAIN" else 2),
+            validate_data_contract_fn=_validate_contract,
+            finalize_noop_run_fn=lambda **kwargs: None,
+            record_coldstart_fn=lambda equip: coldstart_calls.append(equip),
+            refit_requested=False,
+            run_id="r1",
+        )
+
+        assert out.should_continue is True
+        assert out.train is not None
+        assert out.score is not None
+        assert out.meta.dup_timestamps_removed == 3
+        assert len(validate_calls) == 1
+        assert coldstart_calls == ["FD_FAN"]
+
     def test_write_drift_controller_state_no_output_manager(self):
         """Drift writer should safely no-op when output manager is missing."""
         from core.drift import write_drift_controller_state
