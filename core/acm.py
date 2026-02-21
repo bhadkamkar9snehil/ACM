@@ -99,6 +99,8 @@ from core.model_persistence import (
     load_cached_models_with_validation,
     save_trained_models,
     align_current_features_to_cached_manifest,
+    restore_detectors_from_runtime_cache,
+    load_quality_regime_state_if_needed,
 )
 from core.model_evaluation import auto_tune_parameters, evaluate_force_retrain_triggers
 
@@ -1070,36 +1072,30 @@ def main() -> None:
                             Console.info(f"Model validation: {warn}", component="MODEL", equip=equip)
                         
             elif detector_cache:
-                ar1_detector = detector_cache.get("ar1")
-                pca_detector = detector_cache.get("pca")
-                iforest_detector = detector_cache.get("iforest")
-                gmm_detector = detector_cache.get("gmm")
-                regime_model = detector_cache.get("regime_model")
-                
-                if regime_model is not None:
-                    # Do NOT overwrite regime_model.meta["quality_ok"] from the cache.
-                    # The model meta stores fit-time quality (set in fit_regime_model()).
-                    # Overwriting it with a cached label-time boolean propagates stale
-                    # quality_ok=False across batches, causing a perpetual retrain loop.
-                    if detector_cache.get("regime_basis_hash"):
-                        regime_model.train_hash = detector_cache["regime_basis_hash"]
-                
-                if not all([ar1_detector, pca_detector, iforest_detector]):
-                    Console.warn("Cached detectors incomplete; will re-fit", component="MODEL")
-                    ar1_detector = pca_detector = iforest_detector = gmm_detector = omr_detector = None
-                    regime_model = None
+                restored = restore_detectors_from_runtime_cache(
+                    detector_cache=detector_cache,
+                    logger=Console,
+                )
+                ar1_detector = restored["ar1_detector"]
+                pca_detector = restored["pca_detector"]
+                iforest_detector = restored["iforest_detector"]
+                gmm_detector = restored["gmm_detector"]
+                omr_detector = restored["omr_detector"]
+                regime_model = restored["regime_model"]
             
             # Load regime state from SQL if no regime model is loaded.
-            if regime_model is None:
-                try:
-                    from core.model_persistence import load_regime_state
-                    regime_state = load_regime_state(equip=equip, equip_id=equip_id, sql_client=sql_client)
-                    if regime_state is not None and regime_state.quality_ok:
-                        regime_state_version = regime_state.state_version
-                        regime_loaded_from_state = True  # Boolean flag replaces string sentinel.
-                        Console.info(f"Regime loaded from state_v{regime_state_version} | K={regime_state.n_clusters}", component="REGIME")
-                except Exception as e:
-                    Console.warn(f"Failed to load regime state: {e}", component="REGIME")
+            regime_state_loaded, loaded_state_version, loaded_from_state = load_quality_regime_state_if_needed(
+                regime_model=regime_model,
+                equip=equip,
+                equip_id=equip_id,
+                sql_client=sql_client,
+                logger=Console,
+            )
+            if regime_state_loaded is not None:
+                regime_state = regime_state_loaded
+            if loaded_from_state:
+                regime_state_version = loaded_state_version
+                regime_loaded_from_state = True  # Boolean flag replaces string sentinel.
 
         # Check if we need to fit detectors using ORIGINAL config-based flags.
         # NOTE: Reconciliation happens AFTER fitting, not before - otherwise we skip training!
