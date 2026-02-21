@@ -77,7 +77,7 @@ from core.pipeline_types import (
     validate_data_contract_at_entry,
 )
 from core.seasonality import SeasonalPattern, detect_and_adjust_safe
-from core.sensor_attribution import build_sensor_analytics_context, persist_contribution_timeline
+from core.sensor_attribution import build_sensor_analytics_context
 from core.adaptive_thresholds import maybe_update_adaptive_thresholds
 from core.smart_coldstart import seed_baseline, load_and_validate_data_stage
 from core.detector_orchestrator import (
@@ -282,7 +282,7 @@ def _detect_mode(cfg: Optional[Dict[str, Any]] = None) -> str:
 # _fit_all_detectors -> detector_orchestrator.py
 # _get_detector_enable_flags -> detector_orchestrator.py
 # sensor analytics context -> sensor_attribution.py::build_sensor_analytics_context()
-# contribution timeline write -> sensor_attribution.py::persist_contribution_timeline()
+# contribution timeline write -> output_manager.py::write_contribution_timeline_from_frame()
 # regime definitions audit write -> regimes.py::write_regime_definitions_for_audit()
 # persist.detector_correlation -> output_manager.py::write_detector_correlation_from_scores()
 # persist.sensor_correlation -> output_manager.py::write_sensor_correlations_from_raw()
@@ -1140,11 +1140,9 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
 
         # ===== Contribution timeline =====
         with T.section("contribution.timeline"):
-            persist_contribution_timeline(
-                output_manager=output_manager,
+            output_manager.write_contribution_timeline_from_frame(
                 frame=frame,
                 fusion_weights=fusion_weights_used,
-                logger=Console,
                 equip=equip,
             )
 

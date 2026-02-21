@@ -862,33 +862,6 @@ def build_contribution_timeline(
     return contrib_df
 
 
-def persist_contribution_timeline(
-    output_manager: Optional[Any],
-    frame: pd.DataFrame,
-    fusion_weights: Optional[Dict[str, float]],
-    logger: Any = Console,
-    equip: str = "",
-) -> int:
-    """
-    Build and persist detector contribution timeline for the current run.
-    """
-    if output_manager is None or not fusion_weights:
-        return 0
-    try:
-        contrib_df = build_contribution_timeline(frame, fusion_weights)
-        if contrib_df is not None and len(contrib_df) > 0:
-            return int(output_manager.write_contribution_timeline(contrib_df))
-        return 0
-    except Exception as e:
-        logger.warn(
-            f"Contribution timeline write failed: {e}",
-            component="CONTRIB",
-            equip=equip,
-            error=str(e)[:200],
-        )
-        return 0
-
-
 def build_sensor_analytics_context(
     raw_train: Optional[pd.DataFrame],
     raw_score: Optional[pd.DataFrame],

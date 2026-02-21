@@ -62,6 +62,7 @@ from core.analytics_builder import (
     AnalyticsConstants as _AnalyticsConstants,  # Re-exported for backward compat
     health_index as _health_index_impl,
 )
+from core.sensor_attribution import build_contribution_timeline
 
 # V11: Confidence model for health and episode confidence
 try:
@@ -2679,6 +2680,31 @@ class OutputManager:
             return self.write_table('ACM_ContributionTimeline', df, delete_existing=True)
         except Exception as e:
             Console.warn(f"write_contribution_timeline failed: {e}", component="OUTPUT", error=str(e)[:200])
+            return 0
+
+    def write_contribution_timeline_from_frame(
+        self,
+        frame: pd.DataFrame,
+        fusion_weights: Optional[Dict[str, float]],
+        equip: str = "",
+    ) -> int:
+        """
+        Build and persist detector contribution timeline from score frame.
+        """
+        if not fusion_weights:
+            return 0
+        try:
+            contrib_df = build_contribution_timeline(frame, fusion_weights)
+            if not self._is_non_empty_dataframe(contrib_df):
+                return 0
+            return self.write_contribution_timeline(contrib_df)
+        except Exception as e:
+            Console.warn(
+                f"Contribution timeline write failed: {e}",
+                component="CONTRIB",
+                equip=equip,
+                error=str(e)[:200],
+            )
             return 0
     
     def write_regime_promotion_log(self, promotions: List[Dict[str, Any]]) -> int:
