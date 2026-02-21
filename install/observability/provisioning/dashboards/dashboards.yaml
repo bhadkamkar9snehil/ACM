@@ -1,6 +1,7 @@
 apiVersion: 1
 
 providers:
+  # Active dashboards — shown in "ACM" folder in Grafana
   - name: 'ACM Dashboards'
     orgId: 1
     folder: 'ACM'
@@ -11,4 +12,15 @@ providers:
     updateIntervalSeconds: 30
     options:
       path: /etc/grafana/dashboards
-      foldersFromFilesStructure: false
+
+  # Archived dashboards — shown in "ACM Archive" folder in Grafana
+  - name: 'ACM Archive'
+    orgId: 1
+    folder: 'ACM Archive'
+    folderUid: 'acm-archive-folder'
+    type: file
+    disableDeletion: false
+    editable: false
+    updateIntervalSeconds: 300
+    options:
+      path: /etc/grafana/dashboards/archive
