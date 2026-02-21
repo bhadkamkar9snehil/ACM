@@ -308,10 +308,10 @@ class TestAcmEntryPoint:
         from core.acm import main
         assert callable(main)
     
-    def test_detect_mode_function_exists(self):
-        """_detect_mode function exists."""
+    def test_legacy_detect_mode_removed(self):
+        """Legacy mode marker helper should be removed."""
         from core import acm
-        assert hasattr(acm, '_detect_mode')
+        assert not hasattr(acm, '_detect_mode')
 
     def test_run_pipeline_passes_namespace_to_main(self, monkeypatch):
         """run_pipeline should invoke main with provided Namespace."""

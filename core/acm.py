@@ -162,14 +162,6 @@ def _continuous_learning_enabled(cfg: Dict[str, Any]) -> bool:
     _ = cfg
     return True
 
-def _detect_mode(cfg: Optional[Dict[str, Any]] = None) -> str:
-    """
-    Backward-compatible runtime mode marker.
-
-    ACM operates in adaptive mode; legacy ONLINE/OFFLINE branches were removed.
-    """
-    return "adaptive"
-
 # ========================================================================
 # Extracted helpers (now owned by dedicated modules)
 # ========================================================================
