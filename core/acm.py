@@ -805,9 +805,7 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
 
         # ===== Phase 7: Fusion + episodes =====
         with T.section("fusion"):
-            from core.fuse import run_fusion_pipeline, FusionResult
-            
-            fusion_result: FusionResult = run_fusion_pipeline(
+            fusion_stage = fuse.run_fusion_stage(
                 frame=frame,
                 train_frame=train_frame,
                 score_data=score,
@@ -819,16 +817,13 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
                 previous_weights=previous_weights,
                 omr_contributions=omr_contributions_data,
                 equip=equip,
-            )
-
-            frame, train_frame, episodes, fusion_weights_used = fuse.apply_fusion_result_and_record_metrics(
-                frame=frame,
-                train_frame=train_frame,
-                fusion_result=fusion_result,
-                equip=equip,
                 record_detector_scores_fn=record_detector_scores,
                 record_episode_fn=record_episode,
             )
+            frame = fusion_stage.frame
+            train_frame = fusion_stage.train_frame
+            episodes = fusion_stage.episodes
+            fusion_weights_used = fusion_stage.fusion_weights_used
 
         # ===== Adaptive thresholds =====
         with T.section("thresholds.adaptive"):
