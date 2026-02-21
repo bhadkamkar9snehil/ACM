@@ -6,7 +6,7 @@ type: agent-memory
 
 | Module | Symbols | Core Imports |
 |---|---:|---:|
-| `[core.acm]` | 18 | 15 |
+| `[core.acm]` | 13 | 15 |
 | `[core.adaptive_thresholds]` | 11 | 1 |
 | `[core.analytics_builder]` | 15 | 1 |
 | `[core.ar1_detector]` | 6 | 1 |
@@ -25,7 +25,7 @@ type: agent-memory
 | `[core.health_tracker]` | 13 | 1 |
 | `[core.metrics]` | 14 | 1 |
 | `[core.model_evaluation]` | 11 | 1 |
-| `[core.model_lifecycle]` | 17 | 1 |
+| `[core.model_lifecycle]` | 18 | 1 |
 | `[core.model_persistence]` | 34 | 1 |
 | `[core.multivariate_forecast]` | 11 | 1 |
 | `[core.observability]` | 108 | 0 |

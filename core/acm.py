@@ -229,16 +229,9 @@ except ImportError:
 
 # Model lifecycle management (maturity, promotion, and active model tracking).
 from core.model_lifecycle import (
-    MaturityState,
-    ModelState,
-    PromotionCriteria,
     BOOLEAN_ONLY_METRICS,
-    check_promotion_eligibility,
-    promote_model,
-    create_new_model_state,
-    update_model_state_from_run,
-    get_active_model_dict,
     load_model_state_from_sql,
+    update_and_persist_model_lifecycle,
 )
 
 # =============================================================================
@@ -710,9 +703,6 @@ def main() -> None:
         )
         root_span = _span_ctx.__enter__()
 
-    # Initialize variables at function scope to avoid NameError in conditional paths.
-    train_start: Optional[datetime] = None
-    train_end: Optional[datetime] = None
     model_state = None  # Single source of truth for model lifecycle state.
     
     # Initialize detector-related variables at function scope to avoid fragile
@@ -1504,134 +1494,21 @@ def main() -> None:
                 )
                 
                 # Model lifecycle management: track maturity and check promotion.
-                # Set train_start/train_end from actual data in this run.
-                if hasattr(train.index, 'min') and len(train.index) > 0:
-                    train_start = pd.to_datetime(train.index.min())
-                    train_end = pd.to_datetime(train.index.max())
-                else:
-                    train_start = datetime.now()
-                    train_end = datetime.now()
-                
                 if output_manager and sql_client:
                     try:
-                        # Extract regime quality from the current run.
-                        # score_out = regime_out, populated by discover_regimes() or label_regimes().
-                        # regime_quality_metric tells the promotion check which threshold to apply.
-                        #
-                        # Metric name: prefer score_out (most current), fall back to model meta,
-                        # then default to 'silhouette'.
-                        if score_out and score_out.get("regime_metric"):
-                            regime_fit_metric = score_out["regime_metric"]
-                        elif regime_model is not None and hasattr(regime_model, 'meta'):
-                            regime_fit_metric = regime_model.meta.get('fit_metric', 'silhouette')
-                        else:
-                            regime_fit_metric = 'silhouette'
-
-                        # Score: prefer model meta (set at fit time, not stale from score-half),
-                        # fall back to score_out.regime_score (label-time score).
-                        if regime_model is not None and hasattr(regime_model, 'meta'):
-                            regime_fit_score = regime_model.meta.get('fit_score')
-                            if regime_fit_score is None and score_out:
-                                regime_fit_score = score_out.get('regime_score')
-                        elif score_out:
-                            regime_fit_score = score_out.get('regime_score')
-                        else:
-                            regime_fit_score = None
-
-                        # Compute actual stability ratio from regime transitions.
-                        # stability = 1 / (1 + normalized_transition_rate)
-                        # Low transitions = high stability, high transitions = low stability.
-                        actual_stability = 1.0 if regime_quality_ok else 0.75  # Default to good
-                        if regime_model is not None and hasattr(regime_model, 'stats') and regime_model.stats:
-                            # Compute weighted average stability across regimes
-                            total_samples = 0
-                            weighted_stability = 0.0
-                            for regime_id, stat in regime_model.stats.items():
-                                count = stat.get('count', 0)
-                                stab = stat.get('stability_score', 1.0)
-                                if count > 0 and np.isfinite(stab):
-                                    weighted_stability += stab * count
-                                    total_samples += count
-                            if total_samples > 0:
-                                actual_stability = weighted_stability / total_samples
-
-                        # Load existing state or create new.
-                        model_state = load_model_state_from_sql(sql_client, equip_id)
-
-                        if model_state is None:
-                            # First time: create new state in LEARNING.
-                            version = regime_state_version
-                            model_state = create_new_model_state(
-                                equip_id=int(equip_id),
-                                version=version,
-                                training_rows=len(train),
-                                training_start=train_start,
-                                training_end=train_end,
-                                silhouette_score=regime_fit_score,
-                                regime_quality_metric=regime_fit_metric,
-                                regime_quality_ok=regime_quality_ok if regime_quality_ok is not None else True,
-                                run_id=run_id,
-                            )
-                        else:
-                            # Update existing state - always refresh the metric and quality_ok
-                            # from the current run so the promotion check uses the right scale.
-                            training_days = (train_end - train_start).total_seconds() / 86400.0
-                            model_state = update_model_state_from_run(
-                                state=model_state,
-                                run_id=run_id,
-                                run_success=True,
-                                silhouette_score=regime_fit_score,
-                                regime_quality_metric=regime_fit_metric,
-                                regime_quality_ok=regime_quality_ok if regime_quality_ok is not None else True,
-                                stability_ratio=actual_stability,
-                                additional_rows=len(train),
-                                additional_days=training_days,
-                            )
-                            
-                            # Check promotion eligibility if still LEARNING.
-                            promotion_happened = False
-                            if model_state.maturity == MaturityState.LEARNING:
-                                # Get promotion criteria from config (allows per-equipment tuning)
-                                promotion_criteria = PromotionCriteria.from_config(cfg or {})
-                                eligible, unmet = check_promotion_eligibility(model_state, promotion_criteria)
-                                if eligible:
-                                    old_maturity = model_state.maturity.value
-                                    model_state = promote_model(model_state)
-                                    promotion_happened = True
-                                    
-                                    # Write regime promotion log.
-                                    try:
-                                        promotion_record = [{
-                                            'RegimeLabel': 'ALL',  # Model-level promotion
-                                            'FromState': old_maturity,
-                                            'ToState': model_state.maturity.value,
-                                            'Reason': 'met_promotion_criteria',
-                                            'PromotedAt': datetime.now(),
-                                            'Version': model_state.version,
-                                            'ConsecutiveRuns': model_state.consecutive_runs,
-                                            'TotalDays': model_state.total_days,
-                                        }]
-                                        output_manager.write_regime_promotion_log(promotion_record)
-                                    except Exception:
-                                        pass  # Promotion log is best-effort.
-                                    
-                                    Console.ok(f"Model promoted: LEARNING->CONVERGED (runs={model_state.consecutive_runs}, days={model_state.total_days:.1f})", component="LIFECYCLE")
-                                else:
-                                    # Log why promotion didn't happen
-                                    Console.info(f"Promotion not eligible: {', '.join(unmet)}", component="LIFECYCLE")
-                        
-                        # Write updated state.
-                        output_manager.write_active_models(get_active_model_dict(
-                            model_state,
-                            regime_version=regime_state_version,
-                        ))
-                        
-                        # Propagate maturity_state to OutputManager to avoid race conditions.
-                        if model_state is not None:
-                            output_manager.set_maturity_state(str(model_state.maturity.value))
-                        
-                        Console.info(f"Model state: {model_state.maturity.value}", component="LIFECYCLE",
-                                     version=model_state.version, consecutive_runs=model_state.consecutive_runs)
+                        model_state = update_and_persist_model_lifecycle(
+                            sql_client=sql_client,
+                            output_manager=output_manager,
+                            equip_id=int(equip_id),
+                            regime_state_version=regime_state_version,
+                            cfg=cfg,
+                            train_data=train,
+                            run_id=run_id,
+                            regime_model=regime_model,
+                            score_out=score_out if isinstance(score_out, dict) else {},
+                            regime_quality_ok=regime_quality_ok,
+                            logger=Console,
+                        )
                     except Exception as e:
                         Console.warn(f"Failed to update model lifecycle: {e}", component="LIFECYCLE",
                                      error=str(e)[:200])
