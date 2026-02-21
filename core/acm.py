@@ -199,7 +199,7 @@ except Exception:
     start_acm_run = None  # type: ignore
 
 # Data utilities: index hygiene and deduplication helpers.
-from core.fast_features import ensure_local_index, deduplicate_index
+from core.fast_features import ensure_local_index, deduplicate_index, build_features_for_pipeline
 
 # Config utilities: signature and loader helpers.
 from utils.config_dict import ConfigDict, compute_config_signature, load_config as load_config_from_source
@@ -331,20 +331,6 @@ def _configure_logging(logging_cfg, args):
                      log_file=str(log_file))
 
 
-def _get_equipment_id(equipment_name: str, sql_client: Any) -> int:
-    """Compatibility wrapper around core.sql_client.resolve_equipment_id_required()."""
-    if resolve_equipment_id_required is None:
-        raise RuntimeError("SQL helper resolve_equipment_id_required is unavailable.")
-    return resolve_equipment_id_required(equipment_name, sql_client)
-
-
-def _load_config(sql_client: Any, equipment_name: str) -> ConfigDict:
-    """Compatibility wrapper around core.sql_client.load_config_required_from_sql()."""
-    if load_config_required_from_sql is None:
-        raise RuntimeError("SQL helper load_config_required_from_sql is unavailable.")
-    return load_config_required_from_sql(sql_client, equipment_name, logger=Console)
-
-
 # Backwards-compat breadcrumbs for helpers extracted from this module.
 # _compute_config_signature -> utils/config_dict.py::compute_config_signature()
 # _ensure_local_index -> core/fast_features.py::ensure_local_index()
@@ -370,42 +356,11 @@ def _detect_mode(cfg: Optional[Dict[str, Any]] = None) -> str:
     """
     return "adaptive"
 
-def _sql_connect(cfg: Dict[str, Any]) -> Optional[Any]:
-    if connect_acm_sql is None:
-        raise RuntimeError("SQL helper connect_acm_sql is unavailable.")
-    return connect_acm_sql(cfg, logger=Console)
-
-def _sql_start_run(cli: Any, cfg: Dict[str, Any], equip_code: str) -> Tuple[str, pd.Timestamp, pd.Timestamp, int]:
-    """Compatibility wrapper around core.sql_client.start_acm_run()."""
-    if start_acm_run is None:
-        raise RuntimeError("SQL helper start_acm_run is unavailable.")
-    return start_acm_run(
-        cli=cli,
-        cfg=cfg,
-        equip_code=equip_code,
-        deadlock_retry_func=execute_with_deadlock_retry,
-        logger=Console,
-    )
-
-
-def _build_features(
-    train: pd.DataFrame,
-    score: pd.DataFrame,
-    cfg: Dict[str, Any],
-    equip: str = "",
-) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """Compatibility wrapper around feature construction owned by fast_features."""
-    if fast_features is None:
-        Console.warn("fast_features not available; returning raw inputs", component="FEAT", equip=equip)
-        return train, score
-    return fast_features.build_features_for_pipeline(train=train, score=score, cfg=cfg, equip=equip)
-
 # ========================================================================
 # Extracted helpers (now owned by dedicated modules)
 # ========================================================================
 # _sql_finalize_run -> sql_client.py::SQLClient.finalize_run()
 # _execute_with_deadlock_retry -> sql_client.py::execute_with_deadlock_retry()
-# _sql_connect -> sql_client.py::connect_acm_sql()
 # _get_equipment_id -> sql_client.py::resolve_equipment_id_required()
 # _load_config -> sql_client.py::load_config_required_from_sql()
 # _sql_start_run -> sql_client.py::start_acm_run()
@@ -567,8 +522,10 @@ def main() -> None:
         raise SystemExit(1)
 
     with T.section("startup"):
+        if load_config_required_from_sql is None:
+            raise RuntimeError("SQL helper load_config_required_from_sql is unavailable.")
         # Load config from SQL (no CSV fallback; SQL is the source of truth).
-        cfg = _load_config(sql_client, equipment_name=equip)
+        cfg = load_config_required_from_sql(sql_client, equipment_name=equip, logger=Console)
         
         # Deep copy config to prevent accidental mutation across phases.
         import copy
@@ -578,7 +535,9 @@ def main() -> None:
     _configure_logging(logging_cfg, args)
 
     # Get equipment ID from SQL (already resolved during config loading)
-    equip_id = _get_equipment_id(equip, sql_client)
+    if resolve_equipment_id_required is None:
+        raise RuntimeError("SQL helper resolve_equipment_id_required is unavailable.")
+    equip_id = resolve_equipment_id_required(equip, sql_client)
     if not hasattr(cfg, '_equip_id') or cfg._equip_id == 0:
         cfg._equip_id = equip_id
     
@@ -671,7 +630,15 @@ def main() -> None:
     cli_overrides = []
 
     # Start the run in SQL.
-    run_id, win_start, win_end, equip_id = _sql_start_run(sql_client, cfg, equip)
+    if start_acm_run is None:
+        raise RuntimeError("SQL helper start_acm_run is unavailable.")
+    run_id, win_start, win_end, equip_id = start_acm_run(
+        cli=sql_client,
+        cfg=cfg,
+        equip_code=equip,
+        deadlock_retry_func=execute_with_deadlock_retry,
+        logger=Console,
+    )
     
     # Fail-fast: ensure EquipID is valid immediately after SQL lookup.
     if equip_id <= 0:
@@ -984,7 +951,7 @@ def main() -> None:
 
         # ===== Feature construction (detectors require engineered features) =====
         with T.section("features.build"):
-            train, score = _build_features(train, score, cfg, equip)
+            train, score = build_features_for_pipeline(train=train, score=score, cfg=cfg, equip=equip)
 
         # ===== Resolve protected feature columns from cached model manifest =====
         # Do a lightweight SQL manifest-only fetch (no model blobs) so that we
