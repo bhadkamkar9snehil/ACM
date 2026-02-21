@@ -103,6 +103,7 @@ from core.detector_orchestrator import (
 from core.model_persistence import (
     save_trained_models,
     persist_calibration_params_safe,
+    load_manifest_protected_columns,
     restore_detectors_from_runtime_cache,
     load_quality_regime_state_if_needed,
     load_and_rebuild_detectors_from_sql_cache,
@@ -826,30 +827,18 @@ def main() -> None:
         # scoring batch.  Full model objects are still loaded later in
         # models.load as normal.
         _manifest_protected_columns: Optional[List[str]] = None
-        _use_cache_this_run = cfg.get("models", {}).get("use_cache", True) and not (
-            meta.get('is_coldstart_run', False) if isinstance(meta, dict)
-            else getattr(meta, 'is_coldstart_run', False)
+        _manifest_protected_columns = load_manifest_protected_columns(
+            sql_client=sql_client,
+            equip=equip,
+            equip_id=equip_id,
+            cfg=cfg,
+            is_coldstart_run=bool(
+                meta.get("is_coldstart_run", False)
+                if isinstance(meta, dict)
+                else getattr(meta, "is_coldstart_run", False)
+            ),
+            logger=Console,
         )
-        if _use_cache_this_run and sql_client is not None:
-            try:
-                from core.model_persistence import ModelVersionManager
-                _early_mgr = ModelVersionManager(
-                    equip=equip, sql_client=sql_client, equip_id=equip_id
-                )
-                _early_manifest = _early_mgr.load_manifest_only()
-                if _early_manifest:
-                    _manifest_protected_columns = _early_manifest.get("train_sensors") or None
-                    if _manifest_protected_columns:
-                        Console.info(
-                            f"Feature protection: {len(_manifest_protected_columns)} columns "
-                            f"from cached model manifest will not be dropped by low-var filter",
-                            component="FEAT", equip=equip,
-                        )
-            except Exception as _mpe:
-                Console.warn(
-                    f"Early manifest load failed (non-fatal): {_mpe}",
-                    component="FEAT", equip=equip,
-                )
 
         # ===== Impute missing values in feature space (detectors require clean data) =====
         with T.section("features.impute"):

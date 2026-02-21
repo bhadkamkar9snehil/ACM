@@ -535,6 +535,51 @@ class TestRefactorHelpers:
         assert out["cached_models"] is None
         assert out["retrain_result"] is None
 
+    def test_load_manifest_protected_columns_returns_none_when_cache_skipped(self):
+        """Manifest protection helper should no-op when cache is disabled or run is coldstart."""
+        from core.model_persistence import load_manifest_protected_columns
+
+        out_disabled = load_manifest_protected_columns(
+            sql_client=object(),
+            equip="FD_FAN",
+            equip_id=1,
+            cfg={"models": {"use_cache": False}},
+            is_coldstart_run=False,
+        )
+        out_coldstart = load_manifest_protected_columns(
+            sql_client=object(),
+            equip="FD_FAN",
+            equip_id=1,
+            cfg={"models": {"use_cache": True}},
+            is_coldstart_run=True,
+        )
+
+        assert out_disabled is None
+        assert out_coldstart is None
+
+    def test_load_manifest_protected_columns_returns_sensors(self, monkeypatch):
+        """Manifest protection helper should return train_sensors from manifest-only load."""
+        from core import model_persistence
+
+        class _Manager:
+            def __init__(self, equip, sql_client, equip_id):
+                self.equip = equip
+                self.sql_client = sql_client
+                self.equip_id = equip_id
+
+            def load_manifest_only(self):
+                return {"train_sensors": ["a", "b", "c"]}
+
+        monkeypatch.setattr(model_persistence, "ModelVersionManager", _Manager)
+        out = model_persistence.load_manifest_protected_columns(
+            sql_client=object(),
+            equip="FD_FAN",
+            equip_id=1,
+            cfg={"models": {"use_cache": True}},
+            is_coldstart_run=False,
+        )
+        assert out == ["a", "b", "c"]
+
     def test_update_and_persist_model_lifecycle_safe_no_deps(self):
         """Lifecycle safe wrapper should return None when SQL/output manager are unavailable."""
         from core.model_lifecycle import update_and_persist_model_lifecycle_safe

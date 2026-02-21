@@ -1889,4 +1889,46 @@ def persist_calibration_params_safe(
             equip=equip,
             error=str(e)[:200],
         )
+
+
+def load_manifest_protected_columns(
+    *,
+    sql_client: Any,
+    equip: str,
+    equip_id: int,
+    cfg: Dict[str, Any],
+    is_coldstart_run: bool,
+    logger: Any = Console,
+) -> Optional[List[str]]:
+    """
+    Load protected feature columns from latest cached model manifest when cache is enabled.
+    """
+    use_cache = bool(cfg.get("models", {}).get("use_cache", True))
+    if not use_cache or is_coldstart_run or sql_client is None:
+        return None
+
+    try:
+        manager = ModelVersionManager(
+            equip=equip,
+            sql_client=sql_client,
+            equip_id=equip_id,
+        )
+        manifest = manager.load_manifest_only()
+        if not manifest:
+            return None
+        protected = manifest.get("train_sensors") or None
+        if protected:
+            logger.info(
+                f"Feature protection: {len(protected)} columns from cached model manifest will not be dropped by low-var filter",
+                component="FEAT",
+                equip=equip,
+            )
+        return protected
+    except Exception as e:
+        logger.warn(
+            f"Early manifest load failed (non-fatal): {e}",
+            component="FEAT",
+            equip=equip,
+        )
+        return None
         return False
