@@ -233,7 +233,7 @@ except ImportError:
 from core.model_lifecycle import (
     BOOLEAN_ONLY_METRICS,
     load_model_state_from_sql,
-    update_and_persist_model_lifecycle,
+    update_and_persist_model_lifecycle_safe,
 )
 
 # =============================================================================
@@ -1404,24 +1404,19 @@ def main() -> None:
                 )
                 
                 # Model lifecycle management: track maturity and check promotion.
-                if output_manager and sql_client:
-                    try:
-                        model_state = update_and_persist_model_lifecycle(
-                            sql_client=sql_client,
-                            output_manager=output_manager,
-                            equip_id=int(equip_id),
-                            regime_state_version=regime_state_version,
-                            cfg=cfg,
-                            train_data=train,
-                            run_id=run_id,
-                            regime_model=regime_model,
-                            score_out=score_out if isinstance(score_out, dict) else {},
-                            regime_quality_ok=regime_quality_ok,
-                            logger=Console,
-                        )
-                    except Exception as e:
-                        Console.warn(f"Failed to update model lifecycle: {e}", component="LIFECYCLE",
-                                     error=str(e)[:200])
+                model_state = update_and_persist_model_lifecycle_safe(
+                    sql_client=sql_client,
+                    output_manager=output_manager,
+                    equip_id=int(equip_id),
+                    regime_state_version=regime_state_version,
+                    cfg=cfg,
+                    train_data=train,
+                    run_id=run_id,
+                    regime_model=regime_model,
+                    score_out=score_out if isinstance(score_out, dict) else {},
+                    regime_quality_ok=regime_quality_ok,
+                    logger=Console,
+                )
 
         # On scoring batches (models_were_trained=False), model_state is still None here
         # because the lifecycle block above only runs when models are fitted. Load it from
