@@ -5,7 +5,6 @@ module: core.model_lifecycle
 source: core/model_lifecycle.py
 line_start: 47
 line_end: 48
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.model_lifecycle.MaturityState.__str__

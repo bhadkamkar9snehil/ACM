@@ -5,7 +5,6 @@ module: core.health_tracker
 source: core/health_tracker.py
 line_start: 296
 line_end: 308
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.health_tracker.HealthTimeline._apply_row_limit

@@ -5,7 +5,6 @@ module: core.seasonality
 source: core/seasonality.py
 line_start: 562
 line_end: 585
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.seasonality.detect_and_adjust_safe

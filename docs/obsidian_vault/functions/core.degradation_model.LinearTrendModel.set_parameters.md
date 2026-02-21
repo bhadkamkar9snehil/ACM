@@ -5,7 +5,6 @@ module: core.degradation_model
 source: core/degradation_model.py
 line_start: 470
 line_end: 485
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.degradation_model.LinearTrendModel.set_parameters

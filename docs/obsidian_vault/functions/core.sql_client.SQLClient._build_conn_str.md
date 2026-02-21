@@ -5,7 +5,6 @@ module: core.sql_client
 source: core/sql_client.py
 line_start: 138
 line_end: 185
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.sql_client.SQLClient._build_conn_str

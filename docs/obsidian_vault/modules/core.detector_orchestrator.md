@@ -2,7 +2,6 @@
 type: module
 module: core.detector_orchestrator
 source: core/detector_orchestrator.py
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.detector_orchestrator
@@ -12,10 +11,12 @@ Source file: `core/detector_orchestrator.py`
 Summary: Detector Orchestrator Module
 
 ## Imports from core
-- [[modules/core|core]]
 - [[modules/core.ar1_detector|core.ar1_detector]]
+- [[modules/core.correlation|core.correlation]]
+- [[modules/core.fuse|core.fuse]]
 - [[modules/core.observability|core.observability]]
 - [[modules/core.omr|core.omr]]
+- [[modules/core.outliers|core.outliers]]
 
 ## Top-level symbols
 - [[functions/core.detector_orchestrator.score_all_detectors|core.detector_orchestrator.score_all_detectors]] (line 31, function)

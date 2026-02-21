@@ -5,7 +5,6 @@ module: core.fuse
 source: core/fuse.py
 line_start: 375
 line_end: 451
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.fuse.CalibrationContaminationFilter._apply_exclusion_with_guards

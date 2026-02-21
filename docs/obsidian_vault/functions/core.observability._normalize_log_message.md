@@ -5,7 +5,6 @@ module: core.observability
 source: core/observability.py
 line_start: 290
 line_end: 309
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.observability._normalize_log_message

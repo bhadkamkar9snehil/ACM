@@ -5,7 +5,6 @@ module: core.fast_features
 source: core/fast_features.py
 line_start: 1048
 line_end: 1158
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.fast_features.normalize_with_confidence_gating

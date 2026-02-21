@@ -5,7 +5,6 @@ module: core.model_lifecycle
 source: core/model_lifecycle.py
 line_start: 343
 line_end: 398
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.model_lifecycle.create_new_model_state

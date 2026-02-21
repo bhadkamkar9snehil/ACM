@@ -5,7 +5,6 @@ module: core.outliers
 source: core/outliers.py
 line_start: 122
 line_end: 148
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.outliers.GMMDetector.__init__

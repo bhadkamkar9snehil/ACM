@@ -5,7 +5,6 @@ module: core.drift
 source: core/drift.py
 line_start: 335
 line_end: 361
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.drift.load_previous_drift_mode

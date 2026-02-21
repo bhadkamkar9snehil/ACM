@@ -5,7 +5,6 @@ module: core.sql_client
 source: core/sql_client.py
 line_start: 395
 line_end: 423
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.sql_client.SQLClient.get_equipment_id

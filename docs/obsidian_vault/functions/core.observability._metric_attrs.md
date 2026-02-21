@@ -5,7 +5,6 @@ module: core.observability
 source: core/observability.py
 line_start: 560
 line_end: 577
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.observability._metric_attrs

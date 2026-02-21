@@ -5,7 +5,6 @@ module: core.model_persistence
 source: core/model_persistence.py
 line_start: 1415
 line_end: 1522
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.model_persistence.load_cached_models_with_validation

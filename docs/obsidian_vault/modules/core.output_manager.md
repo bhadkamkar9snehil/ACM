@@ -2,7 +2,6 @@
 type: module
 module: core.output_manager
 source: core/output_manager.py
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.output_manager

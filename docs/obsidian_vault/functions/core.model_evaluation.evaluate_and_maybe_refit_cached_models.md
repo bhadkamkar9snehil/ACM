@@ -5,7 +5,6 @@ module: core.model_evaluation
 source: core/model_evaluation.py
 line_start: 486
 line_end: 569
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.model_evaluation.evaluate_and_maybe_refit_cached_models

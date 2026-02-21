@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import ast
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -37,6 +38,7 @@ LOCAL_CODEX_HOME = Path(
     (Path.home() / ".codex").as_posix()
 )
 LOCAL_SKILL_DIR = LOCAL_CODEX_HOME / "skills" / "acm-codebase-memory"
+WIKILINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
 
 
 @dataclass
@@ -324,6 +326,93 @@ def _sync_local_skill() -> int:
     return sum(1 for _ in LOCAL_SKILL_DIR.rglob("*"))
 
 
+def _iter_link_check_files() -> List[Path]:
+    # Link integrity is enforced for the canonical Obsidian vault graph.
+    # Skill reference files are a compact subset and may contain intentional
+    # links that only resolve inside the full vault.
+    files: List[Path] = []
+    files.extend(sorted(OBSIDIAN_DIR.rglob("*.md")))
+    # De-duplicate while preserving order.
+    dedup: List[Path] = []
+    seen: Set[str] = set()
+    for p in files:
+        key = p.resolve().as_posix()
+        if key in seen:
+            continue
+        seen.add(key)
+        dedup.append(p)
+    return dedup
+
+
+def _split_wikilink_target(raw_target: str) -> str:
+    target = raw_target.split("|", 1)[0].strip()
+    target = target.split("#", 1)[0].strip()
+    return target
+
+
+def _candidate_note_paths(base_dir: Path, target: str) -> List[Path]:
+    target_path = Path(target)
+    has_explicit_md = target.lower().endswith(".md")
+    cands: List[Path] = []
+    if has_explicit_md:
+        cands.append(base_dir / target_path)
+    else:
+        cands.append(base_dir / f"{target}.md")
+    return cands
+
+
+def _resolve_wikilink(source_file: Path, raw_target: str) -> bool:
+    target = _split_wikilink_target(raw_target)
+    if not target:
+        return True
+    if target.lower().startswith(("http://", "https://")):
+        return True
+
+    # Explicit path-like targets.
+    if "/" in target or "\\" in target or target.startswith("."):
+        candidates: List[Path] = []
+        candidates.extend(_candidate_note_paths(source_file.parent, target))
+        candidates.extend(_candidate_note_paths(OBSIDIAN_DIR, target))
+        candidates.extend(_candidate_note_paths(REPO_SKILL_REF_DIR, target))
+        return any(c.exists() for c in candidates)
+
+    # Bare note names: allow unique match in known roots.
+    candidate_name = target if target.endswith(".md") else f"{target}.md"
+    hits: List[Path] = []
+    hits.extend(OBSIDIAN_DIR.rglob(candidate_name))
+    hits.extend(REPO_SKILL_REF_DIR.rglob(candidate_name))
+    return len(hits) > 0
+
+
+def _check_wikilinks() -> Dict[str, object]:
+    files = _iter_link_check_files()
+    broken_links: List[Dict[str, str]] = []
+    total_links = 0
+
+    for md in files:
+        try:
+            content = md.read_text(encoding="utf-8-sig")
+        except Exception:
+            continue
+        for match in WIKILINK_RE.finditer(content):
+            raw_target = match.group(1).strip()
+            total_links += 1
+            if not _resolve_wikilink(md, raw_target):
+                broken_links.append(
+                    {
+                        "source": md.relative_to(REPO_ROOT).as_posix(),
+                        "target": raw_target,
+                    }
+                )
+
+    return {
+        "files_scanned": len(files),
+        "links_scanned": total_links,
+        "broken_count": len(broken_links),
+        "broken_links": broken_links[:200],
+    }
+
+
 def _health() -> Tuple[bool, Dict[str, object]]:
     required = [
         OBSIDIAN_DIR / "00_Home.md",
@@ -335,11 +424,13 @@ def _health() -> Tuple[bool, Dict[str, object]]:
         REPO_SKILL_REF_DIR / "00_Agent-Memory-Hub.md",
     ]
     missing = [p.as_posix() for p in required if not p.exists()]
-    ok = len(missing) == 0
+    link_report = _check_wikilinks()
+    ok = len(missing) == 0 and int(link_report.get("broken_count", 0)) == 0
     details: Dict[str, object] = {
         "ok": ok,
         "missing": missing,
         "checked_files": [p.as_posix() for p in required],
+        "link_check": link_report,
     }
     return ok, details
 
@@ -357,6 +448,10 @@ def cmd_refresh(args: argparse.Namespace) -> int:
     if args.sync_local_skill:
         count = _sync_local_skill()
         print(f"Local CODEX skill synced: path={LOCAL_SKILL_DIR.as_posix()} entries={count}")
+    ok, details = _health()
+    if not ok:
+        print(json.dumps(details, indent=2))
+        return 1
     return 0
 
 

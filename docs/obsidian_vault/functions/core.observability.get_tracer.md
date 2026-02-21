@@ -5,7 +5,6 @@ module: core.observability
 source: core/observability.py
 line_start: 2206
 line_end: 2208
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.observability.get_tracer

@@ -5,7 +5,6 @@ module: core.output_manager
 source: core/output_manager.py
 line_start: 2999
 line_end: 3028
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.output_manager.OutputManager.write_active_models

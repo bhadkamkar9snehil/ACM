@@ -5,7 +5,6 @@ module: core.regimes
 source: core/regimes.py
 line_start: 1260
 line_end: 1580
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.regimes.fit_regime_model

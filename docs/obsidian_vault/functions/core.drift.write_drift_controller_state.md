@@ -5,7 +5,6 @@ module: core.drift
 source: core/drift.py
 line_start: 387
 line_end: 424
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.drift.write_drift_controller_state

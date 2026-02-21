@@ -5,7 +5,6 @@ module: core.health_tracker
 source: core/health_tracker.py
 line_start: 436
 line_end: 500
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.health_tracker.HealthTimeline.get_data_summary

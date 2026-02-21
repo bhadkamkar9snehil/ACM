@@ -5,7 +5,6 @@ module: core.forecast_engine
 source: core/forecast_engine.py
 line_start: 1749
 line_end: 1765
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.forecast_engine.RegimeConditionedForecaster.__init__

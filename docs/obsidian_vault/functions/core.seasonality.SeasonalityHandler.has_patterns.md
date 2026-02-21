@@ -5,7 +5,6 @@ module: core.seasonality
 source: core/seasonality.py
 line_start: 464
 line_end: 476
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.seasonality.SeasonalityHandler.has_patterns

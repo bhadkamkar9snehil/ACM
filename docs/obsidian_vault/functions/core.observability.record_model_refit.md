@@ -5,7 +5,6 @@ module: core.observability
 source: core/observability.py
 line_start: 1902
 line_end: 1908
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.observability.record_model_refit

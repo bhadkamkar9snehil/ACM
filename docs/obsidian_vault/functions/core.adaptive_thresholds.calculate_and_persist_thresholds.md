@@ -5,7 +5,6 @@ module: core.adaptive_thresholds
 source: core/adaptive_thresholds.py
 line_start: 504
 line_end: 616
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.adaptive_thresholds.calculate_and_persist_thresholds

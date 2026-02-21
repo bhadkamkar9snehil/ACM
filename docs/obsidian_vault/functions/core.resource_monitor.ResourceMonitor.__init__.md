@@ -5,7 +5,6 @@ module: core.resource_monitor
 source: core/resource_monitor.py
 line_start: 239
 line_end: 265
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.resource_monitor.ResourceMonitor.__init__

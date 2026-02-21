@@ -5,7 +5,6 @@ module: core.fuse
 source: core/fuse.py
 line_start: 454
 line_end: 1010
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.fuse.tune_detector_weights

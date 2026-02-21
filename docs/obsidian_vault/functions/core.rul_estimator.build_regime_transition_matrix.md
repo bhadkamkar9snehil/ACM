@@ -5,7 +5,6 @@ module: core.rul_estimator
 source: core/rul_estimator.py
 line_start: 451
 line_end: 501
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.rul_estimator.build_regime_transition_matrix

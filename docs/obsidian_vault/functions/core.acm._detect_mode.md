@@ -5,7 +5,6 @@ module: core.acm
 source: core/acm.py
 line_start: 350
 line_end: 356
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.acm._detect_mode

@@ -5,7 +5,6 @@ module: core.acm
 source: core/acm.py
 line_start: 309
 line_end: 313
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.acm.ScoreContext

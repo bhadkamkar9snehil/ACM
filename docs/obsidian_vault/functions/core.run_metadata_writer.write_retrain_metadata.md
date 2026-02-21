@@ -5,7 +5,6 @@ module: core.run_metadata_writer
 source: core/run_metadata_writer.py
 line_start: 325
 line_end: 404
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.run_metadata_writer.write_retrain_metadata

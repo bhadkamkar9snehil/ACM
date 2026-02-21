@@ -5,7 +5,6 @@ module: core.analytics_builder
 source: core/analytics_builder.py
 line_start: 425
 line_end: 450
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.analytics_builder.AnalyticsBuilder._compute_health_confidence_vectorized

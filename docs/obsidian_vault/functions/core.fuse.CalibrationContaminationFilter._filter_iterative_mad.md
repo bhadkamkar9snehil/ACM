@@ -5,7 +5,6 @@ module: core.fuse
 source: core/fuse.py
 line_start: 236
 line_end: 312
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.fuse.CalibrationContaminationFilter._filter_iterative_mad

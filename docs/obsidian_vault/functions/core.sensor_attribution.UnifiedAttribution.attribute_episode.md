@@ -5,7 +5,6 @@ module: core.sensor_attribution
 source: core/sensor_attribution.py
 line_start: 377
 line_end: 416
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.sensor_attribution.UnifiedAttribution.attribute_episode

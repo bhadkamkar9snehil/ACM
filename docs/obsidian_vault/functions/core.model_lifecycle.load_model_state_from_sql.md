@@ -5,7 +5,6 @@ module: core.model_lifecycle
 source: core/model_lifecycle.py
 line_start: 720
 line_end: 788
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.model_lifecycle.load_model_state_from_sql

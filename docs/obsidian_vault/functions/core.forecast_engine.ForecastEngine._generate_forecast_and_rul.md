@@ -5,7 +5,6 @@ module: core.forecast_engine
 source: core/forecast_engine.py
 line_start: 785
 line_end: 901
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.forecast_engine.ForecastEngine._generate_forecast_and_rul

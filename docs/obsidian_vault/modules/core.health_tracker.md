@@ -2,7 +2,6 @@
 type: module
 module: core.health_tracker
 source: core/health_tracker.py
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.health_tracker

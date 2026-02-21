@@ -5,7 +5,6 @@ module: core.outliers
 source: core/outliers.py
 line_start: 81
 line_end: 102
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.outliers.IsolationForestDetector.score

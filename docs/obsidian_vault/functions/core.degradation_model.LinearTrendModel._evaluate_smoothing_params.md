@@ -5,7 +5,6 @@ module: core.degradation_model
 source: core/degradation_model.py
 line_start: 792
 line_end: 820
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.degradation_model.LinearTrendModel._evaluate_smoothing_params

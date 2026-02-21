@@ -5,7 +5,6 @@ module: core.observability
 source: core/observability.py
 line_start: 533
 line_end: 549
-generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.observability._check_endpoint_reachable
