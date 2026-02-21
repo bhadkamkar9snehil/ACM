@@ -608,6 +608,48 @@ def update_and_persist_model_lifecycle(
     return model_state
 
 
+def update_and_persist_model_lifecycle_safe(
+    *,
+    sql_client: Any,
+    output_manager: Any,
+    equip_id: int,
+    regime_state_version: int,
+    cfg: Dict[str, Any],
+    train_data: Any,
+    run_id: Optional[str],
+    regime_model: Optional[Any],
+    score_out: Optional[Dict[str, Any]],
+    regime_quality_ok: Optional[bool],
+    logger: Any = Console,
+) -> Optional[ModelState]:
+    """
+    Safe wrapper around update_and_persist_model_lifecycle.
+
+    Returns None on failure and logs a warning instead of raising.
+    """
+    try:
+        return update_and_persist_model_lifecycle(
+            sql_client=sql_client,
+            output_manager=output_manager,
+            equip_id=equip_id,
+            regime_state_version=regime_state_version,
+            cfg=cfg,
+            train_data=train_data,
+            run_id=run_id,
+            regime_model=regime_model,
+            score_out=score_out,
+            regime_quality_ok=regime_quality_ok,
+            logger=logger,
+        )
+    except Exception as e:
+        logger.warn(
+            f"Failed to update model lifecycle: {e}",
+            component="LIFECYCLE",
+            error=str(e)[:200],
+        )
+        return None
+
+
 def get_active_model_dict(
     state: ModelState,
     regime_version: Optional[int] = None,
