@@ -1561,15 +1561,14 @@ def main() -> None:
         with T.section("persist"):
           with output_manager.batched_transaction():
             # Core outputs must succeed; failures here abort the run.
-            with T.section("persist.write_scores"):
-                scores_result = output_manager.write_scores(frame)
-                rows_written += scores_result.get('inserted', 0)
-
-            with T.section("persist.write_episodes"):
-                episode_rows = output_manager.write_episodes(episodes)
-                rows_written += episode_rows.get('inserted', 0)
-                if episodes is not None and len(episodes) > 0:
-                    record_episode(equip, count=len(episodes), severity="info")
+            with T.section("persist.core_outputs"):
+                core_persist = output_manager.persist_core_outputs(
+                    scores_df=frame,
+                    episodes_df=episodes,
+                )
+                rows_written += core_persist.rows_written_delta
+                if core_persist.episode_count > 0:
+                    record_episode(equip, count=core_persist.episode_count, severity="info")
 
             # Culprits are written via OutputManager.
             

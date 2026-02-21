@@ -324,6 +324,18 @@ class PersistArtifactsResult:
     seasonal_pattern_rows: int = 0
 
 
+@dataclass
+class PersistCoreOutputsResult:
+    """Row counts for core persist-phase writes."""
+    scores_inserted: int = 0
+    episodes_inserted: int = 0
+    episode_count: int = 0
+
+    @property
+    def rows_written_delta(self) -> int:
+        return int(self.scores_inserted) + int(self.episodes_inserted)
+
+
 class OutputManager:
     """
     Unified output manager that consolidates all scattered output generation.
@@ -1696,6 +1708,23 @@ class OutputManager:
                 Console.warn(f"Failed to write to ACM_Episodes: {summary_err}", component="EPISODES", equip_id=self.equip_id, run_id=self.run_id, episode_count=len(episodes_df), error_type=type(summary_err).__name__)
         
         return result
+
+    def persist_core_outputs(
+        self,
+        scores_df: pd.DataFrame,
+        episodes_df: Optional[pd.DataFrame],
+    ) -> PersistCoreOutputsResult:
+        """
+        Persist core outputs and return inserted row counts for batch accounting.
+        """
+        scores_result = self.write_scores(scores_df)
+        episodes_safe = pd.DataFrame() if episodes_df is None else episodes_df
+        episodes_result = self.write_episodes(episodes_safe)
+        return PersistCoreOutputsResult(
+            scores_inserted=int(scores_result.get("inserted", 0)),
+            episodes_inserted=int(episodes_result.get("inserted", 0)),
+            episode_count=int(len(episodes_safe)),
+        )
     
     def write_threshold_metadata(
         self,
