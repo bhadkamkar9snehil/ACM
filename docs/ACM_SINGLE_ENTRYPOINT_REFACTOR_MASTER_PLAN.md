@@ -20,6 +20,10 @@ Completed on `integration/acm-single-entrypoint`:
 6. Removed redundant baseline-buffer try-wrapper in `core/acm.py` and delegated directly to `OutputManager.update_baseline_buffer()` owner logic.
 7. Added safe lifecycle wrapper `update_and_persist_model_lifecycle_safe()` in `core/model_lifecycle.py` and replaced inline lifecycle try/except in `core/acm.py`.
 8. Updated `tests/test_v11_modules.py` with helper coverage for extracted functions to keep regression checks aligned with refactor state.
+9. Extracted DataContract entry validation flow from `core/acm.py` into `core/pipeline_types.py` via `validate_data_contract_at_entry()`.
+10. Replaced inline DataContract threshold parsing and validation/write logic in `core/acm.py` with a single call to the ownership helper.
+11. Updated `tests/test_v11_modules.py` with direct coverage for `validate_data_contract_at_entry()` pass and failure paths.
+12. Maintained source control isolation by merging unrelated dashboard changes through dedicated `chore/*` branches into integration.
 
 Validation executed after each extraction slice:
 

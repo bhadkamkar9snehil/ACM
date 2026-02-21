@@ -432,6 +432,85 @@ class TestRefactorHelpers:
         state = load_model_state_safe(sql_client=None, equip_id=1)
         assert state is None
 
+    def test_validate_data_contract_at_entry_passes_and_writes(self):
+        """Data contract entry helper should pass and persist validation payload."""
+        from core.pipeline_types import validate_data_contract_at_entry
+
+        class _OutputManager:
+            def __init__(self):
+                self.rows = []
+
+            def write_data_contract_validation(self, payload):
+                self.rows.append(payload)
+
+        class _Logger:
+            def warn(self, *args, **kwargs):
+                pass
+
+            def error(self, *args, **kwargs):
+                pass
+
+        meta = type(
+            "Meta",
+            (),
+            {"kept_cols": ["sensor_a"], "timestamp_col": "Timestamp", "is_coldstart_run": False},
+        )()
+        idx = pd.date_range("2026-01-01", periods=2, freq="h")
+        train = pd.DataFrame({"sensor_a": [1.0, 2.0]}, index=idx)
+        score = pd.DataFrame({"sensor_a": [1.1]}, index=idx[:1])
+        out = _OutputManager()
+
+        validation = validate_data_contract_at_entry(
+            train=train,
+            score=score,
+            meta=meta,
+            refit_requested=False,
+            cfg={},
+            output_manager=out,
+            equip_id=1,
+            equip="FD_FAN",
+            run_id="r1",
+            logger=_Logger(),
+        )
+
+        assert validation.passed is True
+        assert len(out.rows) == 1
+        assert out.rows[0]["Passed"] is True
+
+    def test_validate_data_contract_at_entry_raises_on_insufficient_rows(self):
+        """Data contract entry helper should raise when minimum score rows are not met."""
+        from core.pipeline_types import validate_data_contract_at_entry
+
+        class _Logger:
+            def warn(self, *args, **kwargs):
+                pass
+
+            def error(self, *args, **kwargs):
+                pass
+
+        meta = type(
+            "Meta",
+            (),
+            {"kept_cols": ["sensor_a"], "timestamp_col": "Timestamp", "is_coldstart_run": False},
+        )()
+        idx = pd.date_range("2026-01-01", periods=2, freq="h")
+        train = pd.DataFrame({"sensor_a": [1.0, 2.0]}, index=idx)
+        score = pd.DataFrame({"sensor_a": [1.1]}, index=idx[:1])
+
+        with pytest.raises(ValueError, match="DataContract validation FAILED"):
+            validate_data_contract_at_entry(
+                train=train,
+                score=score,
+                meta=meta,
+                refit_requested=False,
+                cfg={"data": {"min_score_samples": 5}},
+                output_manager=None,
+                equip_id=1,
+                equip="FD_FAN",
+                run_id="r1",
+                logger=_Logger(),
+            )
+
     def test_apply_regime_health_labels_sets_unknown_when_quality_bad(self):
         """Regime health helper should mark unknown when quality is not acceptable."""
         from core.regimes import apply_regime_health_labels
