@@ -24,6 +24,7 @@ Completed on `integration/acm-single-entrypoint`:
 10. Replaced inline DataContract threshold parsing and validation/write logic in `core/acm.py` with a single call to the ownership helper.
 11. Updated `tests/test_v11_modules.py` with direct coverage for `validate_data_contract_at_entry()` pass and failure paths.
 12. Maintained source control isolation by merging unrelated dashboard changes through dedicated `chore/*` branches into integration.
+13. Extracted seasonality safe-execution wrapper into `core/seasonality.py` and removed inline seasonality try/except from `core/acm.py`.
 
 Validation executed after each extraction slice:
 
