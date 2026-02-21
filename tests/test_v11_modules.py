@@ -2102,6 +2102,96 @@ class TestRefactorHelpers:
         assert len(result.episodes) == 1
         assert result.fusion_weights_used == {"ar1_z": 1.0}
 
+    def test_run_feature_preparation_stage_orchestrates_pipeline(self, monkeypatch):
+        """Feature preparation stage should orchestrate seasonality, guardrails, build, impute, hash, and refit flag."""
+        from core import fast_features
+
+        idx = pd.date_range("2026-01-01", periods=3, freq="h")
+        train = pd.DataFrame({"a": [1.0, 2.0, 3.0]}, index=idx)
+        score = pd.DataFrame({"a": [1.5, 2.5, 3.5]}, index=idx)
+
+        calls = {"sections": [], "impute": None}
+
+        class _Section:
+            def __init__(self, name):
+                self.name = name
+            def __enter__(self):
+                calls["sections"].append(self.name)
+                return self
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        def _section_fn(name):
+            return _Section(name)
+
+        def _detect_and_adjust_fn(**kwargs):
+            return kwargs["train"], kwargs["score"], {"sensor_a": []}, False
+
+        def _run_data_guardrails_fn(**kwargs):
+            return type("GuardrailResult", (), {"low_var_threshold": 0.25})()
+
+        def _load_manifest_protected_columns_fn(**kwargs):
+            return ["a"]
+
+        def _compute_feature_hash_fn(_train, _equip):
+            return "hash-123"
+
+        def _build_features_for_pipeline(**kwargs):
+            out_train = kwargs["train"].copy()
+            out_score = kwargs["score"].copy()
+            out_train["a_feat"] = out_train["a"] * 2.0
+            out_score["a_feat"] = out_score["a"] * 2.0
+            return out_train, out_score
+
+        def _impute_features(**kwargs):
+            calls["impute"] = {
+                "low_var_threshold": kwargs["low_var_threshold"],
+                "protected_columns": kwargs["protected_columns"],
+            }
+            return kwargs["train"], kwargs["score"], []
+
+        monkeypatch.setattr(fast_features, "build_features_for_pipeline", _build_features_for_pipeline)
+        monkeypatch.setattr(fast_features, "impute_features", _impute_features)
+
+        class _OutputManager:
+            def check_refit_request(self):
+                return True
+
+        result = fast_features.run_feature_preparation_stage(
+            train=train,
+            score=score,
+            cfg={},
+            meta={"is_coldstart_run": False},
+            output_manager=_OutputManager(),
+            sql_client=object(),
+            run_id="r1",
+            equip_id=1,
+            equip="FD_FAN",
+            section_fn=_section_fn,
+            detect_and_adjust_fn=_detect_and_adjust_fn,
+            run_data_guardrails_fn=_run_data_guardrails_fn,
+            load_manifest_protected_columns_fn=_load_manifest_protected_columns_fn,
+            compute_feature_hash_fn=_compute_feature_hash_fn,
+        )
+
+        assert "a_feat" in result.train.columns
+        assert "a_feat" in result.score.columns
+        assert result.raw_train.equals(train)
+        assert result.raw_score.equals(score)
+        assert result.seasonal_patterns == {"sensor_a": []}
+        assert result.train_feature_hash == "hash-123"
+        assert result.refit_requested is True
+        assert calls["impute"]["low_var_threshold"] == pytest.approx(0.25)
+        assert calls["impute"]["protected_columns"] == ["a"]
+        assert calls["sections"] == [
+            "seasonality.detect",
+            "data.guardrails",
+            "features.build",
+            "features.impute",
+            "features.hash",
+            "models.refit_flag",
+        ]
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
