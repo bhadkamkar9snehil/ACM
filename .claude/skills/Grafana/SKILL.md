@@ -2,10 +2,95 @@
 
 ## Skill Metadata
 - **Skill Name**: grafana-dashboard-master
-- **Version**: 1.0.0
-- **Last Updated**: 2026-01-17
-- **Applicable Grafana Versions**: 10.x, 11.x
+- **Version**: 1.1.0
+- **Last Updated**: 2026-02-21
+- **Applicable Grafana Versions**: 10.x, 11.x, 12.x
 - **Primary Focus**: Dashboard JSON creation, visualization configuration, SQL datasource queries
+
+---
+
+## 0. ACM Schema Quick Reference (Critical - prevents wrong column names)
+
+### Datasource UIDs (provisioned)
+| Datasource | UID | Type |
+|------------|-----|------|
+| MSSQL (ACM business data) | `mssql-ds` | mssql |
+| Prometheus | `prometheus-ds` | prometheus |
+| Loki | `loki-ds` | loki |
+| Tempo | `tempo-ds` | tempo |
+| Pyroscope | `pyroscope-ds` | grafana-pyroscope-datasource |
+
+### Column Names — VERIFIED CORRECT (2026-02-21)
+| Table | Column | Notes |
+|-------|--------|-------|
+| ACM_HealthTimeline | `Timestamp` | datetime2 |
+| ACM_HealthTimeline | `HealthIndex` | float, 0-100 |
+| ACM_HealthTimeline | `Zone` | nvarchar(16): GOOD/WATCH/ALERT (NOT HealthZone) |
+| ACM_HealthTimeline | `FusedZ` | float |
+| ACM_Scores_Wide | `EntryDateTime` | datetime2 (NOT Timestamp) |
+| ACM_Scores_Wide | `fused` | float |
+| ACM_Scores_Wide | `alert_mode` | tinyint |
+| ACM_Scores_Wide | `regime_label` | int |
+| ACM_Scores_Wide | `ar1_z`, `pca_spe_z`, `pca_t2_z`, `mhal_z`, `iforest_z`, `gmm_z`, `cusum_z` | float z-scores |
+| ACM_Episodes (dual) | `StartEntryDateTime`, `EndEntryDateTime` | datetime2 |
+| ACM_Episodes (dual) | `DurationHours`, `Severity`, `PrimaryDetector`, `Culprits` | |
+| ACM_RegimeTimeline | `Timestamp`, `RegimeLabel` (int), `RegimeState` | |
+| ACM_SensorHotspots | `SensorName`, `MaxAbsZ`, `LatestAbsZ`, `AboveWarnCount`, `AboveAlertCount` | |
+| ACM_SensorDefects | `DetectorType`, `Severity`, `ViolationPct`, `MaxZ`, `CurrentZ`, `ActiveDefect` | |
+| ACM_ContributionTimeline | `Timestamp`, `DetectorType`, `ContributionPct` | |
+| ACM_ContributionCurrent | `DetectorType`, `ContributionPct`, `ZScore` | |
+| ACM_CalibrationSummary | `Detector`, `Mean`, `Std`, `P95`, `P99`, `ClipZ`, `ClipPct` | |
+| ACM_DetectorCorrelation | `DetectorA`, `DetectorB`, `PearsonR` | |
+| ACM_DriftSeries | `Timestamp`, `DriftValue` | |
+| ACM_DefectSummary | `Status`, `Severity`, `CurrentHealth`, `EpisodeCount`, `WorstSensor` | |
+| ACM_EpisodeMetrics | `TotalEpisodes`, `RatePerDay`, `AvgDurationHours`, `MeanInterarrivalHours` | |
+| ACM_ThresholdCrossings | `Timestamp`, `Detector`, `ZScore`, `Direction` | UP/DOWN |
+| ACM_CulpritHistory | `StartTimestamp`, `EndTimestamp`, `PrimaryDetector`, `WeightedContribution` | |
+| ACM_RegimeDwellStats | `RegimeLabel`, `MeanSeconds`, `MedianSeconds`, `Runs` | |
+| ACM_RegimeOccupancy | `RegimeLabel`, `Percentage` | |
+| ACM_HealthHistogram | `HealthBin`, `RecordCount`, `Percentage` | |
+| ACM_DataQuality | `sensor`, `CheckResult`, `train_null_pct`, `score_null_pct` | |
+| ACM_SinceWhen | `AlertZone`, `DurationHours`, `StartTimestamp` | |
+| ACM_AlertAge | `AlertZone`, `DurationHours` | |
+| ACM_PCA_Metrics | `ComponentName`, `MetricType`, `Value` | |
+| RunLog | `StartEntryDateTime`, `EndEntryDateTime`, `Outcome`, `Stage`, `RowsRead`, `RowsWritten` | |
+| Equipments | `EquipID`, `EquipCode`, `Active` | |
+| ACM_RunSummary | `EquipCode`, `StartEntryDateTime`, `Status`, `RowsProcessed`, `EpisodesDetected`, `ProcessingTimeMs` | |
+
+### Variable Template: Equipment Selector
+```json
+{
+  "name": "equipment",
+  "type": "query",
+  "datasource": {"type": "mssql", "uid": "mssql-ds"},
+  "query": "SELECT EquipID AS __value, EquipCode AS __text FROM Equipments WHERE Active = 1 ORDER BY EquipCode",
+  "refresh": 2,
+  "multi": false,
+  "includeAll": false
+}
+```
+
+### Variable Template: Datasource Picker
+```json
+{
+  "name": "datasource",
+  "type": "datasource",
+  "query": "mssql",
+  "current": {"text": "MSSQL", "value": "mssql-ds"}
+}
+```
+
+### Critical Time-Series Pattern (MSSQL)
+- Use `$__timeFrom()` and `$__timeTo()` macros for time filtering
+- Always alias time column as `time` for time-series panels
+- Always `ORDER BY time ASC` for time series
+- Use `format: "time_series"` for time series panels, `"table"` for stat/table/bar
+
+### Latest-Run Pattern (avoids showing stale data)
+```sql
+WHERE EquipID = $equipment
+  AND RunID = (SELECT TOP 1 RunID FROM <table> WHERE EquipID = $equipment ORDER BY CreatedAt DESC)
+```
 
 ---
 
