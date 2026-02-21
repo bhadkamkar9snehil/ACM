@@ -1773,16 +1773,12 @@ def main() -> None:
 
         # ===== Rolling baseline buffer: update with latest raw SCORE =====
         with T.section("baseline.buffer_write"):
-            try:
-                if sql_client:
-                    output_manager.update_baseline_buffer(
-                        score_numeric=raw_score,
-                        cfg=cfg,
-                        coldstart_complete=coldstart_complete
-                    )
-            except Exception as be:
-                Console.warn(f"Baseline buffer update failed: {be}", component="BASELINE",
-                             equip=equip, error_type=type(be).__name__, error=str(be)[:200])
+            if raw_score is not None:
+                output_manager.update_baseline_buffer(
+                    score_numeric=raw_score,
+                    cfg=cfg,
+                    coldstart_complete=coldstart_complete,
+                )
 
         sensor_context: Optional[Dict[str, Any]] = None
         with T.section("sensor.context"):
