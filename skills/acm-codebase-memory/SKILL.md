@@ -22,6 +22,7 @@ Keep ACM context persistent and agent-usable across sessions.
 - `references/01_Modules.md`
 - `references/03_Runtime-Flow.md`
 - `references/04_Outputs-and-Status.md`
+- `references/05_Grafana-Dashboard-Guardrails.md` (when editing Grafana dashboards)
 - `references/memory_index.json`
 
 ## Rules

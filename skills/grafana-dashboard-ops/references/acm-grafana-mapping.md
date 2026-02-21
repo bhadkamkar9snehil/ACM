@@ -34,3 +34,11 @@
 
 1. Do not include archive JSON files in active dashboard provider path.
 2. Ensure dashboard UIDs are unique across all provisioned files.
+
+## Color Palette Guardrail
+
+1. Grafana color mode values are strict identifiers.
+2. Use `continuous-RdYlGr` for red-yellow-green gradients.
+3. Do not use `continuous-RdYlGn`.
+4. Validate before commit:
+   - `python skills/grafana-dashboard-ops/scripts/validate_grafana_palette_modes.py`
