@@ -96,11 +96,10 @@ from core.detector_orchestrator import (
     reconcile_detector_flags_with_loaded_models,
 )
 from core.model_persistence import (
-    load_cached_models_with_validation,
     save_trained_models,
-    align_current_features_to_cached_manifest,
     restore_detectors_from_runtime_cache,
     load_quality_regime_state_if_needed,
+    load_and_rebuild_detectors_from_sql_cache,
 )
 from core.model_evaluation import auto_tune_parameters, evaluate_force_retrain_triggers
 
@@ -1031,45 +1030,28 @@ def main() -> None:
 
         with T.section("models.load"):
             if use_cache and detector_cache is None:
-                current_sensors = list(train.columns) if hasattr(train, 'columns') else []
-                cached_models, cached_manifest = load_cached_models_with_validation(
-                    equip=equip, sql_client=sql_client, equip_id=equip_id,
-                    cfg=cfg, train_columns=current_sensors,
+                cache_restore = load_and_rebuild_detectors_from_sql_cache(
+                    train=train,
+                    score=score,
+                    equip=equip,
+                    sql_client=sql_client,
+                    equip_id=equip_id,
+                    cfg=cfg,
+                    rebuild_from_cache_fn=rebuild_detectors_from_cache,
+                    logger=Console,
                 )
-                if cached_models:
-                    train, score, current_sensors, cache_compatible = align_current_features_to_cached_manifest(
-                        train=train,
-                        score=score,
-                        cached_manifest=cached_manifest,
-                        equip=equip,
-                        logger=Console,
-                    )
-                    if not cache_compatible:
-                        cached_models = None
-                        cached_manifest = None
-                
-                if cached_models:
-                    rebuild_result = rebuild_detectors_from_cache(
-                        cached_models=cached_models, cached_manifest=cached_manifest,
-                        cfg=cfg, equip=equip, current_columns=current_sensors
-                    )
-                    ar1_detector = rebuild_result["ar1_detector"]
-                    pca_detector = rebuild_result["pca_detector"]
-                    iforest_detector = rebuild_result["iforest_detector"]
-                    gmm_detector = rebuild_result["gmm_detector"]
-                    omr_detector = rebuild_result["omr_detector"]
-                    regime_model = rebuild_result.get("regime_model")
-                    col_meds = rebuild_result.get("feature_medians")
-
-                    # v11.9.0: Extract cached calibration params for cross-batch consistency
-                    cached_calibration_params = cached_models.get("calibration_params")
-                    if cached_calibration_params:
-                        Console.info(f"Loaded cached calibration params ({len(cached_calibration_params)} detectors)", component="CAL")
-
-                    # AUDIT FIX: Log validation warnings if any
-                    if rebuild_result.get("validation_warnings"):
-                        for warn in rebuild_result["validation_warnings"]:
-                            Console.info(f"Model validation: {warn}", component="MODEL", equip=equip)
+                train = cache_restore["train"]
+                score = cache_restore["score"]
+                cached_models = cache_restore["cached_models"]
+                cached_manifest = cache_restore["cached_manifest"]
+                cached_calibration_params = cache_restore["cached_calibration_params"]
+                ar1_detector = cache_restore["ar1_detector"]
+                pca_detector = cache_restore["pca_detector"]
+                iforest_detector = cache_restore["iforest_detector"]
+                gmm_detector = cache_restore["gmm_detector"]
+                omr_detector = cache_restore["omr_detector"]
+                regime_model = cache_restore["regime_model"]
+                col_meds = cache_restore["col_meds"]
                         
             elif detector_cache:
                 restored = restore_detectors_from_runtime_cache(
