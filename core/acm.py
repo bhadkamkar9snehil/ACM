@@ -1104,14 +1104,6 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
                 equip=equip,
             )
 
-        # ===== Contribution timeline =====
-        with T.section("contribution.timeline"):
-            output_manager.write_contribution_timeline_from_frame(
-                frame=frame,
-                fusion_weights=fusion_weights_used,
-                equip=equip,
-            )
-
         # ===== Phase 9: Persist artifacts / finalize (SQL-only) =====
         rows_read = int(score.shape[0])
         anomaly_count = int(len(episodes))
