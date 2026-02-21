@@ -81,7 +81,7 @@ from core.run_metadata_writer import (
     finalize_run_with_metadata,
 )
 from core.episode_culprits_writer import write_episode_culprits_enhanced
-from core.pipeline_types import DataContract, ValidationResult
+from core.pipeline_types import validate_data_contract_at_entry
 from core.seasonality import SeasonalPattern  # detect_and_adjust imported inline
 from core.sensor_attribution import build_sensor_analytics_context, persist_contribution_timeline
 from core.adaptive_thresholds import maybe_update_adaptive_thresholds
@@ -770,94 +770,19 @@ def main() -> None:
             score, score_dups = deduplicate_index(score, "SCORE", equip)
             meta.dup_timestamps_removed = int(train_dups + score_dups)
 
-            # Load validation thresholds from config (with sensible defaults)
-            data_cfg = cfg.get("data", {}) or {}
-            try:
-                min_score_samples = int(data_cfg.get("min_score_samples", 1))
-                min_score_samples = max(1, min_score_samples)
-            except (TypeError, ValueError):
-                min_score_samples = 1
-                
-            try:
-                min_train_samples = int(data_cfg.get("min_train_samples", 500))
-                min_train_samples = max(10, min_train_samples)
-            except (TypeError, ValueError):
-                min_train_samples = 500
-                
-            # DataContract validation at pipeline entry.
-            # ------------------------------------------------------------
-            # DATA CONTRACT VALIDATION
-            # ------------------------------------------------------------
-            # Purpose:
-            #   - Training phase (coldstart/refit): validate TRAIN against min_train_samples
-            #   - Scoring phase: validate SCORE against min_score_samples
-            #   - Always write the validation row to SQL (pass or fail).
-            # ------------------------------------------------------------
             with T.section("data.contract"):
-                # v11.8.0 ADAPTIVE: Unified validation - no ONLINE/OFFLINE branching.
-                # Decision based on what we're doing: training or scoring.
-                is_initial_coldstart = bool(
-                    meta.get('is_coldstart_run', False) if isinstance(meta, dict)
-                    else getattr(meta, 'is_coldstart_run', False)
-                )
-                is_warm_refit = bool(refit_requested)
-                is_training_phase = is_initial_coldstart or is_warm_refit
-
-                # Minimum rows: training phases allow smaller blocks
-                if is_training_phase:
-                    min_rows_threshold = int(min_train_samples)
-                else:
-                    min_rows_threshold = int(min_score_samples)
-
-                # Choose DF to validate:
-                # - Training phase (coldstart/refit): validate TRAIN (score split is only 40%)
-                # - Scoring phase: prefer score if available, else train
-                if is_training_phase:
-                    validation_df = train
-                else:
-                    validation_df = score if (score is not None and len(score) > 0) else train
-
-                contract = DataContract(
-                    required_sensors=[],
-                    optional_sensors=list(meta.kept_cols) if hasattr(meta, "kept_cols") else [],
-                    timestamp_col=meta.timestamp_col if hasattr(meta, "timestamp_col") else "Timestamp",
-                    min_rows=min_rows_threshold,
-                    max_null_fraction=0.5,
+                validate_data_contract_at_entry(
+                    train=train,
+                    score=score,
+                    meta=meta,
+                    refit_requested=refit_requested,
+                    cfg=cfg,
+                    output_manager=output_manager,
                     equip_id=equip_id,
-                    equip_code=equip,
+                    equip=equip,
+                    run_id=run_id,
+                    logger=Console,
                 )
-
-                validation = contract.validate(validation_df)
-
-                # Write validation result to SQL (success or failure).
-                if output_manager:
-                    try:
-                        sig = contract.signature() if hasattr(contract, "signature") and callable(contract.signature) else None
-                        output_manager.write_data_contract_validation(
-                            {
-                                "Passed": validation.passed,
-                                "RowsValidated": len(validation_df) if validation_df is not None else 0,
-                                "ColumnsValidated": len(validation_df.columns) if validation_df is not None else 0,
-                                "IssuesJSON": json.dumps(validation.issues) if validation.issues else None,
-                                "WarningsJSON": json.dumps(validation.warnings) if validation.warnings else None,
-                                "ContractSignature": sig,
-                            }
-                        )
-                    except Exception as e:
-                        # Only warn if validation passed; if validation failed, failing to write is less important.
-                        if validation.passed:
-                            Console.warn(f"Failed to write DataContract validation: {e}", component="DATA")
-
-                if not validation.passed:
-                    error_msg = f"DataContract validation FAILED: {validation.issues}"
-                    Console.error(error_msg, component="DATA", equip=equip, run_id=run_id, issues=validation.issues)
-                    raise ValueError(error_msg)
-
-                if validation.warnings:
-                    Console.warn(
-                        f"DataContract: {len(validation.warnings)} warnings | {validation.warnings[0] if validation.warnings else ''}",
-                        component="DATA",
-                    )
 
             # Stop Here    
             if len(score) == 0:
