@@ -1,5 +1,7 @@
 {
-  "annotations": { "list": [] },
+  "annotations": {
+    "list": []
+  },
   "description": "ACM Pipeline Observability — Runs, Resources (Prometheus), Traces (Tempo), Logs (Loki), Profiling (Pyroscope)",
   "editable": true,
   "fiscalYearStartMonth": 0,
@@ -9,49 +11,151 @@
   "panels": [
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
       "id": 1,
       "title": "PIPELINE RUN HISTORY",
       "type": "row"
     },
     {
-      "datasource": { "type": "mssql", "uid": "mssql-ds" },
+      "datasource": {
+        "type": "mssql",
+        "uid": "mssql-ds"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
-          "custom": { "align": "auto", "cellOptions": { "type": "auto" }, "inspect": false },
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          },
           "mappings": [],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
         },
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "Status" },
+            "matcher": {
+              "id": "byName",
+              "options": "HealthStatus"
+            },
             "properties": [
-              { "id": "custom.cellOptions", "value": { "type": "color-background" } },
-              { "id": "mappings", "value": [
-                { "type": "value", "options": { "OK": { "text": "OK", "color": "green", "index": 0 } } },
-                { "type": "value", "options": { "ERROR": { "text": "ERROR", "color": "red", "index": 1 } } },
-                { "type": "value", "options": { "PARTIAL": { "text": "PARTIAL", "color": "orange", "index": 2 } } }
-              ]}
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "OK": {
+                        "text": "OK",
+                        "color": "green",
+                        "index": 0
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "ERROR": {
+                        "text": "ERROR",
+                        "color": "red",
+                        "index": 1
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "PARTIAL": {
+                        "text": "PARTIAL",
+                        "color": "orange",
+                        "index": 2
+                      }
+                    }
+                  }
+                ]
+              }
             ]
           },
-          { "matcher": { "id": "byName", "options": "ProcessingTimeMs" }, "properties": [{ "id": "unit", "value": "ms" }] },
-          { "matcher": { "id": "byName", "options": "RowsProcessed" }, "properties": [{ "id": "unit", "value": "short" }] }
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ProcessingTimeMs"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "ms"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ScoreRowCount"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              }
+            ]
+          }
         ]
       },
-      "gridPos": { "h": 7, "w": 24, "x": 0, "y": 1 },
+      "gridPos": {
+        "h": 7,
+        "w": 24,
+        "x": 0,
+        "y": 1
+      },
       "id": 2,
       "options": {
         "cellHeight": "sm",
-        "footer": { "show": false, "reducer": ["sum"] },
+        "footer": {
+          "show": false,
+          "reducer": [
+            "sum"
+          ]
+        },
         "showHeader": true,
-        "sortBy": [{ "displayName": "CreatedAt", "desc": true }]
+        "sortBy": [
+          {
+            "displayName": "CreatedAt",
+            "desc": true
+          }
+        ]
       },
       "targets": [
         {
-          "datasource": { "type": "mssql", "uid": "mssql-ds" },
+          "datasource": {
+            "type": "mssql",
+            "uid": "mssql-ds"
+          },
           "format": "table",
-          "rawSql": "SELECT TOP 30\n  eq.EquipCode AS Equipment,\n  rs.Status,\n  rs.RowsProcessed,\n  rs.EpisodesDetected,\n  rs.ProcessingTimeMs,\n  LEFT(rs.ConfigSignature, 12) AS Config,\n  CONVERT(varchar(19), rs.CreatedAt, 120) AS CreatedAt,\n  LEFT(ISNULL(rs.ErrorMessage, ''), 60) AS ErrorMessage\nFROM dbo.ACM_RunSummary rs\nJOIN dbo.Equipments eq ON eq.EquipID = rs.EquipID\nWHERE rs.CreatedAt BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY rs.CreatedAt DESC",
+          "rawSql": "SELECT TOP 30\n  eq.EquipCode AS Equipment,\n  r.HealthStatus AS Status,\n  r.ScoreRowCount AS RowsProcessed,\n  r.EpisodeCount AS EpisodesDetected,\n  r.DurationSeconds AS DurationSeconds,\n  LEFT(r.ConfigSignature, 12) AS Config,\n  CONVERT(varchar(19), r.StartedAt, 120) AS StartedAt,\n  LEFT(ISNULL(r.ErrorMessage, ''), 60) AS ErrorMessage\nFROM dbo.ACM_Runs r\nJOIN dbo.Equipment eq ON eq.EquipID = r.EquipID\nWHERE r.StartedAt BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY r.StartedAt DESC",
           "refId": "A"
         }
       ],
@@ -59,24 +163,62 @@
       "type": "table"
     },
     {
-      "datasource": { "type": "mssql", "uid": "mssql-ds" },
+      "datasource": {
+        "type": "mssql",
+        "uid": "mssql-ds"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
+          "color": {
+            "mode": "thresholds"
+          },
           "mappings": [],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 80 }] },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
           "unit": "short"
         },
         "overrides": []
       },
-      "gridPos": { "h": 3, "w": 4, "x": 0, "y": 8 },
+      "gridPos": {
+        "h": 3,
+        "w": 4,
+        "x": 0,
+        "y": 8
+      },
       "id": 3,
-      "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["sum"], "fields": "", "values": false }, "textMode": "auto" },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "sum"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
       "targets": [
         {
-          "datasource": { "type": "mssql", "uid": "mssql-ds" },
+          "datasource": {
+            "type": "mssql",
+            "uid": "mssql-ds"
+          },
           "format": "time_series",
-          "rawSql": "SELECT COUNT(*) AS value FROM dbo.ACM_RunSummary WHERE CreatedAt BETWEEN $__timeFrom() AND $__timeTo()",
+          "rawSql": "SELECT COUNT(*) AS value FROM dbo.ACM_Runs WHERE StartedAt BETWEEN $__timeFrom() AND $__timeTo()",
           "refId": "A"
         }
       ],
@@ -84,24 +226,63 @@
       "type": "stat"
     },
     {
-      "datasource": { "type": "mssql", "uid": "mssql-ds" },
+      "datasource": {
+        "type": "mssql",
+        "uid": "mssql-ds"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "fixed", "fixedColor": "red" },
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "red"
+          },
           "mappings": [],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
           "unit": "short"
         },
         "overrides": []
       },
-      "gridPos": { "h": 3, "w": 4, "x": 4, "y": 8 },
+      "gridPos": {
+        "h": 3,
+        "w": 4,
+        "x": 4,
+        "y": 8
+      },
       "id": 4,
-      "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["sum"], "fields": "", "values": false }, "textMode": "auto" },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "sum"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
       "targets": [
         {
-          "datasource": { "type": "mssql", "uid": "mssql-ds" },
+          "datasource": {
+            "type": "mssql",
+            "uid": "mssql-ds"
+          },
           "format": "time_series",
-          "rawSql": "SELECT COUNT(*) AS value FROM dbo.ACM_RunSummary WHERE Status = 'ERROR' AND CreatedAt BETWEEN $__timeFrom() AND $__timeTo()",
+          "rawSql": "SELECT COUNT(*) AS value FROM dbo.ACM_Runs WHERE ErrorMessage IS NOT NULL AND ErrorMessage <> '' AND StartedAt BETWEEN $__timeFrom() AND $__timeTo()",
           "refId": "A"
         }
       ],
@@ -109,24 +290,66 @@
       "type": "stat"
     },
     {
-      "datasource": { "type": "mssql", "uid": "mssql-ds" },
+      "datasource": {
+        "type": "mssql",
+        "uid": "mssql-ds"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
+          "color": {
+            "mode": "thresholds"
+          },
           "mappings": [],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 5000 }, { "color": "red", "value": 30000 }] },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 5000
+              },
+              {
+                "color": "red",
+                "value": 30000
+              }
+            ]
+          },
           "unit": "ms"
         },
         "overrides": []
       },
-      "gridPos": { "h": 3, "w": 4, "x": 8, "y": 8 },
+      "gridPos": {
+        "h": 3,
+        "w": 4,
+        "x": 8,
+        "y": 8
+      },
       "id": 5,
-      "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["mean"], "fields": "", "values": false }, "textMode": "auto" },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "mean"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
       "targets": [
         {
-          "datasource": { "type": "mssql", "uid": "mssql-ds" },
+          "datasource": {
+            "type": "mssql",
+            "uid": "mssql-ds"
+          },
           "format": "time_series",
-          "rawSql": "SELECT AVG(CAST(ProcessingTimeMs AS float)) AS value FROM dbo.ACM_RunSummary WHERE Status = 'OK' AND CreatedAt BETWEEN $__timeFrom() AND $__timeTo()",
+          "rawSql": "SELECT AVG(CAST(DurationSeconds AS float)) AS value FROM dbo.ACM_Runs WHERE CompletedAt IS NOT NULL AND StartedAt BETWEEN $__timeFrom() AND $__timeTo()",
           "refId": "A"
         }
       ],
@@ -134,24 +357,58 @@
       "type": "stat"
     },
     {
-      "datasource": { "type": "mssql", "uid": "mssql-ds" },
+      "datasource": {
+        "type": "mssql",
+        "uid": "mssql-ds"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
+          "color": {
+            "mode": "thresholds"
+          },
           "mappings": [],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
           "unit": "short"
         },
         "overrides": []
       },
-      "gridPos": { "h": 3, "w": 4, "x": 12, "y": 8 },
+      "gridPos": {
+        "h": 3,
+        "w": 4,
+        "x": 12,
+        "y": 8
+      },
       "id": 6,
-      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["sum"], "fields": "", "values": false }, "textMode": "auto" },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "sum"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
       "targets": [
         {
-          "datasource": { "type": "mssql", "uid": "mssql-ds" },
+          "datasource": {
+            "type": "mssql",
+            "uid": "mssql-ds"
+          },
           "format": "time_series",
-          "rawSql": "SELECT ISNULL(SUM(RowsProcessed), 0) AS value FROM dbo.ACM_RunSummary WHERE CreatedAt BETWEEN $__timeFrom() AND $__timeTo()",
+          "rawSql": "SELECT ISNULL(SUM(ScoreRowCount), 0) AS value FROM dbo.ACM_Runs WHERE StartedAt BETWEEN $__timeFrom() AND $__timeTo()",
           "refId": "A"
         }
       ],
@@ -159,24 +416,66 @@
       "type": "stat"
     },
     {
-      "datasource": { "type": "mssql", "uid": "mssql-ds" },
+      "datasource": {
+        "type": "mssql",
+        "uid": "mssql-ds"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
+          "color": {
+            "mode": "thresholds"
+          },
           "mappings": [],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 5 }, { "color": "red", "value": 20 }] },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 5
+              },
+              {
+                "color": "red",
+                "value": 20
+              }
+            ]
+          },
           "unit": "short"
         },
         "overrides": []
       },
-      "gridPos": { "h": 3, "w": 4, "x": 16, "y": 8 },
+      "gridPos": {
+        "h": 3,
+        "w": 4,
+        "x": 16,
+        "y": 8
+      },
       "id": 7,
-      "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["sum"], "fields": "", "values": false }, "textMode": "auto" },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "sum"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
       "targets": [
         {
-          "datasource": { "type": "mssql", "uid": "mssql-ds" },
+          "datasource": {
+            "type": "mssql",
+            "uid": "mssql-ds"
+          },
           "format": "time_series",
-          "rawSql": "SELECT ISNULL(SUM(EpisodesDetected), 0) AS value FROM dbo.ACM_RunSummary WHERE CreatedAt BETWEEN $__timeFrom() AND $__timeTo()",
+          "rawSql": "SELECT ISNULL(SUM(EpisodeCount), 0) AS value FROM dbo.ACM_Runs WHERE StartedAt BETWEEN $__timeFrom() AND $__timeTo()",
           "refId": "A"
         }
       ],
@@ -185,99 +484,263 @@
     },
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 11 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 11
+      },
       "id": 10,
       "title": "RESOURCE UTILIZATION (Prometheus)",
       "type": "row"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "prometheus-ds" },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-ds"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "palette-classic" },
-          "custom": {
-            "axisLabel": "Memory (MB)", "drawStyle": "line", "fillOpacity": 20,
-            "gradientMode": "opacity", "lineInterpolation": "smooth", "lineWidth": 2,
-            "showPoints": "auto", "spanNulls": 3600000
+          "color": {
+            "mode": "palette-classic"
           },
-          "mappings": [], "unit": "decmbytes",
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+          "custom": {
+            "axisLabel": "Memory (MB)",
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "gradientMode": "opacity",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "showPoints": "auto",
+            "spanNulls": 3600000
+          },
+          "mappings": [],
+          "unit": "decmbytes",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 12 },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 12
+      },
       "id": 11,
-      "options": { "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
       "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus-ds" }, "expr": "max by (section) (acm_memory_rss_mb)", "legendFormat": "{{section}}", "refId": "A" }
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-ds"
+          },
+          "expr": "max by (section) (acm_memory_rss_mb)",
+          "legendFormat": "{{section}}",
+          "refId": "A"
+        }
       ],
       "title": "Memory by Pipeline Phase",
       "type": "timeseries"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "prometheus-ds" },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-ds"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "palette-classic" },
-          "custom": {
-            "axisLabel": "CPU %", "drawStyle": "line", "fillOpacity": 20,
-            "gradientMode": "opacity", "lineInterpolation": "smooth", "lineWidth": 2,
-            "showPoints": "auto", "spanNulls": 3600000
+          "color": {
+            "mode": "palette-classic"
           },
-          "mappings": [], "max": 100, "min": 0, "unit": "percent",
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+          "custom": {
+            "axisLabel": "CPU %",
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "gradientMode": "opacity",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "showPoints": "auto",
+            "spanNulls": 3600000
+          },
+          "mappings": [],
+          "max": 100,
+          "min": 0,
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 12 },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 12
+      },
       "id": 12,
-      "options": { "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
       "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus-ds" }, "expr": "avg by (equipment) (acm_cpu_percent)", "legendFormat": "{{equipment}}", "refId": "A" }
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-ds"
+          },
+          "expr": "avg by (equipment) (acm_cpu_percent)",
+          "legendFormat": "{{equipment}}",
+          "refId": "A"
+        }
       ],
       "title": "CPU Utilization",
       "type": "timeseries"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "prometheus-ds" },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-ds"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "palette-classic" },
-          "custom": {
-            "axisLabel": "Memory RSS (MB)", "drawStyle": "line", "fillOpacity": 20,
-            "gradientMode": "opacity", "lineInterpolation": "smooth", "lineWidth": 2,
-            "showPoints": "auto", "spanNulls": 3600000
+          "color": {
+            "mode": "palette-classic"
           },
-          "mappings": [], "unit": "decmbytes",
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+          "custom": {
+            "axisLabel": "Memory RSS (MB)",
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "gradientMode": "opacity",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "showPoints": "auto",
+            "spanNulls": 3600000
+          },
+          "mappings": [],
+          "unit": "decmbytes",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 12 },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 12
+      },
       "id": 13,
-      "options": { "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
       "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus-ds" }, "expr": "max by (equipment) (acm_memory_rss_mb)", "legendFormat": "{{equipment}}", "refId": "A" }
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-ds"
+          },
+          "expr": "max by (equipment) (acm_memory_rss_mb)",
+          "legendFormat": "{{equipment}}",
+          "refId": "A"
+        }
       ],
       "title": "Memory RSS",
       "type": "timeseries"
     },
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 20 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 20
+      },
       "id": 20,
       "title": "DISTRIBUTED TRACES (Tempo)",
       "type": "row"
     },
     {
-      "datasource": { "type": "tempo", "uid": "tempo-ds" },
-      "fieldConfig": { "defaults": {}, "overrides": [] },
-      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 21 },
+      "datasource": {
+        "type": "tempo",
+        "uid": "tempo-ds"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 21
+      },
       "id": 21,
       "options": {},
       "targets": [
         {
-          "datasource": { "type": "tempo", "uid": "tempo-ds" },
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo-ds"
+          },
           "queryType": "traceql",
           "query": "{resource.service.name=\"acm-pipeline\"} | select(span.\"acm.mem_mb\", span.\"acm.duration_s\", span.\"acm.equipment\")",
           "limit": 20,
@@ -289,15 +752,31 @@
     },
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 31 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 31
+      },
       "id": 30,
       "title": "LOGS (Loki)",
       "type": "row"
     },
     {
-      "datasource": { "type": "loki", "uid": "loki-ds" },
-      "fieldConfig": { "defaults": {}, "overrides": [] },
-      "gridPos": { "h": 10, "w": 16, "x": 0, "y": 32 },
+      "datasource": {
+        "type": "loki",
+        "uid": "loki-ds"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 16,
+        "x": 0,
+        "y": 32
+      },
       "id": 31,
       "options": {
         "dedupStrategy": "none",
@@ -310,15 +789,34 @@
         "wrapLogMessage": false
       },
       "targets": [
-        { "datasource": { "type": "loki", "uid": "loki-ds" }, "expr": "{app=\"acm\"} |= ``", "queryType": "range", "refId": "A" }
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki-ds"
+          },
+          "expr": "{app=\"acm\"} |= ``",
+          "queryType": "range",
+          "refId": "A"
+        }
       ],
       "title": "Application Logs",
       "type": "logs"
     },
     {
-      "datasource": { "type": "loki", "uid": "loki-ds" },
-      "fieldConfig": { "defaults": {}, "overrides": [] },
-      "gridPos": { "h": 10, "w": 8, "x": 16, "y": 32 },
+      "datasource": {
+        "type": "loki",
+        "uid": "loki-ds"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 8,
+        "x": 16,
+        "y": 32
+      },
       "id": 32,
       "options": {
         "dedupStrategy": "none",
@@ -331,28 +829,55 @@
         "wrapLogMessage": false
       },
       "targets": [
-        { "datasource": { "type": "loki", "uid": "loki-ds" }, "expr": "{app=\"acm\"} |~ `(ERROR|WARN|error|warn)`", "queryType": "range", "refId": "A" }
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki-ds"
+          },
+          "expr": "{app=\"acm\"} |~ `(ERROR|WARN|error|warn)`",
+          "queryType": "range",
+          "refId": "A"
+        }
       ],
       "title": "Errors & Warnings",
       "type": "logs"
     },
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 42 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 42
+      },
       "id": 40,
       "title": "PROFILING (Pyroscope)",
       "type": "row"
     },
     {
-      "datasource": { "type": "grafana-pyroscope-datasource", "uid": "pyroscope-ds" },
+      "datasource": {
+        "type": "grafana-pyroscope-datasource",
+        "uid": "pyroscope-ds"
+      },
       "description": "CPU flame graph. Requires yappi and ACM batch run with observability stack.",
-      "fieldConfig": { "defaults": {}, "overrides": [] },
-      "gridPos": { "h": 12, "w": 12, "x": 0, "y": 43 },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 12,
+        "w": 12,
+        "x": 0,
+        "y": 43
+      },
       "id": 41,
       "options": {},
       "targets": [
         {
-          "datasource": { "type": "grafana-pyroscope-datasource", "uid": "pyroscope-ds" },
+          "datasource": {
+            "type": "grafana-pyroscope-datasource",
+            "uid": "pyroscope-ds"
+          },
           "profileTypeId": "acm.cpu:samples:samples::",
           "labelSelector": "{service_name=\"acm-pipeline\"}",
           "queryType": "profile",
@@ -363,15 +888,29 @@
       "type": "flamegraph"
     },
     {
-      "datasource": { "type": "grafana-pyroscope-datasource", "uid": "pyroscope-ds" },
+      "datasource": {
+        "type": "grafana-pyroscope-datasource",
+        "uid": "pyroscope-ds"
+      },
       "description": "Memory allocation flame graph. Requires tracemalloc and ACM batch run.",
-      "fieldConfig": { "defaults": {}, "overrides": [] },
-      "gridPos": { "h": 12, "w": 12, "x": 12, "y": 43 },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 12,
+        "w": 12,
+        "x": 12,
+        "y": 43
+      },
       "id": 42,
       "options": {},
       "targets": [
         {
-          "datasource": { "type": "grafana-pyroscope-datasource", "uid": "pyroscope-ds" },
+          "datasource": {
+            "type": "grafana-pyroscope-datasource",
+            "uid": "pyroscope-ds"
+          },
           "profileTypeId": "acm.alloc_space:bytes:bytes::",
           "labelSelector": "{service_name=\"acm-pipeline\"}",
           "queryType": "profile",
@@ -383,56 +922,194 @@
     },
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 55 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 55
+      },
       "id": 50,
       "title": "PIPELINE PHASE TIMING",
       "type": "row"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "prometheus-ds" },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-ds"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "palette-classic" },
-          "custom": {
-            "axisLabel": "Duration (s)", "drawStyle": "bars", "fillOpacity": 80,
-            "gradientMode": "none", "lineWidth": 1, "showPoints": "never"
+          "color": {
+            "mode": "palette-classic"
           },
-          "mappings": [], "unit": "s",
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+          "custom": {
+            "axisLabel": "Duration (s)",
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "gradientMode": "none",
+            "lineWidth": 1,
+            "showPoints": "never"
+          },
+          "mappings": [],
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 14, "x": 0, "y": 56 },
+      "gridPos": {
+        "h": 8,
+        "w": 14,
+        "x": 0,
+        "y": 56
+      },
       "id": 51,
-      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "single", "sort": "none" } },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
       "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus-ds" }, "expr": "topk(10, acm_stage_duration_seconds_sum)", "legendFormat": "{{stage}}", "refId": "A" }
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-ds"
+          },
+          "expr": "topk(10, acm_stage_duration_seconds_sum)",
+          "legendFormat": "{{stage}}",
+          "refId": "A"
+        }
       ],
       "title": "Stage Duration (Top 10 Stages)",
       "type": "timeseries"
     },
     {
-      "datasource": { "type": "mssql", "uid": "mssql-ds" },
+      "datasource": {
+        "type": "mssql",
+        "uid": "mssql-ds"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
-          "custom": { "align": "auto", "cellOptions": { "type": "auto" }, "inspect": false },
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          },
           "mappings": [],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
         },
         "overrides": [
-          { "matcher": { "id": "byName", "options": "ProcessingTimeMs" }, "properties": [{ "id": "unit", "value": "ms" }, { "id": "custom.cellOptions", "value": { "type": "gauge", "mode": "lcd" } }, { "id": "max", "value": 300000 }, { "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 30000 }, { "color": "red", "value": 120000 }] } }] },
-          { "matcher": { "id": "byName", "options": "RowsProcessed" }, "properties": [{ "id": "unit", "value": "short" }] }
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ProcessingTimeMs"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "ms"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge",
+                  "mode": "lcd"
+                }
+              },
+              {
+                "id": "max",
+                "value": 300000
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": 30000
+                    },
+                    {
+                      "color": "red",
+                      "value": 120000
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ScoreRowCount"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              }
+            ]
+          }
         ]
       },
-      "gridPos": { "h": 8, "w": 10, "x": 14, "y": 56 },
+      "gridPos": {
+        "h": 8,
+        "w": 10,
+        "x": 14,
+        "y": 56
+      },
       "id": 52,
-      "options": { "cellHeight": "sm", "footer": { "show": false }, "showHeader": true, "sortBy": [{ "displayName": "CreatedAt", "desc": true }] },
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        },
+        "showHeader": true,
+        "sortBy": [
+          {
+            "displayName": "CreatedAt",
+            "desc": true
+          }
+        ]
+      },
       "targets": [
         {
-          "datasource": { "type": "mssql", "uid": "mssql-ds" },
+          "datasource": {
+            "type": "mssql",
+            "uid": "mssql-ds"
+          },
           "format": "table",
-          "rawSql": "SELECT TOP 10\n  eq.EquipCode AS Equipment,\n  rs.ProcessingTimeMs,\n  rs.RowsProcessed,\n  CONVERT(varchar(19), rs.CreatedAt, 120) AS CreatedAt\nFROM dbo.ACM_RunSummary rs\nJOIN dbo.Equipments eq ON eq.EquipID = rs.EquipID\nWHERE rs.Status = 'OK' AND rs.CreatedAt BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY rs.CreatedAt DESC",
+          "rawSql": "SELECT TOP 10\n  eq.EquipCode AS Equipment,\n  r.DurationSeconds,\n  r.ScoreRowCount,\n  r.HealthStatus,\n  CONVERT(varchar(19), r.StartedAt, 120) AS StartedAt\nFROM dbo.ACM_Runs r\nJOIN dbo.Equipment eq ON eq.EquipID = r.EquipID\nWHERE r.CompletedAt IS NOT NULL\n  AND r.StartedAt BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY r.StartedAt DESC",
           "refId": "A"
         }
       ],
@@ -441,39 +1118,86 @@
     },
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 64 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 64
+      },
       "id": 60,
       "title": "SQL OPERATIONS",
       "type": "row"
     },
     {
-      "datasource": { "type": "mssql", "uid": "mssql-ds" },
+      "datasource": {
+        "type": "mssql",
+        "uid": "mssql-ds"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "palette-classic" },
-          "custom": {
-            "fillOpacity": 80, "gradientMode": "none",
-            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
-            "lineWidth": 1, "scaleDistribution": { "type": "linear" }
+          "color": {
+            "mode": "palette-classic"
           },
-          "mappings": [], "unit": "short",
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+          "custom": {
+            "fillOpacity": 80,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineWidth": 1,
+            "scaleDistribution": {
+              "type": "linear"
+            }
+          },
+          "mappings": [],
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 65 },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 65
+      },
       "id": 61,
       "options": {
-        "barRadius": 0, "barWidth": 0.8, "fullHighlight": false, "groupWidth": 0.7,
-        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
-        "orientation": "horizontal", "showValue": "auto", "stacking": "none",
-        "tooltip": { "mode": "single", "sort": "none" }
+        "barRadius": 0,
+        "barWidth": 0.8,
+        "fullHighlight": false,
+        "groupWidth": 0.7,
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "orientation": "horizontal",
+        "showValue": "auto",
+        "stacking": "none",
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
       },
       "targets": [
         {
-          "datasource": { "type": "mssql", "uid": "mssql-ds" },
+          "datasource": {
+            "type": "mssql",
+            "uid": "mssql-ds"
+          },
           "format": "table",
-          "rawSql": "SELECT 'ACM_Scores_Wide' AS TableName, COUNT(*) AS TotalRows FROM dbo.ACM_Scores_Wide WHERE CreatedAt BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL\nSELECT 'ACM_HealthTimeline', COUNT(*) FROM dbo.ACM_HealthTimeline WHERE CreatedAt BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL\nSELECT 'ACM_RegimeTimeline', COUNT(*) FROM dbo.ACM_RegimeTimeline WHERE CreatedAt BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL\nSELECT 'ACM_Episodes', COUNT(*) FROM dbo.ACM_Episodes WHERE CreatedAt BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL\nSELECT 'ACM_RunSummary', COUNT(*) FROM dbo.ACM_RunSummary WHERE CreatedAt BETWEEN $__timeFrom() AND $__timeTo()",
+          "rawSql": "SELECT 'ACM_Scores_Wide' AS TableName, COUNT(*) AS TotalRows FROM dbo.ACM_Scores_Wide WHERE CreatedAt BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL\nSELECT 'ACM_HealthTimeline', COUNT(*) FROM dbo.ACM_HealthTimeline WHERE CreatedAt BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL\nSELECT 'ACM_RegimeTimeline', COUNT(*) FROM dbo.ACM_RegimeTimeline WHERE CreatedAt BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL\nSELECT 'ACM_Episodes', COUNT(*) FROM dbo.ACM_Episodes WHERE CreatedAt BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL\nSELECT 'ACM_Runs', COUNT(*) FROM dbo.ACM_Runs WHERE CreatedAt BETWEEN $__timeFrom() AND $__timeTo()",
           "refId": "A"
         }
       ],
@@ -481,52 +1205,131 @@
       "type": "barchart"
     },
     {
-      "datasource": { "type": "loki", "uid": "loki-ds" },
-      "fieldConfig": { "defaults": {}, "overrides": [] },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 65 },
+      "datasource": {
+        "type": "loki",
+        "uid": "loki-ds"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 65
+      },
       "id": 62,
       "options": {
-        "dedupStrategy": "none", "enableLogDetails": true, "prettifyLogMessage": false,
-        "showCommonLabels": false, "showLabels": false, "showTime": true,
-        "sortOrder": "Descending", "wrapLogMessage": false
+        "dedupStrategy": "none",
+        "enableLogDetails": true,
+        "prettifyLogMessage": false,
+        "showCommonLabels": false,
+        "showLabels": false,
+        "showTime": true,
+        "sortOrder": "Descending",
+        "wrapLogMessage": false
       },
       "targets": [
-        { "datasource": { "type": "loki", "uid": "loki-ds" }, "expr": "{app=\"acm\"} |~ `(SQL|insert|write|rows)`", "queryType": "range", "refId": "A" }
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki-ds"
+          },
+          "expr": "{app=\"acm\"} |~ `(SQL|insert|write|rows)`",
+          "queryType": "range",
+          "refId": "A"
+        }
       ],
       "title": "SQL / Write Logs",
       "type": "logs"
     },
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 73 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 73
+      },
       "id": 70,
       "title": "DETECTOR SCORES (Latest Run per Equipment)",
       "type": "row"
     },
     {
-      "datasource": { "type": "mssql", "uid": "mssql-ds" },
+      "datasource": {
+        "type": "mssql",
+        "uid": "mssql-ds"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "palette-classic" },
+          "color": {
+            "mode": "palette-classic"
+          },
           "custom": {
-            "axisLabel": "Z-Score", "drawStyle": "line", "fillOpacity": 10,
-            "gradientMode": "none", "lineInterpolation": "smooth", "lineWidth": 2,
-            "showPoints": "auto", "spanNulls": 3600000,
-            "thresholdsStyle": { "mode": "line+area" }
+            "axisLabel": "Z-Score",
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "showPoints": "auto",
+            "spanNulls": 3600000,
+            "thresholdsStyle": {
+              "mode": "line+area"
+            }
           },
           "mappings": [],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 2 }, { "color": "red", "value": 3 }] }
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 2
+              },
+              {
+                "color": "red",
+                "value": 3
+              }
+            ]
+          }
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 74 },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 74
+      },
       "id": 71,
-      "options": { "legend": { "calcs": ["last", "max"], "displayMode": "table", "placement": "right", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "options": {
+        "legend": {
+          "calcs": [
+            "last",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
       "targets": [
         {
-          "datasource": { "type": "mssql", "uid": "mssql-ds" },
+          "datasource": {
+            "type": "mssql",
+            "uid": "mssql-ds"
+          },
           "format": "time_series",
-          "rawSql": "SELECT\n  sw.EntryDateTime AS time,\n  eq.EquipCode + ' | AR1'     AS metric, sw.ar1_z     AS value FROM dbo.ACM_Scores_Wide sw JOIN dbo.Equipments eq ON eq.EquipID = sw.EquipID WHERE sw.RunID IN (SELECT TOP 1 RunID FROM dbo.ACM_RunSummary ORDER BY CreatedAt DESC) AND sw.EntryDateTime BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL SELECT sw.EntryDateTime, eq.EquipCode + ' | PCA_SPE', sw.pca_spe_z FROM dbo.ACM_Scores_Wide sw JOIN dbo.Equipments eq ON eq.EquipID = sw.EquipID WHERE sw.RunID IN (SELECT TOP 1 RunID FROM dbo.ACM_RunSummary ORDER BY CreatedAt DESC) AND sw.EntryDateTime BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL SELECT sw.EntryDateTime, eq.EquipCode + ' | GMM', sw.gmm_z FROM dbo.ACM_Scores_Wide sw JOIN dbo.Equipments eq ON eq.EquipID = sw.EquipID WHERE sw.RunID IN (SELECT TOP 1 RunID FROM dbo.ACM_RunSummary ORDER BY CreatedAt DESC) AND sw.EntryDateTime BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL SELECT sw.EntryDateTime, eq.EquipCode + ' | Fused', sw.fused FROM dbo.ACM_Scores_Wide sw JOIN dbo.Equipments eq ON eq.EquipID = sw.EquipID WHERE sw.RunID IN (SELECT TOP 1 RunID FROM dbo.ACM_RunSummary ORDER BY CreatedAt DESC) AND sw.EntryDateTime BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY time ASC",
+          "rawSql": "DECLARE @LatestRun uniqueidentifier = (SELECT TOP 1 RunID FROM dbo.ACM_Runs ORDER BY StartedAt DESC);\nSELECT sw.Timestamp AS time, 'AR1' AS metric, sw.ar1_z AS value FROM dbo.ACM_Scores_Wide sw WHERE sw.RunID = @LatestRun AND sw.Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL SELECT sw.Timestamp, 'PCA_SPE', sw.pca_spe_z FROM dbo.ACM_Scores_Wide sw WHERE sw.RunID = @LatestRun AND sw.Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL SELECT sw.Timestamp, 'PCA_T2', sw.pca_t2_z FROM dbo.ACM_Scores_Wide sw WHERE sw.RunID = @LatestRun AND sw.Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL SELECT sw.Timestamp, 'IForest', sw.iforest_z FROM dbo.ACM_Scores_Wide sw WHERE sw.RunID = @LatestRun AND sw.Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL SELECT sw.Timestamp, 'GMM', sw.gmm_z FROM dbo.ACM_Scores_Wide sw WHERE sw.RunID = @LatestRun AND sw.Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL SELECT sw.Timestamp, 'Fused', sw.fused FROM dbo.ACM_Scores_Wide sw WHERE sw.RunID = @LatestRun AND sw.Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY time ASC",
           "refId": "A"
         }
       ],
@@ -536,9 +1339,21 @@
   ],
   "refresh": "30s",
   "schemaVersion": 40,
-  "tags": ["acm", "v11", "observability", "traces", "logs", "profiling"],
-  "templating": { "list": [] },
-  "time": { "from": "now-6h", "to": "now" },
+  "tags": [
+    "acm",
+    "v11",
+    "observability",
+    "traces",
+    "logs",
+    "profiling"
+  ],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
   "timepicker": {},
   "timezone": "browser",
   "title": "ACM — Observability",
