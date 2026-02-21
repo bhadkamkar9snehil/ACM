@@ -6,6 +6,34 @@ Status: Draft for execution
 
 ---
 
+## 0. Execution Progress Log
+
+Updated: 2026-02-21
+
+Completed on `integration/acm-single-entrypoint`:
+
+1. Extracted SQL cached-model load and detector rebuild orchestration from `core/acm.py` into `core/model_persistence.py`.
+2. Extracted regime health labeling and transient labeling flow from `core/acm.py` into `core/regimes.py`.
+3. Extracted cached-model auto-retrain evaluation and optional refit execution from `core/acm.py` into `core/model_evaluation.py`.
+4. Extracted adaptive-threshold update gating from `core/acm.py` into `core/adaptive_thresholds.py`.
+5. Extracted drift-controller payload write path from `core/acm.py` into `core/drift.py`.
+6. Removed redundant baseline-buffer try-wrapper in `core/acm.py` and delegated directly to `OutputManager.update_baseline_buffer()` owner logic.
+7. Added safe lifecycle wrapper `update_and_persist_model_lifecycle_safe()` in `core/model_lifecycle.py` and replaced inline lifecycle try/except in `core/acm.py`.
+8. Updated `tests/test_v11_modules.py` with helper coverage for extracted functions to keep regression checks aligned with refactor state.
+
+Validation executed after each extraction slice:
+
+1. `python -m py_compile` on touched modules.
+2. `pytest tests/test_v11_modules.py -q`.
+3. `python scripts/sql_batch_runner.py --equip FD_FAN --dry-run --max-batches 1`.
+
+Notes:
+
+1. `main` branch remains untouched.
+2. Work continues only through phase branches merged into `integration/acm-single-entrypoint`.
+
+---
+
 ## 1. Objective
 
 Migrate the ACM runtime to a **single supported entrypoint**:
