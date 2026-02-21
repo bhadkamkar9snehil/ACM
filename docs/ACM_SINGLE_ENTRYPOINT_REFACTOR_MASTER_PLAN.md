@@ -596,3 +596,34 @@ Validation completed:
 Main branch status:
 1. `main` was not touched.
 2. Work was delivered through phase branch to integration branch only.
+
+### 2026-02-21 - Grafana Dashboard Stability Detour
+
+Branch flow used:
+1. `refactor/acm-entrypoint-p4-grafana-dashboards-fix` (merged into integration)
+2. `integration/acm-single-entrypoint` (updated and pushed)
+
+Completed:
+1. Added a new operational skill: `skills/grafana-dashboard-ops`.
+2. Added validator scripts for:
+   - SQL schema-level dashboard query validation
+   - Grafana API runtime query validation
+3. Fixed active dashboard SQL in:
+   - `acm_fleet_overview.json`
+   - `acm_master_complete.json`
+   - `acm_observability.json`
+4. Enforced active provisioning path:
+   - `install/observability/provisioning/dashboards/dashboards.yaml`
+   - active path now points to `/etc/grafana/dashboards/active`
+5. Added active dashboard folders under both dashboard roots and synchronized content.
+6. Removed stale archive dashboards from Grafana runtime using API so only active dashboards remain visible.
+
+Validation completed:
+1. `python skills/grafana-dashboard-ops/scripts/validate_acm_dashboards.py` passed
+2. `python skills/grafana-dashboard-ops/scripts/validate_grafana_api_queries.py` passed
+3. Grafana `/api/search?type=dash-db` shows exactly 3 active dashboards
+4. Grafana provisioning duplicate-UID warnings and panel query `status=400` errors were eliminated for active dashboards
+
+Main branch status:
+1. `main` was not touched.
+2. Work was delivered through phase branch to integration branch only.
