@@ -9,7 +9,7 @@ line_end: 901
 
 # core.fast_features.ConfidenceGatedNormalizer.has_regime_stats
 
-Defined in: [[modules/core.fast_features|core.fast_features]]
+Defined in: [[modules/core.fast_features]]
 
 Source: `core/fast_features.py:899`
 

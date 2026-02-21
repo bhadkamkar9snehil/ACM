@@ -9,7 +9,7 @@ line_end: 298
 
 # core.adaptive_thresholds.AdaptiveThresholdCalculator._mad_threshold
 
-Defined in: [[modules/core.adaptive_thresholds|core.adaptive_thresholds]]
+Defined in: [[modules/core.adaptive_thresholds]]
 
 Source: `core/adaptive_thresholds.py:270`
 

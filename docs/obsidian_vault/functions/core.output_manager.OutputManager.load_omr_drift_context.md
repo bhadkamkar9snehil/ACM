@@ -3,15 +3,15 @@ type: method
 id: core.output_manager.OutputManager.load_omr_drift_context
 module: core.output_manager
 source: core/output_manager.py
-line_start: 1809
-line_end: 1924
+line_start: 1810
+line_end: 1925
 ---
 
 # core.output_manager.OutputManager.load_omr_drift_context
 
-Defined in: [[modules/core.output_manager|core.output_manager]]
+Defined in: [[modules/core.output_manager]]
 
-Source: `core/output_manager.py:1809`
+Source: `core/output_manager.py:1810`
 
 Kind: `method`
 

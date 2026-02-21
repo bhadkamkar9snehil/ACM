@@ -9,7 +9,7 @@ line_end: 1513
 
 # core.observability.Span._get_phase_tracer
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:1507`
 

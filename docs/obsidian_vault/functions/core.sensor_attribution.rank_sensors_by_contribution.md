@@ -9,7 +9,7 @@ line_end: 760
 
 # core.sensor_attribution.rank_sensors_by_contribution
 
-Defined in: [[modules/core.sensor_attribution|core.sensor_attribution]]
+Defined in: [[modules/core.sensor_attribution]]
 
 Source: `core/sensor_attribution.py:732`
 

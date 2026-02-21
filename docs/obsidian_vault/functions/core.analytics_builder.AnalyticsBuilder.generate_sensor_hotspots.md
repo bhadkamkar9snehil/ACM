@@ -9,7 +9,7 @@ line_end: 625
 
 # core.analytics_builder.AnalyticsBuilder.generate_sensor_hotspots
 
-Defined in: [[modules/core.analytics_builder|core.analytics_builder]]
+Defined in: [[modules/core.analytics_builder]]
 
 Source: `core/analytics_builder.py:529`
 

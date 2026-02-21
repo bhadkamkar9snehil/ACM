@@ -9,7 +9,7 @@ line_end: 2887
 
 # core.regimes.regime_model_to_state
 
-Defined in: [[modules/core.regimes|core.regimes]]
+Defined in: [[modules/core.regimes]]
 
 Source: `core/regimes.py:2815`
 

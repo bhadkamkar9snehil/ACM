@@ -3,15 +3,15 @@ type: method
 id: core.output_manager.OutputManager.write_data_contract_validation
 module: core.output_manager
 source: core/output_manager.py
-line_start: 3030
-line_end: 3046
+line_start: 3031
+line_end: 3047
 ---
 
 # core.output_manager.OutputManager.write_data_contract_validation
 
-Defined in: [[modules/core.output_manager|core.output_manager]]
+Defined in: [[modules/core.output_manager]]
 
-Source: `core/output_manager.py:3030`
+Source: `core/output_manager.py:3031`
 
 Kind: `method`
 

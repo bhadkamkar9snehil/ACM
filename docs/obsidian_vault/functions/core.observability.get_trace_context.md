@@ -9,7 +9,7 @@ line_end: 1104
 
 # core.observability.get_trace_context
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:1071`
 

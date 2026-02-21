@@ -3,15 +3,15 @@ type: method
 id: core.output_manager.OutputManager._load_data_from_sql
 module: core.output_manager
 source: core/output_manager.py
-line_start: 464
-line_end: 481
+line_start: 465
+line_end: 482
 ---
 
 # core.output_manager.OutputManager._load_data_from_sql
 
-Defined in: [[modules/core.output_manager|core.output_manager]]
+Defined in: [[modules/core.output_manager]]
 
-Source: `core/output_manager.py:464`
+Source: `core/output_manager.py:465`
 
 Kind: `method`
 

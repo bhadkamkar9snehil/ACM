@@ -9,7 +9,7 @@ line_end: 569
 
 # core.model_evaluation.evaluate_and_maybe_refit_cached_models
 
-Defined in: [[modules/core.model_evaluation|core.model_evaluation]]
+Defined in: [[modules/core.model_evaluation]]
 
 Source: `core/model_evaluation.py:486`
 

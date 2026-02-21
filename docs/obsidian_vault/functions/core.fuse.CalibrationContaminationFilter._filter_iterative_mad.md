@@ -9,7 +9,7 @@ line_end: 312
 
 # core.fuse.CalibrationContaminationFilter._filter_iterative_mad
 
-Defined in: [[modules/core.fuse|core.fuse]]
+Defined in: [[modules/core.fuse]]
 
 Source: `core/fuse.py:236`
 

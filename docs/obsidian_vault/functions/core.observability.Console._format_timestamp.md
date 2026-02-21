@@ -9,7 +9,7 @@ line_end: 1194
 
 # core.observability.Console._format_timestamp
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:1191`
 

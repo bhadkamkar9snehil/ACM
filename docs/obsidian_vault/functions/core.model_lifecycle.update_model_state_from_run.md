@@ -9,7 +9,7 @@ line_end: 460
 
 # core.model_lifecycle.update_model_state_from_run
 
-Defined in: [[modules/core.model_lifecycle|core.model_lifecycle]]
+Defined in: [[modules/core.model_lifecycle]]
 
 Source: `core/model_lifecycle.py:401`
 

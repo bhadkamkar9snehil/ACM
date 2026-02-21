@@ -9,7 +9,7 @@ line_end: 482
 
 # core.drift.run_drift_pipeline
 
-Defined in: [[modules/core.drift|core.drift]]
+Defined in: [[modules/core.drift]]
 
 Source: `core/drift.py:427`
 

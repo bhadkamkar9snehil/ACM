@@ -9,7 +9,7 @@ line_end: 89
 
 # core.state_manager.StateManager.__init__
 
-Defined in: [[modules/core.state_manager|core.state_manager]]
+Defined in: [[modules/core.state_manager]]
 
 Source: `core/state_manager.py:79`
 

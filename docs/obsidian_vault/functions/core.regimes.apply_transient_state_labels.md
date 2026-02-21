@@ -9,7 +9,7 @@ line_end: 3927
 
 # core.regimes.apply_transient_state_labels
 
-Defined in: [[modules/core.regimes|core.regimes]]
+Defined in: [[modules/core.regimes]]
 
 Source: `core/regimes.py:3901`
 

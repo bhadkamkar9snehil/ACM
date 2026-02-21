@@ -9,7 +9,7 @@ line_end: 206
 
 # core.pipeline_types.ValidationResult.__bool__
 
-Defined in: [[modules/core.pipeline_types|core.pipeline_types]]
+Defined in: [[modules/core.pipeline_types]]
 
 Source: `core/pipeline_types.py:205`
 

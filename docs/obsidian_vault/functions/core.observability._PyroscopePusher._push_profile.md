@@ -9,7 +9,7 @@ line_end: 3244
 
 # core.observability._PyroscopePusher._push_profile
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:3155`
 

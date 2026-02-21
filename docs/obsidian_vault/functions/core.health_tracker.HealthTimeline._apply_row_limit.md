@@ -9,7 +9,7 @@ line_end: 308
 
 # core.health_tracker.HealthTimeline._apply_row_limit
 
-Defined in: [[modules/core.health_tracker|core.health_tracker]]
+Defined in: [[modules/core.health_tracker]]
 
 Source: `core/health_tracker.py:296`
 

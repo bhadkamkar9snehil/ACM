@@ -3,15 +3,15 @@ type: method
 id: core.output_manager.OutputManager.generate_all_analytics_tables
 module: core.output_manager
 source: core/output_manager.py
-line_start: 3366
-line_end: 3385
+line_start: 3392
+line_end: 3411
 ---
 
 # core.output_manager.OutputManager.generate_all_analytics_tables
 
-Defined in: [[modules/core.output_manager|core.output_manager]]
+Defined in: [[modules/core.output_manager]]
 
-Source: `core/output_manager.py:3366`
+Source: `core/output_manager.py:3392`
 
 Kind: `method`
 

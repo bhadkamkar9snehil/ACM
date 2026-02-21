@@ -9,7 +9,7 @@ line_end: 515
 
 # core.resource_monitor.ResourceMonitor.to_dataframe
 
-Defined in: [[modules/core.resource_monitor|core.resource_monitor]]
+Defined in: [[modules/core.resource_monitor]]
 
 Source: `core/resource_monitor.py:490`
 

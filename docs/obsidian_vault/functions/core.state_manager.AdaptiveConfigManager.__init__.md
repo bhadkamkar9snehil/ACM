@@ -9,7 +9,7 @@ line_end: 310
 
 # core.state_manager.AdaptiveConfigManager.__init__
 
-Defined in: [[modules/core.state_manager|core.state_manager]]
+Defined in: [[modules/core.state_manager]]
 
 Source: `core/state_manager.py:302`
 

@@ -3,15 +3,15 @@ type: function
 id: core.fuse.compute_episode_params
 module: core.fuse
 source: core/fuse.py
-line_start: 1831
-line_end: 1918
+line_start: 2194
+line_end: 2281
 ---
 
 # core.fuse.compute_episode_params
 
-Defined in: [[modules/core.fuse|core.fuse]]
+Defined in: [[modules/core.fuse]]
 
-Source: `core/fuse.py:1831`
+Source: `core/fuse.py:2194`
 
 Kind: `function`
 

@@ -9,7 +9,7 @@ line_end: 1637
 
 # core.model_persistence.restore_detectors_from_runtime_cache
 
-Defined in: [[modules/core.model_persistence|core.model_persistence]]
+Defined in: [[modules/core.model_persistence]]
 
 Source: `core/model_persistence.py:1596`
 

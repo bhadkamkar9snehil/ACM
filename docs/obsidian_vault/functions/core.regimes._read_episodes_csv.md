@@ -9,7 +9,7 @@ line_end: 2619
 
 # core.regimes._read_episodes_csv
 
-Defined in: [[modules/core.regimes|core.regimes]]
+Defined in: [[modules/core.regimes]]
 
 Source: `core/regimes.py:2519`
 

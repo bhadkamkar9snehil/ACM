@@ -9,7 +9,7 @@ line_end: 3998
 
 # core.regimes.write_regime_occupancy_and_transitions
 
-Defined in: [[modules/core.regimes|core.regimes]]
+Defined in: [[modules/core.regimes]]
 
 Source: `core/regimes.py:3930`
 

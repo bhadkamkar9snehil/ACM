@@ -9,7 +9,7 @@ line_end: 783
 
 # core.forecast_engine.ForecastEngine._fit_degradation_model
 
-Defined in: [[modules/core.forecast_engine|core.forecast_engine]]
+Defined in: [[modules/core.forecast_engine]]
 
 Source: `core/forecast_engine.py:727`
 

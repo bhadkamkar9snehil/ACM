@@ -9,7 +9,7 @@ line_end: 477
 
 # core.model_persistence.load_regime_state
 
-Defined in: [[modules/core.model_persistence|core.model_persistence]]
+Defined in: [[modules/core.model_persistence]]
 
 Source: `core/model_persistence.py:421`
 

@@ -9,7 +9,7 @@ line_end: 209
 
 # core.failure_probability.mean_time_to_failure
 
-Defined in: [[modules/core.failure_probability|core.failure_probability]]
+Defined in: [[modules/core.failure_probability]]
 
 Source: `core/failure_probability.py:168`
 

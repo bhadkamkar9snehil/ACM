@@ -9,7 +9,7 @@ line_end: 1908
 
 # core.observability.record_model_refit
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:1902`
 

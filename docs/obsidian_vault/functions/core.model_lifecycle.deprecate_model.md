@@ -9,7 +9,7 @@ line_end: 340
 
 # core.model_lifecycle.deprecate_model
 
-Defined in: [[modules/core.model_lifecycle|core.model_lifecycle]]
+Defined in: [[modules/core.model_lifecycle]]
 
 Source: `core/model_lifecycle.py:324`
 

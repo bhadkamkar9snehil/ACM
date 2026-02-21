@@ -9,7 +9,7 @@ line_end: 73
 
 # core.sensor_attribution.SensorStats
 
-Defined in: [[modules/core.sensor_attribution|core.sensor_attribution]]
+Defined in: [[modules/core.sensor_attribution]]
 
 Source: `core/sensor_attribution.py:62`
 

@@ -9,7 +9,7 @@ line_end: 318
 
 # core.resource_monitor.ResourceMonitor._start_cpu_sampling
 
-Defined in: [[modules/core.resource_monitor|core.resource_monitor]]
+Defined in: [[modules/core.resource_monitor]]
 
 Source: `core/resource_monitor.py:293`
 

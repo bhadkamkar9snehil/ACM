@@ -9,7 +9,7 @@ line_end: 474
 
 # core.regimes.RegimeModel.set_cluster_centers_
 
-Defined in: [[modules/core.regimes|core.regimes]]
+Defined in: [[modules/core.regimes]]
 
 Source: `core/regimes.py:463`
 

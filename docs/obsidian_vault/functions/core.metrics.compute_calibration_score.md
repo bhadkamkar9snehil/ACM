@@ -9,7 +9,7 @@ line_end: 659
 
 # core.metrics.compute_calibration_score
 
-Defined in: [[modules/core.metrics|core.metrics]]
+Defined in: [[modules/core.metrics]]
 
 Source: `core/metrics.py:544`
 

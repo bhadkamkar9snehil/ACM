@@ -684,6 +684,350 @@ class TestRefactorHelpers:
         finalize_noop_run(sql_client=sql, run_id=None)
         assert sql.calls == 0
 
+    def test_apply_contamination_filter_config_sets_defaults(self):
+        """Calibration config helper should always set contamination_filter with defaults."""
+        from core.fuse import apply_contamination_filter_config
+
+        cfg = {"clip_z": 8.0}
+        out = apply_contamination_filter_config(self_tune_cfg=cfg, thresholds_cfg={})
+        assert out is cfg
+        assert "contamination_filter" in cfg
+        assert cfg["contamination_filter"]["method"] == "iterative_mad"
+        assert cfg["contamination_filter"]["enabled"] is True
+
+    def test_choose_pca_cache_for_calibration_length_match(self):
+        """PCA cache helper should return cache only when lengths match."""
+        from core.fuse import choose_pca_cache_for_calibration
+
+        spe = np.array([1.0, 2.0, 3.0], dtype=np.float32)
+        t2 = np.array([0.1, 0.2, 0.3], dtype=np.float32)
+        out = choose_pca_cache_for_calibration(
+            pca_train_spe=spe,
+            pca_train_t2=t2,
+            train_len=3,
+        )
+        assert out is not None
+        assert np.array_equal(out[0], spe)
+        assert np.array_equal(out[1], t2)
+
+    def test_compute_and_set_adaptive_clip_updates_clip(self):
+        """Adaptive clip helper should raise clip_z when train P99 exceeds default."""
+        from core.fuse import compute_and_set_adaptive_clip
+
+        train_frame = pd.DataFrame(
+            {
+                "ar1_raw": np.linspace(0.0, 100.0, 200),
+                "iforest_raw": np.linspace(0.0, 50.0, 200),
+            }
+        )
+        self_tune_cfg = {"clip_z": 1.0}
+        adaptive = compute_and_set_adaptive_clip(
+            train_frame=train_frame,
+            self_tune_cfg=self_tune_cfg,
+            omr_enabled=False,
+        )
+        assert adaptive >= 1.0
+        assert self_tune_cfg["clip_z"] == pytest.approx(adaptive)
+
+    def test_collect_enabled_calibrators_and_compute_pca_percentiles(self):
+        """Calibration helper should filter enabled calibrators and compute PCA train percentiles."""
+        from core.fuse import collect_enabled_calibrators, compute_pca_train_percentiles
+
+        class _Cal:
+            def __init__(self, offset: float = 0.0):
+                self.offset = offset
+
+            def transform(self, x, regime_labels=None):
+                return np.asarray(x, dtype=np.float32) + self.offset
+
+        calibrators_dict = {
+            "ar1_z": _Cal(),
+            "pca_spe_z": _Cal(offset=1.0),
+            "pca_t2_z": _Cal(offset=2.0),
+            "iforest_z": _Cal(),
+            "gmm_z": _Cal(),
+            "omr_z": _Cal(),
+        }
+        frame = pd.DataFrame({"omr_raw": [1.0, 2.0]})
+        calibrators = collect_enabled_calibrators(
+            calibrators_dict=calibrators_dict,
+            frame=frame,
+            ar1_enabled=True,
+            pca_enabled=True,
+            iforest_enabled=False,
+            gmm_enabled=False,
+            omr_enabled=True,
+        )
+        names = [name for name, _ in calibrators]
+        assert names == ["ar1_z", "pca_spe_z", "pca_t2_z", "omr_z"]
+
+        train_frame = pd.DataFrame(
+            {
+                "pca_spe": np.array([1.0, 2.0, 3.0, 4.0]),
+                "pca_t2": np.array([2.0, 3.0, 4.0, 5.0]),
+            }
+        )
+        spe_p95, t2_p95 = compute_pca_train_percentiles(
+            train_frame=train_frame,
+            fit_regimes=None,
+            pca_enabled=True,
+            calibrators_dict=calibrators_dict,
+        )
+        assert spe_p95 > 0.0
+        assert t2_p95 > 0.0
+
+    def test_write_calibration_summary_safe_writes_rows(self):
+        """Calibration summary helper should write rows and return count."""
+        from core.fuse import write_calibration_summary_safe
+
+        class _Cal:
+            def __init__(self):
+                self.q_z = 2.0
+                self.med = 1.0
+                self.scale = 0.5
+                self.regime_thresh_ = {0: 1.5}
+
+        class _Out:
+            def __init__(self):
+                self.rows = []
+
+            def write_calibration_summary(self, rows):
+                self.rows.extend(rows)
+                return len(rows)
+
+        out = _Out()
+        count = write_calibration_summary_safe(
+            output_manager=out,
+            calibrators=[("ar1_z", _Cal())],
+        )
+        assert count == 1
+        assert len(out.rows) == 1
+        assert out.rows[0]["DetectorType"] == "ar1_z"
+
+    def test_persist_calibration_params_safe_uses_model_manager(self, monkeypatch):
+        """Model persistence helper should call ModelVersionManager.save_calibration_params."""
+        from core import model_persistence
+
+        captured = {"called": False, "version": None}
+
+        class _Mgr:
+            def __init__(self, equip, sql_client, equip_id):
+                self.equip = equip
+                self.sql_client = sql_client
+                self.equip_id = equip_id
+
+            def save_calibration_params(self, calibrators_dict, version):
+                captured["called"] = True
+                captured["version"] = version
+
+        monkeypatch.setattr(model_persistence, "ModelVersionManager", _Mgr)
+        ok = model_persistence.persist_calibration_params_safe(
+            equip="FD_FAN",
+            sql_client=object(),
+            equip_id=1,
+            saved_model_version=7,
+            calibrators_dict={"ar1_z": {"med": 1.0}},
+        )
+        assert ok is True
+        assert captured["called"] is True
+        assert captured["version"] == 7
+
+    def test_persist_threshold_artifacts_writes_expected_tables(self):
+        """Threshold artifact helper should write both thresholds artifacts when available."""
+        from core.fuse import persist_threshold_artifacts
+
+        class _Cal:
+            def __init__(self):
+                self.med = 1.0
+                self.scale = 0.5
+                self.q_z = 2.0
+                self.q_thresh = 2.0
+                self.regime_thresh_ = {0: 1.5}
+                self.regime_params_ = {0: (1.0, 0.5)}
+
+        class _Out:
+            def __init__(self):
+                self.writes = []
+
+            def write_dataframe(self, df, artifact_name):
+                self.writes.append((artifact_name, len(df)))
+
+        out = _Out()
+        per_regime_count, threshold_count = persist_threshold_artifacts(
+            output_manager=out,
+            calibrators=[("ar1_z", _Cal())],
+            quality_ok=True,
+            use_per_regime=True,
+        )
+        assert per_regime_count == 1
+        assert threshold_count == 2
+        assert ("per_regime_thresholds", 1) in out.writes
+        assert ("acm_thresholds", 2) in out.writes
+
+    def test_run_calibration_stage_orchestrates_and_returns_result(self):
+        """Calibration stage helper should orchestrate scoring, calibration, and artifact writes."""
+        from core.fuse import run_calibration_stage
+
+        train = pd.DataFrame({"x": [1.0, 2.0, 3.0, 4.0]})
+        frame = pd.DataFrame(
+            {
+                "ar1_raw": [0.1, 0.2, 0.3, 0.4],
+                "pca_spe": [0.1, 0.1, 0.2, 0.3],
+                "pca_t2": [0.2, 0.2, 0.3, 0.4],
+                "iforest_raw": [0.3, 0.4, 0.5, 0.6],
+                "gmm_raw": [0.2, 0.3, 0.4, 0.5],
+                "omr_raw": [0.1, 0.2, 0.3, 0.4],
+            }
+        )
+
+        class _Cal:
+            def __init__(self):
+                self.med = 0.0
+                self.scale = 1.0
+                self.q_z = 2.0
+                self.q_thresh = 2.0
+                self.regime_thresh_ = {}
+                self.regime_params_ = {}
+
+            def transform(self, x, regime_labels=None):
+                return np.asarray(x, dtype=np.float32)
+
+        def _score_all_detectors_fn(**kwargs):
+            return kwargs["data"].assign(
+                ar1_raw=np.array([0.1, 0.2, 0.3, 0.4]),
+                pca_spe=np.array([0.2, 0.3, 0.4, 0.5]),
+                pca_t2=np.array([0.3, 0.4, 0.5, 0.6]),
+                iforest_raw=np.array([0.4, 0.5, 0.6, 0.7]),
+                gmm_raw=np.array([0.5, 0.6, 0.7, 0.8]),
+                omr_raw=np.array([0.6, 0.7, 0.8, 0.9]),
+            ), None
+
+        def _calibrate_all_detectors_fn(**kwargs):
+            score_frame = kwargs["score_frame"].copy()
+            score_frame["ar1_z"] = score_frame["ar1_raw"]
+            score_frame["pca_spe_z"] = score_frame["pca_spe"]
+            score_frame["pca_t2_z"] = score_frame["pca_t2"]
+            score_frame["iforest_z"] = score_frame["iforest_raw"]
+            score_frame["gmm_z"] = score_frame["gmm_raw"]
+            score_frame["omr_z"] = score_frame["omr_raw"]
+            return score_frame, {
+                "ar1_z": _Cal(),
+                "pca_spe_z": _Cal(),
+                "pca_t2_z": _Cal(),
+                "iforest_z": _Cal(),
+                "gmm_z": _Cal(),
+                "omr_z": _Cal(),
+            }
+
+        persisted = {"called": False}
+
+        def _persist(version, calibrators_dict):
+            persisted["called"] = True
+            return True
+
+        class _Out:
+            def __init__(self):
+                self.df_writes = 0
+                self.summary_writes = 0
+
+            def write_dataframe(self, df, artifact_name):
+                self.df_writes += 1
+
+            def write_calibration_summary(self, rows):
+                self.summary_writes += 1
+                return len(rows)
+
+        class _Logger:
+            def info(self, *args, **kwargs):
+                pass
+
+            def warn(self, *args, **kwargs):
+                pass
+
+        out = _Out()
+        result = run_calibration_stage(
+            train=train,
+            frame=frame,
+            cfg={"thresholds": {"q": 0.98, "self_tune": {}}, "fusion": {"per_regime": True}},
+            regime_quality_ok=True,
+            train_regime_labels=np.array([0, 0, 0, 0]),
+            score_regime_labels=np.array([0, 0, 0, 0]),
+            pca_train_spe=None,
+            pca_train_t2=None,
+            detectors={},
+            detector_flags={
+                "ar1_enabled": True,
+                "pca_enabled": True,
+                "iforest_enabled": True,
+                "gmm_enabled": True,
+                "omr_enabled": True,
+            },
+            cached_calibration_params=None,
+            saved_model_version=1,
+            score_all_detectors_fn=_score_all_detectors_fn,
+            calibrate_all_detectors_fn=_calibrate_all_detectors_fn,
+            persist_calibration_params_fn=_persist,
+            output_manager=out,
+            logger=_Logger(),
+            equip="FD_FAN",
+        )
+
+        assert isinstance(result.frame, pd.DataFrame)
+        assert isinstance(result.train_frame, pd.DataFrame)
+        assert "per_regime_active" in result.frame.columns
+        assert result.quality_ok is True
+        assert result.use_per_regime is True
+        assert persisted["called"] is True
+        assert out.df_writes >= 1
+        assert out.summary_writes == 1
+
+    def test_apply_fusion_result_and_record_metrics_updates_frames(self):
+        """Fusion result helper should apply fused columns and emit detector metrics."""
+        from core.fuse import FusionResult, apply_fusion_result_and_record_metrics
+
+        frame = pd.DataFrame(
+            {
+                "ar1_z": [0.1, 0.2],
+                "pca_spe_z": [0.2, 0.3],
+                "pca_t2_z": [0.3, 0.4],
+                "iforest_z": [0.4, 0.5],
+                "gmm_z": [0.5, 0.6],
+                "omr_z": [0.6, 0.7],
+            }
+        )
+        train_frame = pd.DataFrame({"x": [1.0, 2.0]})
+        fusion_result = FusionResult(
+            fused_scores=np.array([1.1, 1.2], dtype=np.float32),
+            episodes=pd.DataFrame({"episode_id": [1]}),
+            weights_used={"ar1_z": 1.0},
+            auto_tuned=False,
+            train_fused=np.array([0.9, 1.0], dtype=np.float32),
+        )
+
+        captured = {"detector_scores": None, "episode": None}
+
+        def _record_detector_scores(equip, detector_scores):
+            captured["detector_scores"] = (equip, detector_scores)
+
+        def _record_episode(equip, count, severity):
+            captured["episode"] = (equip, count, severity)
+
+        out_frame, out_train, episodes, weights = apply_fusion_result_and_record_metrics(
+            frame=frame,
+            train_frame=train_frame,
+            fusion_result=fusion_result,
+            equip="FD_FAN",
+            record_detector_scores_fn=_record_detector_scores,
+            record_episode_fn=_record_episode,
+        )
+
+        assert "fused" in out_frame.columns
+        assert "fused" in out_train.columns
+        assert len(episodes) == 1
+        assert weights == {"ar1_z": 1.0}
+        assert captured["detector_scores"] is not None
+        assert captured["episode"] == ("FD_FAN", 1, "warning")
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

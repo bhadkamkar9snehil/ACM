@@ -9,7 +9,7 @@ line_end: 259
 
 # core.episode_culprits_writer.compute_detector_contributions
 
-Defined in: [[modules/core.episode_culprits_writer|core.episode_culprits_writer]]
+Defined in: [[modules/core.episode_culprits_writer]]
 
 Source: `core/episode_culprits_writer.py:185`
 

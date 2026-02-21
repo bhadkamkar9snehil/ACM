@@ -9,7 +9,7 @@ line_end: 267
 
 # core.ar1_detector.AR1Detector.from_dict
 
-Defined in: [[modules/core.ar1_detector|core.ar1_detector]]
+Defined in: [[modules/core.ar1_detector]]
 
 Source: `core/ar1_detector.py:263`
 

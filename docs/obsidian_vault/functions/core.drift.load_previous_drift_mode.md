@@ -9,7 +9,7 @@ line_end: 361
 
 # core.drift.load_previous_drift_mode
 
-Defined in: [[modules/core.drift|core.drift]]
+Defined in: [[modules/core.drift]]
 
 Source: `core/drift.py:335`
 

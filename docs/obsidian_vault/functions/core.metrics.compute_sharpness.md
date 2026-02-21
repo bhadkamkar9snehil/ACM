@@ -9,7 +9,7 @@ line_end: 215
 
 # core.metrics.compute_sharpness
 
-Defined in: [[modules/core.metrics|core.metrics]]
+Defined in: [[modules/core.metrics]]
 
 Source: `core/metrics.py:189`
 

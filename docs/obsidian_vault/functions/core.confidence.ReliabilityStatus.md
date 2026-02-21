@@ -9,7 +9,7 @@ line_end: 37
 
 # core.confidence.ReliabilityStatus
 
-Defined in: [[modules/core.confidence|core.confidence]]
+Defined in: [[modules/core.confidence]]
 
 Source: `core/confidence.py:32`
 

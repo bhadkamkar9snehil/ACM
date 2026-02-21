@@ -9,7 +9,7 @@ line_end: 1037
 
 # core.observability.stop_profiling
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:1025`
 

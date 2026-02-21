@@ -9,7 +9,7 @@ line_end: 451
 
 # core.fuse.CalibrationContaminationFilter._apply_exclusion_with_guards
 
-Defined in: [[modules/core.fuse|core.fuse]]
+Defined in: [[modules/core.fuse]]
 
 Source: `core/fuse.py:375`
 

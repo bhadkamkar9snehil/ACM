@@ -3,15 +3,15 @@ type: function
 id: core.acm._namespace_to_cli_args
 module: core.acm
 source: core/acm.py
-line_start: 418
-line_end: 442
+line_start: 422
+line_end: 446
 ---
 
 # core.acm._namespace_to_cli_args
 
-Defined in: [[modules/core.acm|core.acm]]
+Defined in: [[modules/core.acm]]
 
-Source: `core/acm.py:418`
+Source: `core/acm.py:422`
 
 Kind: `function`
 

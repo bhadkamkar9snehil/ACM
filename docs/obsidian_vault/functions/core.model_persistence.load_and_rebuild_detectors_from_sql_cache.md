@@ -9,7 +9,7 @@ line_end: 1749
 
 # core.model_persistence.load_and_rebuild_detectors_from_sql_cache
 
-Defined in: [[modules/core.model_persistence|core.model_persistence]]
+Defined in: [[modules/core.model_persistence]]
 
 Source: `core/model_persistence.py:1665`
 

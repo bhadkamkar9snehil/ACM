@@ -3,15 +3,15 @@ type: function
 id: core.acm._detect_mode
 module: core.acm
 source: core/acm.py
-line_start: 350
-line_end: 356
+line_start: 354
+line_end: 360
 ---
 
 # core.acm._detect_mode
 
-Defined in: [[modules/core.acm|core.acm]]
+Defined in: [[modules/core.acm]]
 
-Source: `core/acm.py:350`
+Source: `core/acm.py:354`
 
 Kind: `function`
 

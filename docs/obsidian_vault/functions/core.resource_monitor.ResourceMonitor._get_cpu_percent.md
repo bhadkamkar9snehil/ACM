@@ -9,7 +9,7 @@ line_end: 291
 
 # core.resource_monitor.ResourceMonitor._get_cpu_percent
 
-Defined in: [[modules/core.resource_monitor|core.resource_monitor]]
+Defined in: [[modules/core.resource_monitor]]
 
 Source: `core/resource_monitor.py:284`
 

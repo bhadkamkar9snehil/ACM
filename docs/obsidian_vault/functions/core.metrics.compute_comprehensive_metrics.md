@@ -9,7 +9,7 @@ line_end: 353
 
 # core.metrics.compute_comprehensive_metrics
 
-Defined in: [[modules/core.metrics|core.metrics]]
+Defined in: [[modules/core.metrics]]
 
 Source: `core/metrics.py:310`
 

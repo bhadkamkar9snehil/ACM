@@ -9,7 +9,7 @@ line_end: 2049
 
 # core.observability.record_cpu_per_core
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:2040`
 

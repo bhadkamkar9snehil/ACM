@@ -9,7 +9,7 @@ line_end: 1713
 
 # core.forecast_engine.ForecastEngine
 
-Defined in: [[modules/core.forecast_engine|core.forecast_engine]]
+Defined in: [[modules/core.forecast_engine]]
 
 Source: `core/forecast_engine.py:151`
 

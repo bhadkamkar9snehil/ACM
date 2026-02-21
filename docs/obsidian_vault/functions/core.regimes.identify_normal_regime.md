@@ -9,7 +9,7 @@ line_end: 2036
 
 # core.regimes.identify_normal_regime
 
-Defined in: [[modules/core.regimes|core.regimes]]
+Defined in: [[modules/core.regimes]]
 
 Source: `core/regimes.py:1974`
 

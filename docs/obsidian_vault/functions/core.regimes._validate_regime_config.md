@@ -9,7 +9,7 @@ line_end: 380
 
 # core.regimes._validate_regime_config
 
-Defined in: [[modules/core.regimes|core.regimes]]
+Defined in: [[modules/core.regimes]]
 
 Source: `core/regimes.py:368`
 

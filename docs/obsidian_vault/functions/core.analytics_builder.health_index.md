@@ -9,7 +9,7 @@ line_end: 89
 
 # core.analytics_builder.health_index
 
-Defined in: [[modules/core.analytics_builder|core.analytics_builder]]
+Defined in: [[modules/core.analytics_builder]]
 
 Source: `core/analytics_builder.py:71`
 

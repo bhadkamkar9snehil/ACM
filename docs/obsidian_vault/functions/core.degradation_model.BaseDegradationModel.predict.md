@@ -9,7 +9,7 @@ line_end: 91
 
 # core.degradation_model.BaseDegradationModel.predict
 
-Defined in: [[modules/core.degradation_model|core.degradation_model]]
+Defined in: [[modules/core.degradation_model]]
 
 Source: `core/degradation_model.py:74`
 

@@ -9,7 +9,7 @@ line_end: 788
 
 # core.model_lifecycle.load_model_state_from_sql
 
-Defined in: [[modules/core.model_lifecycle|core.model_lifecycle]]
+Defined in: [[modules/core.model_lifecycle]]
 
 Source: `core/model_lifecycle.py:720`
 

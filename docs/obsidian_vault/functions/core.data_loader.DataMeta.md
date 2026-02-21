@@ -9,7 +9,7 @@ line_end: 53
 
 # core.data_loader.DataMeta
 
-Defined in: [[modules/core.data_loader|core.data_loader]]
+Defined in: [[modules/core.data_loader]]
 
 Source: `core/data_loader.py:41`
 

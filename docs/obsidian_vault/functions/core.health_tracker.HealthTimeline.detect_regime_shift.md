@@ -9,7 +9,7 @@ line_end: 558
 
 # core.health_tracker.HealthTimeline.detect_regime_shift
 
-Defined in: [[modules/core.health_tracker|core.health_tracker]]
+Defined in: [[modules/core.health_tracker]]
 
 Source: `core/health_tracker.py:502`
 

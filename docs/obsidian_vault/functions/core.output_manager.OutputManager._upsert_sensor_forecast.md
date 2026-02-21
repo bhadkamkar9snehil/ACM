@@ -3,15 +3,15 @@ type: method
 id: core.output_manager.OutputManager._upsert_sensor_forecast
 module: core.output_manager
 source: core/output_manager.py
-line_start: 1431
-line_end: 1443
+line_start: 1432
+line_end: 1444
 ---
 
 # core.output_manager.OutputManager._upsert_sensor_forecast
 
-Defined in: [[modules/core.output_manager|core.output_manager]]
+Defined in: [[modules/core.output_manager]]
 
-Source: `core/output_manager.py:1431`
+Source: `core/output_manager.py:1432`
 
 Kind: `method`
 

@@ -9,7 +9,7 @@ line_end: 226
 
 # core.sql_client.SQLClient.rollback
 
-Defined in: [[modules/core.sql_client|core.sql_client]]
+Defined in: [[modules/core.sql_client]]
 
 Source: `core/sql_client.py:223`
 

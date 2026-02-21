@@ -9,7 +9,7 @@ line_end: 319
 
 # core.observability._extract_leading_tag
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:311`
 

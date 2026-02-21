@@ -9,7 +9,7 @@ line_end: 118
 
 # core.analytics_builder.AnalyticsBuilder.run_id
 
-Defined in: [[modules/core.analytics_builder|core.analytics_builder]]
+Defined in: [[modules/core.analytics_builder]]
 
 Source: `core/analytics_builder.py:117`
 

@@ -9,7 +9,7 @@ line_end: 193
 
 # core.confidence.compute_prediction_confidence
 
-Defined in: [[modules/core.confidence|core.confidence]]
+Defined in: [[modules/core.confidence]]
 
 Source: `core/confidence.py:143`
 

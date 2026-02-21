@@ -3,15 +3,15 @@ type: function
 id: core.run_metadata_writer.emit_batch_summary
 module: core.run_metadata_writer
 source: core/run_metadata_writer.py
-line_start: 407
-line_end: 525
+line_start: 446
+line_end: 564
 ---
 
 # core.run_metadata_writer.emit_batch_summary
 
-Defined in: [[modules/core.run_metadata_writer|core.run_metadata_writer]]
+Defined in: [[modules/core.run_metadata_writer]]
 
-Source: `core/run_metadata_writer.py:407`
+Source: `core/run_metadata_writer.py:446`
 
 Kind: `function`
 

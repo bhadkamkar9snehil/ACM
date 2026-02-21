@@ -38,6 +38,19 @@
         "rawQuery": true,
         "rawSql": "SELECT Timestamp AS time, Detector + ' crossed ' + Direction + ' at Z=' + CAST(ROUND(ZScore,2) AS nvarchar(20)) AS text, 'THRESHOLD' AS tags\nFROM ACM_ThresholdCrossings\nWHERE EquipID = $equipment\n  AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY Timestamp ASC",
         "type": "table"
+      },
+      {
+        "datasource": {
+          "type": "mssql",
+          "uid": "${datasource}"
+        },
+        "enable": true,
+        "hide": false,
+        "iconColor": "#6E9FFF",
+        "name": "Batch Boundaries",
+        "rawQuery": true,
+        "rawSql": "SELECT\n  MIN(sw.Timestamp) AS time,\n  'Batch #' + CAST(ROW_NUMBER() OVER (ORDER BY r.StartedAt) AS nvarchar) + ' start — scores re-calibrated, AR1/CUSUM state reset' AS text,\n  'BATCH' AS tags\nFROM dbo.ACM_Runs r\nJOIN dbo.ACM_Scores_Wide sw ON sw.RunID = r.RunID AND sw.EquipID = r.EquipID\nWHERE r.EquipID = $equipment\n  AND r.StartedAt BETWEEN $__timeFrom() AND $__timeTo()\nGROUP BY r.RunID, r.StartedAt\nORDER BY r.StartedAt ASC",
+        "type": "table"
       }
     ]
   },
@@ -778,7 +791,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT Timestamp AS time, HealthIndex AS value\nFROM ACM_HealthTimeline\nWHERE EquipID = $equipment\n  AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY Timestamp ASC",
+          "rawSql": "SELECT\n  Timestamp AS time,\n  HealthIndex,\n  NULLIF(RawHealthIndex, -1) AS RawHealthIndex\nFROM dbo.ACM_HealthTimeline\nWHERE EquipID = $equipment\n  AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY Timestamp ASC",
           "refId": "A"
         }
       ],
@@ -802,7 +815,7 @@
         "type": "mssql",
         "uid": "${datasource}"
       },
-      "description": "All 6 detector z-scores over time. Spikes above dashed lines = anomalies.",
+      "description": "Detector z-scores over time. mhal_z removed (deprecated v9.1.0, 0% data). Detectors with <5% data coverage show as sparse spikes only — gaps are intentional NULLs not missing data. Dashed lines = WARN (1.5σ) and ALERT (3.0σ) thresholds.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -817,7 +830,7 @@
             "barAlignment": 0,
             "barWidthFactor": 0.6,
             "drawStyle": "line",
-            "fillOpacity": 5,
+            "fillOpacity": 0,
             "gradientMode": "none",
             "hideFrom": {
               "legend": false,
@@ -863,136 +876,62 @@
         },
         "overrides": [
           {
-            "matcher": {
-              "id": "byName",
-              "options": "ar1_z"
-            },
+            "matcher": { "id": "byName", "options": "ar1_z" },
             "properties": [
-              {
-                "id": "displayName",
-                "value": "AR1"
-              },
-              {
-                "id": "color",
-                "value": {
-                  "fixedColor": "#5794F2",
-                  "mode": "fixed"
-                }
-              }
+              { "id": "displayName", "value": "AR1" },
+              { "id": "color", "value": { "fixedColor": "#5794F2", "mode": "fixed" } },
+              { "id": "custom.lineWidth", "value": 1 }
             ]
           },
           {
-            "matcher": {
-              "id": "byName",
-              "options": "pca_spe_z"
-            },
+            "matcher": { "id": "byName", "options": "pca_spe_z" },
             "properties": [
-              {
-                "id": "displayName",
-                "value": "PCA-SPE"
-              },
-              {
-                "id": "color",
-                "value": {
-                  "fixedColor": "#73BF69",
-                  "mode": "fixed"
-                }
-              }
+              { "id": "displayName", "value": "PCA-SPE" },
+              { "id": "color", "value": { "fixedColor": "#73BF69", "mode": "fixed" } },
+              { "id": "custom.showPoints", "value": "always" },
+              { "id": "custom.pointSize", "value": 4 }
             ]
           },
           {
-            "matcher": {
-              "id": "byName",
-              "options": "pca_t2_z"
-            },
+            "matcher": { "id": "byName", "options": "pca_t2_z" },
             "properties": [
-              {
-                "id": "displayName",
-                "value": "PCA-T\u00b2"
-              },
-              {
-                "id": "color",
-                "value": {
-                  "fixedColor": "#37872D",
-                  "mode": "fixed"
-                }
-              }
+              { "id": "displayName", "value": "PCA-T\u00b2" },
+              { "id": "color", "value": { "fixedColor": "#37872D", "mode": "fixed" } },
+              { "id": "custom.lineWidth", "value": 1 }
             ]
           },
           {
-            "matcher": {
-              "id": "byName",
-              "options": "mhal_z"
-            },
+            "matcher": { "id": "byName", "options": "iforest_z" },
             "properties": [
-              {
-                "id": "displayName",
-                "value": "Mahal"
-              },
-              {
-                "id": "color",
-                "value": {
-                  "fixedColor": "#FADE2A",
-                  "mode": "fixed"
-                }
-              }
+              { "id": "displayName", "value": "IForest" },
+              { "id": "color", "value": { "fixedColor": "#FF9830", "mode": "fixed" } },
+              { "id": "custom.showPoints", "value": "always" },
+              { "id": "custom.pointSize", "value": 4 }
             ]
           },
           {
-            "matcher": {
-              "id": "byName",
-              "options": "iforest_z"
-            },
+            "matcher": { "id": "byName", "options": "gmm_z" },
             "properties": [
-              {
-                "id": "displayName",
-                "value": "IForest"
-              },
-              {
-                "id": "color",
-                "value": {
-                  "fixedColor": "#FF9830",
-                  "mode": "fixed"
-                }
-              }
+              { "id": "displayName", "value": "GMM" },
+              { "id": "color", "value": { "fixedColor": "#E0B400", "mode": "fixed" } },
+              { "id": "custom.lineWidth", "value": 1 }
             ]
           },
           {
-            "matcher": {
-              "id": "byName",
-              "options": "gmm_z"
-            },
+            "matcher": { "id": "byName", "options": "cusum_z" },
             "properties": [
-              {
-                "id": "displayName",
-                "value": "GMM"
-              },
-              {
-                "id": "color",
-                "value": {
-                  "fixedColor": "#E0B400",
-                  "mode": "fixed"
-                }
-              }
+              { "id": "displayName", "value": "CUSUM" },
+              { "id": "color", "value": { "fixedColor": "#C4162A", "mode": "fixed" } },
+              { "id": "custom.lineWidth", "value": 2 }
             ]
           },
           {
-            "matcher": {
-              "id": "byName",
-              "options": "cusum_z"
-            },
+            "matcher": { "id": "byName", "options": "omr_z" },
             "properties": [
-              {
-                "id": "displayName",
-                "value": "CUSUM"
-              },
-              {
-                "id": "color",
-                "value": {
-                  "fixedColor": "#C4162A",
-                  "mode": "fixed"
-                }
-              }
+              { "id": "displayName", "value": "OMR" },
+              { "id": "color", "value": { "fixedColor": "#FF780A", "mode": "fixed" } },
+              { "id": "custom.lineWidth", "value": 2 },
+              { "id": "custom.lineStyle", "value": { "dash": [6, 3], "fill": "dash" } }
             ]
           }
         ]
@@ -1028,11 +967,11 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT Timestamp AS time, ar1_z, pca_spe_z, pca_t2_z, mhal_z, iforest_z, gmm_z, cusum_z\nFROM ACM_Scores_Wide\nWHERE EquipID = $equipment\n  AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY Timestamp ASC",
+          "rawSql": "SELECT\n  Timestamp AS time,\n  NULLIF(ar1_z,    -8) AS ar1_z,\n  NULLIF(pca_spe_z,-8) AS pca_spe_z,\n  NULLIF(pca_t2_z, -8) AS pca_t2_z,\n  NULLIF(iforest_z,-8) AS iforest_z,\n  NULLIF(gmm_z,    -8) AS gmm_z,\n  NULLIF(cusum_z,  -8) AS cusum_z,\n  NULLIF(omr_z,    -8) AS omr_z\nFROM dbo.ACM_Scores_Wide\nWHERE EquipID = $equipment\n  AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY Timestamp ASC",
           "refId": "A"
         }
       ],
-      "title": "Detector Z-Scores (All 6 Heads)",
+      "title": "Detector Z-Scores (AR1, PCA-T\u00b2, GMM, CUSUM, OMR + sparse IForest/PCA-SPE)",
       "type": "timeseries"
     },
     {
@@ -3100,22 +3039,11 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "WITH latest AS (\n  SELECT TOP 1\n    pm.RunID,\n    r.StartedAt,\n    pm.ComponentsJson\n  FROM dbo.ACM_PCA_Metrics pm\n  JOIN dbo.ACM_Runs r ON r.RunID = pm.RunID\n  WHERE pm.EquipID = $equipment\n  ORDER BY pm.CreatedAt DESC\n)\nSELECT\n  DATEADD(minute, CAST(j.[key] AS int), latest.StartedAt) AS time,\n  TRY_CAST(JSON_VALUE(j.value, '$.value') AS float) AS VarianceRatio\nFROM latest\nCROSS APPLY OPENJSON(latest.ComponentsJson) j\nWHERE JSON_VALUE(j.value, '$.type') = 'variance_ratio'\nORDER BY time",
+          "rawSql": "SELECT\n  r.StartedAt AS time,\n  pm.NComponents,\n  ROUND(pm.ExplainedVariance * 100.0, 1) AS ExplainedVariancePct,\n  pm.TrainSamples,\n  pm.TrainFeatures\nFROM dbo.ACM_PCA_Metrics pm\nJOIN dbo.ACM_Runs r ON r.RunID = pm.RunID AND r.EquipID = pm.EquipID\nWHERE pm.EquipID = $equipment\n  AND r.StartedAt BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY r.StartedAt ASC",
           "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "mssql",
-            "uid": "${datasource}"
-          },
-          "editorMode": "code",
-          "format": "time_series",
-          "rawQuery": true,
-          "rawSql": "WITH latest AS (\n  SELECT TOP 1\n    pm.RunID,\n    r.StartedAt,\n    pm.ComponentsJson\n  FROM dbo.ACM_PCA_Metrics pm\n  JOIN dbo.ACM_Runs r ON r.RunID = pm.RunID\n  WHERE pm.EquipID = $equipment\n  ORDER BY pm.CreatedAt DESC\n)\nSELECT\n  DATEADD(minute, CAST(j.[key] AS int), latest.StartedAt) AS time,\n  TRY_CAST(JSON_VALUE(j.value, '$.cumulative') AS float) AS CumulativeVariance\nFROM latest\nCROSS APPLY OPENJSON(latest.ComponentsJson) j\nWHERE JSON_VALUE(j.value, '$.type') = 'variance_ratio'\nORDER BY time",
-          "refId": "B"
         }
       ],
-      "title": "PCA Variance Explained by Component",
+      "title": "PCA Model — Components & Variance Explained",
       "type": "timeseries"
     },
     {
@@ -3811,12 +3739,278 @@
     },
     {
       "collapsed": false,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 91
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 91 },
+      "id": 200,
+      "title": "\ud83e\udde0 MODEL LIFECYCLE & HEALTH QUALITY",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "mssql", "uid": "${datasource}" },
+      "description": "Current model maturity state, regime version, and training history from ACM_ActiveModels.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] },
+          "mappings": []
+        },
+        "overrides": []
       },
+      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 92 },
+      "id": 201,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "text": {},
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "mssql", "uid": "${datasource}" },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  ISNULL(RegimeMaturityState, 'UNKNOWN') AS MaturityState,\n  ISNULL(CAST(ActiveRegimeVersion AS nvarchar), '-') AS RegimeVersion,\n  TrainingRows,\n  ROUND(TrainingDays, 1) AS TrainingDays,\n  ConsecutiveRuns,\n  TotalRuns,\n  ROUND(ISNULL(SilhouetteScore, 0), 3) AS SilhouetteScore,\n  ROUND(ISNULL(StabilityRatio, 0), 3) AS StabilityRatio\nFROM dbo.ACM_ActiveModels\nWHERE EquipID = $equipment",
+          "refId": "A"
+        }
+      ],
+      "title": "Model Lifecycle State",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "mssql", "uid": "${datasource}" },
+      "description": "Coldstart progress — how far along data accumulation is.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 50 },
+              { "color": "green", "value": 100 }
+            ]
+          },
+          "unit": "percent",
+          "min": 0,
+          "max": 100
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 96 },
+      "id": 202,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "mssql", "uid": "${datasource}" },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  ROUND(100.0 * AccumulatedRows / NULLIF(RequiredRows, 0), 1) AS ColdstartPct,\n  Stage,\n  Status,\n  AccumulatedRows,\n  RequiredRows\nFROM dbo.ACM_ColdstartState\nWHERE EquipID = $equipment",
+          "refId": "A"
+        }
+      ],
+      "title": "Coldstart Progress",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "mssql", "uid": "${datasource}" },
+      "description": "Per-run: average health index and data quality score. Downward trends = degradation.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "opacity",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "insertNulls": false,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "auto",
+            "spanNulls": true,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          },
+          "min": 0,
+          "max": 100,
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 16, "x": 8, "y": 96 },
+      "id": 203,
+      "options": {
+        "legend": {
+          "calcs": ["lastNotNull", "min"],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": { "mode": "multi", "sort": "none" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "mssql", "uid": "${datasource}" },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  r.StartedAt AS time,\n  ROUND(r.AvgHealthIndex, 1) AS AvgHealthIndex,\n  ROUND(r.DataQualityScore, 1) AS DataQualityScore\nFROM dbo.ACM_Runs r\nWHERE r.EquipID = $equipment\n  AND r.StartedAt BETWEEN $__timeFrom() AND $__timeTo()\n  AND r.AvgHealthIndex IS NOT NULL\nORDER BY r.StartedAt ASC",
+          "refId": "A"
+        }
+      ],
+      "title": "Run Health & Data Quality Score Trend",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "mssql", "uid": "${datasource}" },
+      "description": "Health index confidence and quality flag per timestamp. Low confidence = model uncertain.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "Confidence (0-1)",
+            "axisPlacement": "auto",
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "gradientMode": "opacity",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "insertNulls": false,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 4,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "dashed" }
+          },
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 0.5 },
+              { "color": "green", "value": 0.8 }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 104 },
+      "id": 204,
+      "options": {
+        "legend": {
+          "calcs": ["lastNotNull", "min"],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": { "mode": "multi", "sort": "none" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "mssql", "uid": "${datasource}" },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  Timestamp AS time,\n  NULLIF(Confidence, -1) AS Confidence,\n  CASE QualityFlag\n    WHEN 'GOOD' THEN 1.0\n    WHEN 'WARN' THEN 0.5\n    WHEN 'BAD'  THEN 0.1\n    ELSE NULL\n  END AS QualityFlagScore\nFROM dbo.ACM_HealthTimeline\nWHERE EquipID = $equipment\n  AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY Timestamp ASC",
+          "refId": "A"
+        }
+      ],
+      "title": "Health Confidence & Quality Flag",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "mssql", "uid": "${datasource}" },
+      "description": "Regime assignment confidence over time. Low confidence = borderline operating state.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "Confidence",
+            "axisPlacement": "auto",
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "insertNulls": false,
+            "lineInterpolation": "smooth",
+            "lineWidth": 1,
+            "pointSize": 4,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          },
+          "min": 0,
+          "max": 1,
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "IsNovel" },
+            "properties": [
+              { "id": "custom.drawStyle", "value": "bars" },
+              { "id": "custom.fillOpacity", "value": 80 },
+              { "id": "color", "value": { "fixedColor": "#FF9830", "mode": "fixed" } },
+              { "id": "custom.axisPlacement", "value": "right" }
+            ]
+          }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 104 },
+      "id": 205,
+      "options": {
+        "legend": {
+          "calcs": ["lastNotNull"],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": { "mode": "multi", "sort": "none" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "mssql", "uid": "${datasource}" },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  Timestamp AS time,\n  NULLIF(AssignmentConfidence, -1) AS AssignmentConfidence,\n  CAST(IsNovel AS float) AS IsNovel\nFROM dbo.ACM_RegimeTimeline\nWHERE EquipID = $equipment\n  AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY Timestamp ASC",
+          "refId": "A"
+        }
+      ],
+      "title": "Regime Assignment Confidence & Novel Detections",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 91 },
       "id": 90,
       "title": "\ud83d\udce1 OBSERVABILITY \u2014 PROMETHEUS METRICS",
       "type": "row"
@@ -4093,14 +4287,14 @@
           "type": "mssql",
           "uid": "mssql-ds"
         },
-        "definition": "SELECT EquipID AS __value, EquipCode AS __text FROM dbo.Equipment ORDER BY EquipCode",
+        "definition": "SELECT EquipID AS __value, EquipCode AS __text FROM dbo.Equipment WHERE Status = 1 ORDER BY EquipCode",
         "hide": 0,
         "includeAll": false,
         "label": "Equipment",
         "multi": false,
         "name": "equipment",
         "options": [],
-        "query": "SELECT EquipID AS __value, EquipCode AS __text FROM dbo.Equipment ORDER BY EquipCode",
+        "query": "SELECT EquipID AS __value, EquipCode AS __text FROM dbo.Equipment WHERE Status = 1 ORDER BY EquipCode",
         "refresh": 2,
         "regex": "",
         "sort": 1,

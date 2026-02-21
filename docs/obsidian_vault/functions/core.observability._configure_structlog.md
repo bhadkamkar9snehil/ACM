@@ -9,7 +9,7 @@ line_end: 420
 
 # core.observability._configure_structlog
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:408`
 

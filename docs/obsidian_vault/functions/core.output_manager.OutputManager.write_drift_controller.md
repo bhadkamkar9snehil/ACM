@@ -3,15 +3,15 @@ type: method
 id: core.output_manager.OutputManager.write_drift_controller
 module: core.output_manager
 source: core/output_manager.py
-line_start: 2963
-line_end: 2978
+line_start: 2964
+line_end: 2979
 ---
 
 # core.output_manager.OutputManager.write_drift_controller
 
-Defined in: [[modules/core.output_manager|core.output_manager]]
+Defined in: [[modules/core.output_manager]]
 
-Source: `core/output_manager.py:2963`
+Source: `core/output_manager.py:2964`
 
 Kind: `method`
 

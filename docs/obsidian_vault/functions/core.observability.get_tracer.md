@@ -9,7 +9,7 @@ line_end: 2208
 
 # core.observability.get_tracer
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:2206`
 

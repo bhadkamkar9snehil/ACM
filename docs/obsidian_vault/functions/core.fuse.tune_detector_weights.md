@@ -9,7 +9,7 @@ line_end: 1010
 
 # core.fuse.tune_detector_weights
 
-Defined in: [[modules/core.fuse|core.fuse]]
+Defined in: [[modules/core.fuse]]
 
 Source: `core/fuse.py:454`
 

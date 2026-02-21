@@ -9,7 +9,7 @@ line_end: 3852
 
 # core.regimes.detect_transient_states
 
-Defined in: [[modules/core.regimes|core.regimes]]
+Defined in: [[modules/core.regimes]]
 
 Source: `core/regimes.py:3694`
 

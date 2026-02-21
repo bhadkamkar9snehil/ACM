@@ -9,7 +9,7 @@ line_end: 1412
 
 # core.model_persistence.create_model_metadata
 
-Defined in: [[modules/core.model_persistence|core.model_persistence]]
+Defined in: [[modules/core.model_persistence]]
 
 Source: `core/model_persistence.py:1223`
 

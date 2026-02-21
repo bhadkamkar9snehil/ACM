@@ -9,7 +9,7 @@ line_end: 108
 
 # core.failure_probability.compute_survival_curve
 
-Defined in: [[modules/core.failure_probability|core.failure_probability]]
+Defined in: [[modules/core.failure_probability]]
 
 Source: `core/failure_probability.py:74`
 

@@ -9,7 +9,7 @@ line_end: 273
 
 # core.resource_monitor.ResourceMonitor.start_run
 
-Defined in: [[modules/core.resource_monitor|core.resource_monitor]]
+Defined in: [[modules/core.resource_monitor]]
 
 Source: `core/resource_monitor.py:267`
 

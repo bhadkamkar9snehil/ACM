@@ -9,7 +9,7 @@ line_end: 234
 
 # core.fuse.CalibrationContaminationFilter._filter_z_trim
 
-Defined in: [[modules/core.fuse|core.fuse]]
+Defined in: [[modules/core.fuse]]
 
 Source: `core/fuse.py:204`
 

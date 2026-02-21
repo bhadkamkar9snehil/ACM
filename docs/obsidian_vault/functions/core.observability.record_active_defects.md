@@ -9,7 +9,7 @@ line_end: 1816
 
 # core.observability.record_active_defects
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:1811`
 

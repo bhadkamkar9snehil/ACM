@@ -9,7 +9,7 @@ line_end: 280
 
 # core.sql_client.SQLClient.call_proc
 
-Defined in: [[modules/core.sql_client|core.sql_client]]
+Defined in: [[modules/core.sql_client]]
 
 Source: `core/sql_client.py:254`
 

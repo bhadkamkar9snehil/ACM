@@ -9,7 +9,7 @@ line_end: 451
 
 # core.fuse.CalibrationContaminationFilter
 
-Defined in: [[modules/core.fuse|core.fuse]]
+Defined in: [[modules/core.fuse]]
 
 Source: `core/fuse.py:43`
 

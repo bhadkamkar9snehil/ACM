@@ -9,7 +9,7 @@ line_end: 2957
 
 # core.observability._PyroscopePusher._memory_snapshot_to_collapsed
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:2870`
 

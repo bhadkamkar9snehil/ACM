@@ -9,7 +9,7 @@ line_end: 315
 
 # core.fast_features.rolling_xcorr
 
-Defined in: [[modules/core.fast_features|core.fast_features]]
+Defined in: [[modules/core.fast_features]]
 
 Source: `core/fast_features.py:300`
 

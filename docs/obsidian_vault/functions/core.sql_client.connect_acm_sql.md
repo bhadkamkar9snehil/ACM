@@ -9,7 +9,7 @@ line_end: 599
 
 # core.sql_client.connect_acm_sql
 
-Defined in: [[modules/core.sql_client|core.sql_client]]
+Defined in: [[modules/core.sql_client]]
 
 Source: `core/sql_client.py:577`
 

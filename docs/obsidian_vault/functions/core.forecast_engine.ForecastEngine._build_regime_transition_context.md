@@ -9,7 +9,7 @@ line_end: 725
 
 # core.forecast_engine.ForecastEngine._build_regime_transition_context
 
-Defined in: [[modules/core.forecast_engine|core.forecast_engine]]
+Defined in: [[modules/core.forecast_engine]]
 
 Source: `core/forecast_engine.py:666`
 

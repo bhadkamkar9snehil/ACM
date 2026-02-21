@@ -9,7 +9,7 @@ line_end: 2769
 
 # core.observability._PyroscopePusher.set_trace_context
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:2763`
 

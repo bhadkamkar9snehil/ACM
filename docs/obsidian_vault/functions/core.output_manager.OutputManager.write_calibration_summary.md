@@ -3,15 +3,15 @@ type: method
 id: core.output_manager.OutputManager.write_calibration_summary
 module: core.output_manager
 source: core/output_manager.py
-line_start: 2529
-line_end: 2544
+line_start: 2530
+line_end: 2545
 ---
 
 # core.output_manager.OutputManager.write_calibration_summary
 
-Defined in: [[modules/core.output_manager|core.output_manager]]
+Defined in: [[modules/core.output_manager]]
 
-Source: `core/output_manager.py:2529`
+Source: `core/output_manager.py:2530`
 
 Kind: `method`
 

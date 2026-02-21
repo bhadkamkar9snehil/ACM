@@ -9,7 +9,7 @@ line_end: 1505
 
 # core.observability.Span._get_span_kind
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:1498`
 

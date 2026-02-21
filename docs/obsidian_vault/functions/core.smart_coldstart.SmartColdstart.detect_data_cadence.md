@@ -9,7 +9,7 @@ line_end: 237
 
 # core.smart_coldstart.SmartColdstart.detect_data_cadence
 
-Defined in: [[modules/core.smart_coldstart|core.smart_coldstart]]
+Defined in: [[modules/core.smart_coldstart]]
 
 Source: `core/smart_coldstart.py:161`
 

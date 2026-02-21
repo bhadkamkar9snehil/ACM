@@ -9,7 +9,7 @@ line_end: 125
 
 # core.resource_monitor.get_gpu_info
 
-Defined in: [[modules/core.resource_monitor|core.resource_monitor]]
+Defined in: [[modules/core.resource_monitor]]
 
 Source: `core/resource_monitor.py:86`
 

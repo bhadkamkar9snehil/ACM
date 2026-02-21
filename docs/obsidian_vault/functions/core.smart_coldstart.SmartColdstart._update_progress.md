@@ -9,7 +9,7 @@ line_end: 560
 
 # core.smart_coldstart.SmartColdstart._update_progress
 
-Defined in: [[modules/core.smart_coldstart|core.smart_coldstart]]
+Defined in: [[modules/core.smart_coldstart]]
 
 Source: `core/smart_coldstart.py:539`
 

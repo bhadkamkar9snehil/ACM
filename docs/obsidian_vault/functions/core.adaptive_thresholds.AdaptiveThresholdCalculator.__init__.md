@@ -9,7 +9,7 @@ line_end: 68
 
 # core.adaptive_thresholds.AdaptiveThresholdCalculator.__init__
 
-Defined in: [[modules/core.adaptive_thresholds|core.adaptive_thresholds]]
+Defined in: [[modules/core.adaptive_thresholds]]
 
 Source: `core/adaptive_thresholds.py:46`
 

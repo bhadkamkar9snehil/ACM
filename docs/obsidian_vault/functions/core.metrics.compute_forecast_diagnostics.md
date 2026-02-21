@@ -9,7 +9,7 @@ line_end: 514
 
 # core.metrics.compute_forecast_diagnostics
 
-Defined in: [[modules/core.metrics|core.metrics]]
+Defined in: [[modules/core.metrics]]
 
 Source: `core/metrics.py:377`
 

@@ -9,7 +9,7 @@ line_end: 501
 
 # core.rul_estimator.build_regime_transition_matrix
 
-Defined in: [[modules/core.rul_estimator|core.rul_estimator]]
+Defined in: [[modules/core.rul_estimator]]
 
 Source: `core/rul_estimator.py:451`
 

@@ -9,7 +9,7 @@ line_end: 796
 
 # core.model_persistence.ModelVersionManager._cleanup_old_versions
 
-Defined in: [[modules/core.model_persistence|core.model_persistence]]
+Defined in: [[modules/core.model_persistence]]
 
 Source: `core/model_persistence.py:742`
 

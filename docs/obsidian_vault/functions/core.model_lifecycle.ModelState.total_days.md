@@ -9,7 +9,7 @@ line_end: 174
 
 # core.model_lifecycle.ModelState.total_days
 
-Defined in: [[modules/core.model_lifecycle|core.model_lifecycle]]
+Defined in: [[modules/core.model_lifecycle]]
 
 Source: `core/model_lifecycle.py:172`
 

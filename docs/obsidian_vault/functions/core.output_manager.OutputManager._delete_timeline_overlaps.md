@@ -3,15 +3,15 @@ type: method
 id: core.output_manager.OutputManager._delete_timeline_overlaps
 module: core.output_manager
 source: core/output_manager.py
-line_start: 3165
-line_end: 3223
+line_start: 3191
+line_end: 3249
 ---
 
 # core.output_manager.OutputManager._delete_timeline_overlaps
 
-Defined in: [[modules/core.output_manager|core.output_manager]]
+Defined in: [[modules/core.output_manager]]
 
-Source: `core/output_manager.py:3165`
+Source: `core/output_manager.py:3191`
 
 Kind: `method`
 

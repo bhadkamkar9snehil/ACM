@@ -9,7 +9,7 @@ line_end: 365
 
 # core.regimes._validate_regime_inputs
 
-Defined in: [[modules/core.regimes|core.regimes]]
+Defined in: [[modules/core.regimes]]
 
 Source: `core/regimes.py:344`
 

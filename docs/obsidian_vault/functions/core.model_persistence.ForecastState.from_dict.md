@@ -9,7 +9,7 @@ line_end: 113
 
 # core.model_persistence.ForecastState.from_dict
 
-Defined in: [[modules/core.model_persistence|core.model_persistence]]
+Defined in: [[modules/core.model_persistence]]
 
 Source: `core/model_persistence.py:111`
 

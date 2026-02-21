@@ -9,7 +9,7 @@ line_end: 2370
 
 # core.forecast_engine.RegimeConditionedForecaster._check_retraining_needed
 
-Defined in: [[modules/core.forecast_engine|core.forecast_engine]]
+Defined in: [[modules/core.forecast_engine]]
 
 Source: `core/forecast_engine.py:2345`
 

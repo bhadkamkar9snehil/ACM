@@ -26,6 +26,31 @@ Completed on `integration/acm-single-entrypoint`:
 12. Maintained source control isolation by merging unrelated dashboard changes through dedicated `chore/*` branches into integration.
 13. Extracted seasonality safe-execution wrapper into `core/seasonality.py` and removed inline seasonality try/except from `core/acm.py`.
 14. Extracted guardrails safe-execution wrapper into `core/pipeline_types.py` and removed inline guardrails try/except from `core/acm.py`.
+15. Extracted calibration helper internals from `core/acm.py` into `core/fuse.py`:
+   - `apply_contamination_filter_config`
+   - `choose_pca_cache_for_calibration`
+   - `compute_and_set_adaptive_clip`
+   - `compute_pca_train_percentiles`
+   - `collect_enabled_calibrators`
+   - `write_calibration_summary_safe`
+16. Replaced inline calibration helper logic in `core/acm.py` with calls into `core/fuse.py` while preserving calibration stage sequencing and outputs.
+17. Updated `tests/test_v11_modules.py` with direct tests for extracted calibration helpers and re-ran the refactor regression suite.
+18. Extracted calibration-params persistence wrapper from `core/acm.py` into `core/model_persistence.py`:
+   - `persist_calibration_params_safe`
+19. Replaced inline calibration-params persistence try/except in `core/acm.py` with `persist_calibration_params_safe(...)`.
+20. Fixed Obsidian graph link generation in `scripts/build_acm_obsidian_graph.py` to emit vault-safe wikilinks and restored memory health checks to zero broken links after refresh.
+21. Extracted threshold artifact persistence from `core/acm.py` into `core/fuse.py`:
+   - `persist_threshold_artifacts`
+22. Replaced inline per-regime/global threshold write logic in `core/acm.py` with `persist_threshold_artifacts(...)` and updated refactor tests.
+23. Consolidated remaining calibration orchestration from `core/acm.py` into `core/fuse.py`:
+   - `CalibrationStageResult`
+   - `run_calibration_stage`
+24. Replaced inline calibration stage orchestration in `core/acm.py` with a single `fuse.run_calibration_stage(...)` call, preserving sequence and outputs.
+25. Added regression test coverage for `run_calibration_stage` orchestration in `tests/test_v11_modules.py`.
+26. Extracted fusion-result unpack and observability metric emission from `core/acm.py` into `core/fuse.py`:
+   - `apply_fusion_result_and_record_metrics`
+27. Replaced inline fusion result handling in `core/acm.py` with `fuse.apply_fusion_result_and_record_metrics(...)`.
+28. Added regression test coverage for `apply_fusion_result_and_record_metrics` in `tests/test_v11_modules.py`.
 
 Validation executed after each extraction slice:
 
@@ -166,6 +191,13 @@ Execution status (current):
     - `build_per_regime_threshold_rows`
     - `build_threshold_rows`
     - `build_calibration_summary_rows`
+  - calibration orchestration helper internals moved to `core/fuse.py`:
+    - `apply_contamination_filter_config`
+    - `choose_pca_cache_for_calibration`
+    - `compute_and_set_adaptive_clip`
+    - `compute_pca_train_percentiles`
+    - `collect_enabled_calibrators`
+    - `write_calibration_summary_safe`
   - persistence optional artifact wrappers moved to `core/output_manager.py`:
     - `write_detector_correlation_from_scores`
     - `write_sensor_correlations_from_raw`

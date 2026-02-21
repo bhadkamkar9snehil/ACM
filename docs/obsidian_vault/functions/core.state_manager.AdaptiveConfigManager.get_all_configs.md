@@ -9,7 +9,7 @@ line_end: 402
 
 # core.state_manager.AdaptiveConfigManager.get_all_configs
 
-Defined in: [[modules/core.state_manager|core.state_manager]]
+Defined in: [[modules/core.state_manager]]
 
 Source: `core/state_manager.py:360`
 

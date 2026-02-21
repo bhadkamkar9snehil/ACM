@@ -9,7 +9,7 @@ line_end: 389
 
 # core.pipeline_types.SensorValidator
 
-Defined in: [[modules/core.pipeline_types|core.pipeline_types]]
+Defined in: [[modules/core.pipeline_types]]
 
 Source: `core/pipeline_types.py:223`
 

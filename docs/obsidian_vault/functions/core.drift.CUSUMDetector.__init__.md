@@ -9,7 +9,7 @@ line_end: 28
 
 # core.drift.CUSUMDetector.__init__
 
-Defined in: [[modules/core.drift|core.drift]]
+Defined in: [[modules/core.drift]]
 
 Source: `core/drift.py:22`
 

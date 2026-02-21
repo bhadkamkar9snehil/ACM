@@ -9,7 +9,7 @@ line_end: 204
 
 # core.model_persistence.save_forecast_state
 
-Defined in: [[modules/core.model_persistence|core.model_persistence]]
+Defined in: [[modules/core.model_persistence]]
 
 Source: `core/model_persistence.py:145`
 

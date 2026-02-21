@@ -9,7 +9,7 @@ line_end: 79
 
 # core.outliers.IsolationForestDetector.fit
 
-Defined in: [[modules/core.outliers|core.outliers]]
+Defined in: [[modules/core.outliers]]
 
 Source: `core/outliers.py:60`
 

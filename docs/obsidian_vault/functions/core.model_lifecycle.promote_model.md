@@ -9,7 +9,7 @@ line_end: 321
 
 # core.model_lifecycle.promote_model
 
-Defined in: [[modules/core.model_lifecycle|core.model_lifecycle]]
+Defined in: [[modules/core.model_lifecycle]]
 
 Source: `core/model_lifecycle.py:301`
 

@@ -9,7 +9,7 @@ line_end: 2810
 
 # core.regimes._fit_auto_k
 
-Defined in: [[modules/core.regimes|core.regimes]]
+Defined in: [[modules/core.regimes]]
 
 Source: `core/regimes.py:2721`
 

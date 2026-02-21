@@ -1859,3 +1859,34 @@ def save_trained_models(
                      equip=equip, run_id=run_id, error_type=type(e).__name__, error=str(e)[:500])
         traceback.print_exc()
         return None
+
+
+def persist_calibration_params_safe(
+    equip: str,
+    sql_client: Optional[Any],
+    equip_id: int,
+    saved_model_version: Optional[int],
+    calibrators_dict: Optional[Dict[str, Any]],
+    logger: Any = Console,
+) -> bool:
+    """
+    Persist calibration parameters for cross-batch consistency.
+
+    Returns:
+        True when persistence succeeds, otherwise False.
+    """
+    if saved_model_version is None or not calibrators_dict:
+        return False
+
+    try:
+        cal_manager = ModelVersionManager(equip=equip, sql_client=sql_client, equip_id=equip_id)
+        cal_manager.save_calibration_params(calibrators_dict, version=saved_model_version)
+        return True
+    except Exception as e:
+        logger.warn(
+            f"Failed to persist calibration params: {e}",
+            component="CAL",
+            equip=equip,
+            error=str(e)[:200],
+        )
+        return False

@@ -9,7 +9,7 @@ line_end: 1394
 
 # core.forecast_engine.ForecastEngine._run_regime_conditioned_forecasting
 
-Defined in: [[modules/core.forecast_engine|core.forecast_engine]]
+Defined in: [[modules/core.forecast_engine]]
 
 Source: `core/forecast_engine.py:1298`
 

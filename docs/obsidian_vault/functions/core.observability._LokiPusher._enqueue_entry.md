@@ -9,7 +9,7 @@ line_end: 2447
 
 # core.observability._LokiPusher._enqueue_entry
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:2416`
 

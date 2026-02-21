@@ -9,7 +9,7 @@ line_end: 719
 
 # core.fast_features.RegimeNormStats.to_dict
 
-Defined in: [[modules/core.fast_features|core.fast_features]]
+Defined in: [[modules/core.fast_features]]
 
 Source: `core/fast_features.py:710`
 

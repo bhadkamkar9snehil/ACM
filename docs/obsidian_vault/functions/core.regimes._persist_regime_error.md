@@ -9,7 +9,7 @@ line_end: 2112
 
 # core.regimes._persist_regime_error
 
-Defined in: [[modules/core.regimes|core.regimes]]
+Defined in: [[modules/core.regimes]]
 
 Source: `core/regimes.py:2107`
 

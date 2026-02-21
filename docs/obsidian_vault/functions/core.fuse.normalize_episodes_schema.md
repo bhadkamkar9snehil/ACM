@@ -3,15 +3,15 @@ type: function
 id: core.fuse.normalize_episodes_schema
 module: core.fuse
 source: core/fuse.py
-line_start: 2008
-line_end: 2161
+line_start: 2371
+line_end: 2524
 ---
 
 # core.fuse.normalize_episodes_schema
 
-Defined in: [[modules/core.fuse|core.fuse]]
+Defined in: [[modules/core.fuse]]
 
-Source: `core/fuse.py:2008`
+Source: `core/fuse.py:2371`
 
 Kind: `function`
 

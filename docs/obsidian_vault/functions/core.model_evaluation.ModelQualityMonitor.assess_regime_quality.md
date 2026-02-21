@@ -9,7 +9,7 @@ line_end: 197
 
 # core.model_evaluation.ModelQualityMonitor.assess_regime_quality
 
-Defined in: [[modules/core.model_evaluation|core.model_evaluation]]
+Defined in: [[modules/core.model_evaluation]]
 
 Source: `core/model_evaluation.py:176`
 

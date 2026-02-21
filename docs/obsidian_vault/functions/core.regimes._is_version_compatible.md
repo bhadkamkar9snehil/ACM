@@ -9,7 +9,7 @@ line_end: 158
 
 # core.regimes._is_version_compatible
 
-Defined in: [[modules/core.regimes|core.regimes]]
+Defined in: [[modules/core.regimes]]
 
 Source: `core/regimes.py:132`
 

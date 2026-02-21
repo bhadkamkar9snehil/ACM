@@ -9,7 +9,7 @@ line_end: 2212
 
 # core.forecast_engine.RegimeConditionedForecaster.write_regime_conditioned_outputs
 
-Defined in: [[modules/core.forecast_engine|core.forecast_engine]]
+Defined in: [[modules/core.forecast_engine]]
 
 Source: `core/forecast_engine.py:2111`
 

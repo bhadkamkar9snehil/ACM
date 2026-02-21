@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-02-21T13:53:42+00:00",
+  "generated_at": "2026-02-21T14:23:15+00:00",
   "module_count": 36,
   "modules": [
     {
@@ -163,7 +163,7 @@
     {
       "module_name": "core.fuse",
       "source_path": "core/fuse.py",
-      "symbol_count": 34,
+      "symbol_count": 44,
       "core_import_count": 1,
       "core_imports": [
         "core.observability"
@@ -208,7 +208,7 @@
     {
       "module_name": "core.model_persistence",
       "source_path": "core/model_persistence.py",
-      "symbol_count": 38,
+      "symbol_count": 39,
       "core_import_count": 1,
       "core_imports": [
         "core.observability"

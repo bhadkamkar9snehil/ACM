@@ -9,7 +9,7 @@ line_end: 52
 
 # core.metrics.compute_mae
 
-Defined in: [[modules/core.metrics|core.metrics]]
+Defined in: [[modules/core.metrics]]
 
 Source: `core/metrics.py:27`
 

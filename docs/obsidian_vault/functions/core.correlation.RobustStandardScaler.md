@@ -9,7 +9,7 @@ line_end: 59
 
 # core.correlation.RobustStandardScaler
 
-Defined in: [[modules/core.correlation|core.correlation]]
+Defined in: [[modules/core.correlation]]
 
 Source: `core/correlation.py:27`
 

@@ -9,7 +9,7 @@ line_end: 539
 
 # core.state_manager.AdaptiveConfigManager._parse_config_value
 
-Defined in: [[modules/core.state_manager|core.state_manager]]
+Defined in: [[modules/core.state_manager]]
 
 Source: `core/state_manager.py:517`
 

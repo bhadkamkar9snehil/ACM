@@ -9,7 +9,7 @@ line_end: 441
 
 # core.rul_estimator.RULEstimator._agresti_coull_adjustment
 
-Defined in: [[modules/core.rul_estimator|core.rul_estimator]]
+Defined in: [[modules/core.rul_estimator]]
 
 Source: `core/rul_estimator.py:396`
 

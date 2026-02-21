@@ -9,7 +9,7 @@ line_end: 202
 
 # core.observability._format_message_rows
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:146`
 

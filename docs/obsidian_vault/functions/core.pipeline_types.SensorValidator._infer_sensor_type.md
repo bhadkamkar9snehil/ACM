@@ -9,7 +9,7 @@ line_end: 342
 
 # core.pipeline_types.SensorValidator._infer_sensor_type
 
-Defined in: [[modules/core.pipeline_types|core.pipeline_types]]
+Defined in: [[modules/core.pipeline_types]]
 
 Source: `core/pipeline_types.py:321`
 

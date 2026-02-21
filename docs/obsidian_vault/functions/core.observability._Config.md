@@ -9,7 +9,7 @@ line_end: 508
 
 # core.observability._Config
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:496`
 

@@ -9,7 +9,7 @@ line_end: 999
 
 # core.regimes._compute_hdbscan_centroids
 
-Defined in: [[modules/core.regimes|core.regimes]]
+Defined in: [[modules/core.regimes]]
 
 Source: `core/regimes.py:978`
 

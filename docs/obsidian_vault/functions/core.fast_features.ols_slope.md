@@ -9,7 +9,7 @@ line_end: 237
 
 # core.fast_features.ols_slope
 
-Defined in: [[modules/core.fast_features|core.fast_features]]
+Defined in: [[modules/core.fast_features]]
 
 Source: `core/fast_features.py:225`
 

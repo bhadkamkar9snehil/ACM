@@ -9,7 +9,7 @@ line_end: 115
 
 # core.metrics.compute_mape
 
-Defined in: [[modules/core.metrics|core.metrics]]
+Defined in: [[modules/core.metrics]]
 
 Source: `core/metrics.py:83`
 

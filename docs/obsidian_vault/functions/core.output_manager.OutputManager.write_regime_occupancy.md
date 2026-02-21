@@ -3,15 +3,15 @@ type: method
 id: core.output_manager.OutputManager.write_regime_occupancy
 module: core.output_manager
 source: core/output_manager.py
-line_start: 2546
-line_end: 2561
+line_start: 2547
+line_end: 2562
 ---
 
 # core.output_manager.OutputManager.write_regime_occupancy
 
-Defined in: [[modules/core.output_manager|core.output_manager]]
+Defined in: [[modules/core.output_manager]]
 
-Source: `core/output_manager.py:2546`
+Source: `core/output_manager.py:2547`
 
 Kind: `method`
 

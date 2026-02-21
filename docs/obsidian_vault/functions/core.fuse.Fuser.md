@@ -3,15 +3,15 @@ type: class
 id: core.fuse.Fuser
 module: core.fuse
 source: core/fuse.py
-line_start: 1402
-line_end: 1828
+line_start: 1765
+line_end: 2191
 ---
 
 # core.fuse.Fuser
 
-Defined in: [[modules/core.fuse|core.fuse]]
+Defined in: [[modules/core.fuse]]
 
-Source: `core/fuse.py:1402`
+Source: `core/fuse.py:1765`
 
 Kind: `class`
 

@@ -9,7 +9,7 @@ line_end: 107
 
 # core.rul_estimator.RULEstimator.__init__
 
-Defined in: [[modules/core.rul_estimator|core.rul_estimator]]
+Defined in: [[modules/core.rul_estimator]]
 
 Source: `core/rul_estimator.py:85`
 

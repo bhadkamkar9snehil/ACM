@@ -9,7 +9,7 @@ line_end: 834
 
 # core.regimes.build_feature_basis
 
-Defined in: [[modules/core.regimes|core.regimes]]
+Defined in: [[modules/core.regimes]]
 
 Source: `core/regimes.py:648`
 

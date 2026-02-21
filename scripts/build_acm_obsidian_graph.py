@@ -237,11 +237,11 @@ def _cleanup_generated_notes() -> None:
 
 
 def _link_to_module(module_name: str) -> str:
-    return f"[[modules/{module_name}|{module_name}]]"
+    return f"[[modules/{module_name}]]"
 
 
 def _link_to_function(full_name: str) -> str:
-    return f"[[functions/{full_name}|{full_name}]]"
+    return f"[[functions/{full_name}]]"
 
 
 def _render_module_note(module: ModuleInfo) -> str:
@@ -415,10 +415,10 @@ Outcome semantics:
 4. FAIL
 
 Primary output owner:
-- [[modules/core.output_manager|core.output_manager]]
+- [[modules/core.output_manager]]
 
 Primary run metadata owner:
-- [[modules/core.run_metadata_writer|core.run_metadata_writer]]
+- [[modules/core.run_metadata_writer]]
 
 Primary lifecycle table:
 - ACM_Runs

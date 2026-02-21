@@ -9,7 +9,7 @@ line_end: 57
 
 # core.model_evaluation.ModelQualityMonitor.__init__
 
-Defined in: [[modules/core.model_evaluation|core.model_evaluation]]
+Defined in: [[modules/core.model_evaluation]]
 
 Source: `core/model_evaluation.py:38`
 

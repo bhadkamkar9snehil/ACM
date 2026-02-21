@@ -11,18 +11,18 @@ Source file: `core/data_loader.py`
 Summary: Data Loader for ACM
 
 ## Imports from core
-- [[modules/core.observability|core.observability]]
+- [[modules/core.observability]]
 
 ## Top-level symbols
-- [[functions/core.data_loader.DataMeta|core.data_loader.DataMeta]] (line 41, class)
-- [[functions/core.data_loader._cfg_get|core.data_loader._cfg_get]] (line 59, function)
-- [[functions/core.data_loader._future_cutoff_ts|core.data_loader._future_cutoff_ts]] (line 71, function)
-- [[functions/core.data_loader.parse_ts_index|core.data_loader.parse_ts_index]] (line 82, function)
-- [[functions/core.data_loader.coerce_local_and_filter_future|core.data_loader.coerce_local_and_filter_future]] (line 92, function)
-- [[functions/core.data_loader.infer_numeric_cols|core.data_loader.infer_numeric_cols]] (line 132, function)
-- [[functions/core.data_loader.native_cadence_secs|core.data_loader.native_cadence_secs]] (line 137, function)
-- [[functions/core.data_loader.check_cadence|core.data_loader.check_cadence]] (line 154, function)
-- [[functions/core.data_loader.resample_df|core.data_loader.resample_df]] (line 164, function)
-- [[functions/core.data_loader.DataLoader|core.data_loader.DataLoader]] (line 198, class)
-- [[functions/core.data_loader.DataLoader.__init__|core.data_loader.DataLoader.__init__]] (line 205, method)
-- [[functions/core.data_loader.DataLoader.load_from_sql|core.data_loader.DataLoader.load_from_sql]] (line 214, method)
+- [[functions/core.data_loader.DataMeta]] (line 41, class)
+- [[functions/core.data_loader._cfg_get]] (line 59, function)
+- [[functions/core.data_loader._future_cutoff_ts]] (line 71, function)
+- [[functions/core.data_loader.parse_ts_index]] (line 82, function)
+- [[functions/core.data_loader.coerce_local_and_filter_future]] (line 92, function)
+- [[functions/core.data_loader.infer_numeric_cols]] (line 132, function)
+- [[functions/core.data_loader.native_cadence_secs]] (line 137, function)
+- [[functions/core.data_loader.check_cadence]] (line 154, function)
+- [[functions/core.data_loader.resample_df]] (line 164, function)
+- [[functions/core.data_loader.DataLoader]] (line 198, class)
+- [[functions/core.data_loader.DataLoader.__init__]] (line 205, method)
+- [[functions/core.data_loader.DataLoader.load_from_sql]] (line 214, method)

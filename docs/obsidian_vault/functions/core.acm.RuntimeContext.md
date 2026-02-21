@@ -3,15 +3,15 @@ type: class
 id: core.acm.RuntimeContext
 module: core.acm
 source: core/acm.py
-line_start: 266
-line_end: 279
+line_start: 270
+line_end: 283
 ---
 
 # core.acm.RuntimeContext
 
-Defined in: [[modules/core.acm|core.acm]]
+Defined in: [[modules/core.acm]]
 
-Source: `core/acm.py:266`
+Source: `core/acm.py:270`
 
 Kind: `class`
 

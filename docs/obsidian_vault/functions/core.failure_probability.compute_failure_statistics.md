@@ -9,7 +9,7 @@ line_end: 279
 
 # core.failure_probability.compute_failure_statistics
 
-Defined in: [[modules/core.failure_probability|core.failure_probability]]
+Defined in: [[modules/core.failure_probability]]
 
 Source: `core/failure_probability.py:212`
 

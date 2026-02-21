@@ -9,7 +9,7 @@ line_end: 1057
 
 # core.observability.close_run_span
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:1040`
 

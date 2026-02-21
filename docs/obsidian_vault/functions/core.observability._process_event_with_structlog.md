@@ -9,7 +9,7 @@ line_end: 327
 
 # core.observability._process_event_with_structlog
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:321`
 

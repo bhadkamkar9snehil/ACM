@@ -9,7 +9,7 @@ line_end: 324
 
 # core.config_history_writer.log_auto_tune_changes
 
-Defined in: [[modules/core.config_history_writer|core.config_history_writer]]
+Defined in: [[modules/core.config_history_writer]]
 
 Source: `core/config_history_writer.py:237`
 

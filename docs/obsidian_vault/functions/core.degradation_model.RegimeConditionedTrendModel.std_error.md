@@ -9,7 +9,7 @@ line_end: 878
 
 # core.degradation_model.RegimeConditionedTrendModel.std_error
 
-Defined in: [[modules/core.degradation_model|core.degradation_model]]
+Defined in: [[modules/core.degradation_model]]
 
 Source: `core/degradation_model.py:877`
 

@@ -3,15 +3,15 @@ type: method
 id: core.output_manager.OutputManager.write_sensor_correlations_from_raw
 module: core.output_manager
 source: core/output_manager.py
-line_start: 2488
-line_end: 2510
+line_start: 2489
+line_end: 2511
 ---
 
 # core.output_manager.OutputManager.write_sensor_correlations_from_raw
 
-Defined in: [[modules/core.output_manager|core.output_manager]]
+Defined in: [[modules/core.output_manager]]
 
-Source: `core/output_manager.py:2488`
+Source: `core/output_manager.py:2489`
 
 Kind: `method`
 

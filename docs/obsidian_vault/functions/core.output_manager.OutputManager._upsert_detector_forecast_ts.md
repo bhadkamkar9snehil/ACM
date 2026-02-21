@@ -3,15 +3,15 @@ type: method
 id: core.output_manager.OutputManager._upsert_detector_forecast_ts
 module: core.output_manager
 source: core/output_manager.py
-line_start: 1353
-line_end: 1429
+line_start: 1354
+line_end: 1430
 ---
 
 # core.output_manager.OutputManager._upsert_detector_forecast_ts
 
-Defined in: [[modules/core.output_manager|core.output_manager]]
+Defined in: [[modules/core.output_manager]]
 
-Source: `core/output_manager.py:1353`
+Source: `core/output_manager.py:1354`
 
 Kind: `method`
 

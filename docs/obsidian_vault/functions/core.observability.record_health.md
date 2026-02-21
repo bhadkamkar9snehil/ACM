@@ -9,7 +9,7 @@ line_end: 1789
 
 # core.observability.record_health
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:1784`
 

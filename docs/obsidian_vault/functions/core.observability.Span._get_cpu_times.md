@@ -9,7 +9,7 @@ line_end: 1496
 
 # core.observability.Span._get_cpu_times
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:1488`
 

@@ -9,7 +9,7 @@ line_end: 813
 
 # core.model_persistence.ModelVersionManager._get_latest_version_from_sql
 
-Defined in: [[modules/core.model_persistence|core.model_persistence]]
+Defined in: [[modules/core.model_persistence]]
 
 Source: `core/model_persistence.py:798`
 

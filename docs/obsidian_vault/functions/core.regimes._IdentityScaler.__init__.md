@@ -9,7 +9,7 @@ line_end: 228
 
 # core.regimes._IdentityScaler.__init__
 
-Defined in: [[modules/core.regimes|core.regimes]]
+Defined in: [[modules/core.regimes]]
 
 Source: `core/regimes.py:226`
 

@@ -9,7 +9,7 @@ line_end: 262
 
 # core.observability._format_summary_rows
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:205`
 

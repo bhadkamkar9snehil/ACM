@@ -9,7 +9,7 @@ line_end: 341
 
 # core.episode_culprits_writer.write_episode_culprits_enhanced
 
-Defined in: [[modules/core.episode_culprits_writer|core.episode_culprits_writer]]
+Defined in: [[modules/core.episode_culprits_writer]]
 
 Source: `core/episode_culprits_writer.py:262`
 

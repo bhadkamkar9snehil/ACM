@@ -9,7 +9,7 @@ line_end: 103
 
 # core.fast_features.ensure_local_index
 
-Defined in: [[modules/core.fast_features|core.fast_features]]
+Defined in: [[modules/core.fast_features]]
 
 Source: `core/fast_features.py:80`
 

@@ -9,7 +9,7 @@ line_end: 422
 
 # core.omr.OMRDetector.fit
 
-Defined in: [[modules/core.omr|core.omr]]
+Defined in: [[modules/core.omr]]
 
 Source: `core/omr.py:300`
 

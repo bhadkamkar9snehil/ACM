@@ -9,7 +9,7 @@ line_end: 637
 
 # core.pipeline_types.run_data_guardrails_safe
 
-Defined in: [[modules/core.pipeline_types|core.pipeline_types]]
+Defined in: [[modules/core.pipeline_types]]
 
 Source: `core/pipeline_types.py:602`
 

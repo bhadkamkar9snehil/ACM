@@ -9,7 +9,7 @@ line_end: 691
 
 # core.model_persistence.ModelVersionManager._save_models_to_sql
 
-Defined in: [[modules/core.model_persistence|core.model_persistence]]
+Defined in: [[modules/core.model_persistence]]
 
 Source: `core/model_persistence.py:586`
 

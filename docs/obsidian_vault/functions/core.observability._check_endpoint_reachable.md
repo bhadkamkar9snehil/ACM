@@ -9,7 +9,7 @@ line_end: 549
 
 # core.observability._check_endpoint_reachable
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:533`
 

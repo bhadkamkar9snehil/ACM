@@ -9,7 +9,7 @@ line_end: 131
 
 # core.forecast_engine.RegimeStats
 
-Defined in: [[modules/core.forecast_engine|core.forecast_engine]]
+Defined in: [[modules/core.forecast_engine]]
 
 Source: `core/forecast_engine.py:118`
 

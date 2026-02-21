@@ -3,15 +3,15 @@ type: method
 id: core.output_manager.OutputManager._prepare_dataframe_for_sql
 module: core.output_manager
 source: core/output_manager.py
-line_start: 524
-line_end: 607
+line_start: 525
+line_end: 608
 ---
 
 # core.output_manager.OutputManager._prepare_dataframe_for_sql
 
-Defined in: [[modules/core.output_manager|core.output_manager]]
+Defined in: [[modules/core.output_manager]]
 
-Source: `core/output_manager.py:524`
+Source: `core/output_manager.py:525`
 
 Kind: `method`
 

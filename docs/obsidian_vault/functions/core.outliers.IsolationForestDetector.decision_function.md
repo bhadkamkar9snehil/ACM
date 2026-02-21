@@ -9,7 +9,7 @@ line_end: 106
 
 # core.outliers.IsolationForestDetector.decision_function
 
-Defined in: [[modules/core.outliers|core.outliers]]
+Defined in: [[modules/core.outliers]]
 
 Source: `core/outliers.py:104`
 

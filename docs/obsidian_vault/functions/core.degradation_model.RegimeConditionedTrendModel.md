@@ -9,7 +9,7 @@ line_end: 1094
 
 # core.degradation_model.RegimeConditionedTrendModel
 
-Defined in: [[modules/core.degradation_model|core.degradation_model]]
+Defined in: [[modules/core.degradation_model]]
 
 Source: `core/degradation_model.py:823`
 

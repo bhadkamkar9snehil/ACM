@@ -3,15 +3,15 @@ type: method
 id: core.output_manager.OutputManager.write_refit_request
 module: core.output_manager
 source: core/output_manager.py
-line_start: 2632
-line_end: 2696
+line_start: 2633
+line_end: 2697
 ---
 
 # core.output_manager.OutputManager.write_refit_request
 
-Defined in: [[modules/core.output_manager|core.output_manager]]
+Defined in: [[modules/core.output_manager]]
 
-Source: `core/output_manager.py:2632`
+Source: `core/output_manager.py:2633`
 
 Kind: `method`
 

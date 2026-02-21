@@ -9,7 +9,7 @@ line_end: 300
 
 # core.regimes._robust_scale_clip
 
-Defined in: [[modules/core.regimes|core.regimes]]
+Defined in: [[modules/core.regimes]]
 
 Source: `core/regimes.py:284`
 

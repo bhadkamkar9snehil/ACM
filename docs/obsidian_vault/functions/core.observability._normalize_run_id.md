@@ -9,7 +9,7 @@ line_end: 557
 
 # core.observability._normalize_run_id
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:552`
 

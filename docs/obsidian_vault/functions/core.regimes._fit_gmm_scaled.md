@@ -9,7 +9,7 @@ line_end: 975
 
 # core.regimes._fit_gmm_scaled
 
-Defined in: [[modules/core.regimes|core.regimes]]
+Defined in: [[modules/core.regimes]]
 
 Source: `core/regimes.py:840`
 

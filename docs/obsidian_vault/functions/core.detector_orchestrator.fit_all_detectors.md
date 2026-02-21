@@ -9,7 +9,7 @@ line_end: 326
 
 # core.detector_orchestrator.fit_all_detectors
 
-Defined in: [[modules/core.detector_orchestrator|core.detector_orchestrator]]
+Defined in: [[modules/core.detector_orchestrator]]
 
 Source: `core/detector_orchestrator.py:184`
 

@@ -9,7 +9,7 @@ line_end: 416
 
 # core.sensor_attribution.UnifiedAttribution
 
-Defined in: [[modules/core.sensor_attribution|core.sensor_attribution]]
+Defined in: [[modules/core.sensor_attribution]]
 
 Source: `core/sensor_attribution.py:159`
 

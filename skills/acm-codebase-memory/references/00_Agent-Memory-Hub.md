@@ -1,6 +1,6 @@
 ---
 type: agent-memory
-generated_at: 2026-02-21T13:53:42+00:00
+generated_at: 2026-02-21T14:23:15+00:00
 ---
 
 # ACM Agent Memory Hub
@@ -18,9 +18,9 @@ This note is generated for agent-first ACM context loading.
 - [[modules/core.observability|core.observability]] symbols=108
 - [[modules/core.output_manager|core.output_manager]] symbols=75
 - [[modules/core.regimes|core.regimes]] symbols=59
-- [[modules/core.model_persistence|core.model_persistence]] symbols=38
+- [[modules/core.fuse|core.fuse]] symbols=44
+- [[modules/core.model_persistence|core.model_persistence]] symbols=39
 - [[modules/core.degradation_model|core.degradation_model]] symbols=36
-- [[modules/core.fuse|core.fuse]] symbols=34
 - [[modules/core.fast_features|core.fast_features]] symbols=33
 - [[modules/core.forecast_engine|core.forecast_engine]] symbols=31
 - [[modules/core.sensor_attribution|core.sensor_attribution]] symbols=31

@@ -9,7 +9,7 @@ line_end: 309
 
 # core.model_persistence.RegimeState.to_dict
 
-Defined in: [[modules/core.model_persistence|core.model_persistence]]
+Defined in: [[modules/core.model_persistence]]
 
 Source: `core/model_persistence.py:307`
 

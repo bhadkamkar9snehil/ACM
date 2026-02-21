@@ -9,7 +9,7 @@ line_end: 67
 
 # core.episode_culprits_writer.parse_culprits_string
 
-Defined in: [[modules/core.episode_culprits_writer|core.episode_culprits_writer]]
+Defined in: [[modules/core.episode_culprits_writer]]
 
 Source: `core/episode_culprits_writer.py:21`
 

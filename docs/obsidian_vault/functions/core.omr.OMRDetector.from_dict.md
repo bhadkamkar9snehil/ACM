@@ -9,7 +9,7 @@ line_end: 707
 
 # core.omr.OMRDetector.from_dict
 
-Defined in: [[modules/core.omr|core.omr]]
+Defined in: [[modules/core.omr]]
 
 Source: `core/omr.py:668`
 

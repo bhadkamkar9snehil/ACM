@@ -9,7 +9,7 @@ line_end: 2223
 
 # core.regimes.build_summary_dataframe
 
-Defined in: [[modules/core.regimes|core.regimes]]
+Defined in: [[modules/core.regimes]]
 
 Source: `core/regimes.py:2115`
 

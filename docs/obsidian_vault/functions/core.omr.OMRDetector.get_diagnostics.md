@@ -9,7 +9,7 @@ line_end: 656
 
 # core.omr.OMRDetector.get_diagnostics
 
-Defined in: [[modules/core.omr|core.omr]]
+Defined in: [[modules/core.omr]]
 
 Source: `core/omr.py:638`
 

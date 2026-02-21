@@ -9,7 +9,7 @@ line_end: 536
 
 # core.smart_coldstart.SmartColdstart._load_data_window
 
-Defined in: [[modules/core.smart_coldstart|core.smart_coldstart]]
+Defined in: [[modules/core.smart_coldstart]]
 
 Source: `core/smart_coldstart.py:484`
 

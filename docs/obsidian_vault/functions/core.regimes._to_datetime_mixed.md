@@ -9,7 +9,7 @@ line_end: 2517
 
 # core.regimes._to_datetime_mixed
 
-Defined in: [[modules/core.regimes|core.regimes]]
+Defined in: [[modules/core.regimes]]
 
 Source: `core/regimes.py:2513`
 

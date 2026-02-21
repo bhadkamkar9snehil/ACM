@@ -9,7 +9,7 @@ line_end: 366
 
 # core.rul_estimator.RULEstimator._run_monte_carlo_simulations
 
-Defined in: [[modules/core.rul_estimator|core.rul_estimator]]
+Defined in: [[modules/core.rul_estimator]]
 
 Source: `core/rul_estimator.py:217`
 

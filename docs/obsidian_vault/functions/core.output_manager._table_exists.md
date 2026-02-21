@@ -3,15 +3,15 @@ type: function
 id: core.output_manager._table_exists
 module: core.output_manager
 source: core/output_manager.py
-line_start: 198
-line_end: 211
+line_start: 199
+line_end: 212
 ---
 
 # core.output_manager._table_exists
 
-Defined in: [[modules/core.output_manager|core.output_manager]]
+Defined in: [[modules/core.output_manager]]
 
-Source: `core/output_manager.py:198`
+Source: `core/output_manager.py:199`
 
 Kind: `function`
 

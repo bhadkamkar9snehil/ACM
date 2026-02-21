@@ -3,15 +3,15 @@ type: function
 id: core.acm.run_pipeline
 module: core.acm
 source: core/acm.py
-line_start: 445
-line_end: 460
+line_start: 449
+line_end: 464
 ---
 
 # core.acm.run_pipeline
 
-Defined in: [[modules/core.acm|core.acm]]
+Defined in: [[modules/core.acm]]
 
-Source: `core/acm.py:445`
+Source: `core/acm.py:449`
 
 Kind: `function`
 

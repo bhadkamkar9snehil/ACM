@@ -9,7 +9,7 @@ line_end: 184
 
 # core.multivariate_forecast.MultivariateSensorForecaster.compute_correlation_matrix
 
-Defined in: [[modules/core.multivariate_forecast|core.multivariate_forecast]]
+Defined in: [[modules/core.multivariate_forecast]]
 
 Source: `core/multivariate_forecast.py:177`
 

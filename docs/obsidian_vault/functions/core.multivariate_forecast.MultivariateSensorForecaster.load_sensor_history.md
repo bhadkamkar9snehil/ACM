@@ -9,7 +9,7 @@ line_end: 175
 
 # core.multivariate_forecast.MultivariateSensorForecaster.load_sensor_history
 
-Defined in: [[modules/core.multivariate_forecast|core.multivariate_forecast]]
+Defined in: [[modules/core.multivariate_forecast]]
 
 Source: `core/multivariate_forecast.py:91`
 

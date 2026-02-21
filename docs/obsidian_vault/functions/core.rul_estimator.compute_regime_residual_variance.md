@@ -9,7 +9,7 @@ line_end: 552
 
 # core.rul_estimator.compute_regime_residual_variance
 
-Defined in: [[modules/core.rul_estimator|core.rul_estimator]]
+Defined in: [[modules/core.rul_estimator]]
 
 Source: `core/rul_estimator.py:504`
 

@@ -9,7 +9,7 @@ line_end: 242
 
 # core.outliers.GMMDetector.fit
 
-Defined in: [[modules/core.outliers|core.outliers]]
+Defined in: [[modules/core.outliers]]
 
 Source: `core/outliers.py:150`
 

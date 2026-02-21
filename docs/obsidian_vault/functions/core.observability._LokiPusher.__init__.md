@@ -9,7 +9,7 @@ line_end: 2309
 
 # core.observability._LokiPusher.__init__
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:2255`
 

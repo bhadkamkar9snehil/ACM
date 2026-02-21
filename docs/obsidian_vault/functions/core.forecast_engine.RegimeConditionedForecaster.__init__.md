@@ -9,7 +9,7 @@ line_end: 1765
 
 # core.forecast_engine.RegimeConditionedForecaster.__init__
 
-Defined in: [[modules/core.forecast_engine|core.forecast_engine]]
+Defined in: [[modules/core.forecast_engine]]
 
 Source: `core/forecast_engine.py:1749`
 

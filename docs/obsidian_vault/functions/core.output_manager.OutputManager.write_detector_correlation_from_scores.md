@@ -3,15 +3,15 @@ type: method
 id: core.output_manager.OutputManager.write_detector_correlation_from_scores
 module: core.output_manager
 source: core/output_manager.py
-line_start: 2259
-line_end: 2286
+line_start: 2260
+line_end: 2287
 ---
 
 # core.output_manager.OutputManager.write_detector_correlation_from_scores
 
-Defined in: [[modules/core.output_manager|core.output_manager]]
+Defined in: [[modules/core.output_manager]]
 
-Source: `core/output_manager.py:2259`
+Source: `core/output_manager.py:2260`
 
 Kind: `method`
 

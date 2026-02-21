@@ -9,7 +9,7 @@ line_end: 154
 
 # core.pipeline_types.DataContract.validate
 
-Defined in: [[modules/core.pipeline_types|core.pipeline_types]]
+Defined in: [[modules/core.pipeline_types]]
 
 Source: `core/pipeline_types.py:85`
 

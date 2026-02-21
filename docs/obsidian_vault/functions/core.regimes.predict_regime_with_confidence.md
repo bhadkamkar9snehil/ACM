@@ -9,7 +9,7 @@ line_end: 1842
 
 # core.regimes.predict_regime_with_confidence
 
-Defined in: [[modules/core.regimes|core.regimes]]
+Defined in: [[modules/core.regimes]]
 
 Source: `core/regimes.py:1686`
 

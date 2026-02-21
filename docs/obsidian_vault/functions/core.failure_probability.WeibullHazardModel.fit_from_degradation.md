@@ -9,7 +9,7 @@ line_end: 457
 
 # core.failure_probability.WeibullHazardModel.fit_from_degradation
 
-Defined in: [[modules/core.failure_probability|core.failure_probability]]
+Defined in: [[modules/core.failure_probability]]
 
 Source: `core/failure_probability.py:380`
 

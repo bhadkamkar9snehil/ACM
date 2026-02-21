@@ -9,7 +9,7 @@ line_end: 2351
 
 # core.observability._LokiPusher._update_queue_depth_metric
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:2347`
 

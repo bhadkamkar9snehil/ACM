@@ -9,7 +9,7 @@ line_end: 1219
 
 # core.observability.Console._build_event_dict
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:1197`
 

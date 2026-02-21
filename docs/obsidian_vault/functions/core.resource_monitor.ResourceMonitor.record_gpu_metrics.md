@@ -9,7 +9,7 @@ line_end: 584
 
 # core.resource_monitor.ResourceMonitor.record_gpu_metrics
 
-Defined in: [[modules/core.resource_monitor|core.resource_monitor]]
+Defined in: [[modules/core.resource_monitor]]
 
 Source: `core/resource_monitor.py:559`
 

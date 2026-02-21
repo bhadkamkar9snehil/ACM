@@ -9,7 +9,7 @@ line_end: 1024
 
 # core.model_persistence.ModelVersionManager.load_models
 
-Defined in: [[modules/core.model_persistence|core.model_persistence]]
+Defined in: [[modules/core.model_persistence]]
 
 Source: `core/model_persistence.py:966`
 

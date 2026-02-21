@@ -3,15 +3,15 @@ type: method
 id: core.output_manager.OutputManager.write_sensor_normalized_ts_from_raw
 module: core.output_manager
 source: core/output_manager.py
-line_start: 3066
-line_end: 3094
+line_start: 3067
+line_end: 3095
 ---
 
 # core.output_manager.OutputManager.write_sensor_normalized_ts_from_raw
 
-Defined in: [[modules/core.output_manager|core.output_manager]]
+Defined in: [[modules/core.output_manager]]
 
-Source: `core/output_manager.py:3066`
+Source: `core/output_manager.py:3067`
 
 Kind: `method`
 

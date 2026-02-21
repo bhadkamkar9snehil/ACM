@@ -9,7 +9,7 @@ line_end: 621
 
 # core.degradation_model.LinearTrendModel._detect_and_handle_health_jumps
 
-Defined in: [[modules/core.degradation_model|core.degradation_model]]
+Defined in: [[modules/core.degradation_model]]
 
 Source: `core/degradation_model.py:529`
 

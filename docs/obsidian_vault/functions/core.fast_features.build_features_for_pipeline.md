@@ -9,7 +9,7 @@ line_end: 1217
 
 # core.fast_features.build_features_for_pipeline
 
-Defined in: [[modules/core.fast_features|core.fast_features]]
+Defined in: [[modules/core.fast_features]]
 
 Source: `core/fast_features.py:1165`
 

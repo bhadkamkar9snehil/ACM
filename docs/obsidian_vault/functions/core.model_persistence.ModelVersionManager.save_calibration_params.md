@@ -9,7 +9,7 @@ line_end: 740
 
 # core.model_persistence.ModelVersionManager.save_calibration_params
 
-Defined in: [[modules/core.model_persistence|core.model_persistence]]
+Defined in: [[modules/core.model_persistence]]
 
 Source: `core/model_persistence.py:693`
 

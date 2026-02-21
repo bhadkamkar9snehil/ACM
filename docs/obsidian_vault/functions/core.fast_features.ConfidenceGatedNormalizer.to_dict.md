@@ -9,7 +9,7 @@ line_end: 1024
 
 # core.fast_features.ConfidenceGatedNormalizer.to_dict
 
-Defined in: [[modules/core.fast_features|core.fast_features]]
+Defined in: [[modules/core.fast_features]]
 
 Source: `core/fast_features.py:1014`
 

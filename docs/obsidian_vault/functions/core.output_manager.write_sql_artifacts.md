@@ -3,15 +3,15 @@ type: function
 id: core.output_manager.write_sql_artifacts
 module: core.output_manager
 source: core/output_manager.py
-line_start: 3559
-line_end: 3697
+line_start: 3585
+line_end: 3723
 ---
 
 # core.output_manager.write_sql_artifacts
 
-Defined in: [[modules/core.output_manager|core.output_manager]]
+Defined in: [[modules/core.output_manager]]
 
-Source: `core/output_manager.py:3559`
+Source: `core/output_manager.py:3585`
 
 Kind: `function`
 

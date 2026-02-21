@@ -9,7 +9,7 @@ line_end: 1983
 
 # core.forecast_engine.RegimeConditionedForecaster.compute_regime_stats
 
-Defined in: [[modules/core.forecast_engine|core.forecast_engine]]
+Defined in: [[modules/core.forecast_engine]]
 
 Source: `core/forecast_engine.py:1815`
 

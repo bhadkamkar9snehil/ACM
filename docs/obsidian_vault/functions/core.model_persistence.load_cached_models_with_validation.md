@@ -9,7 +9,7 @@ line_end: 1522
 
 # core.model_persistence.load_cached_models_with_validation
 
-Defined in: [[modules/core.model_persistence|core.model_persistence]]
+Defined in: [[modules/core.model_persistence]]
 
 Source: `core/model_persistence.py:1415`
 

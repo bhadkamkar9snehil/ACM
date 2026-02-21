@@ -9,7 +9,7 @@ line_end: 70
 
 # core.confidence.ConfidenceFactors.overall
 
-Defined in: [[modules/core.confidence|core.confidence]]
+Defined in: [[modules/core.confidence]]
 
 Source: `core/confidence.py:48`
 

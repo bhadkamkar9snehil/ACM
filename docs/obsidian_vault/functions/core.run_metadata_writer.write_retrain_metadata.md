@@ -3,15 +3,15 @@ type: function
 id: core.run_metadata_writer.write_retrain_metadata
 module: core.run_metadata_writer
 source: core/run_metadata_writer.py
-line_start: 325
-line_end: 404
+line_start: 364
+line_end: 443
 ---
 
 # core.run_metadata_writer.write_retrain_metadata
 
-Defined in: [[modules/core.run_metadata_writer|core.run_metadata_writer]]
+Defined in: [[modules/core.run_metadata_writer]]
 
-Source: `core/run_metadata_writer.py:325`
+Source: `core/run_metadata_writer.py:364`
 
 Kind: `function`
 

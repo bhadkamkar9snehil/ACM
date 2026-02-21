@@ -9,7 +9,7 @@ line_end: 1561
 
 # core.observability.Span._set_custom_attributes
 
-Defined in: [[modules/core.observability|core.observability]]
+Defined in: [[modules/core.observability]]
 
 Source: `core/observability.py:1549`
 

@@ -9,7 +9,7 @@ line_end: 211
 
 # core.regimes._cfg_get
 
-Defined in: [[modules/core.regimes|core.regimes]]
+Defined in: [[modules/core.regimes]]
 
 Source: `core/regimes.py:189`
 

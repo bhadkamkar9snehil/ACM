@@ -9,7 +9,7 @@ line_end: 374
 
 # core.metrics.log_metrics_summary
 
-Defined in: [[modules/core.metrics|core.metrics]]
+Defined in: [[modules/core.metrics]]
 
 Source: `core/metrics.py:356`
 

@@ -9,7 +9,7 @@ line_end: 650
 
 # core.model_lifecycle.update_and_persist_model_lifecycle_safe
 
-Defined in: [[modules/core.model_lifecycle|core.model_lifecycle]]
+Defined in: [[modules/core.model_lifecycle]]
 
 Source: `core/model_lifecycle.py:611`
 

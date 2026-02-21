@@ -9,7 +9,7 @@ line_end: 666
 
 # core.adaptive_thresholds.maybe_update_adaptive_thresholds
 
-Defined in: [[modules/core.adaptive_thresholds|core.adaptive_thresholds]]
+Defined in: [[modules/core.adaptive_thresholds]]
 
 Source: `core/adaptive_thresholds.py:619`
 

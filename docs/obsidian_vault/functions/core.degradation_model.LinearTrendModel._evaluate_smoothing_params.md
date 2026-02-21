@@ -9,7 +9,7 @@ line_end: 820
 
 # core.degradation_model.LinearTrendModel._evaluate_smoothing_params
 
-Defined in: [[modules/core.degradation_model|core.degradation_model]]
+Defined in: [[modules/core.degradation_model]]
 
 Source: `core/degradation_model.py:792`
 

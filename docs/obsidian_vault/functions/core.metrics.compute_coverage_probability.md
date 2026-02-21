@@ -9,7 +9,7 @@ line_end: 186
 
 # core.metrics.compute_coverage_probability
 
-Defined in: [[modules/core.metrics|core.metrics]]
+Defined in: [[modules/core.metrics]]
 
 Source: `core/metrics.py:146`
 

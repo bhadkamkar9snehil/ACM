@@ -9,7 +9,7 @@ line_end: 2714
 
 # core.regimes._read_scores_csv
 
-Defined in: [[modules/core.regimes|core.regimes]]
+Defined in: [[modules/core.regimes]]
 
 Source: `core/regimes.py:2622`
 
