@@ -343,9 +343,15 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
         cfg["runtime"] = {}
     cfg["runtime"]["run_count"] = run_count
     # Consolidated startup log.
-    adaptive_info = f"adaptive | continuous_learning={CONTINUOUS_LEARNING} | force_retrain={force_retraining}"
-    intervals_info = f" | intervals=model:{model_update_interval},thresh:{threshold_update_interval}" if CONTINUOUS_LEARNING else ""
-    Console.info(f"Run #{run_count + 1} | {equip} | {adaptive_info}{intervals_info}", component="RUN")
+    continuous_learning_str = "true" if CONTINUOUS_LEARNING else "false"
+    force_retrain_str = "true" if force_retraining else "false"
+    intervals_info = f"model:{model_update_interval},thresh:{threshold_update_interval}"
+    Console.info(
+        f"Run #{run_count + 1} | equip={equip} mode=adaptive "
+        f"continuous_learning={continuous_learning_str} force_retrain={force_retrain_str} "
+        f"intervals={intervals_info}",
+        component="RUN",
+    )
 
     # Initialize cross-phase state variables.
     detector_cache: Optional[Dict[str, Any]] = None
