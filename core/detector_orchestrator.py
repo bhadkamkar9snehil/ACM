@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import time
 from typing import Any, Dict, Optional, Tuple
+from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
@@ -30,6 +31,40 @@ from core.model_persistence import (
     align_current_features_to_cached_manifest,
     load_cached_models_with_validation,
 )
+
+
+@dataclass
+class DetectorInitState:
+    """Typed return payload for detector initialization stage."""
+    train: pd.DataFrame
+    score: pd.DataFrame
+    det_flags: Dict[str, bool]
+    ar1_enabled: bool
+    pca_enabled: bool
+    iforest_enabled: bool
+    gmm_enabled: bool
+    omr_enabled: bool
+    ar1_detector: Optional[Any]
+    pca_detector: Optional[Any]
+    iforest_detector: Optional[Any]
+    gmm_detector: Optional[Any]
+    omr_detector: Optional[Any]
+    pca_train_spe: Optional[np.ndarray]
+    pca_train_t2: Optional[np.ndarray]
+    regime_model: Optional[Any]
+    regime_state: Optional[Any]
+    regime_state_version: int
+    regime_loaded_from_state: bool
+    col_meds: Optional[Any]
+    cached_models: Optional[Dict[str, Any]]
+    cached_manifest: Optional[Dict[str, Any]]
+    cached_calibration_params: Optional[Dict[str, Any]]
+    detectors_just_trained: bool
+    use_cache: bool
+
+    def __getitem__(self, key: str) -> Any:
+        """Backward-compatible dict-like access for legacy call sites/tests."""
+        return getattr(self, key)
 
 
 def score_all_detectors(
@@ -348,7 +383,7 @@ def initialize_detectors_for_run(
     fit_all_detectors_fn: Any = fit_all_detectors,
     reconcile_detector_flags_fn: Any = None,
     logger: Any = Console,
-) -> Dict[str, Any]:
+) -> DetectorInitState:
     """
     Initialize detector runtime state for the current run.
 
@@ -500,33 +535,33 @@ def initialize_detectors_for_run(
         logger.error(f"Detector initialization failed: {missing}", component="MODEL", equip=equip)
         raise RuntimeError(f"Required detector initialization failed: {missing}")
 
-    return {
-        "train": train,
-        "score": score,
-        "det_flags": det_flags,
-        "ar1_enabled": ar1_enabled,
-        "pca_enabled": pca_enabled,
-        "iforest_enabled": iforest_enabled,
-        "gmm_enabled": gmm_enabled,
-        "omr_enabled": omr_enabled,
-        "ar1_detector": ar1_detector,
-        "pca_detector": pca_detector,
-        "iforest_detector": iforest_detector,
-        "gmm_detector": gmm_detector,
-        "omr_detector": omr_detector,
-        "pca_train_spe": pca_train_spe,
-        "pca_train_t2": pca_train_t2,
-        "regime_model": regime_model,
-        "regime_state": regime_state,
-        "regime_state_version": regime_state_version,
-        "regime_loaded_from_state": regime_loaded_from_state,
-        "col_meds": col_meds,
-        "cached_models": cached_models,
-        "cached_manifest": cached_manifest,
-        "cached_calibration_params": cached_calibration_params,
-        "detectors_just_trained": detectors_just_trained,
-        "use_cache": use_cache,
-    }
+    return DetectorInitState(
+        train=train,
+        score=score,
+        det_flags=det_flags,
+        ar1_enabled=ar1_enabled,
+        pca_enabled=pca_enabled,
+        iforest_enabled=iforest_enabled,
+        gmm_enabled=gmm_enabled,
+        omr_enabled=omr_enabled,
+        ar1_detector=ar1_detector,
+        pca_detector=pca_detector,
+        iforest_detector=iforest_detector,
+        gmm_detector=gmm_detector,
+        omr_detector=omr_detector,
+        pca_train_spe=pca_train_spe,
+        pca_train_t2=pca_train_t2,
+        regime_model=regime_model,
+        regime_state=regime_state,
+        regime_state_version=regime_state_version,
+        regime_loaded_from_state=regime_loaded_from_state,
+        col_meds=col_meds,
+        cached_models=cached_models,
+        cached_manifest=cached_manifest,
+        cached_calibration_params=cached_calibration_params,
+        detectors_just_trained=detectors_just_trained,
+        use_cache=use_cache,
+    )
 
 
 def load_and_rebuild_detectors_from_sql_cache(
