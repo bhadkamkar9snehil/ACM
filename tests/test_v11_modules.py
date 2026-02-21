@@ -699,6 +699,56 @@ class TestRefactorHelpers:
         assert captured["cfg"] is cfg
         assert captured["sensor_context"] is sensor_context
 
+    def test_persist_pipeline_outputs_orchestrates_writes_and_cleanup(self):
+        """Persist pipeline helper should orchestrate writes, analytics, and memory cleanup."""
+        from core.output_manager import OutputManager, PersistCoreOutputsResult
+
+        output_manager = OutputManager.__new__(OutputManager)
+        output_manager.persist_core_outputs = lambda scores_df, episodes_df: PersistCoreOutputsResult(
+            scores_inserted=5,
+            episodes_inserted=2,
+            episode_count=3,
+        )
+        output_manager.persist_additional_artifacts = (
+            lambda scores_df, raw_score, seasonal_patterns, max_total_rows=10000: None
+        )
+        output_manager.release_persist_memory = (
+            lambda raw_train, raw_score, iforest_detector=None, omr_detector=None: (None, None)
+        )
+        output_manager.generate_all_analytics_with_context = (
+            lambda scores_df, cfg, sensor_context, fusion_weights_used=None: {"sql_tables": 9}
+        )
+
+        record_calls = []
+
+        def _record_episode(equip, count, severity):
+            record_calls.append((equip, count, severity))
+
+        scores_df = pd.DataFrame({"fused": [0.1, 0.2]})
+        episodes_df = pd.DataFrame({"episode_id": [1, 2, 3]})
+        result = output_manager.persist_pipeline_outputs(
+            scores_df=scores_df,
+            episodes_df=episodes_df,
+            raw_train=pd.DataFrame({"sensor": [1.0]}),
+            raw_score=pd.DataFrame({"sensor": [1.1]}),
+            iforest_detector=object(),
+            omr_detector=object(),
+            seasonal_patterns={},
+            cfg={},
+            sensor_context={"k": "v"},
+            fusion_weights_used={"ar1_z": 0.7},
+            record_episode_fn=_record_episode,
+            equip="FD_FAN",
+        )
+
+        assert result.rows_written_delta == 7
+        assert result.episode_count == 3
+        assert result.analytics_table_count == 9
+        assert result.raw_train is None
+        assert result.raw_score is None
+        assert result.sensor_context is None
+        assert record_calls == [("FD_FAN", 3, "info")]
+
     def test_resolve_run_outcome_from_degradations(self):
         """Run metadata helper should map degradation list to DEGRADED outcome and payload."""
         from core.run_metadata_writer import resolve_run_outcome_from_degradations
