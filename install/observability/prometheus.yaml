@@ -18,11 +18,10 @@ scrape_configs:
     static_configs:
       - targets: ['localhost:9090']
 
-  # Scrape Alloy metrics (host machine)
-  # Note: host.docker.internal works on Docker Desktop
+  # Scrape Alloy metrics from the observability Docker network
   - job_name: 'alloy'
     static_configs:
-      - targets: ['host.docker.internal:12345']
+      - targets: ['acm-alloy:9099']
     metrics_path: /metrics
 
   # Scrape ACM Python app metrics (if exposed)
