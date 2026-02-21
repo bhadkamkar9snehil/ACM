@@ -650,6 +650,29 @@ def update_and_persist_model_lifecycle_safe(
         return None
 
 
+def load_model_state_safe(
+    sql_client: Any,
+    equip_id: int,
+    logger: Any = Console,
+) -> Optional[ModelState]:
+    """
+    Safely load model state from SQL.
+
+    Returns None when SQL is unavailable or on load errors.
+    """
+    if sql_client is None or not equip_id:
+        return None
+    try:
+        return load_model_state_from_sql(sql_client, equip_id)
+    except Exception as e:
+        logger.warn(
+            f"Failed to load model state: {e}",
+            component="LIFECYCLE",
+            error=str(e)[:200],
+        )
+        return None
+
+
 def get_active_model_dict(
     state: ModelState,
     regime_version: Optional[int] = None,
