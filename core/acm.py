@@ -98,6 +98,7 @@ from core.detector_orchestrator import (
 from core.model_persistence import (
     load_cached_models_with_validation,
     save_trained_models,
+    align_current_features_to_cached_manifest,
 )
 from core.model_evaluation import auto_tune_parameters, evaluate_force_retrain_triggers
 
@@ -1034,68 +1035,16 @@ def main() -> None:
                     cfg=cfg, train_columns=current_sensors,
                 )
                 if cached_models:
-                    # v11.7.0 FIX: Align to INTERSECTION (common features) not UNION (cached features)
-                    # Previous logic padded current data to match manifest count, causing model mismatch
-                    # New logic subsets to common features that both data and models support
-                    cached_sensors = cached_manifest.get("train_sensors", [])
-                    if cached_sensors and set(cached_sensors) != set(current_sensors):
-                        # Find intersection - columns that exist in BOTH cached and current
-                        common_cols = sorted(set(cached_sensors) & set(current_sensors))
-                        missing_in_current = set(cached_sensors) - set(current_sensors)
-                        extra_in_current = set(current_sensors) - set(cached_sensors)
-
-                        # Calculate overlap from CURRENT perspective (not cached)
-                        # We need 100% of current features to exist in cache, but can tolerate missing cached features
-                        overlap_ratio = len(common_cols) / len(current_sensors) if current_sensors else 0
-
-                        Console.info(
-                            f"Aligning features: cached={len(cached_sensors)}, current={len(current_sensors)}, "
-                            f"common={len(common_cols)}, missing_in_current={len(missing_in_current)}, "
-                            f"extra_in_current={len(extra_in_current)}, overlap={overlap_ratio:.1%}",
-                            component="MODEL"
-                        )
-
-                        if overlap_ratio < 1.0:
-                            # Current data has features not in cache - cannot score
-                            Console.warn(
-                                f"Current data has {len(extra_in_current)} features not in cache - cannot use cached models",
-                                component="MODEL",
-                                extra_features=list(extra_in_current)[:5]  # Show first 5
-                            )
-                            cached_models = None  # Force retrain
-                            cached_manifest = None
-                        elif len(missing_in_current) > 0:
-                            # Some cached features missing in current - use intersection (graceful degradation)
-                            Console.warn(
-                                f"Using feature subset: {len(missing_in_current)} cached features missing in current data",
-                                component="MODEL",
-                                missing_features=list(missing_in_current)[:5]  # Show first 5
-                            )
-
-                            # Use INTERSECTION - subset both data and models to common features
-                            aligned_sensors = common_cols
-
-                            # Select only common columns in sorted order
-                            train = train[[c for c in aligned_sensors if c in train.columns]]
-                            score = score[[c for c in aligned_sensors if c in score.columns]]
-                            current_sensors = aligned_sensors
-
-                            Console.info(
-                                f"Features aligned to intersection: train={train.shape}, score={score.shape}",
-                                component="MODEL"
-                            )
-                        else:
-                            # Perfect match
-                            aligned_sensors = common_cols
-                            train = train[aligned_sensors]
-                            score = score[aligned_sensors]
-                            current_sensors = aligned_sensors
-                    else:
-                        # No mismatch, but ensure consistent ordering
-                        if cached_sensors:
-                            train = train[cached_sensors]
-                            score = score[cached_sensors]
-                            current_sensors = cached_sensors
+                    train, score, current_sensors, cache_compatible = align_current_features_to_cached_manifest(
+                        train=train,
+                        score=score,
+                        cached_manifest=cached_manifest,
+                        equip=equip,
+                        logger=Console,
+                    )
+                    if not cache_compatible:
+                        cached_models = None
+                        cached_manifest = None
                 
                 if cached_models:
                     rebuild_result = rebuild_detectors_from_cache(

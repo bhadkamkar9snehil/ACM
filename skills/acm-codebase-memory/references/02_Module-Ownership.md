@@ -26,7 +26,7 @@ type: agent-memory
 | `[core.metrics]` | 14 | 1 |
 | `[core.model_evaluation]` | 11 | 1 |
 | `[core.model_lifecycle]` | 18 | 1 |
-| `[core.model_persistence]` | 34 | 1 |
+| `[core.model_persistence]` | 35 | 1 |
 | `[core.multivariate_forecast]` | 11 | 1 |
 | `[core.observability]` | 108 | 0 |
 | `[core.omr]` | 19 | 0 |

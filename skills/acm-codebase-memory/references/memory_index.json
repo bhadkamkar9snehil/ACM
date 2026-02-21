@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-02-21T04:18:01+00:00",
+  "generated_at": "2026-02-21T04:34:45+00:00",
   "module_count": 36,
   "modules": [
     {
@@ -208,7 +208,7 @@
     {
       "module_name": "core.model_persistence",
       "source_path": "core/model_persistence.py",
-      "symbol_count": 34,
+      "symbol_count": 35,
       "core_import_count": 1,
       "core_imports": [
         "core.observability"
