@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-02-21T06:46:01+00:00",
+  "generated_at": "2026-02-21T13:49:39+00:00",
   "module_count": 36,
   "modules": [
     {
@@ -249,7 +249,7 @@
     {
       "module_name": "core.output_manager",
       "source_path": "core/output_manager.py",
-      "symbol_count": 74,
+      "symbol_count": 75,
       "core_import_count": 3,
       "core_imports": [
         "core.analytics_builder",
@@ -294,7 +294,7 @@
     {
       "module_name": "core.run_metadata_writer",
       "source_path": "core/run_metadata_writer.py",
-      "symbol_count": 7,
+      "symbol_count": 9,
       "core_import_count": 1,
       "core_imports": [
         "core.observability"

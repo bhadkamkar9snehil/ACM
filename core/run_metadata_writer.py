@@ -12,6 +12,7 @@ Called at the end of every ACM run (success or failure).
 
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+import json
 import pandas as pd
 import numpy as np
 from core.observability import Console
@@ -165,6 +166,28 @@ def compute_run_health_status(avg_health: float, min_health: float) -> str:
     
     # Healthy
     return "HEALTHY"
+
+
+def resolve_run_outcome_from_degradations(degradations: Optional[List[str]]) -> tuple[str, Optional[str]]:
+    """
+    Compute final run outcome from degradation list.
+
+    Returns:
+        Tuple of (outcome, err_json). err_json is populated only for DEGRADED.
+    """
+    if degradations:
+        return "DEGRADED", json.dumps({"degraded_steps": degradations[:20]}, ensure_ascii=False)
+    return "OK", None
+
+
+def serialize_run_exception(exc: Exception) -> str:
+    """
+    Build stable JSON payload for run failure serialization.
+    """
+    try:
+        return json.dumps({"type": exc.__class__.__name__, "message": str(exc)}, ensure_ascii=False)
+    except Exception:
+        return '{"type":"Exception","message":"<serialization failed>"}'
 
 
 def extract_run_metadata_from_scores(scores: pd.DataFrame, per_regime_enabled: bool = False, regime_count: int = 0) -> dict:

@@ -31,12 +31,12 @@ type: agent-memory
 | `[core.observability]` | 108 | 0 |
 | `[core.omr]` | 19 | 0 |
 | `[core.outliers]` | 12 | 1 |
-| `[core.output_manager]` | 74 | 3 |
+| `[core.output_manager]` | 75 | 3 |
 | `[core.pipeline_types]` | 23 | 0 |
 | `[core.regimes]` | 59 | 1 |
 | `[core.resource_monitor]` | 27 | 0 |
 | `[core.rul_estimator]` | 9 | 3 |
-| `[core.run_metadata_writer]` | 7 | 1 |
+| `[core.run_metadata_writer]` | 9 | 1 |
 | `[core.seasonality]` | 20 | 0 |
 | `[core.sensor_attribution]` | 31 | 1 |
 | `[core.smart_coldstart]` | 14 | 1 |

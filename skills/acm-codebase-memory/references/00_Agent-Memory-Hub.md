@@ -1,6 +1,6 @@
 ---
 type: agent-memory
-generated_at: 2026-02-21T06:46:01+00:00
+generated_at: 2026-02-21T13:49:39+00:00
 ---
 
 # ACM Agent Memory Hub
@@ -16,7 +16,7 @@ This note is generated for agent-first ACM context loading.
 
 ## Highest Symbol Density Modules
 - [[modules/core.observability|core.observability]] symbols=108
-- [[modules/core.output_manager|core.output_manager]] symbols=74
+- [[modules/core.output_manager|core.output_manager]] symbols=75
 - [[modules/core.regimes|core.regimes]] symbols=59
 - [[modules/core.model_persistence|core.model_persistence]] symbols=38
 - [[modules/core.degradation_model|core.degradation_model]] symbols=36
@@ -33,9 +33,3 @@ This note is generated for agent-first ACM context loading.
 `python scripts/manage_acm_agent_memory.py refresh --sync-repo-skill --sync-local-skill`
 2. Health check:
 `python scripts/manage_acm_agent_memory.py health`
-
-## Grafana Guardrail
-1. For dashboard color gradients use `continuous-RdYlGr`.
-2. Never use `continuous-RdYlGn`.
-3. Validate palettes with:
-`python skills/grafana-dashboard-ops/scripts/validate_grafana_palette_modes.py`

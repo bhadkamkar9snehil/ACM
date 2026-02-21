@@ -214,10 +214,26 @@ def _cleanup_generated_notes() -> None:
     This prevents stale symbols from lingering in the vault when source code
     changes remove or rename functions.
     """
+    locked: List[Path] = []
+
+    def _safe_unlink(note_path: Path) -> None:
+        try:
+            note_path.unlink()
+        except FileNotFoundError:
+            return
+        except PermissionError:
+            locked.append(note_path)
+
     for md in MODULES_DIR.glob("*.md"):
-        md.unlink()
+        _safe_unlink(md)
     for md in FUNCTIONS_DIR.glob("*.md"):
-        md.unlink()
+        _safe_unlink(md)
+
+    if locked:
+        print(
+            f"[obsidian-graph] skipped deleting {len(locked)} locked note(s); "
+            "they will be overwritten when writable."
+        )
 
 
 def _link_to_module(module_name: str) -> str:
