@@ -23,7 +23,6 @@ from __future__ import annotations
 # Standard library imports
 # ============================
 import argparse
-import sys
 import time
 from datetime import datetime
 # NOTE: Parallel fitting via ThreadPoolExecutor was removed due to BLAS/OpenMP
@@ -39,26 +38,7 @@ from typing import Any, Callable, Dict, List, Optional
 import numpy as np
 import pandas as pd
 
-# --- import guard to support module and script execution modes
-try:
-    # import ONLY core modules relatively
-    from . import regimes, drift, fuse
-    from . import correlation, outliers
-    from .ar1_detector import AR1Detector  # Split out of forecasting for clarity
-    from . import fast_features
-    # FORECASTING_DISABLED: ForecastEngine import temporarily disabled.
-    # To re-enable: uncomment the line below and remove the stub after this block.
-    # from .forecast_engine import ForecastEngine  # Unified forecasting orchestrator
-except ImportError:
-    import pathlib
-    sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
-    from core import regimes, drift, fuse
-    from core import correlation, outliers
-    from core.ar1_detector import AR1Detector
-    # FORECASTING_DISABLED: ForecastEngine import temporarily disabled.
-    # To re-enable: uncomment the line below and remove the stub after this block.
-    # from core.forecast_engine import ForecastEngine  # Unified forecasting orchestrator
-    from core import fast_features
+from core import regimes, drift, fuse, fast_features
 
 # FORECASTING_DISABLED: Stub so pipeline can import without ForecastEngine.
 # Remove this stub when re-enabling forecasting.
@@ -176,24 +156,13 @@ except ImportError:
     def shutdown_run_observability(*args, **kwargs): pass
     def start_profiling(): pass
 
-# SQL client: required at runtime (SQL-only pipeline). Guarded import keeps
-# module importable in environments without SQL drivers.
-try:
-    from core.sql_client import (  # type: ignore
-        SQLClient,
-        execute_with_deadlock_retry,
-        connect_acm_sql,
-        resolve_equipment_id_required,
-        load_config_required_from_sql,
-        start_acm_run,
-    )
-except ImportError:
-    SQLClient = None  # type: ignore
-    execute_with_deadlock_retry = None  # type: ignore
-    connect_acm_sql = None  # type: ignore
-    resolve_equipment_id_required = None  # type: ignore
-    load_config_required_from_sql = None  # type: ignore
-    start_acm_run = None  # type: ignore
+from core.sql_client import (
+    SQLClient,
+    execute_with_deadlock_retry,
+    resolve_equipment_id_required,
+    load_config_required_from_sql,
+    start_acm_run,
+)
 
 # Data utilities: index hygiene and deduplication helpers.
 from core.fast_features import ensure_local_index, deduplicate_index, build_features_for_pipeline
@@ -246,7 +215,6 @@ def _configure_logging(logging_cfg, args):
 # _ensure_local_index -> core/fast_features.py::ensure_local_index()
 # _get_equipment_id -> core/sql_client.py::resolve_equipment_id_required()
 # _load_config -> core/sql_client.py::load_config_required_from_sql()
-# _sql_connect -> core/sql_client.py::connect_acm_sql()
 # _sql_start_run -> core/sql_client.py::start_acm_run()
 
 
@@ -385,8 +353,6 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
     # ========================================================================
     Console.info("Connecting to SQL Server...", component="SQL")
     try:
-        if not SQLClient:
-            raise RuntimeError("SQLClient not available. Ensure core/sql_client.py exists and pyodbc is installed.")
         sql_client = SQLClient.from_ini('acm')
         sql_client.connect()
         # Quick health check.
