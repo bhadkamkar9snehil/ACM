@@ -73,7 +73,7 @@
       }
     ]
   },
-  "description": "Fleet-wide equipment health overview — all assets at a glance",
+  "description": "Fleet-wide equipment health overview \u2014 all assets at a glance",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -164,8 +164,8 @@
             "type": "mssql",
             "uid": "mssql-ds"
           },
-          "rawSql": "SELECT COUNT(DISTINCT EquipID) AS value FROM dbo.Equipment WHERE Status = 'Active'",
-          "format": "time_series",
+          "rawSql": "SELECT COUNT(DISTINCT EquipID) AS value FROM dbo.Equipment WHERE Status = 1",
+          "format": "table",
           "refId": "A"
         }
       ]
@@ -224,8 +224,8 @@
             "type": "mssql",
             "uid": "mssql-ds"
           },
-          "rawSql": "SELECT COUNT(*) AS value FROM (\n  SELECT EquipID, HealthZone AS Zone, ROW_NUMBER() OVER (PARTITION BY EquipID ORDER BY Timestamp DESC) AS rn\n  FROM dbo.ACM_HealthTimeline\n) x WHERE rn = 1 AND HealthZone = 'ALERT'",
-          "format": "time_series",
+          "rawSql": "SELECT COUNT(*) AS value FROM (\n  SELECT EquipID, HealthZone AS Zone, ROW_NUMBER() OVER (PARTITION BY EquipID ORDER BY Timestamp DESC) AS rn\n  FROM dbo.ACM_HealthTimeline\n) x WHERE rn = 1 AND Zone = 'ALERT'",
+          "format": "table",
           "refId": "A"
         }
       ]
@@ -284,8 +284,8 @@
             "type": "mssql",
             "uid": "mssql-ds"
           },
-          "rawSql": "SELECT COUNT(*) AS value FROM (\n  SELECT EquipID, HealthZone AS Zone, ROW_NUMBER() OVER (PARTITION BY EquipID ORDER BY Timestamp DESC) AS rn\n  FROM dbo.ACM_HealthTimeline\n) x WHERE rn = 1 AND HealthZone = 'WATCH'",
-          "format": "time_series",
+          "rawSql": "SELECT COUNT(*) AS value FROM (\n  SELECT EquipID, HealthZone AS Zone, ROW_NUMBER() OVER (PARTITION BY EquipID ORDER BY Timestamp DESC) AS rn\n  FROM dbo.ACM_HealthTimeline\n) x WHERE rn = 1 AND Zone = 'WATCH'",
+          "format": "table",
           "refId": "A"
         }
       ]
@@ -344,8 +344,8 @@
             "type": "mssql",
             "uid": "mssql-ds"
           },
-          "rawSql": "SELECT COUNT(*) AS value FROM (\n  SELECT EquipID, HealthZone AS Zone, ROW_NUMBER() OVER (PARTITION BY EquipID ORDER BY Timestamp DESC) AS rn\n  FROM dbo.ACM_HealthTimeline\n) x WHERE rn = 1 AND HealthZone = 'GOOD'",
-          "format": "time_series",
+          "rawSql": "SELECT COUNT(*) AS value FROM (\n  SELECT EquipID, HealthZone AS Zone, ROW_NUMBER() OVER (PARTITION BY EquipID ORDER BY Timestamp DESC) AS rn\n  FROM dbo.ACM_HealthTimeline\n) x WHERE rn = 1 AND Zone = 'GOOD'",
+          "format": "table",
           "refId": "A"
         }
       ]
@@ -418,7 +418,7 @@
             "uid": "mssql-ds"
           },
           "rawSql": "SELECT ROUND(AVG(x.HealthIndex), 1) AS value FROM (\n  SELECT EquipID, HealthIndex, ROW_NUMBER() OVER (PARTITION BY EquipID ORDER BY Timestamp DESC) AS rn\n  FROM dbo.ACM_HealthTimeline\n) x WHERE rn = 1",
-          "format": "time_series",
+          "format": "table",
           "refId": "A"
         }
       ]
@@ -503,7 +503,7 @@
             "type": "mssql",
             "uid": "mssql-ds"
           },
-          "rawSql": "SELECT\n  eq.EquipCode AS metric,\n  x.HealthIndex\nFROM (\n  SELECT EquipID, HealthIndex, ROW_NUMBER() OVER (PARTITION BY EquipID ORDER BY Timestamp DESC) AS rn\n  FROM dbo.ACM_HealthTimeline\n) x\nJOIN dbo.Equipment eq ON eq.EquipID = x.EquipID\nWHERE x.rn = 1 AND eq.Status = 'Active'\nORDER BY x.HealthIndex ASC",
+          "rawSql": "SELECT\n  eq.EquipCode AS metric,\n  x.HealthIndex\nFROM (\n  SELECT EquipID, HealthIndex, ROW_NUMBER() OVER (PARTITION BY EquipID ORDER BY Timestamp DESC) AS rn\n  FROM dbo.ACM_HealthTimeline\n) x\nJOIN dbo.Equipment eq ON eq.EquipID = x.EquipID\nWHERE x.rn = 1 AND eq.Status = 1\nORDER BY x.HealthIndex ASC",
           "format": "table",
           "refId": "A"
         }
@@ -627,7 +627,7 @@
             "type": "mssql",
             "uid": "mssql-ds"
           },
-          "rawSql": "SELECT HealthZone AS Zone, COUNT(*) AS value FROM (\n  SELECT EquipID, HealthZone AS Zone, ROW_NUMBER() OVER (PARTITION BY EquipID ORDER BY Timestamp DESC) AS rn\n  FROM dbo.ACM_HealthTimeline\n) x WHERE rn = 1 GROUP BY Zone",
+          "rawSql": "SELECT Zone AS metric, COUNT(*) AS value FROM (\n  SELECT EquipID, HealthZone AS Zone, ROW_NUMBER() OVER (PARTITION BY EquipID ORDER BY Timestamp DESC) AS rn\n  FROM dbo.ACM_HealthTimeline\n) x WHERE rn = 1 GROUP BY Zone ORDER BY value DESC",
           "format": "table",
           "refId": "A"
         }
@@ -843,7 +843,7 @@
           }
         ]
       },
-      "title": "All Equipment — Current Status",
+      "title": "All Equipment \u2014 Current Status",
       "type": "table",
       "targets": [
         {
@@ -851,7 +851,7 @@
             "type": "mssql",
             "uid": "mssql-ds"
           },
-          "rawSql": "SELECT\n  eq.EquipCode AS Equipment,\n  ROUND(h.HealthIndex, 1) AS HealthIndex,\n  h.HealthZone,\n  ISNULL(ep.ActiveEpisodes, 0) AS ActiveEpisodes,\n  CONVERT(varchar(19), h.Timestamp, 120) AS LastUpdated\nFROM (\n  SELECT EquipID, HealthIndex, HealthZone AS Zone, Timestamp,\n         ROW_NUMBER() OVER (PARTITION BY EquipID ORDER BY Timestamp DESC) AS rn\n  FROM dbo.ACM_HealthTimeline\n) h\nJOIN dbo.Equipment eq ON eq.EquipID = h.EquipID\nLEFT JOIN (\n  SELECT EquipID, COUNT(*) AS ActiveEpisodes\n  FROM dbo.ACM_Episodes\n  WHERE StartTime >= DATEADD(day, -1, GETUTCDATE())\n  GROUP BY EquipID\n) ep ON ep.EquipID = h.EquipID\nWHERE h.rn = 1 AND eq.Status = 'Active'\nORDER BY h.HealthIndex ASC",
+          "rawSql": "SELECT\n  eq.EquipCode AS Equipment,\n  ROUND(h.HealthIndex, 1) AS HealthIndex,\n  h.Zone AS HealthZone,\n  ISNULL(ep.ActiveEpisodes, 0) AS ActiveEpisodes,\n  CONVERT(varchar(19), h.Timestamp, 120) AS LastUpdated\nFROM (\n  SELECT EquipID, HealthIndex, HealthZone AS Zone, Timestamp,\n         ROW_NUMBER() OVER (PARTITION BY EquipID ORDER BY Timestamp DESC) AS rn\n  FROM dbo.ACM_HealthTimeline\n) h\nJOIN dbo.Equipment eq ON eq.EquipID = h.EquipID\nLEFT JOIN (\n  SELECT EquipID, COUNT(*) AS ActiveEpisodes\n  FROM dbo.ACM_Episodes\n  WHERE StartTime >= DATEADD(day, -1, GETUTCDATE())\n  GROUP BY EquipID\n) ep ON ep.EquipID = h.EquipID\nWHERE h.rn = 1 AND eq.Status = 1\nORDER BY h.HealthIndex ASC",
           "format": "table",
           "refId": "A"
         }
@@ -961,7 +961,7 @@
             "type": "mssql",
             "uid": "mssql-ds"
           },
-          "rawSql": "SELECT\n  h.Timestamp AS time,\n  eq.EquipCode AS metric,\n  h.HealthIndex AS value\nFROM dbo.ACM_HealthTimeline h\nJOIN dbo.Equipment eq ON eq.EquipID = h.EquipID\nWHERE h.Timestamp >= DATEADD(day, -7, GETUTCDATE())\n  AND eq.Status = 'Active'\nORDER BY h.Timestamp",
+          "rawSql": "SELECT\n  h.Timestamp AS time,\n  eq.EquipCode AS metric,\n  h.HealthIndex AS value\nFROM dbo.ACM_HealthTimeline h\nJOIN dbo.Equipment eq ON eq.EquipID = h.EquipID\nWHERE h.Timestamp >= DATEADD(day, -7, GETUTCDATE())\n  AND eq.Status = 1\nORDER BY h.Timestamp",
           "format": "time_series",
           "refId": "A"
         }
@@ -1305,7 +1305,7 @@
           "sort": "none"
         }
       },
-      "title": "Health Zone Timeline — All Equipment (7 days)",
+      "title": "Health Zone Timeline \u2014 All Equipment (7 days)",
       "type": "state-timeline",
       "targets": [
         {
@@ -1313,7 +1313,7 @@
             "type": "mssql",
             "uid": "mssql-ds"
           },
-          "rawSql": "SELECT\n  h.Timestamp AS time,\n  eq.EquipCode AS metric,\n  h.HealthZone AS value\nFROM dbo.ACM_HealthTimeline h\nJOIN dbo.Equipment eq ON eq.EquipID = h.EquipID\nWHERE h.Timestamp >= DATEADD(day, -7, GETUTCDATE())\n  AND eq.Status = 'Active'\nORDER BY h.Timestamp",
+          "rawSql": "SELECT\n  h.Timestamp AS time,\n  eq.EquipCode AS metric,\n  h.HealthZone AS value\nFROM dbo.ACM_HealthTimeline h\nJOIN dbo.Equipment eq ON eq.EquipID = h.EquipID\nWHERE h.Timestamp >= DATEADD(day, -7, GETUTCDATE())\n  AND eq.Status = 1\nORDER BY h.Timestamp",
           "format": "time_series",
           "refId": "A"
         }
@@ -1410,7 +1410,7 @@
             "type": "mssql",
             "uid": "mssql-ds"
           },
-          "rawSql": "SELECT TOP 15\n  sh.SensorName,\n  sh.MaxAbsZ\nFROM dbo.ACM_SensorHotspots sh\nJOIN (\n  SELECT EquipID, MAX(CreatedAt) AS MaxCreatedAt\n  FROM dbo.ACM_SensorHotspots\n  GROUP BY EquipID\n) latest ON latest.EquipID = sh.EquipID AND latest.MaxCreatedAt = sh.CreatedAt\nORDER BY sh.MaxAbsZ DESC",
+          "rawSql": "WITH ranked AS (\n  SELECT\n    sh.*,\n    ROW_NUMBER() OVER (\n      PARTITION BY sh.EquipID, sh.SensorName\n      ORDER BY sh.MaxTimestamp DESC, sh.ID DESC\n    ) AS rn\n  FROM dbo.ACM_SensorHotspots sh\n)\nSELECT TOP 15\n  SensorName,\n  MaxAbsZ\nFROM ranked\nWHERE rn = 1\nORDER BY MaxAbsZ DESC",
           "format": "table",
           "refId": "A"
         }
@@ -1557,7 +1557,7 @@
             "type": "mssql",
             "uid": "mssql-ds"
           },
-          "rawSql": "SELECT TOP 30\n  eq.EquipCode AS Equipment,\n  sh.SensorName,\n  ROUND(sh.MaxAbsZ, 2) AS MaxAbsZ,\n  ROUND(sh.LatestAbsZ, 2) AS LatestAbsZ,\n  sh.AboveWarnCount,\n  sh.AboveAlertCount\nFROM dbo.ACM_SensorHotspots sh\nJOIN dbo.Equipment eq ON eq.EquipID = sh.EquipID\nJOIN (\n  SELECT EquipID, MAX(CreatedAt) AS MaxCreatedAt\n  FROM dbo.ACM_SensorHotspots\n  GROUP BY EquipID\n) latest ON latest.EquipID = sh.EquipID AND latest.MaxCreatedAt = sh.CreatedAt\nORDER BY sh.MaxAbsZ DESC",
+          "rawSql": "WITH ranked AS (\n  SELECT\n    sh.*,\n    ROW_NUMBER() OVER (\n      PARTITION BY sh.EquipID, sh.SensorName\n      ORDER BY sh.MaxTimestamp DESC, sh.ID DESC\n    ) AS rn\n  FROM dbo.ACM_SensorHotspots sh\n)\nSELECT TOP 30\n  eq.EquipCode AS Equipment,\n  ranked.SensorName,\n  ROUND(ranked.MaxAbsZ, 2) AS MaxAbsZ,\n  ROUND(ranked.LatestAbsZ, 2) AS LatestAbsZ,\n  ranked.AboveWarnCount,\n  ranked.AboveAlertCount\nFROM ranked\nJOIN dbo.Equipment eq ON eq.EquipID = ranked.EquipID\nWHERE ranked.rn = 1\nORDER BY ranked.MaxAbsZ DESC",
           "format": "table",
           "refId": "A"
         }
@@ -1733,7 +1733,7 @@
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "ACM — Fleet Overview",
+  "title": "ACM \u2014 Fleet Overview",
   "uid": "acm-fleet-overview-v1",
   "version": 1,
   "weekStart": ""

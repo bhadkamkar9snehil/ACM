@@ -41,7 +41,7 @@
       }
     ]
   },
-  "description": "ACM Complete Picture — Health, Detectors, Regimes, Episodes, Drift, Sensor Hotspots, Diagnostics, and Pipeline Ops. Full v11 coverage.",
+  "description": "ACM Complete Picture \u2014 Health, Detectors, Regimes, Episodes, Drift, Sensor Hotspots, Diagnostics, and Pipeline Ops. Full v11 coverage.",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -70,7 +70,7 @@
         "y": 0
       },
       "id": 1,
-      "title": "⚡ EQUIPMENT HEALTH — CURRENT STATUS",
+      "title": "\u26a1 EQUIPMENT HEALTH \u2014 CURRENT STATUS",
       "type": "row"
     },
     {
@@ -78,7 +78,7 @@
         "type": "mssql",
         "uid": "${datasource}"
       },
-      "description": "Current health index (0-100%). Red < 50, Orange < 70, Yellow < 85, Green ≥ 85.",
+      "description": "Current health index (0-100%). Red < 50, Orange < 70, Yellow < 85, Green \u2265 85.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -167,7 +167,7 @@
                 "GOOD": {
                   "color": "#73BF69",
                   "index": 0,
-                  "text": "✅ GOOD"
+                  "text": "\u2705 GOOD"
                 }
               },
               "type": "value"
@@ -177,7 +177,7 @@
                 "WATCH": {
                   "color": "#FADE2A",
                   "index": 1,
-                  "text": "⚠️ WATCH"
+                  "text": "\u26a0\ufe0f WATCH"
                 }
               },
               "type": "value"
@@ -187,7 +187,7 @@
                 "ALERT": {
                   "color": "#FF9830",
                   "index": 2,
-                  "text": "🔶 ALERT"
+                  "text": "\ud83d\udd36 ALERT"
                 }
               },
               "type": "value"
@@ -197,7 +197,7 @@
                 "CRITICAL": {
                   "color": "#C4162A",
                   "index": 3,
-                  "text": "🔴 CRITICAL"
+                  "text": "\ud83d\udd34 CRITICAL"
                 }
               },
               "type": "value"
@@ -416,7 +416,7 @@
                 "HEALTHY": {
                   "color": "#73BF69",
                   "index": 0,
-                  "text": "✅ HEALTHY"
+                  "text": "\u2705 HEALTHY"
                 }
               },
               "type": "value"
@@ -426,7 +426,7 @@
                 "DEGRADED": {
                   "color": "#FADE2A",
                   "index": 1,
-                  "text": "⚠️ DEGRADED"
+                  "text": "\u26a0\ufe0f DEGRADED"
                 }
               },
               "type": "value"
@@ -436,7 +436,7 @@
                 "FAULT": {
                   "color": "#FF9830",
                   "index": 2,
-                  "text": "🔶 FAULT"
+                  "text": "\ud83d\udd36 FAULT"
                 }
               },
               "type": "value"
@@ -446,7 +446,7 @@
                 "CRITICAL": {
                   "color": "#C4162A",
                   "index": 3,
-                  "text": "🔴 CRITICAL"
+                  "text": "\ud83d\udd34 CRITICAL"
                 }
               },
               "type": "value"
@@ -679,7 +679,7 @@
         "type": "mssql",
         "uid": "${datasource}"
       },
-      "description": "Health index trend — yellow band = WATCH, red = ALERT",
+      "description": "Health index trend \u2014 yellow band = WATCH, red = ALERT",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -794,7 +794,7 @@
         "y": 7
       },
       "id": 10,
-      "title": "🔬 DETECTOR ENSEMBLE — SCORES & CONTRIBUTIONS",
+      "title": "\ud83d\udd2c DETECTOR ENSEMBLE \u2014 SCORES & CONTRIBUTIONS",
       "type": "row"
     },
     {
@@ -908,7 +908,7 @@
             "properties": [
               {
                 "id": "displayName",
-                "value": "PCA-T²"
+                "value": "PCA-T\u00b2"
               },
               {
                 "id": "color",
@@ -1148,7 +1148,7 @@
         "type": "mssql",
         "uid": "${datasource}"
       },
-      "description": "Detector contribution % over time — stacked to 100%",
+      "description": "Detector contribution % over time \u2014 stacked to 100%",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1281,7 +1281,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT DetectorType AS metric, ContributionPct AS value\nFROM ACM_ContributionCurrent\nWHERE EquipID = $equipment\n  AND RunID = (SELECT TOP 1 RunID FROM ACM_ContributionCurrent WHERE EquipID = $equipment ORDER BY CreatedAt DESC)\nORDER BY ContributionPct DESC",
+          "rawSql": "WITH latest_run AS (\n  SELECT TOP 1 RunID\n  FROM dbo.ACM_ContributionTimeline\n  WHERE EquipID = $equipment\n  ORDER BY CreatedAt DESC\n),\nlatest_ts AS (\n  SELECT MAX(Timestamp) AS ts\n  FROM dbo.ACM_ContributionTimeline\n  WHERE EquipID = $equipment\n    AND RunID = (SELECT RunID FROM latest_run)\n)\nSELECT\n  DetectorType AS metric,\n  ContributionPct AS value\nFROM dbo.ACM_ContributionTimeline\nWHERE EquipID = $equipment\n  AND RunID = (SELECT RunID FROM latest_run)\n  AND Timestamp = (SELECT ts FROM latest_ts)\nORDER BY ContributionPct DESC",
           "refId": "A"
         }
       ],
@@ -1293,7 +1293,7 @@
         "type": "mssql",
         "uid": "${datasource}"
       },
-      "description": "Detector calibration statistics — z-score distribution quality",
+      "description": "Detector calibration statistics \u2014 z-score distribution quality",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1395,7 +1395,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT Detector, ROUND(Mean,3) AS Mean, ROUND(Std,3) AS Std, ROUND(P95,3) AS P95, ROUND(P99,3) AS P99, ROUND(ClipPct,1) AS ClipPct\nFROM ACM_CalibrationSummary\nWHERE EquipID = $equipment\n  AND RunID = (SELECT TOP 1 RunID FROM ACM_CalibrationSummary WHERE EquipID = $equipment ORDER BY CreatedAt DESC)\nORDER BY P95 DESC",
+          "rawSql": "SELECT\n  DetectorType AS Detector,\n  ROUND(CalibrationScore, 3) AS CalibrationScore,\n  ROUND(TrainR2, 3) AS TrainR2,\n  ROUND(MeanAbsError, 3) AS MeanAbsError,\n  ROUND(P95Error, 3) AS P95Error,\n  DatapointsUsed\nFROM dbo.ACM_CalibrationSummary\nWHERE EquipID = $equipment\n  AND RunID = (\n    SELECT TOP 1 RunID\n    FROM dbo.ACM_CalibrationSummary\n    WHERE EquipID = $equipment\n    ORDER BY CreatedAt DESC\n  )\nORDER BY DetectorType",
           "refId": "A"
         }
       ],
@@ -1411,7 +1411,7 @@
         "y": 24
       },
       "id": 20,
-      "title": "🌀 OPERATING REGIMES",
+      "title": "\ud83c\udf00 OPERATING REGIMES",
       "type": "row"
     },
     {
@@ -1419,7 +1419,7 @@
         "type": "mssql",
         "uid": "${datasource}"
       },
-      "description": "Regime label over time — each band = distinct operating mode",
+      "description": "Regime label over time \u2014 each band = distinct operating mode",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1583,7 +1583,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT CASE WHEN RegimeLabel = -1 THEN 'UNKNOWN' ELSE CONCAT('Regime ', RegimeLabel) END AS metric, Percentage AS value\nFROM ACM_RegimeOccupancy\nWHERE EquipID = $equipment\n  AND RunID = (SELECT TOP 1 RunID FROM ACM_RegimeOccupancy WHERE EquipID = $equipment ORDER BY CreatedAt DESC)\nORDER BY Percentage DESC",
+          "rawSql": "SELECT\n  CASE WHEN RegimeLabel = '-1' THEN 'UNKNOWN' ELSE CONCAT('Regime ', RegimeLabel) END AS metric,\n  ROUND(DwellFraction * 100.0, 2) AS value\nFROM dbo.ACM_RegimeOccupancy\nWHERE EquipID = $equipment\n  AND RunID = (SELECT TOP 1 RunID FROM dbo.ACM_Runs WHERE EquipID = $equipment ORDER BY StartedAt DESC)\nORDER BY value DESC",
           "refId": "A"
         }
       ],
@@ -1661,7 +1661,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT\n  ro.RegimeLabel,\n  ro.RecordCount,\n  ROUND(ro.Percentage, 1) AS Percentage\nFROM dbo.ACM_RegimeOccupancy ro\nWHERE ro.EquipID = $equipment\n  AND ro.RunID = (SELECT TOP 1 RunID FROM dbo.ACM_Runs WHERE EquipID = $equipment ORDER BY StartedAt DESC)\nORDER BY ro.Percentage DESC",
+          "rawSql": "SELECT\n  ro.RegimeLabel,\n  ro.EntryCount AS RecordCount,\n  ROUND(ro.DwellFraction * 100.0, 1) AS Percentage,\n  ROUND(ro.DwellTimeHours, 2) AS DwellTimeHours,\n  ROUND(ro.AvgDwellMinutes, 1) AS AvgDwellMinutes\nFROM dbo.ACM_RegimeOccupancy ro\nWHERE ro.EquipID = $equipment\n  AND ro.RunID = (SELECT TOP 1 RunID FROM dbo.ACM_Runs WHERE EquipID = $equipment ORDER BY StartedAt DESC)\nORDER BY ro.DwellTimeHours DESC",
           "refId": "A"
         }
       ],
@@ -1677,7 +1677,7 @@
         "y": 31
       },
       "id": 30,
-      "title": "⚠️ ANOMALY EPISODES & EVENTS",
+      "title": "\u26a0\ufe0f ANOMALY EPISODES & EVENTS",
       "type": "row"
     },
     {
@@ -1685,7 +1685,7 @@
         "type": "mssql",
         "uid": "${datasource}"
       },
-      "description": "Detected anomaly episodes — start, end, duration, severity, culprit detectors",
+      "description": "Detected anomaly episodes \u2014 start, end, duration, severity, culprit detectors",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1847,7 +1847,7 @@
         "type": "mssql",
         "uid": "${datasource}"
       },
-      "description": "Episodes per day — trend of anomaly frequency",
+      "description": "Episodes per day \u2014 trend of anomaly frequency",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1947,7 +1947,7 @@
         "y": 40
       },
       "id": 40,
-      "title": "🌡️ SENSOR HOTSPOTS & DEFECTS",
+      "title": "\ud83c\udf21\ufe0f SENSOR HOTSPOTS & DEFECTS",
       "type": "row"
     },
     {
@@ -2056,7 +2056,7 @@
         "type": "mssql",
         "uid": "${datasource}"
       },
-      "description": "Sensor hotspot detail table — latest run",
+      "description": "Sensor hotspot detail table \u2014 latest run",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -2198,7 +2198,7 @@
         "type": "mssql",
         "uid": "${datasource}"
       },
-      "description": "Per-detector defect status — violation rate and severity",
+      "description": "Per-detector defect status \u2014 violation rate and severity",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -2391,7 +2391,7 @@
         "y": 49
       },
       "id": 50,
-      "title": "📈 DRIFT & CUSUM",
+      "title": "\ud83d\udcc8 DRIFT & CUSUM",
       "type": "row"
     },
     {
@@ -2399,7 +2399,7 @@
         "type": "mssql",
         "uid": "${datasource}"
       },
-      "description": "Model drift score over time — high drift triggers model refit",
+      "description": "Model drift score over time \u2014 high drift triggers model refit",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -2502,7 +2502,7 @@
         "type": "mssql",
         "uid": "${datasource}"
       },
-      "description": "Zone state over time — tracks when equipment entered and left each alert zone",
+      "description": "Zone state over time \u2014 tracks when equipment entered and left each alert zone",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -2597,7 +2597,7 @@
         "type": "mssql",
         "uid": "${datasource}"
       },
-      "description": "Defect zone transition events — when equipment crossed zone boundaries",
+      "description": "Defect zone transition events \u2014 when equipment crossed zone boundaries",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -2706,7 +2706,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT TOP 20\n    Timestamp, EventType, FromZone, ToZone,\n    ROUND(HealthAtEvent, 1) AS HealthAtEvent,\n    ROUND(FusedZ, 2) AS FusedZ\nFROM ACM_DefectTimeline\nWHERE EquipID = $equipment\n  AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY Timestamp DESC",
+          "rawSql": "WITH zoned AS (\n  SELECT\n    h.Timestamp,\n    h.HealthZone AS ToZone,\n    LAG(h.HealthZone) OVER (ORDER BY h.Timestamp) AS FromZone,\n    h.HealthIndex AS HealthAtEvent,\n    h.FusedZ\n  FROM dbo.ACM_HealthTimeline h\n  WHERE h.EquipID = $equipment\n    AND h.Timestamp BETWEEN $__timeFrom() AND $__timeTo()\n)\nSELECT TOP 20\n  Timestamp,\n  'ZONE_TRANSITION' AS EventType,\n  FromZone,\n  ToZone,\n  ROUND(HealthAtEvent, 1) AS HealthAtEvent,\n  ROUND(FusedZ, 2) AS FusedZ\nFROM zoned\nWHERE FromZone IS NOT NULL\n  AND FromZone <> ToZone\nORDER BY Timestamp DESC",
           "refId": "A"
         }
       ],
@@ -2722,7 +2722,7 @@
         "y": 64
       },
       "id": 60,
-      "title": "📊 HEALTH ANALYTICS — HISTOGRAMS & HEATMAPS",
+      "title": "\ud83d\udcca HEALTH ANALYTICS \u2014 HISTOGRAMS & HEATMAPS",
       "type": "row"
     },
     {
@@ -2730,7 +2730,7 @@
         "type": "mssql",
         "uid": "${datasource}"
       },
-      "description": "Health index distribution — how often was equipment in each health bracket?",
+      "description": "Health index distribution \u2014 how often was equipment in each health bracket?",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -2830,7 +2830,7 @@
         "type": "mssql",
         "uid": "${datasource}"
       },
-      "description": "FusedZ score distribution — raw anomaly score concentration",
+      "description": "FusedZ score distribution \u2014 raw anomaly score concentration",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -2909,7 +2909,7 @@
         "type": "mssql",
         "uid": "${datasource}"
       },
-      "description": "Anomaly rate % by detector and day — shows which detectors are most active",
+      "description": "Anomaly rate % by detector and day \u2014 shows which detectors are most active",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -2978,7 +2978,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT\n  sd.DetectorType,\n  ROUND(sd.ViolationPct, 1) AS AnomalyRatePct,\n  ROUND(sd.MaxZ, 2) AS MaxZ,\n  ROUND(sd.AvgZ, 2) AS AvgZ\nFROM dbo.ACM_SensorDefects sd\nWHERE sd.EquipID = $equipment\n  AND sd.RunID = (SELECT TOP 1 RunID FROM dbo.ACM_Runs WHERE EquipID = $equipment ORDER BY StartedAt DESC)\nORDER BY sd.ViolationPct DESC",
+          "rawSql": "SELECT\n  r.StartedAt AS time,\n  sd.DetectorType AS metric,\n  ROUND(sd.ViolationPct, 1) AS value\nFROM dbo.ACM_SensorDefects sd\nJOIN dbo.ACM_Runs r ON r.RunID = sd.RunID\nWHERE sd.EquipID = $equipment\n  AND sd.RunID = (SELECT TOP 1 RunID FROM dbo.ACM_Runs WHERE EquipID = $equipment ORDER BY StartedAt DESC)\nORDER BY sd.DetectorType",
           "refId": "A"
         }
       ],
@@ -2994,7 +2994,7 @@
         "y": 73
       },
       "id": 70,
-      "title": "🔧 PCA MODEL & DATA QUALITY",
+      "title": "\ud83d\udd27 PCA MODEL & DATA QUALITY",
       "type": "row"
     },
     {
@@ -3002,7 +3002,7 @@
         "type": "mssql",
         "uid": "${datasource}"
       },
-      "description": "PCA variance explained by component — how many components capture most variance",
+      "description": "PCA variance explained by component \u2014 how many components capture most variance",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -3100,7 +3100,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT ComponentName AS time, Value AS VarianceRatio\nFROM ACM_PCA_Metrics\nWHERE EquipID = $equipment\n  AND MetricType = 'VarianceRatio'\n  AND ComponentName <> 'Total'\n  AND RunID = (SELECT TOP 1 RunID FROM ACM_PCA_Metrics WHERE EquipID = $equipment ORDER BY CreatedAt DESC)\nORDER BY ComponentName ASC",
+          "rawSql": "WITH latest AS (\n  SELECT TOP 1\n    pm.RunID,\n    r.StartedAt,\n    pm.ComponentsJson\n  FROM dbo.ACM_PCA_Metrics pm\n  JOIN dbo.ACM_Runs r ON r.RunID = pm.RunID\n  WHERE pm.EquipID = $equipment\n  ORDER BY pm.CreatedAt DESC\n)\nSELECT\n  DATEADD(minute, CAST(j.[key] AS int), latest.StartedAt) AS time,\n  TRY_CAST(JSON_VALUE(j.value, '$.value') AS float) AS VarianceRatio\nFROM latest\nCROSS APPLY OPENJSON(latest.ComponentsJson) j\nWHERE JSON_VALUE(j.value, '$.type') = 'variance_ratio'\nORDER BY time",
           "refId": "A"
         },
         {
@@ -3111,7 +3111,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT ComponentName AS time, Value AS CumulativeVariance\nFROM ACM_PCA_Metrics\nWHERE EquipID = $equipment\n  AND MetricType = 'CumulativeVariance'\n  AND ComponentName <> 'Total'\n  AND RunID = (SELECT TOP 1 RunID FROM ACM_PCA_Metrics WHERE EquipID = $equipment ORDER BY CreatedAt DESC)\nORDER BY ComponentName ASC",
+          "rawSql": "WITH latest AS (\n  SELECT TOP 1\n    pm.RunID,\n    r.StartedAt,\n    pm.ComponentsJson\n  FROM dbo.ACM_PCA_Metrics pm\n  JOIN dbo.ACM_Runs r ON r.RunID = pm.RunID\n  WHERE pm.EquipID = $equipment\n  ORDER BY pm.CreatedAt DESC\n)\nSELECT\n  DATEADD(minute, CAST(j.[key] AS int), latest.StartedAt) AS time,\n  TRY_CAST(JSON_VALUE(j.value, '$.cumulative') AS float) AS CumulativeVariance\nFROM latest\nCROSS APPLY OPENJSON(latest.ComponentsJson) j\nWHERE JSON_VALUE(j.value, '$.type') = 'variance_ratio'\nORDER BY time",
           "refId": "B"
         }
       ],
@@ -3123,7 +3123,7 @@
         "type": "mssql",
         "uid": "${datasource}"
       },
-      "description": "Detector cross-correlation matrix — high correlation = detectors fire together",
+      "description": "Detector cross-correlation matrix \u2014 high correlation = detectors fire together",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -3229,7 +3229,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT DetectorA, DetectorB, ROUND(PearsonR, 3) AS PearsonR\nFROM ACM_DetectorCorrelation\nWHERE EquipID = $equipment\n  AND DetectorA <> DetectorB\n  AND RunID = (SELECT TOP 1 RunID FROM ACM_DetectorCorrelation WHERE EquipID = $equipment ORDER BY CreatedAt DESC)\nORDER BY ABS(PearsonR) DESC",
+          "rawSql": "SELECT\n  Detector1 AS DetectorA,\n  Detector2 AS DetectorB,\n  ROUND(Correlation, 3) AS PearsonR\nFROM dbo.ACM_DetectorCorrelation\nWHERE EquipID = $equipment\n  AND Detector1 <> Detector2\n  AND RunID = (\n    SELECT TOP 1 RunID\n    FROM dbo.ACM_DetectorCorrelation\n    WHERE EquipID = $equipment\n    ORDER BY CreatedAt DESC\n  )\nORDER BY ABS(Correlation) DESC",
           "refId": "A"
         }
       ],
@@ -3241,7 +3241,7 @@
         "type": "mssql",
         "uid": "${datasource}"
       },
-      "description": "Data quality issues per sensor — null rates, flatlines, outliers",
+      "description": "Data quality issues per sensor \u2014 null rates, flatlines, outliers",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -3386,7 +3386,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT TOP 30\n    sensor,\n    CheckResult,\n    ROUND(train_null_pct, 1) AS train_null_pct,\n    ROUND(score_null_pct, 1) AS score_null_pct,\n    train_flatline_span,\n    score_flatline_span\nFROM ACM_DataQuality\nWHERE EquipID = $equipment\n  AND RunID = (SELECT TOP 1 RunID FROM ACM_DataQuality WHERE EquipID = $equipment ORDER BY CreatedAt DESC)\n  AND CheckResult IN ('WARN','FAIL')\nORDER BY CheckResult DESC, train_null_pct DESC",
+          "rawSql": "SELECT TOP 30\n  sensor,\n  CheckResult,\n  ROUND(train_null_pct, 1) AS train_null_pct,\n  ROUND(score_null_pct, 1) AS score_null_pct,\n  train_flatline_span,\n  score_flatline_span\nFROM dbo.ACM_DataQuality\nWHERE EquipID = $equipment\n  AND RunID = (\n    SELECT TOP 1 RunID\n    FROM dbo.ACM_Runs\n    WHERE EquipID = $equipment\n    ORDER BY StartedAt DESC\n  )\nORDER BY sensor ASC",
           "refId": "A"
         }
       ],
@@ -3402,7 +3402,7 @@
         "y": 82
       },
       "id": 80,
-      "title": "🏃 PIPELINE OPERATIONS — RUNS & PERFORMANCE",
+      "title": "\ud83c\udfc3 PIPELINE OPERATIONS \u2014 RUNS & PERFORMANCE",
       "type": "row"
     },
     {
@@ -3410,7 +3410,7 @@
         "type": "mssql",
         "uid": "${datasource}"
       },
-      "description": "Most recent ACM runs — stage, outcome, rows processed",
+      "description": "Most recent ACM runs \u2014 stage, outcome, rows processed",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -3450,7 +3450,7 @@
                       "OK": {
                         "color": "#73BF69",
                         "index": 0,
-                        "text": "✅ OK"
+                        "text": "\u2705 OK"
                       }
                     },
                     "type": "value"
@@ -3460,7 +3460,7 @@
                       "SUCCESS": {
                         "color": "#73BF69",
                         "index": 1,
-                        "text": "✅ OK"
+                        "text": "\u2705 OK"
                       }
                     },
                     "type": "value"
@@ -3470,7 +3470,7 @@
                       "NOOP": {
                         "color": "#9fa7b3",
                         "index": 2,
-                        "text": "⏭ NOOP"
+                        "text": "\u23ed NOOP"
                       }
                     },
                     "type": "value"
@@ -3480,7 +3480,7 @@
                       "ERROR": {
                         "color": "#C4162A",
                         "index": 3,
-                        "text": "❌ ERROR"
+                        "text": "\u274c ERROR"
                       }
                     },
                     "type": "value"
@@ -3490,7 +3490,7 @@
                       "PARTIAL": {
                         "color": "#FF9830",
                         "index": 4,
-                        "text": "⚠️ PART"
+                        "text": "\u26a0\ufe0f PART"
                       }
                     },
                     "type": "value"
@@ -3714,7 +3714,7 @@
         "type": "mssql",
         "uid": "${datasource}"
       },
-      "description": "Run duration trend — spikes indicate heavy processing batches",
+      "description": "Run duration trend \u2014 spikes indicate heavy processing batches",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -3818,7 +3818,7 @@
         "y": 91
       },
       "id": 90,
-      "title": "📡 OBSERVABILITY — PROMETHEUS METRICS",
+      "title": "\ud83d\udce1 OBSERVABILITY \u2014 PROMETHEUS METRICS",
       "type": "row"
     },
     {
@@ -4013,7 +4013,7 @@
         "y": 99
       },
       "id": 100,
-      "title": "📋 LOGS — LOKI",
+      "title": "\ud83d\udccb LOGS \u2014 LOKI",
       "type": "row"
     },
     {
@@ -4021,7 +4021,7 @@
         "type": "loki",
         "uid": "loki-ds"
       },
-      "description": "Live ACM pipeline logs from Loki — filter by level or equipment",
+      "description": "Live ACM pipeline logs from Loki \u2014 filter by level or equipment",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -4146,7 +4146,7 @@
     "hidden": false
   },
   "timezone": "browser",
-  "title": "ACM — Complete Picture",
+  "title": "ACM \u2014 Complete Picture",
   "uid": "acm-master-complete-v2",
   "version": 1,
   "weekStart": ""

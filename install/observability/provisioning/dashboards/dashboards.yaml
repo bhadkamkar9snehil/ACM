@@ -11,4 +11,4 @@ providers:
     editable: true
     updateIntervalSeconds: 30
     options:
-      path: /etc/grafana/dashboards
+      path: /etc/grafana/dashboards/active
