@@ -232,6 +232,7 @@ except ImportError:
 # Model lifecycle management (maturity, promotion, and active model tracking).
 from core.model_lifecycle import (
     BOOLEAN_ONLY_METRICS,
+    load_model_state_safe,
     load_model_state_from_sql,
     update_and_persist_model_lifecycle_safe,
 )
@@ -1421,8 +1422,12 @@ def main() -> None:
         # On scoring batches (models_were_trained=False), model_state is still None here
         # because the lifecycle block above only runs when models are fitted. Load it from
         # SQL so the batch summary [model] field is populated on every run.
-        if model_state is None and sql_client and equip_id:
-            model_state = load_model_state_from_sql(sql_client, equip_id)
+        if model_state is None:
+            model_state = load_model_state_safe(
+                sql_client=sql_client,
+                equip_id=int(equip_id),
+                logger=Console,
+            )
 
         # ===== Phase 6: Calibration (z-score normalization) =====
         # Fit calibrators on TRAIN data, transform SCORE data.

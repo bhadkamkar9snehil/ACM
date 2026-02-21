@@ -425,6 +425,13 @@ class TestRefactorHelpers:
         )
         assert state is None
 
+    def test_load_model_state_safe_no_sql_client(self):
+        """Model lifecycle safe loader should return None without SQL client."""
+        from core.model_lifecycle import load_model_state_safe
+
+        state = load_model_state_safe(sql_client=None, equip_id=1)
+        assert state is None
+
     def test_apply_regime_health_labels_sets_unknown_when_quality_bad(self):
         """Regime health helper should mark unknown when quality is not acceptable."""
         from core.regimes import apply_regime_health_labels
