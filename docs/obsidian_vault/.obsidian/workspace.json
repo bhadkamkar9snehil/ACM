@@ -186,6 +186,11 @@
   },
   "active": "022870bb10398e16",
   "lastOpenFiles": [
+    "functions/core.seasonality.detect_and_adjust_safe.md",
+    "functions/core.regimes.apply_regime_health_labels.md",
+    "functions/core.pipeline_types.validate_data_contract_at_entry.md",
+    "functions/core.pipeline_types.run_data_guardrails_safe.md",
+    "functions/core.model_lifecycle.load_model_state_safe.md",
     "01_Modules.md",
     "modules/core.observability.md",
     "agent_memory/00_Agent-Memory-Hub.md",

@@ -3,9 +3,9 @@ type: function
 id: core.regimes.write_regime_occupancy_and_transitions
 module: core.regimes
 source: core/regimes.py
-line_start: 3855
-line_end: 3923
-generated_at: 2026-02-21T03:35:55+00:00
+line_start: 3930
+line_end: 3998
+generated_at: 2026-02-21T06:33:21+00:00
 tags:
   - acm
   - function
@@ -15,7 +15,7 @@ tags:
 
 Defined in: [[modules/core.regimes|core.regimes]]
 
-Source: `core/regimes.py:3855`
+Source: `core/regimes.py:3930`
 
 Kind: `function`
 

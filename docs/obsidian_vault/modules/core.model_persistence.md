@@ -2,7 +2,7 @@
 type: module
 module: core.model_persistence
 source: core/model_persistence.py
-generated_at: 2026-02-21T03:35:55+00:00
+generated_at: 2026-02-21T06:33:21+00:00
 tags:
   - acm
   - module
@@ -51,4 +51,8 @@ Summary: Model Versioning & Persistence Module
 - [[functions/core.model_persistence.ModelVersionManager.list_versions|core.model_persistence.ModelVersionManager.list_versions]] (line 1182, method)
 - [[functions/core.model_persistence.create_model_metadata|core.model_persistence.create_model_metadata]] (line 1223, function)
 - [[functions/core.model_persistence.load_cached_models_with_validation|core.model_persistence.load_cached_models_with_validation]] (line 1415, function)
-- [[functions/core.model_persistence.save_trained_models|core.model_persistence.save_trained_models]] (line 1525, function)
+- [[functions/core.model_persistence.align_current_features_to_cached_manifest|core.model_persistence.align_current_features_to_cached_manifest]] (line 1525, function)
+- [[functions/core.model_persistence.restore_detectors_from_runtime_cache|core.model_persistence.restore_detectors_from_runtime_cache]] (line 1596, function)
+- [[functions/core.model_persistence.load_quality_regime_state_if_needed|core.model_persistence.load_quality_regime_state_if_needed]] (line 1640, function)
+- [[functions/core.model_persistence.load_and_rebuild_detectors_from_sql_cache|core.model_persistence.load_and_rebuild_detectors_from_sql_cache]] (line 1665, function)
+- [[functions/core.model_persistence.save_trained_models|core.model_persistence.save_trained_models]] (line 1752, function)

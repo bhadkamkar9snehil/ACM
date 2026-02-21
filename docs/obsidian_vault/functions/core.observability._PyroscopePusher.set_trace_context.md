@@ -5,7 +5,7 @@ module: core.observability
 source: core/observability.py
 line_start: 2763
 line_end: 2769
-generated_at: 2026-02-21T03:35:55+00:00
+generated_at: 2026-02-21T06:33:21+00:00
 tags:
   - acm
   - method

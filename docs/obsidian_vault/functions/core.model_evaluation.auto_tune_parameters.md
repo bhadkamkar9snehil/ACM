@@ -3,9 +3,9 @@ type: function
 id: core.model_evaluation.auto_tune_parameters
 module: core.model_evaluation
 source: core/model_evaluation.py
-line_start: 486
-line_end: 689
-generated_at: 2026-02-21T03:35:55+00:00
+line_start: 572
+line_end: 775
+generated_at: 2026-02-21T06:33:21+00:00
 tags:
   - acm
   - function
@@ -15,7 +15,7 @@ tags:
 
 Defined in: [[modules/core.model_evaluation|core.model_evaluation]]
 
-Source: `core/model_evaluation.py:486`
+Source: `core/model_evaluation.py:572`
 
 Kind: `function`
 

@@ -2,7 +2,7 @@
 type: module
 module: core.regimes
 source: core/regimes.py
-generated_at: 2026-02-21T03:35:55+00:00
+generated_at: 2026-02-21T06:33:21+00:00
 tags:
   - acm
   - module
@@ -73,5 +73,7 @@ Summary: no module docstring summary
 - [[functions/core.regimes.save_regime_model|core.regimes.save_regime_model]] (line 3562, function)
 - [[functions/core.regimes.load_regime_model|core.regimes.load_regime_model]] (line 3612, function)
 - [[functions/core.regimes.detect_transient_states|core.regimes.detect_transient_states]] (line 3694, function)
-- [[functions/core.regimes.write_regime_occupancy_and_transitions|core.regimes.write_regime_occupancy_and_transitions]] (line 3855, function)
-- [[functions/core.regimes.write_regime_definitions_for_audit|core.regimes.write_regime_definitions_for_audit]] (line 3926, function)
+- [[functions/core.regimes.apply_regime_health_labels|core.regimes.apply_regime_health_labels]] (line 3855, function)
+- [[functions/core.regimes.apply_transient_state_labels|core.regimes.apply_transient_state_labels]] (line 3901, function)
+- [[functions/core.regimes.write_regime_occupancy_and_transitions|core.regimes.write_regime_occupancy_and_transitions]] (line 3930, function)
+- [[functions/core.regimes.write_regime_definitions_for_audit|core.regimes.write_regime_definitions_for_audit]] (line 4001, function)

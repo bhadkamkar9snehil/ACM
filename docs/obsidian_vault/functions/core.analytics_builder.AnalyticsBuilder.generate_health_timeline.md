@@ -5,7 +5,7 @@ module: core.analytics_builder
 source: core/analytics_builder.py
 line_start: 314
 line_end: 423
-generated_at: 2026-02-21T03:35:55+00:00
+generated_at: 2026-02-21T06:33:21+00:00
 tags:
   - acm
   - method

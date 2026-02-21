@@ -3,9 +3,9 @@ type: class
 id: core.acm.ScoreContext
 module: core.acm
 source: core/acm.py
-line_start: 310
-line_end: 314
-generated_at: 2026-02-21T03:35:55+00:00
+line_start: 309
+line_end: 313
+generated_at: 2026-02-21T06:33:21+00:00
 tags:
   - acm
   - class
@@ -15,7 +15,7 @@ tags:
 
 Defined in: [[modules/core.acm|core.acm]]
 
-Source: `core/acm.py:310`
+Source: `core/acm.py:309`
 
 Kind: `class`
 

@@ -5,7 +5,7 @@ module: core.fast_features
 source: core/fast_features.py
 line_start: 174
 line_end: 184
-generated_at: 2026-02-21T03:35:55+00:00
+generated_at: 2026-02-21T06:33:21+00:00
 tags:
   - acm
   - function

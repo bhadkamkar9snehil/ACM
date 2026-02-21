@@ -3,9 +3,9 @@ type: function
 id: core.regimes.write_regime_definitions_for_audit
 module: core.regimes
 source: core/regimes.py
-line_start: 3926
-line_end: 3978
-generated_at: 2026-02-21T03:35:55+00:00
+line_start: 4001
+line_end: 4053
+generated_at: 2026-02-21T06:33:21+00:00
 tags:
   - acm
   - function
@@ -15,7 +15,7 @@ tags:
 
 Defined in: [[modules/core.regimes|core.regimes]]
 
-Source: `core/regimes.py:3926`
+Source: `core/regimes.py:4001`
 
 Kind: `function`
 

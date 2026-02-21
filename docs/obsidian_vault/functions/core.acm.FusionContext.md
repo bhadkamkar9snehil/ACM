@@ -3,9 +3,9 @@ type: class
 id: core.acm.FusionContext
 module: core.acm
 source: core/acm.py
-line_start: 318
-line_end: 323
-generated_at: 2026-02-21T03:35:55+00:00
+line_start: 317
+line_end: 322
+generated_at: 2026-02-21T06:33:21+00:00
 tags:
   - acm
   - class
@@ -15,7 +15,7 @@ tags:
 
 Defined in: [[modules/core.acm|core.acm]]
 
-Source: `core/acm.py:318`
+Source: `core/acm.py:317`
 
 Kind: `class`
 

@@ -2,7 +2,7 @@
 type: module
 module: core.drift
 source: core/drift.py
-generated_at: 2026-02-21T03:35:55+00:00
+generated_at: 2026-02-21T06:33:21+00:00
 tags:
   - acm
   - module
@@ -28,3 +28,5 @@ Summary: Change-point and drift detection module.
 - [[functions/core.drift.compute_drift_alert_mode|core.drift.compute_drift_alert_mode]] (line 204, function)
 - [[functions/core.drift.load_previous_drift_mode|core.drift.load_previous_drift_mode]] (line 335, function)
 - [[functions/core.drift.build_drift_controller_state|core.drift.build_drift_controller_state]] (line 364, function)
+- [[functions/core.drift.write_drift_controller_state|core.drift.write_drift_controller_state]] (line 387, function)
+- [[functions/core.drift.run_drift_pipeline|core.drift.run_drift_pipeline]] (line 427, function)

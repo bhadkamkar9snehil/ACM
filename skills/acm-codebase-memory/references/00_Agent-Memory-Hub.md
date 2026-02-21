@@ -1,6 +1,6 @@
 ---
 type: agent-memory
-generated_at: 2026-02-21T04:47:04+00:00
+generated_at: 2026-02-21T06:33:21+00:00
 ---
 
 # ACM Agent Memory Hub
@@ -17,7 +17,7 @@ This note is generated for agent-first ACM context loading.
 ## Highest Symbol Density Modules
 - [[modules/core.observability|core.observability]] symbols=108
 - [[modules/core.output_manager|core.output_manager]] symbols=74
-- [[modules/core.regimes|core.regimes]] symbols=57
+- [[modules/core.regimes|core.regimes]] symbols=59
 - [[modules/core.model_persistence|core.model_persistence]] symbols=38
 - [[modules/core.degradation_model|core.degradation_model]] symbols=36
 - [[modules/core.fuse|core.fuse]] symbols=34
@@ -25,8 +25,8 @@ This note is generated for agent-first ACM context loading.
 - [[modules/core.forecast_engine|core.forecast_engine]] symbols=31
 - [[modules/core.sensor_attribution|core.sensor_attribution]] symbols=31
 - [[modules/core.resource_monitor|core.resource_monitor]] symbols=27
+- [[modules/core.pipeline_types|core.pipeline_types]] symbols=23
 - [[modules/core.sql_client|core.sql_client]] symbols=22
-- [[modules/core.pipeline_types|core.pipeline_types]] symbols=21
 
 ## Commands
 1. Refresh memory:

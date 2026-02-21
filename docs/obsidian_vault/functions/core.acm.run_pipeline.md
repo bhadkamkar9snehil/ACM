@@ -3,9 +3,9 @@ type: function
 id: core.acm.run_pipeline
 module: core.acm
 source: core/acm.py
-line_start: 491
-line_end: 506
-generated_at: 2026-02-21T03:35:55+00:00
+line_start: 445
+line_end: 460
+generated_at: 2026-02-21T06:33:21+00:00
 tags:
   - acm
   - function
@@ -15,7 +15,7 @@ tags:
 
 Defined in: [[modules/core.acm|core.acm]]
 
-Source: `core/acm.py:491`
+Source: `core/acm.py:445`
 
 Kind: `function`
 

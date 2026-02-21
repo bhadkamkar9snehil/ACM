@@ -5,7 +5,7 @@ module: core.model_persistence
 source: core/model_persistence.py
 line_start: 487
 line_end: 501
-generated_at: 2026-02-21T03:35:55+00:00
+generated_at: 2026-02-21T06:33:21+00:00
 tags:
   - acm
   - method

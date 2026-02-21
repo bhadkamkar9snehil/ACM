@@ -3,9 +3,9 @@ type: function
 id: core.acm.build_arg_parser
 module: core.acm
 source: core/acm.py
-line_start: 436
-line_end: 461
-generated_at: 2026-02-21T03:35:55+00:00
+line_start: 390
+line_end: 415
+generated_at: 2026-02-21T06:33:21+00:00
 tags:
   - acm
   - function
@@ -15,7 +15,7 @@ tags:
 
 Defined in: [[modules/core.acm|core.acm]]
 
-Source: `core/acm.py:436`
+Source: `core/acm.py:390`
 
 Kind: `function`
 

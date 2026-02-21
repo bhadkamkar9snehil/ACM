@@ -5,7 +5,7 @@ module: core.resource_monitor
 source: core/resource_monitor.py
 line_start: 636
 line_end: 662
-generated_at: 2026-02-21T03:35:55+00:00
+generated_at: 2026-02-21T06:33:21+00:00
 tags:
   - acm
   - function

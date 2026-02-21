@@ -5,7 +5,7 @@ module: core.model_evaluation
 source: core/model_evaluation.py
 line_start: 298
 line_end: 321
-generated_at: 2026-02-21T03:35:55+00:00
+generated_at: 2026-02-21T06:33:21+00:00
 tags:
   - acm
   - method

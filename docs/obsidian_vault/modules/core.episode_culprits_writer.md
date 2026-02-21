@@ -2,7 +2,7 @@
 type: module
 module: core.episode_culprits_writer
 source: core/episode_culprits_writer.py
-generated_at: 2026-02-21T03:35:55+00:00
+generated_at: 2026-02-21T06:33:21+00:00
 tags:
   - acm
   - module

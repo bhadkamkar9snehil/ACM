@@ -3,9 +3,9 @@ type: function
 id: core.model_persistence.save_trained_models
 module: core.model_persistence
 source: core/model_persistence.py
-line_start: 1525
-line_end: 1634
-generated_at: 2026-02-21T03:35:55+00:00
+line_start: 1752
+line_end: 1861
+generated_at: 2026-02-21T06:33:21+00:00
 tags:
   - acm
   - function
@@ -15,7 +15,7 @@ tags:
 
 Defined in: [[modules/core.model_persistence|core.model_persistence]]
 
-Source: `core/model_persistence.py:1525`
+Source: `core/model_persistence.py:1752`
 
 Kind: `function`
 
