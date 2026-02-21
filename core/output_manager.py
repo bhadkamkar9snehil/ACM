@@ -336,6 +336,17 @@ class PersistCoreOutputsResult:
         return int(self.scores_inserted) + int(self.episodes_inserted)
 
 
+@dataclass
+class PersistPipelineOutputsResult:
+    """Aggregate result for full persist-stage output orchestration."""
+    rows_written_delta: int = 0
+    episode_count: int = 0
+    analytics_table_count: int = 0
+    raw_train: Optional[pd.DataFrame] = None
+    raw_score: Optional[pd.DataFrame] = None
+    sensor_context: Optional[Dict[str, Any]] = None
+
+
 class OutputManager:
     """
     Unified output manager that consolidates all scattered output generation.
@@ -3198,6 +3209,65 @@ class OutputManager:
         return self.generate_all_analytics_tables(
             scores_df=scores_df,
             cfg=cfg,
+            sensor_context=sensor_context,
+        )
+
+    def persist_pipeline_outputs(
+        self,
+        scores_df: pd.DataFrame,
+        episodes_df: Optional[pd.DataFrame],
+        raw_train: Optional[pd.DataFrame],
+        raw_score: Optional[pd.DataFrame],
+        iforest_detector: Optional[Any],
+        omr_detector: Optional[Any],
+        seasonal_patterns: Optional[Dict[str, List[Any]]],
+        cfg: Dict[str, Any],
+        sensor_context: Optional[Dict[str, Any]],
+        fusion_weights_used: Optional[Dict[str, float]],
+        record_episode_fn: Optional[Callable[..., Any]] = None,
+        equip: Optional[str] = None,
+        max_total_rows: int = 10000,
+    ) -> PersistPipelineOutputsResult:
+        """
+        Persist core and optional run artifacts, then release persist-phase memory.
+        """
+        core = self.persist_core_outputs(
+            scores_df=scores_df,
+            episodes_df=episodes_df,
+        )
+        if core.episode_count > 0 and record_episode_fn is not None and equip:
+            record_episode_fn(equip, count=core.episode_count, severity="info")
+
+        self.persist_additional_artifacts(
+            scores_df=scores_df,
+            raw_score=raw_score,
+            seasonal_patterns=seasonal_patterns,
+            max_total_rows=max_total_rows,
+        )
+
+        raw_train, raw_score = self.release_persist_memory(
+            raw_train=raw_train,
+            raw_score=raw_score,
+            iforest_detector=iforest_detector,
+            omr_detector=omr_detector,
+        )
+
+        analytics_result = self.generate_all_analytics_with_context(
+            scores_df=scores_df,
+            cfg=cfg,
+            sensor_context=sensor_context,
+            fusion_weights_used=fusion_weights_used,
+        )
+        table_count = int(analytics_result.get("sql_tables", 0))
+        sensor_context = None
+        gc.collect()
+
+        return PersistPipelineOutputsResult(
+            rows_written_delta=core.rows_written_delta,
+            episode_count=core.episode_count,
+            analytics_table_count=table_count,
+            raw_train=raw_train,
+            raw_score=raw_score,
             sensor_context=sensor_context,
         )
 

@@ -23,7 +23,6 @@ from __future__ import annotations
 # Standard library imports
 # ============================
 import argparse
-import gc
 import hashlib
 import json
 import os
@@ -1560,46 +1559,29 @@ def main() -> None:
         # SQL-only persistence.
         with T.section("persist"):
           with output_manager.batched_transaction():
-            # Core outputs must succeed; failures here abort the run.
-            with T.section("persist.core_outputs"):
-                core_persist = output_manager.persist_core_outputs(
+            # Core + optional outputs, memory release, and analytics generation.
+            with T.section("persist.pipeline_outputs"):
+                persist_result = output_manager.persist_pipeline_outputs(
                     scores_df=frame,
                     episodes_df=episodes,
-                )
-                rows_written += core_persist.rows_written_delta
-                if core_persist.episode_count > 0:
-                    record_episode(equip, count=core_persist.episode_count, severity="info")
-
-            # Culprits are written via OutputManager.
-            
-            # === Additional table writes ===
-            with T.section("persist.additional_artifacts"):
-                output_manager.persist_additional_artifacts(
-                    scores_df=frame,
+                    raw_train=raw_train,
                     raw_score=raw_score,
+                    iforest_detector=iforest_detector,
+                    omr_detector=omr_detector,
                     seasonal_patterns=seasonal_patterns,
-                    max_total_rows=10000,
-                )
-
-            # ===== Memory cleanup: free large objects no longer needed =====
-            # After persist, raw sensor data and selected detector internals are no longer needed.
-            raw_train, raw_score = output_manager.release_persist_memory(
-                raw_train=raw_train,
-                raw_score=raw_score,
-                iforest_detector=iforest_detector,
-                omr_detector=omr_detector,
-            )
-
-            # === Analytics generation ===
-            with T.section("outputs.comprehensive_analytics"):
-                analytics_result = output_manager.generate_all_analytics_with_context(
-                    scores_df=frame,
                     cfg=cfg,
                     sensor_context=sensor_context,
                     fusion_weights_used=fusion_weights_used,
+                    record_episode_fn=record_episode,
+                    equip=equip,
+                    max_total_rows=10000,
                 )
+                rows_written += persist_result.rows_written_delta
+                raw_train = persist_result.raw_train
+                raw_score = persist_result.raw_score
+                sensor_context = persist_result.sensor_context
                 Console.info(
-                    f"Analytics: tables={analytics_result.get('sql_tables', 0)}",
+                    f"Analytics: tables={persist_result.analytics_table_count}",
                     component="OUTPUTS",
                 )
 
@@ -1647,10 +1629,6 @@ def main() -> None:
             #         degradations.append("forecast_failed")
 
             Console.info("Forecasting/RUL is disabled (FORECASTING_DISABLED).", component="FORECAST")
-
-            # Memory cleanup: free sensor context after forecasting.
-            sensor_context = None
-            gc.collect()
 
             run_completion_time = datetime.now()
 
