@@ -1,6 +1,6 @@
 ---
 type: index
-generated_at: 2026-02-21T04:34:45+00:00
+generated_at: 2026-02-21T04:47:04+00:00
 tags:
   - acm
   - index
@@ -12,8 +12,8 @@ Generated from code in `core/`.
 
 ## Snapshot
 - modules: 36
-- symbols (functions/classes/methods): 789
-- generated_at_utc: 2026-02-21T04:34:45+00:00
+- symbols (functions/classes/methods): 792
+- generated_at_utc: 2026-02-21T04:47:04+00:00
 
 ## Start Here
 - [[01_Modules]]
