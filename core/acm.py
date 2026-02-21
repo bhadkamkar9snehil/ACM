@@ -114,7 +114,8 @@ from core.fast_features import ensure_local_index, deduplicate_index, build_feat
 # Config utilities: signature and loader helpers.
 from utils.config_dict import compute_config_signature
 
-from utils.timer import Timer  # type: ignore
+from utils.timer import Timer, enable_timer_metrics  # type: ignore
+from core.resource_monitor import enable_resource_metrics
 
 # Version constant for logging and run metadata.
 from utils.version import __version__ as ACM_VERSION
@@ -249,34 +250,28 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
     # failures are captured. Use equip_id=0 until SQL is available.
     # ========================================================================
     
-    if _OBSERVABILITY_AVAILABLE:
-        try:
-            init_observability(
-                equipment=equip,
-                equip_id=0,  # Will be updated after SQL connects
-                service_name="acm-pipeline",
-                otlp_endpoint="http://localhost:4318",
-                loki_endpoint="http://localhost:3100",
-                enable_tracing=True,
-                enable_metrics=True,
-                enable_loki=True,
-                enable_profiling=True,
-            )
-            start_profiling()
-        except Exception as e:
-            Console.warn(f"Observability init failed (non-fatal): {e}", component="OTEL",
-                         error_type=type(e).__name__, error=str(e)[:200])
+    try:
+        init_observability(
+            equipment=equip,
+            equip_id=0,  # Will be updated after SQL connects
+            service_name="acm-pipeline",
+            otlp_endpoint="http://localhost:4318",
+            loki_endpoint="http://localhost:3100",
+            enable_tracing=True,
+            enable_metrics=True,
+            enable_loki=True,
+            enable_profiling=True,
+        )
+        start_profiling()
+    except Exception as e:
+        Console.warn(f"Observability init failed (non-fatal): {e}", component="OTEL",
+                     error_type=type(e).__name__, error=str(e)[:200])
 
     T = Timer(enable=True)
-    
-    # Enable OTEL metrics for Timer and ResourceMonitor (optional integration).
-    try:
-        from utils.timer import enable_timer_metrics, set_timer_equipment
-        from core.resource_monitor import enable_resource_metrics, set_resource_equipment
-        enable_timer_metrics(equip)
-        enable_resource_metrics(equip)
-    except ImportError:
-        pass  # Optional integration
+
+    # Enable OTEL metrics for Timer and ResourceMonitor.
+    enable_timer_metrics(equip)
+    enable_resource_metrics(equip)
 
     # ========================================================================
     # Fail-fast SQL connect: ACM is SQL-only and must abort if SQL is down.
