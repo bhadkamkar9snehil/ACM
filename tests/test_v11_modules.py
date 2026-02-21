@@ -4,6 +4,8 @@ Tests for V11 core modules: confidence.py, model_lifecycle.py, acm.py
 Run with: pytest tests/test_v11_modules.py -v
 """
 import pytest
+import numpy as np
+import pandas as pd
 from datetime import datetime, timedelta
 
 
@@ -309,6 +311,122 @@ class TestAcmEntryPoint:
         """_detect_mode function exists."""
         from core import acm
         assert hasattr(acm, '_detect_mode')
+
+
+class TestRefactorHelpers:
+    """Smoke and behavior checks for newly extracted helper functions."""
+
+    def test_maybe_update_adaptive_thresholds_skips_without_fused(self):
+        """Threshold update helper should no-op when train_frame has no fused column."""
+        from core.adaptive_thresholds import maybe_update_adaptive_thresholds
+
+        train_frame = pd.DataFrame({"x": [1.0, 2.0]})
+        train_data = pd.DataFrame({"x": [1.0, 2.0]})
+        cfg = {"runtime": {"run_count": 1}}
+
+        class _Logger:
+            def info(self, *_a, **_k):
+                return None
+
+        updated = maybe_update_adaptive_thresholds(
+            train_frame=train_frame,
+            train_data=train_data,
+            cfg=cfg,
+            equip_id=1,
+            output_manager=None,
+            coldstart_complete=False,
+            continuous_learning=False,
+            threshold_update_interval=1,
+            regime_quality_ok=False,
+            logger=_Logger(),
+        )
+        assert updated is False
+
+    def test_write_drift_controller_state_no_output_manager(self):
+        """Drift writer should safely no-op when output manager is missing."""
+        from core.drift import write_drift_controller_state
+
+        frame = pd.DataFrame({"drift_z": [0.1], "drift_mode": ["FAULT"]})
+        rows = write_drift_controller_state(
+            output_manager=None,
+            frame=frame,
+            cfg={},
+            score_out={},
+        )
+        assert rows == 0
+
+    def test_evaluate_and_maybe_refit_cached_models_no_cache(self):
+        """Auto-retrain helper should return no-op when cached models are absent."""
+        from core.model_evaluation import evaluate_and_maybe_refit_cached_models
+
+        out = evaluate_and_maybe_refit_cached_models(
+            cfg={},
+            cached_models=None,
+            cached_manifest=None,
+            detectors_just_trained=False,
+            score_out={},
+            regime_quality_ok=True,
+            current_model_maturity="LEARNING",
+            boolean_only_metrics=[],
+            equip="FD_FAN",
+            logger=type("L", (), {"warn": lambda *a, **k: None})(),
+            record_model_refit_fn=lambda *a, **k: None,
+            fit_all_detectors_fn=lambda **k: {},
+            train=pd.DataFrame({"a": [1.0, 2.0]}),
+            det_flags={},
+            output_manager=None,
+            sql_client=None,
+            run_id=None,
+            equip_id=1,
+            regime_model=None,
+        )
+        assert out["force_retrain"] is False
+        assert out["cached_models"] is None
+        assert out["retrain_result"] is None
+
+    def test_update_and_persist_model_lifecycle_safe_no_deps(self):
+        """Lifecycle safe wrapper should return None when SQL/output manager are unavailable."""
+        from core.model_lifecycle import update_and_persist_model_lifecycle_safe
+
+        state = update_and_persist_model_lifecycle_safe(
+            sql_client=None,
+            output_manager=None,
+            equip_id=1,
+            regime_state_version=1,
+            cfg={},
+            train_data=pd.DataFrame({"a": [1.0, 2.0]}),
+            run_id="r1",
+            regime_model=None,
+            score_out={},
+            regime_quality_ok=True,
+        )
+        assert state is None
+
+    def test_apply_regime_health_labels_sets_unknown_when_quality_bad(self):
+        """Regime health helper should mark unknown when quality is not acceptable."""
+        from core.regimes import apply_regime_health_labels
+
+        frame = pd.DataFrame({"regime_label": np.array([0, 1, -1]), "fused": [0.1, 0.2, 0.3]})
+        out_frame, stats = apply_regime_health_labels(
+            frame=frame,
+            regime_model=None,
+            regime_quality_ok=False,
+            cfg={},
+            output_manager=None,
+        )
+        assert "regime_state" in out_frame.columns
+        assert set(out_frame["regime_state"].unique().tolist()) == {"unknown"}
+        assert stats == {}
+
+    def test_apply_transient_state_labels_no_regime_label(self):
+        """Transient helper should no-op when regime_label column is absent."""
+        from core.regimes import apply_transient_state_labels
+
+        frame = pd.DataFrame({"fused": [0.1, 0.2, 0.3]})
+        score_data = pd.DataFrame({"sensor": [1.0, 2.0, 3.0]})
+        out_frame, counts = apply_transient_state_labels(frame=frame, score_data=score_data, cfg={})
+        assert out_frame.equals(frame)
+        assert counts == {}
 
 
 if __name__ == "__main__":
