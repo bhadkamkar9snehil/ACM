@@ -5,10 +5,7 @@ module: core.sql_client
 source: core/sql_client.py
 line_start: 344
 line_end: 392
-generated_at: 2026-02-21T06:33:21+00:00
-tags:
-  - acm
-  - method
+generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.sql_client.SQLClient.executemany

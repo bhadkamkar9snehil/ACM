@@ -5,10 +5,7 @@ module: core.fuse
 source: core/fuse.py
 line_start: 1216
 line_end: 1253
-generated_at: 2026-02-21T06:33:21+00:00
-tags:
-  - acm
-  - method
+generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.fuse.ScoreCalibrator.transform

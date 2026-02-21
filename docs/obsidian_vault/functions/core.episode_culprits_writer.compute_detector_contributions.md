@@ -5,10 +5,7 @@ module: core.episode_culprits_writer
 source: core/episode_culprits_writer.py
 line_start: 185
 line_end: 259
-generated_at: 2026-02-21T06:33:21+00:00
-tags:
-  - acm
-  - function
+generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.episode_culprits_writer.compute_detector_contributions

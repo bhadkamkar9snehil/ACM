@@ -5,10 +5,7 @@ module: core.model_persistence
 source: core/model_persistence.py
 line_start: 693
 line_end: 740
-generated_at: 2026-02-21T06:33:21+00:00
-tags:
-  - acm
-  - method
+generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.model_persistence.ModelVersionManager.save_calibration_params

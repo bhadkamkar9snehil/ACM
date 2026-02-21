@@ -5,10 +5,7 @@ module: core.confidence
 source: core/confidence.py
 line_start: 196
 line_end: 260
-generated_at: 2026-02-21T06:33:21+00:00
-tags:
-  - acm
-  - function
+generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.confidence.check_rul_reliability

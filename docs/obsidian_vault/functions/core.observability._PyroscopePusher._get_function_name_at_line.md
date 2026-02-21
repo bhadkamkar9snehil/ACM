@@ -5,10 +5,7 @@ module: core.observability
 source: core/observability.py
 line_start: 2959
 line_end: 2995
-generated_at: 2026-02-21T06:33:21+00:00
-tags:
-  - acm
-  - method
+generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.observability._PyroscopePusher._get_function_name_at_line

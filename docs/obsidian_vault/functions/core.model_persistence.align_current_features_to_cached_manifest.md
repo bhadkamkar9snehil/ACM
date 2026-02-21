@@ -5,10 +5,7 @@ module: core.model_persistence
 source: core/model_persistence.py
 line_start: 1525
 line_end: 1593
-generated_at: 2026-02-21T06:33:21+00:00
-tags:
-  - acm
-  - function
+generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.model_persistence.align_current_features_to_cached_manifest

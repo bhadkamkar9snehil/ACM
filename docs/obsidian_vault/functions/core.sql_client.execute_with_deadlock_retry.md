@@ -5,10 +5,7 @@ module: core.sql_client
 source: core/sql_client.py
 line_start: 537
 line_end: 570
-generated_at: 2026-02-21T06:33:21+00:00
-tags:
-  - acm
-  - function
+generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.sql_client.execute_with_deadlock_retry

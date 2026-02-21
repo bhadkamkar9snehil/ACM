@@ -5,10 +5,7 @@ module: core.regimes
 source: core/regimes.py
 line_start: 2622
 line_end: 2714
-generated_at: 2026-02-21T06:33:21+00:00
-tags:
-  - acm
-  - function
+generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.regimes._read_scores_csv

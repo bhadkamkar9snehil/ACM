@@ -5,10 +5,7 @@ module: core.detector_orchestrator
 source: core/detector_orchestrator.py
 line_start: 409
 line_end: 486
-generated_at: 2026-02-21T06:33:21+00:00
-tags:
-  - acm
-  - function
+generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.detector_orchestrator.validate_model_feature_compatibility

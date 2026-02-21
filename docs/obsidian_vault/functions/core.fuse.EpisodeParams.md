@@ -5,10 +5,7 @@ module: core.fuse
 source: core/fuse.py
 line_start: 1375
 line_end: 1399
-generated_at: 2026-02-21T06:33:21+00:00
-tags:
-  - acm
-  - class
+generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.fuse.EpisodeParams

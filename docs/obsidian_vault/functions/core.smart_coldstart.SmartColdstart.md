@@ -5,10 +5,7 @@ module: core.smart_coldstart
 source: core/smart_coldstart.py
 line_start: 79
 line_end: 560
-generated_at: 2026-02-21T06:33:21+00:00
-tags:
-  - acm
-  - class
+generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.smart_coldstart.SmartColdstart

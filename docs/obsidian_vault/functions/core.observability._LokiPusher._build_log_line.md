@@ -5,10 +5,7 @@ module: core.observability
 source: core/observability.py
 line_start: 2391
 line_end: 2414
-generated_at: 2026-02-21T06:33:21+00:00
-tags:
-  - acm
-  - method
+generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.observability._LokiPusher._build_log_line

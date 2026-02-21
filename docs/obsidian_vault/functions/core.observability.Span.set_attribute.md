@@ -5,10 +5,7 @@ module: core.observability
 source: core/observability.py
 line_start: 1730
 line_end: 1736
-generated_at: 2026-02-21T06:33:21+00:00
-tags:
-  - acm
-  - method
+generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.observability.Span.set_attribute

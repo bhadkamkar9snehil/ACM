@@ -201,6 +201,19 @@ def _write(path: Path, content: str) -> None:
     path.write_text(content.rstrip() + "\n", encoding="utf-8")
 
 
+def _cleanup_generated_notes() -> None:
+    """
+    Remove previously generated module/function notes.
+
+    This prevents stale symbols from lingering in the vault when source code
+    changes remove or rename functions.
+    """
+    for md in MODULES_DIR.glob("*.md"):
+        md.unlink()
+    for md in FUNCTIONS_DIR.glob("*.md"):
+        md.unlink()
+
+
 def _link_to_module(module_name: str) -> str:
     return f"[[modules/{module_name}|{module_name}]]"
 
@@ -224,9 +237,6 @@ type: module
 module: {module.module_name}
 source: {module.source_path}
 generated_at: {generated_at}
-tags:
-  - acm
-  - module
 ---
 
 # {module.module_name}
@@ -252,9 +262,6 @@ source: {function.source_path}
 line_start: {function.line_start}
 line_end: {function.line_end}
 generated_at: {generated_at}
-tags:
-  - acm
-  - {function.kind}
 ---
 
 # {function.full_name}
@@ -277,9 +284,6 @@ def _render_home(modules: List[ModuleInfo], generated_at: str) -> str:
     return f"""---
 type: index
 generated_at: {generated_at}
-tags:
-  - acm
-  - index
 ---
 
 # ACM Obsidian Knowledge Graph
@@ -310,9 +314,6 @@ def _render_module_index(modules: List[ModuleInfo], generated_at: str) -> str:
     return f"""---
 type: index
 generated_at: {generated_at}
-tags:
-  - acm
-  - modules
 ---
 
 # Module Index
@@ -337,9 +338,6 @@ def _render_function_index(modules: List[ModuleInfo], generated_at: str) -> str:
     return f"""---
 type: index
 generated_at: {generated_at}
-tags:
-  - acm
-  - functions
 ---
 
 # Function and Symbol Index
@@ -352,9 +350,6 @@ def _runtime_flow_note(generated_at: str) -> str:
     return f"""---
 type: reference
 generated_at: {generated_at}
-tags:
-  - acm
-  - runtime
 ---
 
 # Runtime Flow
@@ -389,9 +384,6 @@ def _outputs_note(generated_at: str) -> str:
     return f"""---
 type: reference
 generated_at: {generated_at}
-tags:
-  - acm
-  - outputs
 ---
 
 # Outputs and Status
@@ -462,6 +454,7 @@ def build_graph() -> Tuple[int, int]:
     VAULT_DIR.mkdir(parents=True, exist_ok=True)
     MODULES_DIR.mkdir(parents=True, exist_ok=True)
     FUNCTIONS_DIR.mkdir(parents=True, exist_ok=True)
+    _cleanup_generated_notes()
 
     _write(VAULT_DIR / "README.md", _readme_note())
     _write(VAULT_DIR / "00_Home.md", _render_home(module_infos, generated_at))

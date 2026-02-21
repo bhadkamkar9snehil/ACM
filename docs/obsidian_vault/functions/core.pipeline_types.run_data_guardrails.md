@@ -5,10 +5,7 @@ module: core.pipeline_types
 source: core/pipeline_types.py
 line_start: 481
 line_end: 599
-generated_at: 2026-02-21T06:33:21+00:00
-tags:
-  - acm
-  - function
+generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.pipeline_types.run_data_guardrails

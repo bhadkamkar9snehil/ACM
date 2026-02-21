@@ -5,10 +5,7 @@ module: core.resource_monitor
 source: core/resource_monitor.py
 line_start: 128
 line_end: 135
-generated_at: 2026-02-21T06:33:21+00:00
-tags:
-  - acm
-  - function
+generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.resource_monitor.get_cpu_per_core

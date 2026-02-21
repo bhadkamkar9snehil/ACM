@@ -5,10 +5,7 @@ module: core.fuse
 source: core/fuse.py
 line_start: 2008
 line_end: 2161
-generated_at: 2026-02-21T06:33:21+00:00
-tags:
-  - acm
-  - function
+generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.fuse.normalize_episodes_schema

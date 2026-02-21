@@ -53,6 +53,12 @@ This repo now adapts these ideas for agent-managed memory:
 3. Do not edit generated module and function notes manually.
 4. Add manual notes in separate files and link to generated notes.
 
+## Tagging Policy For Readable Graphs
+1. Generated notes in `docs/obsidian_vault/` must not include `tags:` frontmatter.
+2. Use frontmatter metadata fields like `type`, `module`, `id`, and `source` instead of tags.
+3. Avoid inline `#tag` usage in generated notes.
+4. If manual notes need tags, keep them minimal and purpose-specific.
+
 ## Recommended Manual Notes
 1. `docs/obsidian_vault/10_Refactor-Log.md` for extraction decisions and rationale.
 2. `docs/obsidian_vault/11_Known-Risks.md` for fragile paths and regression risks.

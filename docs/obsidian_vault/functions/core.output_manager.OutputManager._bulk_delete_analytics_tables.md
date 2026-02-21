@@ -5,10 +5,7 @@ module: core.output_manager
 source: core/output_manager.py
 line_start: 3225
 line_end: 3362
-generated_at: 2026-02-21T06:33:21+00:00
-tags:
-  - acm
-  - method
+generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.output_manager.OutputManager._bulk_delete_analytics_tables

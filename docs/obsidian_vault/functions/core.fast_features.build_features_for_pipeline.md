@@ -5,10 +5,7 @@ module: core.fast_features
 source: core/fast_features.py
 line_start: 1165
 line_end: 1217
-generated_at: 2026-02-21T06:33:21+00:00
-tags:
-  - acm
-  - function
+generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.fast_features.build_features_for_pipeline

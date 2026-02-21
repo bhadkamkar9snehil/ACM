@@ -5,10 +5,7 @@ module: core.adaptive_thresholds
 source: core/adaptive_thresholds.py
 line_start: 247
 line_end: 268
-generated_at: 2026-02-21T06:33:21+00:00
-tags:
-  - acm
-  - method
+generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.adaptive_thresholds.AdaptiveThresholdCalculator._quantile_threshold
