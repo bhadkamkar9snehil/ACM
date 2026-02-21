@@ -23,12 +23,11 @@ from __future__ import annotations
 # Standard library imports
 # ============================
 import argparse
-import sys
 import time
 from datetime import datetime
 # NOTE: Parallel fitting via ThreadPoolExecutor was removed due to BLAS/OpenMP
 # deadlocks; model fitting is intentionally single-threaded here.
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 # NOTE: Overflow warnings are not suppressed globally. If they appear, treat
 # them as a signal of scaling/unit issues and handle them locally where safe.
@@ -39,26 +38,7 @@ from typing import Any, Callable, Dict, List, Optional
 import numpy as np
 import pandas as pd
 
-# --- import guard to support module and script execution modes
-try:
-    # import ONLY core modules relatively
-    from . import regimes, drift, fuse
-    from . import correlation, outliers
-    from .ar1_detector import AR1Detector  # Split out of forecasting for clarity
-    from . import fast_features
-    # FORECASTING_DISABLED: ForecastEngine import temporarily disabled.
-    # To re-enable: uncomment the line below and remove the stub after this block.
-    # from .forecast_engine import ForecastEngine  # Unified forecasting orchestrator
-except ImportError:
-    import pathlib
-    sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
-    from core import regimes, drift, fuse
-    from core import correlation, outliers
-    from core.ar1_detector import AR1Detector
-    # FORECASTING_DISABLED: ForecastEngine import temporarily disabled.
-    # To re-enable: uncomment the line below and remove the stub after this block.
-    # from core.forecast_engine import ForecastEngine  # Unified forecasting orchestrator
-    from core import fast_features
+from core import regimes, drift, fuse, fast_features
 
 # FORECASTING_DISABLED: Stub so pipeline can import without ForecastEngine.
 # Remove this stub when re-enabling forecasting.
@@ -98,102 +78,34 @@ from core.model_persistence import (
 )
 from core.model_evaluation import auto_tune_parameters, run_auto_retrain_stage
 
-# Observability: OpenTelemetry + structured logging. Falls back to no-op stubs
-# when observability dependencies are unavailable.
-try:
-    from core.observability import (
-        init as init_observability,
-        log as obs_log,
-        get_tracer, 
-        get_meter,
-        set_context as set_acm_context,
-        traced,
-        Span,
-        Console,
-        OTEL_AVAILABLE,
-        record_batch,
-        record_batch_processed,
-        record_health,
-        record_health_score,
-        record_rul,
-        record_active_defects,
-        record_episode,
-        record_error,
-        record_coldstart,
-        record_run,
-        record_sql_op,
-        record_detector_scores,
-        record_regime,
-        record_data_quality,
-        record_model_refit,
-        close_run_span,
-        shutdown_run_observability,
-        start_profiling,
-    )
-    _OBSERVABILITY_AVAILABLE = True
-except ImportError:
-    _OBSERVABILITY_AVAILABLE = False
-    OTEL_AVAILABLE = False
-    obs_log = None
-    def init_observability(*args, **kwargs): pass
-    def get_tracer(): return None
-    def get_meter(): return None
-    def set_acm_context(*args, **kwargs): pass
-    def traced(name: str, track_resources: bool = True):
-        def decorator(func: Callable) -> Callable:
-            return func
-        return decorator
-    class _FallbackSpan:
-        def __init__(self, *a, **k): pass
-        def __enter__(self): return self
-        def __exit__(self, *a): return False
-        def set_attribute(self, *a): pass
-    class _FallbackConsole:
-        @staticmethod
-        def info(msg, **k): print(msg)
-        @staticmethod
-        def warn(msg, **k): print(msg)
-        @staticmethod
-        def error(msg, **k): print(msg)
-    Span = _FallbackSpan
-    Console = _FallbackConsole
-    def record_batch(*args, **kwargs): pass
-    def record_batch_processed(*args, **kwargs): pass
-    def record_health(*args, **kwargs): pass
-    def record_health_score(*args, **kwargs): pass
-    def record_rul(*args, **kwargs): pass
-    def record_active_defects(*args, **kwargs): pass
-    def record_episode(*args, **kwargs): pass
-    def record_error(*args, **kwargs): pass
-    def record_coldstart(*args, **kwargs): pass
-    def record_run(*args, **kwargs): pass
-    def record_sql_op(*args, **kwargs): pass
-    def record_detector_scores(*args, **kwargs): pass
-    def record_regime(*args, **kwargs): pass
-    def record_data_quality(*args, **kwargs): pass
-    def record_model_refit(*args, **kwargs): pass
-    def close_run_span(*args, **kwargs): pass
-    def shutdown_run_observability(*args, **kwargs): pass
-    def start_profiling(): pass
+from core.observability import (
+    init as init_observability,
+    get_tracer,
+    set_context as set_acm_context,
+    Console,
+    record_batch_processed,
+    record_health_score,
+    record_episode,
+    record_error,
+    record_coldstart,
+    record_run,
+    record_detector_scores,
+    record_regime,
+    record_data_quality,
+    record_model_refit,
+    close_run_span,
+    shutdown_run_observability,
+    start_profiling,
+)
+_OBSERVABILITY_AVAILABLE = True
 
-# SQL client: required at runtime (SQL-only pipeline). Guarded import keeps
-# module importable in environments without SQL drivers.
-try:
-    from core.sql_client import (  # type: ignore
-        SQLClient,
-        execute_with_deadlock_retry,
-        connect_acm_sql,
-        resolve_equipment_id_required,
-        load_config_required_from_sql,
-        start_acm_run,
-    )
-except ImportError:
-    SQLClient = None  # type: ignore
-    execute_with_deadlock_retry = None  # type: ignore
-    connect_acm_sql = None  # type: ignore
-    resolve_equipment_id_required = None  # type: ignore
-    load_config_required_from_sql = None  # type: ignore
-    start_acm_run = None  # type: ignore
+from core.sql_client import (
+    execute_with_deadlock_retry,
+    connect_acm_sql,
+    resolve_equipment_id_required,
+    load_config_required_from_sql,
+    start_acm_run,
+)
 
 # Data utilities: index hygiene and deduplication helpers.
 from core.fast_features import ensure_local_index, deduplicate_index, build_features_for_pipeline
@@ -201,24 +113,10 @@ from core.fast_features import ensure_local_index, deduplicate_index, build_feat
 # Config utilities: signature and loader helpers.
 from utils.config_dict import compute_config_signature
 
-# Timer helper with a safe fallback for environments without `utils.timer`.
-try:
-    from utils.timer import Timer  # type: ignore
-except Exception:
-    class Timer:
-        def __init__(self, enable: bool = True): pass
-        def section(self, *_a, **_k):
-            class _C:
-                def __enter__(self): return self
-                def __exit__(self, *x): return False
-            return _C()
-        def log(self, *a, **k): pass
+from utils.timer import Timer  # type: ignore
 
 # Version constant for logging and run metadata.
-try:
-    from utils.version import __version__ as ACM_VERSION
-except ImportError:
-    ACM_VERSION = "unknown"
+from utils.version import __version__ as ACM_VERSION
 
 
 # Console from observability (backwards compatible). Do not reimport here to
@@ -246,7 +144,6 @@ def _configure_logging(logging_cfg, args):
 # _ensure_local_index -> core/fast_features.py::ensure_local_index()
 # _get_equipment_id -> core/sql_client.py::resolve_equipment_id_required()
 # _load_config -> core/sql_client.py::load_config_required_from_sql()
-# _sql_connect -> core/sql_client.py::connect_acm_sql()
 # _sql_start_run -> core/sql_client.py::start_acm_run()
 
 
@@ -385,14 +282,9 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
     # ========================================================================
     Console.info("Connecting to SQL Server...", component="SQL")
     try:
-        if not SQLClient:
-            raise RuntimeError("SQLClient not available. Ensure core/sql_client.py exists and pyodbc is installed.")
-        sql_client = SQLClient.from_ini('acm')
-        sql_client.connect()
-        # Quick health check.
-        _cur = sql_client.cursor()
-        _cur.execute("SELECT 1")
-        _cur.fetchone()
+        sql_client = connect_acm_sql(cfg={}, logger=Console)
+        if sql_client is None:
+            raise RuntimeError("connect_acm_sql returned None")
         Console.ok("SQL connection established", component="SQL")
     except Exception as e:
         Console.error(f"SQL connection failed: {e}", component="SQL",
@@ -1135,14 +1027,6 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
                 omr_contributions_data=omr_contributions_data,
                 regime_model=regime_model,
                 logger=Console,
-                equip=equip,
-            )
-
-        # ===== Contribution timeline =====
-        with T.section("contribution.timeline"):
-            output_manager.write_contribution_timeline_from_frame(
-                frame=frame,
-                fusion_weights=fusion_weights_used,
                 equip=equip,
             )
 

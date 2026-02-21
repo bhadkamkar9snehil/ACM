@@ -3280,6 +3280,12 @@ class OutputManager:
         if core.episode_count > 0 and record_episode_fn is not None and equip:
             record_episode_fn(equip, count=core.episode_count, severity="info")
 
+        self.write_contribution_timeline_from_frame(
+            frame=scores_df,
+            fusion_weights=fusion_weights_used,
+            equip=equip or "",
+        )
+
         self.persist_additional_artifacts(
             scores_df=scores_df,
             raw_score=raw_score,
