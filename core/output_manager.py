@@ -348,6 +348,16 @@ class PersistPipelineOutputsResult:
     sensor_context: Optional[Dict[str, Any]] = None
 
 
+@dataclass
+class PersistenceStageResult:
+    """Result bundle for pipeline persistence stage execution."""
+    rows_written: int = 0
+    analytics_table_count: int = 0
+    raw_train: Optional[pd.DataFrame] = None
+    raw_score: Optional[pd.DataFrame] = None
+    sensor_context: Optional[Dict[str, Any]] = None
+
+
 class OutputManager:
     """
     Unified output manager that consolidates all scattered output generation.
@@ -3339,7 +3349,7 @@ class OutputManager:
         anomaly_count: int,
         T: Any,
         culprit_writer_func: Optional[Callable[..., Any]] = None,
-    ) -> int:
+        ) -> int:
         """
         Wrapper for SQL artifact persistence bound to this output manager instance.
         """
@@ -3363,6 +3373,94 @@ class OutputManager:
             anomaly_count=anomaly_count,
             T=T,
             culprit_writer_func=culprit_writer_func,
+        )
+
+    def run_persistence_stage(
+        self,
+        *,
+        section_fn: Any,
+        logger: Any,
+        scores_df: pd.DataFrame,
+        episodes_df: pd.DataFrame,
+        train_df: pd.DataFrame,
+        raw_train: Optional[pd.DataFrame],
+        raw_score: Optional[pd.DataFrame],
+        iforest_detector: Optional[Any],
+        omr_detector: Optional[Any],
+        seasonal_patterns: Optional[Dict[str, List[Any]]],
+        cfg: Dict[str, Any],
+        sensor_context: Optional[Dict[str, Any]],
+        fusion_weights_used: Optional[Dict[str, float]],
+        record_episode_fn: Optional[Callable[..., Any]],
+        equip: str,
+        pca_detector: Any,
+        sql_client: Any,
+        run_id: Optional[str],
+        equip_id: int,
+        meta: Any,
+        win_start: Optional[pd.Timestamp],
+        win_end: Optional[pd.Timestamp],
+        rows_read: int,
+        spe_p95_train: float,
+        t2_p95_train: float,
+        anomaly_count: int,
+        timer: Any,
+        culprit_writer_func: Optional[Callable[..., Any]] = None,
+        max_total_rows: int = 10000,
+    ) -> PersistenceStageResult:
+        """
+        Execute full persistence stage for pipeline outputs and SQL artifacts.
+        """
+        with section_fn("persist"):
+            with self.batched_transaction():
+                with section_fn("persist.pipeline_outputs"):
+                    persist_result = self.persist_pipeline_outputs(
+                        scores_df=scores_df,
+                        episodes_df=episodes_df,
+                        raw_train=raw_train,
+                        raw_score=raw_score,
+                        iforest_detector=iforest_detector,
+                        omr_detector=omr_detector,
+                        seasonal_patterns=seasonal_patterns,
+                        cfg=cfg,
+                        sensor_context=sensor_context,
+                        fusion_weights_used=fusion_weights_used,
+                        record_episode_fn=record_episode_fn,
+                        equip=equip,
+                        max_total_rows=max_total_rows,
+                    )
+                    logger.info(
+                        f"Analytics: tables={persist_result.analytics_table_count}",
+                        component="OUTPUTS",
+                    )
+
+        rows_written = self.write_sql_artifacts_for_run(
+            frame=scores_df,
+            episodes=episodes_df,
+            train=train_df,
+            pca_detector=pca_detector,
+            sql_client=sql_client,
+            run_id=run_id,
+            equip_id=equip_id,
+            equip=equip,
+            cfg=cfg,
+            meta=meta,
+            win_start=win_start,
+            win_end=win_end,
+            rows_read=rows_read,
+            spe_p95_train=spe_p95_train,
+            t2_p95_train=t2_p95_train,
+            anomaly_count=anomaly_count,
+            T=timer,
+            culprit_writer_func=culprit_writer_func,
+        )
+
+        return PersistenceStageResult(
+            rows_written=rows_written,
+            analytics_table_count=persist_result.analytics_table_count,
+            raw_train=persist_result.raw_train,
+            raw_score=persist_result.raw_score,
+            sensor_context=persist_result.sensor_context,
         )
 
     def release_persist_memory(
