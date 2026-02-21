@@ -382,3 +382,43 @@ def build_drift_controller_state(
         "Threshold": float(cfg.get("drift", {}).get("threshold", 3.0)),
         "Sensitivity": float(cfg.get("drift", {}).get("sensitivity", 1.0)),
     }
+
+
+def write_drift_controller_state(
+    *,
+    output_manager: Optional[Any],
+    frame: pd.DataFrame,
+    cfg: Dict[str, Any],
+    score_out: Optional[Dict[str, Any]] = None,
+    logger: Optional[Any] = None,
+    equip: str = "",
+) -> int:
+    """
+    Build and persist drift-controller payload.
+
+    Returns number of rows written when available, otherwise 0.
+    """
+    if logger is None:
+        from .observability import Console as _Console
+        logger = _Console
+
+    if output_manager is None:
+        return 0
+
+    try:
+        drift_state = build_drift_controller_state(
+            frame=frame,
+            cfg=cfg,
+            score_out=score_out,
+        )
+        if drift_state:
+            rows = output_manager.write_drift_controller(drift_state)
+            return int(rows) if rows is not None else 0
+    except Exception as e:
+        logger.warn(
+            f"Drift controller write failed: {e}",
+            component="DRIFT",
+            equip=equip,
+            error=str(e)[:200],
+        )
+    return 0
