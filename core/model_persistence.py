@@ -43,9 +43,6 @@ Manifest structure:
 
 import joblib
 import json
-import os
-import tempfile
-from pathlib import Path
 from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime, timezone
 from io import BytesIO
@@ -1973,6 +1970,7 @@ def persist_calibration_params_safe(
             equip=equip,
             error=str(e)[:200],
         )
+        return False
 
 
 def load_manifest_protected_columns(

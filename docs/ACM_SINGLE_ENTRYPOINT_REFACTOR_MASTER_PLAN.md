@@ -17,7 +17,7 @@ Current snapshot:
    - `python -m core.acm` is the only runtime entrypoint.
 2. `core/acm.py` is shrinking:
    - recent high watermark in this effort: 1758 lines
-   - current: 1231 lines
+   - current: 1283 lines
 3. Extracted and wired into ownership modules:
    - calibration and fusion orchestration pieces in `core/fuse.py`
    - NOOP outcome/error/finalization helpers in `core/run_metadata_writer.py`
@@ -30,9 +30,13 @@ Current snapshot:
    - auto-retrain stage orchestration in `core/model_evaluation.py`
    - model persistence and lifecycle stage orchestration in `core/model_persistence.py`
    - consolidated teardown orchestration in `core/run_metadata_writer.py`
-   - startup guard cleanup in `core/acm.py`:
-     - removed repeated helper-availability checks in main path
-     - tightened SQL import guard to `ImportError` so non-import failures are not silently masked
+    - startup guard cleanup in `core/acm.py`:
+      - removed repeated helper-availability checks in main path
+      - tightened SQL import guard to `ImportError` so non-import failures are not silently masked
+    - dead-code cleanup in `core/acm.py` and `core/model_persistence.py`:
+      - removed permanently disabled model-cache branch from orchestrator
+      - removed stale unused imports and local variables
+      - added explicit `False` return on calibration-persistence failure path
 4. Tests were updated throughout extraction:
    - `tests/test_v11_modules.py` currently passes with new helper coverage.
 5. Source control policy has been followed:
@@ -757,3 +761,27 @@ Validation completed:
 4. Memory refresh:
    - `python scripts/manage_acm_agent_memory.py refresh --sync-repo-skill --sync-local-skill` succeeded with locked-note skip warnings.
    - `python scripts/manage_acm_agent_memory.py health` passed with `ok=true` and `broken_count=0` when run after refresh completion.
+
+### 2026-02-21 - Phase 4 Cleanup: Dead Code Removal
+
+Branch flow used:
+1. `integration/acm-single-entrypoint` (in-progress refactor branch for this slice)
+
+Completed:
+1. Removed stale unused imports from `core/acm.py`.
+2. Removed stale unused imports from `core/model_persistence.py`.
+3. Removed dead orchestrator branch guarded by constant-disabled `reuse_models` in `core/acm.py`.
+4. Removed orphan cache payload assembly and write block that could never execute.
+5. Removed stale unused local variables:
+   - adaptive flags that were not read
+   - unused ETA hints locals
+6. Added explicit `return False` on exception path in:
+   - `core/model_persistence.py::persist_calibration_params_safe`
+
+Validation completed:
+1. `python -m py_compile core/acm.py core/model_persistence.py tests/test_v11_modules.py` passed.
+2. `pytest tests/test_v11_modules.py -v` passed (66 tests).
+
+Main branch status:
+1. `main` was not touched.
+2. Work remains on refactor integration branch.

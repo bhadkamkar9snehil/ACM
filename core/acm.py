@@ -23,18 +23,12 @@ from __future__ import annotations
 # Standard library imports
 # ============================
 import argparse
-import json
-import os
 import sys
-import threading
 import time
-import uuid
-import warnings
 from datetime import datetime
-from pathlib import Path
 # NOTE: Parallel fitting via ThreadPoolExecutor was removed due to BLAS/OpenMP
 # deadlocks; model fitting is intentionally single-threaded here.
-from typing import Any, Callable, Dict, List, Tuple, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional
 
 # NOTE: Overflow warnings are not suppressed globally. If they appear, treat
 # them as a signal of scaling/unit issues and handle them locally where safe.
@@ -42,7 +36,6 @@ from typing import Any, Callable, Dict, List, Tuple, Optional, Sequence
 # ============================
 # Third-party imports
 # ============================
-import joblib
 import numpy as np
 import pandas as pd
 
@@ -71,8 +64,6 @@ except ImportError:
 # Remove this stub when re-enabling forecasting.
 ForecastEngine = None
 
-from core.omr import OMRDetector  # Overall Model Residual detector
-from core.config_history_writer import log_auto_tune_changes
 from core.output_manager import OutputManager
 from core.run_metadata_writer import (
     finalize_noop_run,
@@ -207,7 +198,7 @@ except ImportError:
 from core.fast_features import ensure_local_index, deduplicate_index, build_features_for_pipeline
 
 # Config utilities: signature and loader helpers.
-from utils.config_dict import ConfigDict, compute_config_signature, load_config as load_config_from_source
+from utils.config_dict import compute_config_signature
 
 # Timer helper with a safe fallback for environments without `utils.timer`.
 try:
@@ -428,11 +419,6 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
     config_signature = compute_config_signature(cfg)
     cfg["_signature"] = config_signature
 
-    # v11.8.0 ADAPTIVE: No ONLINE/OFFLINE mode distinction. System decides
-    # adaptively based on model state and quality metrics.
-    ALLOWS_MODEL_REFIT = True      # Always allow - quality metrics decide
-    ALLOWS_REGIME_DISCOVERY = True  # Always allow - maturity state decides
-
     # Continuous learning is controlled exclusively by config.
     CONTINUOUS_LEARNING = _continuous_learning_enabled(cfg)
 
@@ -444,8 +430,7 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
     # v11.8.0: Force retraining only via explicit CLI flag.
     # CONTINUOUS_LEARNING controls quality-based retraining evaluation downstream,
     # not forced retraining every batch.
-    force_retrain_cli = getattr(args, "force_retrain", False)
-    force_retraining = force_retrain_cli
+    force_retraining = bool(getattr(args, "force_retrain", False))
     
     # Validate interval settings to avoid zero/negative values in production.
     invalid_intervals = []
@@ -494,14 +479,8 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
     regime_basis_hash: Optional[int] = None
     raw_train: Optional[pd.DataFrame] = None
     raw_score: Optional[pd.DataFrame] = None
-    cache_payload: Optional[Dict[str, Any]] = None
     regime_quality_ok: bool = True
     refit_requested: bool = False
-
-    # Heuristic ETAs (configurable).
-    eta_load = float((cfg.get("hints") or {}).get("eta_load_sec", 30))
-    eta_fit  = float((cfg.get("hints") or {}).get("eta_fit_sec", 8))
-    eta_score = float((cfg.get("hints") or {}).get("eta_score_sec", 6))
 
     # ===== SQL: Start run (window discovery) =====
     # SQL client is already connected at this point.
@@ -704,7 +683,6 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
         # causing a spurious 632 630 mismatch that forces a full retrain every
         # scoring batch.  Full model objects are still loaded later in
         # models.load as normal.
-        _manifest_protected_columns: Optional[List[str]] = None
         _manifest_protected_columns = load_manifest_protected_columns(
             sql_client=sql_client,
             equip=equip,
@@ -744,7 +722,6 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
         cached_models = None
         cached_manifest = None
         previous_weights = None  # Initialize for fusion pipeline.
-        reuse_models = False  # File-based caching disabled; models persist to SQL.
         cached_calibration_params = None
 
         def _fit_all_detectors_with_timer(**kwargs: Any) -> Dict[str, Any]:
@@ -1114,21 +1091,6 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
             cached_manifest=cached_manifest,
         )
 
-        if reuse_models:
-                cache_payload = {
-                    "ar1": ar1_detector,
-                    "pca": pca_detector,
-                    "iforest": iforest_detector,
-                    "gmm": gmm_detector,
-                    "omr": omr_detector,
-                    "train_columns": current_train_columns,
-                    "train_hash": train_feature_hash,
-                    "config_signature": config_signature,
-                    "regime_model": regime_model,
-                    "regime_basis_hash": regime_basis_hash,
-                    "regime_quality_ok": regime_quality_ok,
-                }
-
         # ===== Phase 8: Drift =====
         with T.section("drift"):
             drift_out = drift.run_drift_pipeline(
@@ -1248,14 +1210,6 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
             T=T,
             culprit_writer_func=write_episode_culprits_enhanced,
         )
-
-        if reuse_models and cache_payload:
-            with T.section("sql.cache_detectors"):
-                try:
-                    joblib.dump(cache_payload, model_cache_path)
-                except Exception as e:
-                    Console.warn(f"Failed to cache detectors: {e}", component="MODEL",
-                                 equip=equip, cache_path=str(model_cache_path), error=str(e))
 
         # Determine outcome based on degradations.
         outcome, degraded_err_json = resolve_run_outcome_from_degradations(degradations)
