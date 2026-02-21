@@ -650,6 +650,23 @@ class TestRefactorHelpers:
         assert result.sensor_normalized_ts_rows == 4
         assert result.seasonal_pattern_rows == 5
 
+    def test_persist_core_outputs_aggregates_insert_counts(self):
+        """Output manager helper should aggregate inserted counts from scores and episodes writes."""
+        from core.output_manager import OutputManager
+
+        output_manager = OutputManager.__new__(OutputManager)
+        output_manager.write_scores = lambda _df: {"inserted": 11}
+        output_manager.write_episodes = lambda _df: {"inserted": 7}
+
+        scores_df = pd.DataFrame({"fused": [0.1, 0.2]})
+        episodes_df = pd.DataFrame({"episode_id": [1, 2, 3]})
+        result = output_manager.persist_core_outputs(scores_df=scores_df, episodes_df=episodes_df)
+
+        assert result.scores_inserted == 11
+        assert result.episodes_inserted == 7
+        assert result.episode_count == 3
+        assert result.rows_written_delta == 18
+
     def test_generate_all_analytics_with_context_injects_fusion_weights(self):
         """Analytics helper should inject fusion weights and delegate to analytics writer."""
         from core.output_manager import OutputManager
