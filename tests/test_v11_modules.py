@@ -6,6 +6,7 @@ Run with: pytest tests/test_v11_modules.py -v
 import pytest
 import numpy as np
 import pandas as pd
+import argparse
 from datetime import datetime, timedelta
 
 
@@ -311,6 +312,22 @@ class TestAcmEntryPoint:
         """_detect_mode function exists."""
         from core import acm
         assert hasattr(acm, '_detect_mode')
+
+    def test_run_pipeline_passes_namespace_to_main(self, monkeypatch):
+        """run_pipeline should invoke main with provided Namespace."""
+        from core import acm
+
+        captured = {"args": None}
+
+        def _main(args=None):
+            captured["args"] = args
+
+        monkeypatch.setattr(acm, "main", _main)
+        args = argparse.Namespace(equip="FD_FAN")
+        rc = acm.run_pipeline(args)
+
+        assert rc == 0
+        assert captured["args"] is args
 
 
 class TestRefactorHelpers:
@@ -1457,6 +1474,66 @@ class TestRefactorHelpers:
         sql = _SQL()
         finalize_noop_run(sql_client=sql, run_id=None)
         assert sql.calls == 0
+
+    def test_finalize_pipeline_teardown_orchestrates_summary_finalize_and_observability(self, monkeypatch):
+        """Teardown helper should call summary, SQL finalization, span close, and observability shutdown."""
+        from core import run_metadata_writer as rmw
+
+        calls = []
+
+        monkeypatch.setattr(rmw, "emit_batch_summary", lambda **kwargs: calls.append("summary"))
+        monkeypatch.setattr(rmw, "finalize_run_with_metadata", lambda **kwargs: calls.append("finalize"))
+
+        def _close_run_span_fn(**kwargs):
+            calls.append("close_span")
+
+        def _shutdown_run_observability_fn(enabled):
+            calls.append(("shutdown", bool(enabled)))
+
+        rmw.finalize_pipeline_teardown(
+            console=type("L", (), {"info": lambda *a, **k: None})(),
+            equip="FD_FAN",
+            run_id="r1",
+            win_start=None,
+            win_end=None,
+            outcome="OK",
+            frame=None,
+            episodes=None,
+            score_out=None,
+            regime_quality_ok=True,
+            model_state=None,
+            rows_read=10,
+            train=None,
+            degradations=[],
+            refit_requested=False,
+            timer=None,
+            sql_client=object(),
+            output_manager=None,
+            equip_id=1,
+            equip_name="FD_FAN",
+            started_at=datetime.now(),
+            rows_written=5,
+            err_json=None,
+            meta=None,
+            config_signature="sig",
+            per_regime_enabled=False,
+            regime_count=0,
+            observability_enabled=True,
+            record_data_quality_fn=None,
+            record_run_fn=None,
+            record_batch_processed_fn=None,
+            record_health_score_fn=None,
+            record_error_fn=None,
+            span_ctx=None,
+            root_span=None,
+            close_run_span_fn=_close_run_span_fn,
+            shutdown_run_observability_fn=_shutdown_run_observability_fn,
+        )
+
+        assert calls[0] == "summary"
+        assert calls[1] == "finalize"
+        assert calls[2] == "close_span"
+        assert calls[3] == ("shutdown", True)
 
     def test_apply_contamination_filter_config_sets_defaults(self):
         """Calibration config helper should always set contamination_filter with defaults."""

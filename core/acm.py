@@ -75,9 +75,8 @@ from core.omr import OMRDetector  # Overall Model Residual detector
 from core.config_history_writer import log_auto_tune_changes
 from core.output_manager import OutputManager
 from core.run_metadata_writer import (
-    emit_batch_summary,
     finalize_noop_run,
-    finalize_run_with_metadata,
+    finalize_pipeline_teardown,
     resolve_run_outcome_from_degradations,
     serialize_run_exception,
 )
@@ -241,87 +240,6 @@ from core.model_lifecycle import (
     update_and_persist_model_lifecycle_safe,
 )
 
-# =============================================================================
-# Pipeline Context Classes
-# Structured data carriers between pipeline phases
-# =============================================================================
-from dataclasses import dataclass, field
-from enum import Enum
-
-
-class RunOutcome(Enum):
-    """Outcome states for ACM pipeline runs.
-    
-    OK: All phases completed successfully.
-    DEGRADED: Non-critical phases failed, but core outputs were produced.
-    NOOP: No data to process (insufficient rows or empty window).
-    FAIL: Critical failure; run cannot be completed.
-    """
-    OK = "OK"
-    DEGRADED = "DEGRADED"
-    NOOP = "NOOP"
-    FAIL = "FAIL"
-
-
-@dataclass
-class RuntimeContext:
-    """Context from initialization phase - passed to all subsequent phases."""
-    equip: str
-    equip_id: int
-    run_id: Optional[str]
-    sql_client: Optional[Any]
-    output_manager: Any  # OutputManager
-    cfg: Dict[str, Any]
-    args: argparse.Namespace
-    CONTINUOUS_LEARNING: bool
-    config_signature: str
-    run_start_time: datetime
-    tracer: Optional[Any] = None
-    root_span: Optional[Any] = None
-
-
-@dataclass
-class FeatureContext:
-    """Context from feature construction phase."""
-    train: pd.DataFrame
-    score: pd.DataFrame
-    train_feature_hash: Optional[str] = None
-    current_train_columns: Optional[List[str]] = None
-
-
-@dataclass
-class ModelContext:
-    """Context from model training/loading phase."""
-    ar1_detector: Optional[Any] = None
-    pca_detector: Optional[Any] = None
-    iforest_detector: Optional[Any] = None
-    gmm_detector: Optional[Any] = None
-    omr_detector: Optional[Any] = None
-    regime_model: Optional[Any] = None
-    models_fitted: bool = False
-    refit_requested: bool = False
-    detector_cache: Optional[Dict[str, Any]] = None
-    # Cached PCA train scores to eliminate double computation in calibration
-    pca_train_spe: Optional[np.ndarray] = None
-    pca_train_t2: Optional[np.ndarray] = None
-
-
-@dataclass
-class ScoreContext:
-    """Context from scoring phase."""
-    frame: pd.DataFrame  # Contains all z-scores
-    train_frame: pd.DataFrame
-    calibrators: Dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass  
-class FusionContext:
-    """Context from fusion phase."""
-    frame: pd.DataFrame  # With fused scores, health, episodes
-    episodes: pd.DataFrame
-    fusion_weights: Dict[str, float] = field(default_factory=dict)
-    health_stats: Dict[str, Any] = field(default_factory=dict)
-
 
 def _configure_logging(logging_cfg, args):
     """Apply CLI/config logging overrides and return effective flags."""
@@ -416,54 +334,23 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
     return ap
 
 
-def _namespace_to_cli_args(args: argparse.Namespace) -> List[str]:
-    """Convert parsed Namespace back to argv-style tokens for compatibility execution."""
-    cli_args: List[str] = ["--equip", str(args.equip)]
-
-    if getattr(args, "force_retrain", False):
-        cli_args.append("--force-retrain")
-    if getattr(args, "clear_cache", False):
-        cli_args.append("--clear-cache")
-    if getattr(args, "log_level", None):
-        cli_args.extend(["--log-level", str(args.log_level)])
-    if getattr(args, "log_format", None):
-        cli_args.extend(["--log-format", str(args.log_format)])
-    if getattr(args, "log_file", None):
-        cli_args.extend(["--log-file", str(args.log_file)])
-
-    module_levels = getattr(args, "log_module_level", None) or []
-    for value in module_levels:
-        cli_args.extend(["--log-module-level", str(value)])
-
-    if getattr(args, "start_time", None):
-        cli_args.extend(["--start-time", str(args.start_time)])
-    if getattr(args, "end_time", None):
-        cli_args.extend(["--end-time", str(args.end_time)])
-
-    return cli_args
-
-
 def run_pipeline(args: argparse.Namespace) -> int:
     """
     Internal callable API for running ACM from a parsed argparse Namespace.
 
-    This compatibility adapter keeps current `main()` behavior intact while
-    allowing `core.acm` to own parsing and call into execution directly.
+    `core.acm` owns parsing and calls execution directly with Namespace args.
     """
-    old_argv = list(sys.argv)
     try:
-        sys.argv = ["acm"] + _namespace_to_cli_args(args)
-        main()
+        main(args)
         return 0
     except SystemExit as e:
         return e.code if isinstance(e.code, int) else 1
-    finally:
-        sys.argv = old_argv
 
 
-def main() -> None:
-    ap = build_arg_parser()
-    args = ap.parse_args()
+def main(args: Optional[argparse.Namespace] = None) -> None:
+    if args is None:
+        ap = build_arg_parser()
+        args = ap.parse_args()
 
     equip = args.equip
     
@@ -1399,9 +1286,7 @@ def main() -> None:
         raise
 
     finally:
-        # === Consolidated Batch Analytics Summary ===
-        # Structured run summary pushed to Loki (component=SUMMARY) and console.
-        emit_batch_summary(
+        finalize_pipeline_teardown(
             console=Console,
             equip=equip,
             run_id=run_id,
@@ -1418,27 +1303,14 @@ def main() -> None:
             degradations=degradations,
             refit_requested=refit_requested,
             timer=T,
-        )
-
-        # Timer Loki push is handled by Timer._print_summary() at atexit
-
-        # === Finalize run in SQL ===
-        finalize_run_with_metadata(
             sql_client=sql_client,
             output_manager=output_manager,
-            run_id=run_id,
             equip_id=int(equip_id),
             equip_name=equip,
             started_at=run_start_time,
-            outcome=outcome,
-            rows_read=rows_read,
             rows_written=rows_written,
             err_json=err_json,
-            frame=frame if isinstance(frame, pd.DataFrame) else None,
-            train=train if isinstance(train, pd.DataFrame) else None,
-            episodes=episodes if isinstance(episodes, pd.DataFrame) else None,
             meta=meta,
-            refit_requested=refit_requested,
             config_signature=config_signature,
             per_regime_enabled=bool(quality_ok and use_per_regime),
             regime_count=len(set(score_regime_labels)) if score_regime_labels is not None else 0,
@@ -1448,20 +1320,11 @@ def main() -> None:
             record_batch_processed_fn=record_batch_processed,
             record_health_score_fn=record_health_score,
             record_error_fn=record_error,
-            logger=Console,
-        )
-        
-        # Close OpenTelemetry root span.
-        close_run_span(
             span_ctx=_span_ctx,
             root_span=root_span,
-            outcome=outcome,
-            rows_read=rows_read,
-            rows_written=rows_written,
+            close_run_span_fn=close_run_span,
+            shutdown_run_observability_fn=shutdown_run_observability,
         )
-
-        # Stop profiling and flush observability.
-        shutdown_run_observability(_OBSERVABILITY_AVAILABLE)
 
     return
 

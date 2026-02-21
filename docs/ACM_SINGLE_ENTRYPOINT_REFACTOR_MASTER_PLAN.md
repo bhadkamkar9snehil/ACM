@@ -17,7 +17,7 @@ Current snapshot:
    - `python -m core.acm` is the only runtime entrypoint.
 2. `core/acm.py` is shrinking:
    - recent high watermark in this effort: 1758 lines
-   - current: 1352 lines
+   - current: 1237 lines
 3. Extracted and wired into ownership modules:
    - calibration and fusion orchestration pieces in `core/fuse.py`
    - NOOP outcome/error/finalization helpers in `core/run_metadata_writer.py`
@@ -29,6 +29,7 @@ Current snapshot:
    - regime basis build and compatibility gating in `core/regimes.py`
    - auto-retrain stage orchestration in `core/model_evaluation.py`
    - model persistence and lifecycle stage orchestration in `core/model_persistence.py`
+   - consolidated teardown orchestration in `core/run_metadata_writer.py`
 4. Tests were updated throughout extraction:
    - `tests/test_v11_modules.py` currently passes with new helper coverage.
 5. Source control policy has been followed:
@@ -43,9 +44,9 @@ Progress interpretation:
 
 Remaining structural backlog:
 
-1. Finalization path in `core/acm.py` still includes a long try and finally with many concerns.
-2. Additional cleanup is needed to reduce nested conditional and exception handling in orchestrator path.
-3. Orchestrator still carries some local state plumbing that can be collapsed into stage payloads.
+1. Additional cleanup is needed to reduce nested conditional and exception handling in orchestrator path.
+2. Orchestrator still carries local state plumbing that can be collapsed into stage payloads.
+3. Startup and run-context initialization path can be further decomposed into ownership helpers.
 
 Validation executed after each extraction slice:
 
@@ -232,12 +233,18 @@ Phase 4 extraction highlights:
   - model save and lifecycle stage extracted from `core/acm.py` to `core/model_persistence.py`:
     - `run_model_persistence_and_lifecycle_stage`
     - owns trained-versus-scoring persistence branch and lifecycle fallback load
+  - final teardown stage extracted from `core/acm.py` to `core/run_metadata_writer.py`:
+    - `finalize_pipeline_teardown`
+    - consolidates summary emit, SQL finalization, span close, and observability shutdown calls
+  - run invocation compatibility path simplified in `core/acm.py`:
+    - removed argv reconstruction adapter and switched `run_pipeline(args)` to direct `main(args)` execution
+  - removed unused legacy context dataclasses and enum from `core/acm.py`.
   - Remaining work is structural extraction of monolith responsibilities from `core/acm.py` into ownership modules with parity checks.
 
 Immediate next extraction queue:
 
-1. Move remaining finalization orchestration from `core/acm.py` into ownership helper paths where already available.
-2. Collapse remaining orchestration state plumbing in `core/acm.py` into stage payload outputs.
+1. Collapse remaining orchestration state plumbing in `core/acm.py` into stage payload outputs.
+2. Extract startup and runtime-context initialization path into ownership helpers where applicable.
 3. Continue until `core/acm.py` is primarily high-level stage calls and run-level control flow only.
 
 ## Phase 0 - Baseline and Safety Harness
