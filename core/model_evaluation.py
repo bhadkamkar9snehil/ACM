@@ -11,11 +11,11 @@ Quality Metrics Monitored:
 5. Sensor Coverage: % of sensors contributing to detections
 
 Retraining Triggers:
-- Saturation > 5% → Model underfitting, recalibrate
-- Anomaly rate > 10% or < 0.01% → Miscalibration
-- Regime silhouette < 0.15 → Poor clustering
-- Episode coverage > 80% → Excessive false positives
-- Config signature changed → Parameter update
+- Saturation > 5% -> Model underfitting, recalibrate
+- Anomaly rate > 10% or < 0.01% -> Miscalibration
+- Regime silhouette < 0.15 -> Poor clustering
+- Episode coverage > 80% -> Excessive false positives
+- Config signature changed -> Parameter update
 
 Actions:
 - Auto-retrains models when degradation detected
@@ -379,6 +379,108 @@ def assess_model_quality(
     quality_report = monitor.create_quality_report(quality_metrics, should_retrain, reasons)
     
     return should_retrain, reasons, quality_report
+
+
+def evaluate_force_retrain_triggers(
+    cfg: Dict[str, Any],
+    cached_manifest: Optional[Dict[str, Any]],
+    score_out: Dict[str, Any],
+    regime_quality_ok: bool,
+    current_model_maturity: Optional[str],
+    boolean_only_metrics: List[str],
+    equip: str = "",
+    logger: Any = Console,
+) -> Dict[str, Any]:
+    """
+    Evaluate force-retrain triggers for cached models.
+
+    This function centralizes policy logic for:
+    - config signature changes
+    - model age threshold
+    - regime-quality threshold by metric type
+    """
+    config_changed = False
+    if cached_manifest:
+        cached_sig = cached_manifest.get("config_signature", "")
+        current_sig = cfg.get("_signature", "unknown")
+        config_changed = (cached_sig != current_sig)
+
+    auto_retrain_cfg = cfg.get("models", {}).get("auto_retrain", {})
+    if isinstance(auto_retrain_cfg, bool):
+        auto_retrain_cfg = {}
+
+    model_age_trigger = False
+    model_age_hours = 0.0
+    max_age_hours = float(auto_retrain_cfg.get("max_model_age_hours", 720))
+    if cached_manifest:
+        created_at_str = cached_manifest.get("created_at")
+        if created_at_str:
+            try:
+                created_at = datetime.fromisoformat(created_at_str)
+                model_age_hours = (datetime.now() - created_at).total_seconds() / 3600.0
+                if model_age_hours > max_age_hours:
+                    model_age_trigger = True
+            except Exception:
+                pass
+
+    regime_quality_trigger = False
+    current_regime_score = float(score_out.get("regime_score", 0.0))
+    regime_metric_name = str(score_out.get("regime_metric", "silhouette"))
+    min_regime_quality = float(auto_retrain_cfg.get("min_regime_quality", 0.3))
+    min_dbcv_quality = float(auto_retrain_cfg.get("min_dbcv_quality", 0.0))
+
+    if regime_metric_name in ("silhouette", "silhouette_non_noise"):
+        regime_quality_trigger = current_regime_score < min_regime_quality
+    elif regime_metric_name in ("dbcv", "persistence"):
+        # For HDBSCAN-style metrics use the raw DBCV/persistence threshold.
+        regime_quality_trigger = current_regime_score < min_dbcv_quality
+    elif regime_metric_name not in boolean_only_metrics:
+        # Unknown numeric metric: fallback to quality_ok boolean.
+        regime_quality_trigger = not regime_quality_ok
+    # boolean_only_metrics: no threshold trigger.
+
+    force_retrain = config_changed or model_age_trigger or regime_quality_trigger
+
+    reasons: List[str] = []
+    if config_changed:
+        reasons.append("config_changed")
+    if model_age_trigger:
+        reasons.append(f"age={model_age_hours:.0f}h>{max_age_hours:.0f}h")
+    if regime_quality_trigger:
+        if not regime_quality_ok:
+            reasons.append(
+                f"regime_quality_ok=False (metric={regime_metric_name}, score={current_regime_score:.3f})"
+            )
+        else:
+            threshold_used = min_dbcv_quality if regime_metric_name in ("dbcv", "persistence") else min_regime_quality
+            reasons.append(f"{regime_metric_name}={current_regime_score:.3f}<{threshold_used}")
+
+    if force_retrain and reasons:
+        logger.warn(f"Forcing retraining: {' | '.join(reasons)}", component="MODEL", equip=equip)
+
+    retrain_reason = "config_changed" if config_changed else (
+        "model_age" if model_age_trigger else (
+            "regime_quality" if regime_quality_trigger else "forced"
+        )
+    )
+
+    clear_regime_model = bool(
+        regime_quality_trigger and current_model_maturity in (None, "COLDSTART", "LEARNING")
+    )
+
+    return {
+        "force_retrain": force_retrain,
+        "reasons": reasons,
+        "retrain_reason": retrain_reason,
+        "config_changed": config_changed,
+        "model_age_trigger": model_age_trigger,
+        "model_age_hours": model_age_hours,
+        "max_age_hours": max_age_hours,
+        "regime_quality_trigger": regime_quality_trigger,
+        "regime_metric_name": regime_metric_name,
+        "current_regime_score": current_regime_score,
+        "clear_regime_model": clear_regime_model,
+    }
 
 
 def auto_tune_parameters(

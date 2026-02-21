@@ -297,7 +297,7 @@ def main():
         Console.info(f"  Timestamp column: EntryDateTime (renamed from Date/Time)")
         Console.info("")
         Console.info("  To run ACM on this equipment:")
-        Console.info(f"    python -m core.acm_main --equip {equip_code}")
+        Console.info(f"    python -m core.acm --equip {equip_code}")
         Console.info("")
         Console.info("Wind Turbine data import completed successfully!", component="OK")
         

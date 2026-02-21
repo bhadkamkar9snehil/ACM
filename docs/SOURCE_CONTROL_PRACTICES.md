@@ -423,7 +423,7 @@ CODE QUALITY:
   [ ] Comments and docstrings: All public functions documented
 
 INTEGRATION TESTS:
-  [ ] File mode still works: python -m core.acm_main --equip TEST_EQUIP
+  [ ] File mode still works: python -m core.acm --equip TEST_EQUIP
   [ ] SQL mode works: python scripts/sql_batch_runner.py --equip GAS_TURBINE --tick-minutes 1440
   [ ] Output files generated correctly
   [ ] Database entries created properly

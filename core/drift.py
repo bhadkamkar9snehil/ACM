@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from . import fuse
 
@@ -330,3 +330,55 @@ def compute_drift_alert_mode(
         frame["drift_mode"] = "FAULT"
     
     return frame
+
+
+def load_previous_drift_mode(
+    sql_client: Optional[Any],
+    equip_id: int,
+    default_mode: str = "FAULT",
+) -> str:
+    """
+    Load last persisted drift controller mode for hysteresis continuity.
+    """
+    prev_mode = default_mode
+    if not sql_client or not equip_id:
+        return prev_mode
+
+    try:
+        with sql_client.get_cursor() as cur:
+            cur.execute(
+                "SELECT TOP 1 ControllerState FROM dbo.ACM_DriftController "
+                "WHERE EquipID = ? ORDER BY CreatedAt DESC",
+                (equip_id,),
+            )
+            row = cur.fetchone()
+        if row:
+            mode = str(row[0]).strip().upper()
+            if mode in ("DRIFT", "FAULT"):
+                prev_mode = mode
+    except Exception:
+        pass  # Missing table/rows -> keep default.
+    return prev_mode
+
+
+def build_drift_controller_state(
+    frame: pd.DataFrame,
+    cfg: Dict[str, Any],
+    score_out: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Build payload for ACM_DriftController write.
+    """
+    score_out = score_out or {}
+    drift_state = score_out.get("drift_state", {})
+    if drift_state:
+        return drift_state
+
+    drift_mode = frame.get("drift_mode", ["STABLE"])[-1] if "drift_mode" in frame.columns else "STABLE"
+    drift_z = frame.get("drift_z", [0.0])
+    return {
+        "ControllerState": str(drift_mode) if isinstance(drift_mode, str) else "STABLE",
+        "CurrentDriftZ": float(drift_z.iloc[-1]) if hasattr(drift_z, "iloc") else 0.0,
+        "Threshold": float(cfg.get("drift", {}).get("threshold", 3.0)),
+        "Sensitivity": float(cfg.get("drift", {}).get("sensitivity", 1.0)),
+    }

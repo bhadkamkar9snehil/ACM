@@ -568,3 +568,161 @@ def execute_with_deadlock_retry(
                     time.sleep(delay * (attempt + 1))  # Exponential backoff
                     continue
             raise
+
+
+# ============================================================================
+# ACM pipeline helper functions (extracted from core/acm.py)
+# ============================================================================
+
+def connect_acm_sql(
+    cfg: Dict[str, Any],
+    logger: Optional[Any] = None,
+) -> Optional[Any]:
+    """
+    Connect to ACM SQL using INI first, then fallback to cfg["sql"].
+    """
+    try:
+        cli = SQLClient.from_ini("acm")
+        cli.connect()
+        return cli
+    except Exception as ini_err:
+        if logger is not None and hasattr(logger, "warn"):
+            logger.warn(
+                f"Failed to connect via INI, trying config dict: {ini_err}",
+                component="SQL",
+                error_type=type(ini_err).__name__,
+                error=str(ini_err)[:200],
+            )
+        sql_cfg = cfg.get("sql", {}) or {}
+        cli = SQLClient(sql_cfg)
+        cli.connect()
+        return cli
+
+
+def resolve_equipment_id_required(
+    equipment_name: str,
+    sql_client: Any,
+) -> int:
+    """
+    Resolve EquipID from SQL. Raises if equipment name/client is missing.
+    """
+    if not equipment_name:
+        raise RuntimeError("Equipment name is required")
+
+    if sql_client is None:
+        raise RuntimeError("SQL client is required to look up equipment ID")
+
+    if hasattr(sql_client, "get_equipment_id"):
+        equip_id = sql_client.get_equipment_id(equipment_name)
+    else:
+        cursor = sql_client.cursor()
+        cursor.execute("SELECT EquipID FROM Equipment WHERE EquipCode = ?", (equipment_name,))
+        row = cursor.fetchone()
+        equip_id = row[0] if row else None
+
+    if not equip_id or equip_id == 0:
+        raise RuntimeError(
+            f"Equipment '{equipment_name}' not found in database.\n"
+            f"Add it to the Equipment table first:\n"
+            f"  INSERT INTO Equipment (EquipCode, EquipName) VALUES ('{equipment_name}', '{equipment_name}')"
+        )
+
+    return int(equip_id)
+
+
+def load_config_required_from_sql(
+    sql_client: Any,
+    equipment_name: str,
+    logger: Optional[Any] = None,
+) -> Any:
+    """
+    Load config from ACM_Config (global defaults + equipment overrides).
+    """
+    from utils.config_dict import ConfigDict
+    import json
+
+    if not equipment_name:
+        raise RuntimeError("Equipment name is required to load config")
+
+    equip_id = resolve_equipment_id_required(equipment_name, sql_client)
+
+    try:
+        cursor = sql_client.cursor()
+        cursor.execute(
+            """
+            SELECT ParamPath, ParamValue, ValueType
+            FROM ACM_Config
+            WHERE EquipID IN (0, ?)
+            ORDER BY EquipID ASC, ParamPath ASC
+            """,
+            (equip_id,),
+        )
+        rows = cursor.fetchall()
+        if not rows:
+            raise RuntimeError(
+                f"No config found in ACM_Config for equipment '{equipment_name}' (EquipID={equip_id}).\n"
+                f"Populate ACM_Config with global (EquipID=0) and/or equipment-specific settings before running ACM."
+            )
+
+        cfg_dict: Dict[str, Any] = {}
+        for param_path, param_value, value_type in rows:
+            if value_type == "int":
+                value = int(param_value)
+            elif value_type == "float":
+                value = float(param_value)
+            elif value_type == "bool":
+                value = str(param_value).lower() in ("true", "1", "yes")
+            elif value_type in ("list", "json"):
+                value = json.loads(param_value)
+            else:
+                value = param_value
+
+            parts = str(param_path).split(".")
+            d = cfg_dict
+            for part in parts[:-1]:
+                if part not in d:
+                    d[part] = {}
+                d = d[part]
+            d[parts[-1]] = value
+
+        if logger is not None and hasattr(logger, "info"):
+            logger.info(
+                f"Config loaded from SQL for {equipment_name} (EquipID={equip_id}, {len(rows)} params)",
+                component="CONFIG",
+            )
+        return ConfigDict(cfg_dict, mode="sql", equip_id=equip_id)
+
+    except Exception as e:
+        if logger is not None and hasattr(logger, "error"):
+            logger.error(
+                f"Failed to load config from SQL: {e}",
+                component="CONFIG",
+                equipment=equipment_name,
+                equip_id=equip_id,
+                error=str(e),
+            )
+        raise RuntimeError(f"Config loading failed: {e}. Ensure ACM_Config table is populated for EquipID={equip_id}.")
+
+
+def start_acm_run(
+    cli: Any,
+    cfg: Dict[str, Any],
+    equip_code: str,
+    deadlock_retry_func: Optional[Callable] = None,
+    logger: Optional[Any] = None,
+) -> Tuple[str, Any, Any, int]:
+    """
+    Start a run in ACM_Runs and return (run_id, window_start, window_end, equip_id).
+    """
+    tick_minutes = cfg.get("runtime", {}).get("tick_minutes", 30)
+    run_id, window_start, window_end, equip_id = cli.start_run(
+        cfg=cfg,
+        equip_code=equip_code,
+        deadlock_retry_func=deadlock_retry_func,
+    )
+    if logger is not None and hasattr(logger, "info"):
+        logger.info(
+            f"Run started: {equip_code} (ID={equip_id}) | RunID={run_id[:8]} | window=[{window_start},{window_end}) | tick={tick_minutes}m",
+            component="RUN",
+        )
+    return run_id, window_start, window_end, equip_id

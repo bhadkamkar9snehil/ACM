@@ -1159,6 +1159,65 @@ def normalize_with_confidence_gating(
 
 
 # =============================================================================
+# Pipeline feature build wrapper (moved from core/acm.py)
+# =============================================================================
+
+def build_features_for_pipeline(
+    train: pd.DataFrame,
+    score: pd.DataFrame,
+    cfg: Dict[str, Any],
+    equip: str = "",
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Build engineered features for ACM pipeline train/score frames.
+
+    Keeps fill-value derivation strictly from TRAIN data to avoid leakage.
+    """
+    if not cfg.get("runtime", {}).get("phases", {}).get("features", True):
+        Console.info("Feature building disabled in config", component="FEAT", equip=equip)
+        return train, score
+
+    feat_win = int((cfg.get("features", {}) or {}).get("window", 3))
+    Console.info(f"Building features with window={feat_win}", component="FEAT", equip=equip)
+
+    idx_train = train.index
+    idx_score = score.index
+
+    # TRAIN-only fill values prevent leakage to SCORE.
+    train_fill_values = train.select_dtypes(include=[np.number]).median().to_dict()
+    Console.info(f"Computed {len(train_fill_values)} fill values from training data", component="FEAT")
+
+    train_feat = compute_basic_features_pl(
+        pl.from_pandas(train),
+        window=feat_win,
+    )
+    score_feat = compute_basic_features_pl(
+        pl.from_pandas(score),
+        window=feat_win,
+        fill_values=train_fill_values,
+    )
+
+    if not isinstance(train_feat, pd.DataFrame):
+        train_feat = train_feat.to_pandas() if hasattr(train_feat, "to_pandas") else pd.DataFrame(train_feat)
+    if not isinstance(score_feat, pd.DataFrame):
+        score_feat = score_feat.to_pandas() if hasattr(score_feat, "to_pandas") else pd.DataFrame(score_feat)
+
+    train_feat.index = idx_train
+    score_feat.index = idx_score
+
+    # Cast only stray object columns (rare) to avoid full-frame conversion overhead.
+    obj_cols_train = train_feat.select_dtypes(include="object").columns
+    if len(obj_cols_train):
+        train_feat[obj_cols_train] = train_feat[obj_cols_train].apply(pd.to_numeric, errors="coerce")
+    obj_cols_score = score_feat.select_dtypes(include="object").columns
+    if len(obj_cols_score):
+        score_feat[obj_cols_score] = score_feat[obj_cols_score].apply(pd.to_numeric, errors="coerce")
+
+    Console.info(f"Features built: train={train_feat.shape}, score={score_feat.shape}", component="FEAT")
+    return train_feat, score_feat
+
+
+# =============================================================================
 # P4.1: FEATURE IMPUTATION (moved from acm_main.py)
 # =============================================================================
 
