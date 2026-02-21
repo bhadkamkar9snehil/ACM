@@ -110,7 +110,7 @@ class TestModelLifecycleModule:
         assert MaturityState.DEPRECATED.value == "DEPRECATED"
     
     def test_promotion_criteria_defaults(self):
-        """PromotionCriteria has current default values (metric-aware lifecycle)."""
+        """PromotionCriteria fallback defaults are stable when config is missing."""
         from core.model_lifecycle import PromotionCriteria
         
         criteria = PromotionCriteria()
@@ -120,6 +120,30 @@ class TestModelLifecycleModule:
         assert criteria.min_stability_ratio == 0.75
         assert criteria.min_consecutive_runs == 5
         assert criteria.min_training_rows == 400
+
+    def test_promotion_criteria_from_config_overrides(self):
+        """PromotionCriteria.from_config applies SQL-style overrides used at runtime."""
+        from core.model_lifecycle import PromotionCriteria
+
+        cfg = {
+            "lifecycle": {
+                "promotion": {
+                    "min_training_days": 7,
+                    "min_silhouette_score": 0.15,
+                    "min_dbcv_score": 0.0,
+                    "min_stability_ratio": 0.6,
+                    "min_consecutive_runs": 3,
+                    "min_training_rows": 200,
+                }
+            }
+        }
+        criteria = PromotionCriteria.from_config(cfg)
+        assert criteria.min_training_days == 7
+        assert criteria.min_silhouette_score == 0.15
+        assert criteria.min_dbcv_score == 0.0
+        assert criteria.min_stability_ratio == 0.6
+        assert criteria.min_consecutive_runs == 3
+        assert criteria.min_training_rows == 200
     
     def test_model_state_creation(self):
         """ModelState can be created with all required fields."""
