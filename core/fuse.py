@@ -2735,3 +2735,62 @@ def apply_fusion_result_and_record_metrics(
         record_episode_fn(equip, count=len(episodes), severity="warning")
 
     return frame, train_frame, episodes, fusion_weights_used
+
+
+@dataclass
+class FusionStageResult:
+    """Result bundle for the full fusion stage."""
+    frame: pd.DataFrame
+    train_frame: Optional[pd.DataFrame]
+    episodes: pd.DataFrame
+    fusion_weights_used: Dict[str, float]
+
+
+def run_fusion_stage(
+    *,
+    frame: pd.DataFrame,
+    train_frame: Optional[pd.DataFrame],
+    score_data: pd.DataFrame,
+    train_data: Optional[pd.DataFrame],
+    cfg: Optional[Dict[str, Any]],
+    score_regime_labels: Optional[np.ndarray] = None,
+    train_regime_labels: Optional[np.ndarray] = None,
+    output_manager: Optional[Any] = None,
+    previous_weights: Optional[Dict[str, float]] = None,
+    omr_contributions: Optional[pd.DataFrame] = None,
+    equip: str = "",
+    record_detector_scores_fn: Optional[Callable[..., None]] = None,
+    record_episode_fn: Optional[Callable[..., None]] = None,
+) -> FusionStageResult:
+    """
+    Execute fusion pipeline and apply outputs to score/train frames.
+    """
+    fusion_result = run_fusion_pipeline(
+        frame=frame,
+        train_frame=train_frame,
+        score_data=score_data,
+        train_data=train_data,
+        cfg=cfg,
+        score_regime_labels=score_regime_labels,
+        train_regime_labels=train_regime_labels,
+        output_manager=output_manager,
+        previous_weights=previous_weights,
+        omr_contributions=omr_contributions,
+        equip=equip,
+    )
+
+    frame, train_frame, episodes, fusion_weights_used = apply_fusion_result_and_record_metrics(
+        frame=frame,
+        train_frame=train_frame,
+        fusion_result=fusion_result,
+        equip=equip,
+        record_detector_scores_fn=record_detector_scores_fn,
+        record_episode_fn=record_episode_fn,
+    )
+
+    return FusionStageResult(
+        frame=frame,
+        train_frame=train_frame,
+        episodes=episodes,
+        fusion_weights_used=fusion_weights_used,
+    )

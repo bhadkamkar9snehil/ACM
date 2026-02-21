@@ -2058,6 +2058,50 @@ class TestRefactorHelpers:
         assert captured["detector_scores"] is not None
         assert captured["episode"] == ("FD_FAN", 1, "warning")
 
+    def test_run_fusion_stage_orchestrates_pipeline_and_apply(self, monkeypatch):
+        """Fusion stage helper should compose pipeline run and result application."""
+        from core import fuse
+        from core.fuse import FusionResult
+
+        frame = pd.DataFrame({"ar1_z": [0.1, 0.2]})
+        train_frame = pd.DataFrame({"ar1_z": [0.05, 0.06]})
+        score_data = pd.DataFrame({"x": [1.0, 2.0]})
+        train_data = pd.DataFrame({"x": [0.8, 0.9]})
+        episodes_df = pd.DataFrame({"episode_id": [1]})
+
+        def _fake_run_fusion_pipeline(**kwargs):
+            return FusionResult(
+                fused_scores=np.array([1.0, 1.1], dtype=np.float32),
+                episodes=episodes_df,
+                weights_used={"ar1_z": 1.0},
+                auto_tuned=False,
+                train_fused=np.array([0.7, 0.8], dtype=np.float32),
+            )
+
+        def _fake_apply_fusion_result_and_record_metrics(**kwargs):
+            out_frame = kwargs["frame"].copy()
+            out_frame["fused"] = [1.0, 1.1]
+            out_train = kwargs["train_frame"].copy()
+            out_train["fused"] = [0.7, 0.8]
+            return out_frame, out_train, episodes_df, {"ar1_z": 1.0}
+
+        monkeypatch.setattr(fuse, "run_fusion_pipeline", _fake_run_fusion_pipeline)
+        monkeypatch.setattr(fuse, "apply_fusion_result_and_record_metrics", _fake_apply_fusion_result_and_record_metrics)
+
+        result = fuse.run_fusion_stage(
+            frame=frame,
+            train_frame=train_frame,
+            score_data=score_data,
+            train_data=train_data,
+            cfg={},
+            equip="FD_FAN",
+        )
+
+        assert "fused" in result.frame.columns
+        assert result.train_frame is not None and "fused" in result.train_frame.columns
+        assert len(result.episodes) == 1
+        assert result.fusion_weights_used == {"ar1_z": 1.0}
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
