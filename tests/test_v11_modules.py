@@ -110,15 +110,16 @@ class TestModelLifecycleModule:
         assert MaturityState.DEPRECATED.value == "DEPRECATED"
     
     def test_promotion_criteria_defaults(self):
-        """PromotionCriteria has correct default values (v11.0.1 relaxed)."""
+        """PromotionCriteria has current default values (metric-aware lifecycle)."""
         from core.model_lifecycle import PromotionCriteria
         
         criteria = PromotionCriteria()
         assert criteria.min_training_days == 7
-        assert criteria.min_silhouette_score == 0.15
-        assert criteria.min_stability_ratio == 0.6  # v11.0.1: relaxed from 0.8
-        assert criteria.min_consecutive_runs == 3
-        assert criteria.min_training_rows == 200  # v11.0.1: relaxed from 1000
+        assert criteria.min_silhouette_score == 0.40
+        assert criteria.min_dbcv_score == 0.0
+        assert criteria.min_stability_ratio == 0.75
+        assert criteria.min_consecutive_runs == 5
+        assert criteria.min_training_rows == 400
     
     def test_model_state_creation(self):
         """ModelState can be created with all required fields."""
@@ -135,6 +136,9 @@ class TestModelLifecycleModule:
         assert state.equip_id == 1
         assert state.maturity == MaturityState.LEARNING
         assert state.training_rows == 500
+        # Backward-compat alias: silhouette_score property maps to regime_quality_score.
+        state.silhouette_score = 0.33
+        assert state.regime_quality_score == pytest.approx(0.33)
     
     def test_check_promotion_eligibility_not_learning(self):
         """Non-LEARNING state is not eligible for promotion."""
@@ -163,7 +167,8 @@ class TestModelLifecycleModule:
             created_at=datetime.now() - timedelta(days=10),
             training_rows=1500,
             training_days=10.0,
-            silhouette_score=0.25,
+            regime_quality_score=0.5,
+            regime_quality_metric="silhouette",
             stability_ratio=0.9,
             consecutive_runs=5,
         )
@@ -180,15 +185,37 @@ class TestModelLifecycleModule:
             version=1,
             maturity=MaturityState.LEARNING,
             created_at=datetime.now() - timedelta(days=3),
-            training_rows=100,  # Too few (< 1000)
+            training_rows=100,  # Too few (< 400)
             training_days=3.0,  # Too short (< 7)
-            silhouette_score=0.1,  # Too low (< 0.15)
-            stability_ratio=0.5,  # Too low (< 0.8)
-            consecutive_runs=1,  # Too few (< 3)
+            regime_quality_score=0.1,  # Too low (< 0.40)
+            regime_quality_metric="silhouette",
+            stability_ratio=0.5,  # Too low (< 0.75)
+            consecutive_runs=1,  # Too few (< 5)
         )
         eligible, reasons = check_promotion_eligibility(state)
         assert eligible is False
         assert len(reasons) >= 4  # Multiple criteria failed
+
+    def test_check_promotion_eligibility_bic_uses_quality_flag(self):
+        """BIC metric uses regime_quality_ok boolean instead of raw score threshold."""
+        from core.model_lifecycle import ModelState, MaturityState, check_promotion_eligibility
+
+        state = ModelState(
+            equip_id=1,
+            version=1,
+            maturity=MaturityState.LEARNING,
+            created_at=datetime.now() - timedelta(days=10),
+            training_rows=1500,
+            training_days=10.0,
+            regime_quality_score=-1234.0,  # Raw value is not thresholded for BIC.
+            regime_quality_metric="bic",
+            regime_quality_ok=False,
+            stability_ratio=0.9,
+            consecutive_runs=5,
+        )
+        eligible, reasons = check_promotion_eligibility(state)
+        assert eligible is False
+        assert any("regime_quality_ok=False" in r for r in reasons)
     
     def test_promote_model(self):
         """promote_model changes LEARNING to CONVERGED."""
