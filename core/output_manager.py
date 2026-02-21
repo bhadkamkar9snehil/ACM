@@ -315,6 +315,15 @@ class OutputBatch:
     total_rows: int = 0
 
 
+@dataclass
+class PersistArtifactsResult:
+    """Counts for optional persist-phase artifact writes."""
+    detector_correlation_rows: int = 0
+    sensor_correlation_rows: int = 0
+    sensor_normalized_ts_rows: int = 0
+    seasonal_pattern_rows: int = 0
+
+
 class OutputManager:
     """
     Unified output manager that consolidates all scattered output generation.
@@ -3124,6 +3133,44 @@ class OutputManager:
                 error=str(e)[:200],
             )
             return 0
+
+    def persist_additional_artifacts(
+        self,
+        scores_df: pd.DataFrame,
+        raw_score: Optional[pd.DataFrame],
+        seasonal_patterns: Optional[Dict[str, List[Any]]],
+        max_total_rows: int = 10000,
+    ) -> PersistArtifactsResult:
+        """
+        Persist optional secondary artifacts derived from current run data.
+        """
+        return PersistArtifactsResult(
+            detector_correlation_rows=self.write_detector_correlation_from_scores(scores_df),
+            sensor_correlation_rows=self.write_sensor_correlations_from_raw(raw_score),
+            sensor_normalized_ts_rows=self.write_sensor_normalized_ts_from_raw(
+                raw_score,
+                max_total_rows=max_total_rows,
+            ),
+            seasonal_pattern_rows=self.write_seasonal_patterns_from_detected(seasonal_patterns),
+        )
+
+    def generate_all_analytics_with_context(
+        self,
+        scores_df: pd.DataFrame,
+        cfg: Dict[str, Any],
+        sensor_context: Optional[Dict[str, Any]],
+        fusion_weights_used: Optional[Dict[str, float]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Persist analytics tables after optional fusion-weight injection into cfg.
+        """
+        if fusion_weights_used:
+            cfg.setdefault("fusion", {})["weights"] = dict(fusion_weights_used)
+        return self.generate_all_analytics_tables(
+            scores_df=scores_df,
+            cfg=cfg,
+            sensor_context=sensor_context,
+        )
 
     def release_persist_memory(
         self,
