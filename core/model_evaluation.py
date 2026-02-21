@@ -483,6 +483,92 @@ def evaluate_force_retrain_triggers(
     }
 
 
+def evaluate_and_maybe_refit_cached_models(
+    *,
+    cfg: Dict[str, Any],
+    cached_models: Optional[Dict[str, Any]],
+    cached_manifest: Optional[Dict[str, Any]],
+    detectors_just_trained: bool,
+    score_out: Dict[str, Any],
+    regime_quality_ok: bool,
+    current_model_maturity: Optional[str],
+    boolean_only_metrics: List[str],
+    equip: str,
+    logger: Any,
+    record_model_refit_fn: Any,
+    fit_all_detectors_fn: Any,
+    train: pd.DataFrame,
+    det_flags: Dict[str, Any],
+    output_manager: Any,
+    sql_client: Any,
+    run_id: Optional[str],
+    equip_id: int,
+    regime_model: Optional[Any],
+) -> Dict[str, Any]:
+    """
+    Evaluate auto-retrain triggers for cached models and optionally refit detectors.
+    """
+    force_retrain = False
+    retrain_result = None
+    cached_models_out = cached_models
+    regime_model_out = regime_model
+
+    if not (cached_models and not detectors_just_trained and cfg.get("models", {}).get("auto_retrain", True)):
+        return {
+            "force_retrain": force_retrain,
+            "cached_models": cached_models_out,
+            "regime_model": regime_model_out,
+            "retrain_result": retrain_result,
+        }
+
+    try:
+        trigger_eval = evaluate_force_retrain_triggers(
+            cfg=cfg,
+            cached_manifest=cached_manifest,
+            score_out=score_out if isinstance(score_out, dict) else {},
+            regime_quality_ok=regime_quality_ok,
+            current_model_maturity=current_model_maturity,
+            boolean_only_metrics=boolean_only_metrics,
+            equip=equip,
+            logger=logger,
+        )
+        force_retrain = bool(trigger_eval["force_retrain"])
+
+        if force_retrain:
+            cached_models_out = None
+            if bool(trigger_eval["clear_regime_model"]):
+                regime_model_out = None
+
+            retrain_reason = str(trigger_eval["retrain_reason"])
+            record_model_refit_fn(equip, reason=retrain_reason, detector="all")
+
+            retrain_result = fit_all_detectors_fn(
+                train=train,
+                cfg=cfg,
+                **det_flags,
+                output_manager=output_manager,
+                sql_client=sql_client,
+                run_id=run_id,
+                equip_id=equip_id,
+                equip=equip,
+            )
+    except Exception as e:
+        logger.warn(
+            f"Quality assessment failed: {e}",
+            component="MODEL",
+            equip=equip,
+            error_type=type(e).__name__,
+            error=str(e)[:200],
+        )
+
+    return {
+        "force_retrain": force_retrain,
+        "cached_models": cached_models_out,
+        "regime_model": regime_model_out,
+        "retrain_result": retrain_result,
+    }
+
+
 def auto_tune_parameters(
     frame: pd.DataFrame,
     episodes: pd.DataFrame,

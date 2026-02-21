@@ -101,7 +101,7 @@ from core.model_persistence import (
     load_quality_regime_state_if_needed,
     load_and_rebuild_detectors_from_sql_cache,
 )
-from core.model_evaluation import auto_tune_parameters, evaluate_force_retrain_triggers
+from core.model_evaluation import auto_tune_parameters, evaluate_and_maybe_refit_cached_models
 
 # Observability: OpenTelemetry + structured logging. Falls back to no-op stubs
 # when observability dependencies are unavailable.
@@ -1342,54 +1342,40 @@ def main() -> None:
         # v11.7.0 ADAPTIVE LEARNING: Always assess quality (no mode guard)
         # Quality-driven retraining happens automatically when triggers fire
         force_retrain = False
-
-        if cached_models and not detectors_just_trained and cfg.get("models", {}).get("auto_retrain", True):
-            with T.section("models.auto_retrain"):
-                try:
-                    trigger_eval = evaluate_force_retrain_triggers(
-                        cfg=cfg,
-                        cached_manifest=cached_manifest,
-                        score_out=score_out if isinstance(score_out, dict) else {},
-                        regime_quality_ok=regime_quality_ok,
-                        current_model_maturity=current_model_maturity,
-                        boolean_only_metrics=list(BOOLEAN_ONLY_METRICS),
-                        equip=equip,
-                        logger=Console,
-                    )
-                    force_retrain = bool(trigger_eval["force_retrain"])
-
-                    # Invalidate cached models if retraining is required.
-                    if force_retrain:
-                        cached_models = None
-                        ar1_detector = pca_detector = iforest_detector = gmm_detector = None
-                        # When regime quality was the trigger and discovery is still allowed
-                        # (COLDSTART / LEARNING), also clear the regime model so it gets
-                        # re-discovered on this batch's regimes.label() call instead of
-                        # reusing a model whose meta["quality_ok"] is already False.
-                        if bool(trigger_eval["clear_regime_model"]):
-                            regime_model = None
-                        
-                        # Determine retrain reason for observability.
-                        retrain_reason = str(trigger_eval["retrain_reason"])
-                        record_model_refit(equip, reason=retrain_reason, detector="all")
-                        
-                        # Fit detectors via detector_orchestrator.fit_all_detectors().
-                        retrain_result = fit_all_detectors(
-                            train=train, cfg=cfg, **det_flags,
-                            output_manager=output_manager, sql_client=sql_client,
-                            run_id=run_id, equip_id=equip_id, equip=equip,
-                        )
-                        ar1_detector = retrain_result["ar1_detector"]
-                        pca_detector = retrain_result["pca_detector"]
-                        iforest_detector = retrain_result["iforest_detector"]
-                        gmm_detector = retrain_result["gmm_detector"]
-                        omr_detector = retrain_result["omr_detector"]
-                        pca_train_spe = retrain_result["pca_train_spe"]
-                        pca_train_t2 = retrain_result["pca_train_t2"]
-                        
-                except Exception as e:
-                    Console.warn(f"Quality assessment failed: {e}", component="MODEL",
-                                 equip=equip, error_type=type(e).__name__, error=str(e)[:200])
+        with T.section("models.auto_retrain"):
+            retrain_out = evaluate_and_maybe_refit_cached_models(
+                cfg=cfg,
+                cached_models=cached_models,
+                cached_manifest=cached_manifest,
+                detectors_just_trained=detectors_just_trained,
+                score_out=score_out if isinstance(score_out, dict) else {},
+                regime_quality_ok=regime_quality_ok,
+                current_model_maturity=current_model_maturity,
+                boolean_only_metrics=list(BOOLEAN_ONLY_METRICS),
+                equip=equip,
+                logger=Console,
+                record_model_refit_fn=record_model_refit,
+                fit_all_detectors_fn=fit_all_detectors,
+                train=train,
+                det_flags=det_flags,
+                output_manager=output_manager,
+                sql_client=sql_client,
+                run_id=run_id,
+                equip_id=equip_id,
+                regime_model=regime_model,
+            )
+            force_retrain = bool(retrain_out["force_retrain"])
+            cached_models = retrain_out["cached_models"]
+            regime_model = retrain_out["regime_model"]
+            retrain_result = retrain_out.get("retrain_result")
+            if retrain_result is not None:
+                ar1_detector = retrain_result["ar1_detector"]
+                pca_detector = retrain_result["pca_detector"]
+                iforest_detector = retrain_result["iforest_detector"]
+                gmm_detector = retrain_result["gmm_detector"]
+                omr_detector = retrain_result["omr_detector"]
+                pca_train_spe = retrain_result["pca_train_spe"]
+                pca_train_t2 = retrain_result["pca_train_t2"]
 
         # ===== Model persistence: save trained models with versioning =====
         # `detectors_fitted_this_run` reflects actual fitting activity.
