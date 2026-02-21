@@ -1688,6 +1688,85 @@ class TestRefactorHelpers:
         assert captured["equip"] == "FD_FAN"
         assert captured["rows_read"] == 10
 
+    def test_run_persistence_stage_orchestrates_pipeline_outputs_and_sql_artifacts(self):
+        """Output manager persistence stage should run pipeline outputs and SQL artifact writes in order."""
+        from core.output_manager import OutputManager, PersistPipelineOutputsResult
+
+        out = OutputManager.__new__(OutputManager)
+        calls = {"sections": [], "pipeline": False, "sql": False}
+
+        class _Section:
+            def __init__(self, name):
+                self.name = name
+            def __enter__(self):
+                calls["sections"].append(self.name)
+                return self
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        def _section_fn(name):
+            return _Section(name)
+
+        class _Txn:
+            def __enter__(self):
+                return self
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        out.batched_transaction = lambda: _Txn()
+        out.persist_pipeline_outputs = lambda **kwargs: PersistPipelineOutputsResult(
+            rows_written_delta=9,
+            episode_count=2,
+            analytics_table_count=11,
+            raw_train=None,
+            raw_score=None,
+            sensor_context=None,
+        )
+        out.write_sql_artifacts_for_run = lambda **kwargs: 88
+
+        class _Logger:
+            def info(self, *args, **kwargs):
+                pass
+
+        frame = pd.DataFrame({"fused": [0.1, 0.2]})
+        episodes = pd.DataFrame({"episode_id": [1, 2]})
+        train = pd.DataFrame({"sensor": [1.0, 2.0]})
+
+        result = out.run_persistence_stage(
+            section_fn=_section_fn,
+            logger=_Logger(),
+            scores_df=frame,
+            episodes_df=episodes,
+            train_df=train,
+            raw_train=train,
+            raw_score=train.copy(),
+            iforest_detector=None,
+            omr_detector=None,
+            seasonal_patterns={},
+            cfg={},
+            sensor_context={},
+            fusion_weights_used={"ar1_z": 1.0},
+            record_episode_fn=None,
+            equip="FD_FAN",
+            pca_detector=None,
+            sql_client=object(),
+            run_id="r1",
+            equip_id=1,
+            meta={},
+            win_start=pd.Timestamp("2026-01-01T00:00:00"),
+            win_end=pd.Timestamp("2026-01-01T01:00:00"),
+            rows_read=2,
+            spe_p95_train=0.1,
+            t2_p95_train=0.2,
+            anomaly_count=2,
+            timer=object(),
+            culprit_writer_func=None,
+        )
+
+        assert result.rows_written == 88
+        assert result.analytics_table_count == 11
+        assert calls["sections"] == ["persist", "persist.pipeline_outputs"]
+
     def test_resolve_run_outcome_from_degradations(self):
         """Run metadata helper should map degradation list to DEGRADED outcome and payload."""
         from core.run_metadata_writer import resolve_run_outcome_from_degradations

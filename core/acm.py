@@ -813,57 +813,27 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
         # ===== Phase 9: Persist artifacts / finalize (SQL-only) =====
         rows_read = int(score.shape[0])
         anomaly_count = int(len(episodes))
-        
-        # `degradations` is tracked throughout the pipeline for final outcome.
-        
-        # SQL-only persistence.
-        with T.section("persist"):
-          with output_manager.batched_transaction():
-            # Core + optional outputs, memory release, and analytics generation.
-            with T.section("persist.pipeline_outputs"):
-                persist_result = output_manager.persist_pipeline_outputs(
-                    scores_df=frame,
-                    episodes_df=episodes,
-                    raw_train=raw_train,
-                    raw_score=raw_score,
-                    iforest_detector=iforest_detector,
-                    omr_detector=omr_detector,
-                    seasonal_patterns=seasonal_patterns,
-                    cfg=cfg,
-                    sensor_context=sensor_context,
-                    fusion_weights_used=fusion_weights_used,
-                    record_episode_fn=record_episode,
-                    equip=equip,
-                    max_total_rows=10000,
-                )
-                rows_written += persist_result.rows_written_delta
-                raw_train = persist_result.raw_train
-                raw_score = persist_result.raw_score
-                sensor_context = persist_result.sensor_context
-                Console.info(
-                    f"Analytics: tables={persist_result.analytics_table_count}",
-                    component="OUTPUTS",
-                )
 
-            # FORECASTING_DISABLED:
-            # Forecast and RUL pipeline is intentionally disabled in current runtime.
-            # Re-enable by restoring ForecastEngine import/stub wiring and forecasting stage.
-
-            Console.info("Forecasting/RUL is disabled (FORECASTING_DISABLED).", component="FORECAST")
-
-            run_completion_time = datetime.now()
-
-        # === SQL-specific artifact writing ===
-        rows_written = output_manager.write_sql_artifacts_for_run(
-            frame=frame,
-            episodes=episodes,
-            train=train,
+        persist_stage = output_manager.run_persistence_stage(
+            section_fn=T.section,
+            logger=Console,
+            scores_df=frame,
+            episodes_df=episodes,
+            train_df=train,
+            raw_train=raw_train,
+            raw_score=raw_score,
+            iforest_detector=iforest_detector,
+            omr_detector=omr_detector,
+            seasonal_patterns=seasonal_patterns,
+            cfg=cfg,
+            sensor_context=sensor_context,
+            fusion_weights_used=fusion_weights_used,
+            record_episode_fn=record_episode,
+            equip=equip,
             pca_detector=pca_detector,
             sql_client=sql_client,
             run_id=run_id,
             equip_id=equip_id,
-            equip=equip,
-            cfg=cfg,
             meta=meta,
             win_start=win_start,
             win_end=win_end,
@@ -871,9 +841,19 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
             spe_p95_train=spe_p95_train,
             t2_p95_train=t2_p95_train,
             anomaly_count=anomaly_count,
-            T=T,
+            timer=T,
             culprit_writer_func=write_episode_culprits_enhanced,
+            max_total_rows=10000,
         )
+        rows_written = persist_stage.rows_written
+        raw_train = persist_stage.raw_train
+        raw_score = persist_stage.raw_score
+        sensor_context = persist_stage.sensor_context
+
+        # FORECASTING_DISABLED:
+        # Forecast and RUL pipeline is intentionally disabled in current runtime.
+        # Re-enable by restoring ForecastEngine import/stub wiring and forecasting stage.
+        Console.info("Forecasting/RUL is disabled (FORECASTING_DISABLED).", component="FORECAST")
 
         # Determine outcome based on degradations.
         outcome, degraded_err_json = resolve_run_outcome_from_degradations(degradations)
