@@ -568,3 +568,31 @@ If post-cutover issues appear:
 1. Production runs continue from `main` artifacts only.
 2. Experimental/refactor validation runs execute from integration branch environment.
 3. Do not use integration artifacts for production decisions until cutover complete.
+
+---
+
+## 17. Progress Log
+
+### 2026-02-21 - Linkage and Memory Graph Integrity Hardening
+
+Branch flow used:
+1. `refactor/acm-entrypoint-p4-linkage-health` (merged into integration)
+2. `integration/acm-single-entrypoint` (updated and pushed)
+
+Completed:
+1. Added strict wiki-link integrity checks in `scripts/manage_acm_agent_memory.py`.
+2. Scoped link health validation to canonical vault notes under `docs/obsidian_vault`.
+3. Added refresh health gating so `refresh` exits non-zero on broken links.
+4. Fixed core import link resolution in `scripts/build_acm_obsidian_graph.py` for statements like `from core import x`.
+5. Removed per-module and per-function `generated_at` frontmatter to reduce graph churn noise.
+6. Regenerated vault and skill references with zero broken links.
+
+Validation completed:
+1. `python scripts/manage_acm_agent_memory.py refresh --sync-repo-skill --sync-local-skill`
+2. `python scripts/manage_acm_agent_memory.py health` with `ok=true` and `broken_count=0`
+3. `python -c "from core.acm import main; print(callable(main))"`
+4. `pytest tests/test_v11_modules.py -q` with all tests passing
+
+Main branch status:
+1. `main` was not touched.
+2. Work was delivered through phase branch to integration branch only.
