@@ -5,10 +5,7 @@ module: core.failure_probability
 source: core/failure_probability.py
 line_start: 212
 line_end: 279
-generated_at: 2026-02-21T06:33:21+00:00
-tags:
-  - acm
-  - function
+generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.failure_probability.compute_failure_statistics

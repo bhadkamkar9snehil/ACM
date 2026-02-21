@@ -2,10 +2,7 @@
 type: module
 module: core.fuse
 source: core/fuse.py
-generated_at: 2026-02-21T06:33:21+00:00
-tags:
-  - acm
-  - module
+generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.fuse

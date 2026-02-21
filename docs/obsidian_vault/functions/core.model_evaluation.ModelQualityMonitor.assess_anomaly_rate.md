@@ -5,10 +5,7 @@ module: core.model_evaluation
 source: core/model_evaluation.py
 line_start: 104
 line_end: 174
-generated_at: 2026-02-21T06:33:21+00:00
-tags:
-  - acm
-  - method
+generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.model_evaluation.ModelQualityMonitor.assess_anomaly_rate

@@ -5,10 +5,7 @@ module: core.drift
 source: core/drift.py
 line_start: 364
 line_end: 384
-generated_at: 2026-02-21T06:33:21+00:00
-tags:
-  - acm
-  - function
+generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.drift.build_drift_controller_state

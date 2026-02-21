@@ -5,10 +5,7 @@ module: core.sql_client
 source: core/sql_client.py
 line_start: 633
 line_end: 704
-generated_at: 2026-02-21T06:33:21+00:00
-tags:
-  - acm
-  - function
+generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.sql_client.load_config_required_from_sql

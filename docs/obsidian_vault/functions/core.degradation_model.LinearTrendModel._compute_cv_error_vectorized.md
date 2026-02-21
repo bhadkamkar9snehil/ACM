@@ -5,10 +5,7 @@ module: core.degradation_model
 source: core/degradation_model.py
 line_start: 702
 line_end: 767
-generated_at: 2026-02-21T06:33:21+00:00
-tags:
-  - acm
-  - method
+generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.degradation_model.LinearTrendModel._compute_cv_error_vectorized

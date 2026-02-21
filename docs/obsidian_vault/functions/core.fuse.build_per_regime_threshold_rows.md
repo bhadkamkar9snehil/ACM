@@ -5,10 +5,7 @@ module: core.fuse
 source: core/fuse.py
 line_start: 1296
 line_end: 1318
-generated_at: 2026-02-21T06:33:21+00:00
-tags:
-  - acm
-  - function
+generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.fuse.build_per_regime_threshold_rows

@@ -5,10 +5,7 @@ module: core.analytics_builder
 source: core/analytics_builder.py
 line_start: 47
 line_end: 65
-generated_at: 2026-02-21T06:33:21+00:00
-tags:
-  - acm
-  - class
+generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.analytics_builder.AnalyticsConstants

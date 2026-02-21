@@ -5,10 +5,7 @@ module: core.resource_monitor
 source: core/resource_monitor.py
 line_start: 222
 line_end: 629
-generated_at: 2026-02-21T06:33:21+00:00
-tags:
-  - acm
-  - class
+generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.resource_monitor.ResourceMonitor

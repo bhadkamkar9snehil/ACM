@@ -5,10 +5,7 @@ module: core.output_manager
 source: core/output_manager.py
 line_start: 1934
 line_end: 2063
-generated_at: 2026-02-21T06:33:21+00:00
-tags:
-  - acm
-  - method
+generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.output_manager.OutputManager._build_data_quality_records

@@ -5,10 +5,7 @@ module: core.data_loader
 source: core/data_loader.py
 line_start: 71
 line_end: 79
-generated_at: 2026-02-21T06:33:21+00:00
-tags:
-  - acm
-  - function
+generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.data_loader._future_cutoff_ts

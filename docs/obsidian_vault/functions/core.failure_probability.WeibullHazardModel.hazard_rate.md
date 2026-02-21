@@ -5,10 +5,7 @@ module: core.failure_probability
 source: core/failure_probability.py
 line_start: 459
 line_end: 477
-generated_at: 2026-02-21T06:33:21+00:00
-tags:
-  - acm
-  - method
+generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.failure_probability.WeibullHazardModel.hazard_rate

@@ -5,10 +5,7 @@ module: core.multivariate_forecast
 source: core/multivariate_forecast.py
 line_start: 41
 line_end: 48
-generated_at: 2026-02-21T06:33:21+00:00
-tags:
-  - acm
-  - class
+generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.multivariate_forecast.MultivariateForecaseResult

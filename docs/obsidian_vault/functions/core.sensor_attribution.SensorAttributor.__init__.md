@@ -5,10 +5,7 @@ module: core.sensor_attribution
 source: core/sensor_attribution.py
 line_start: 458
 line_end: 465
-generated_at: 2026-02-21T06:33:21+00:00
-tags:
-  - acm
-  - method
+generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.sensor_attribution.SensorAttributor.__init__

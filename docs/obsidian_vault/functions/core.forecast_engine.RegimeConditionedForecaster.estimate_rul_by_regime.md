@@ -5,10 +5,7 @@ module: core.forecast_engine
 source: core/forecast_engine.py
 line_start: 1985
 line_end: 2109
-generated_at: 2026-02-21T06:33:21+00:00
-tags:
-  - acm
-  - method
+generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.forecast_engine.RegimeConditionedForecaster.estimate_rul_by_regime

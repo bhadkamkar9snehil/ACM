@@ -5,10 +5,7 @@ module: core.metrics
 source: core/metrics.py
 line_start: 517
 line_end: 534
-generated_at: 2026-02-21T06:33:21+00:00
-tags:
-  - acm
-  - function
+generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.metrics.log_forecast_diagnostics

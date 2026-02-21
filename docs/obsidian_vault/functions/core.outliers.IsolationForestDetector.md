@@ -5,10 +5,7 @@ module: core.outliers
 source: core/outliers.py
 line_start: 32
 line_end: 112
-generated_at: 2026-02-21T06:33:21+00:00
-tags:
-  - acm
-  - class
+generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.outliers.IsolationForestDetector

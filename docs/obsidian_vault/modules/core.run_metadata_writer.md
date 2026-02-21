@@ -2,10 +2,7 @@
 type: module
 module: core.run_metadata_writer
 source: core/run_metadata_writer.py
-generated_at: 2026-02-21T06:33:21+00:00
-tags:
-  - acm
-  - module
+generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.run_metadata_writer

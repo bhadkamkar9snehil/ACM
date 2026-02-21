@@ -5,10 +5,7 @@ module: core.model_persistence
 source: core/model_persistence.py
 line_start: 421
 line_end: 477
-generated_at: 2026-02-21T06:33:21+00:00
-tags:
-  - acm
-  - function
+generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.model_persistence.load_regime_state

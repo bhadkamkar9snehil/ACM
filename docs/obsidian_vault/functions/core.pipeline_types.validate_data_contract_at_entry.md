@@ -5,10 +5,7 @@ module: core.pipeline_types
 source: core/pipeline_types.py
 line_start: 640
 line_end: 726
-generated_at: 2026-02-21T06:33:21+00:00
-tags:
-  - acm
-  - function
+generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.pipeline_types.validate_data_contract_at_entry

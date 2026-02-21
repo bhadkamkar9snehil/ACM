@@ -5,10 +5,7 @@ module: core.degradation_model
 source: core/degradation_model.py
 line_start: 529
 line_end: 621
-generated_at: 2026-02-21T06:33:21+00:00
-tags:
-  - acm
-  - method
+generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.degradation_model.LinearTrendModel._detect_and_handle_health_jumps

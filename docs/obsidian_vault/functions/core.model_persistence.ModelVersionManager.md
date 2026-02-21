@@ -5,10 +5,7 @@ module: core.model_persistence
 source: core/model_persistence.py
 line_start: 484
 line_end: 1220
-generated_at: 2026-02-21T06:33:21+00:00
-tags:
-  - acm
-  - class
+generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.model_persistence.ModelVersionManager

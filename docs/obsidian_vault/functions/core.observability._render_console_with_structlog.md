@@ -5,10 +5,7 @@ module: core.observability
 source: core/observability.py
 line_start: 330
 line_end: 405
-generated_at: 2026-02-21T06:33:21+00:00
-tags:
-  - acm
-  - function
+generated_at: 2026-02-21T06:37:09+00:00
 ---
 
 # core.observability._render_console_with_structlog
