@@ -2,7 +2,7 @@
   "annotations": {
     "list": []
   },
-  "description": "ACM Pipeline Observability — Runs, Resources (Prometheus), Traces (Tempo), Logs (Loki), Profiling (Pyroscope)",
+  "description": "ACM Pipeline Observability \u2014 Runs, Resources (Prometheus), Traces (Tempo), Logs (Loki), Profiling (Pyroscope)",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -217,7 +217,7 @@
             "type": "mssql",
             "uid": "mssql-ds"
           },
-          "format": "time_series",
+          "format": "table",
           "rawSql": "SELECT COUNT(*) AS value FROM dbo.ACM_Runs WHERE StartedAt BETWEEN $__timeFrom() AND $__timeTo()",
           "refId": "A"
         }
@@ -281,7 +281,7 @@
             "type": "mssql",
             "uid": "mssql-ds"
           },
-          "format": "time_series",
+          "format": "table",
           "rawSql": "SELECT COUNT(*) AS value FROM dbo.ACM_Runs WHERE ErrorMessage IS NOT NULL AND ErrorMessage <> '' AND StartedAt BETWEEN $__timeFrom() AND $__timeTo()",
           "refId": "A"
         }
@@ -348,7 +348,7 @@
             "type": "mssql",
             "uid": "mssql-ds"
           },
-          "format": "time_series",
+          "format": "table",
           "rawSql": "SELECT AVG(CAST(DurationSeconds AS float)) AS value FROM dbo.ACM_Runs WHERE CompletedAt IS NOT NULL AND StartedAt BETWEEN $__timeFrom() AND $__timeTo()",
           "refId": "A"
         }
@@ -407,7 +407,7 @@
             "type": "mssql",
             "uid": "mssql-ds"
           },
-          "format": "time_series",
+          "format": "table",
           "rawSql": "SELECT ISNULL(SUM(ScoreRowCount), 0) AS value FROM dbo.ACM_Runs WHERE StartedAt BETWEEN $__timeFrom() AND $__timeTo()",
           "refId": "A"
         }
@@ -474,7 +474,7 @@
             "type": "mssql",
             "uid": "mssql-ds"
           },
-          "format": "time_series",
+          "format": "table",
           "rawSql": "SELECT ISNULL(SUM(EpisodeCount), 0) AS value FROM dbo.ACM_Runs WHERE StartedAt BETWEEN $__timeFrom() AND $__timeTo()",
           "refId": "A"
         }
@@ -1197,7 +1197,7 @@
             "uid": "mssql-ds"
           },
           "format": "table",
-          "rawSql": "SELECT 'ACM_Scores_Wide' AS TableName, COUNT(*) AS TotalRows FROM dbo.ACM_Scores_Wide WHERE CreatedAt BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL\nSELECT 'ACM_HealthTimeline', COUNT(*) FROM dbo.ACM_HealthTimeline WHERE CreatedAt BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL\nSELECT 'ACM_RegimeTimeline', COUNT(*) FROM dbo.ACM_RegimeTimeline WHERE CreatedAt BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL\nSELECT 'ACM_Episodes', COUNT(*) FROM dbo.ACM_Episodes WHERE CreatedAt BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL\nSELECT 'ACM_Runs', COUNT(*) FROM dbo.ACM_Runs WHERE CreatedAt BETWEEN $__timeFrom() AND $__timeTo()",
+          "rawSql": "SELECT 'ACM_Scores_Wide' AS TableName, COUNT(*) AS TotalRows FROM dbo.ACM_Scores_Wide WHERE Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL\nSELECT 'ACM_HealthTimeline', COUNT(*) FROM dbo.ACM_HealthTimeline WHERE Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL\nSELECT 'ACM_RegimeTimeline', COUNT(*) FROM dbo.ACM_RegimeTimeline WHERE Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL\nSELECT 'ACM_Episodes', COUNT(*) FROM dbo.ACM_Episodes WHERE StartTime BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL\nSELECT 'ACM_Runs', COUNT(*) FROM dbo.ACM_Runs WHERE StartedAt BETWEEN $__timeFrom() AND $__timeTo()",
           "refId": "A"
         }
       ],
@@ -1356,7 +1356,7 @@
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "ACM — Observability",
+  "title": "ACM \u2014 Observability",
   "uid": "acm-observability-v4",
   "version": 1,
   "weekStart": ""
