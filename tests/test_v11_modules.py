@@ -735,6 +735,100 @@ class TestRefactorHelpers:
         assert out["model_state"] == {"state": "loaded"}
         assert captured["loaded"] is True
 
+    def test_run_model_adaptation_and_persistence_stage_orchestrates_two_stages(self):
+        """Combined model stage helper should run auto-retrain stage then persistence stage."""
+        from core.model_persistence import run_model_adaptation_and_persistence_stage, ModelPersistenceStageResult
+
+        sections = []
+        class _Section:
+            def __init__(self, name):
+                self.name = name
+            def __enter__(self):
+                sections.append(self.name)
+                return self
+            def __exit__(self, exc_type, exc, tb):
+                return False
+        def _section_fn(name):
+            return _Section(name)
+
+        retrain_detectors = {
+            "ar1_detector": object(),
+            "pca_detector": object(),
+            "iforest_detector": object(),
+            "gmm_detector": None,
+            "omr_detector": None,
+            "pca_train_spe": np.array([0.1]),
+            "pca_train_t2": np.array([0.2]),
+        }
+
+        def _run_auto_retrain_stage_fn(**kwargs):
+            return type(
+                "AutoRetrainStageResult",
+                (),
+                {
+                    "force_retrain": True,
+                    "cached_models": None,
+                    "regime_model": {"k": "v"},
+                    "detectors": retrain_detectors,
+                },
+            )()
+
+        def _run_model_persistence_and_lifecycle_stage_fn(**kwargs):
+            return ModelPersistenceStageResult(
+                detectors_fitted_this_run=True,
+                models_were_trained=True,
+                saved_model_version=12,
+                model_state={"state": "ok"},
+            )
+
+        out = run_model_adaptation_and_persistence_stage(
+            section_fn=_section_fn,
+            run_auto_retrain_stage_fn=_run_auto_retrain_stage_fn,
+            run_model_persistence_and_lifecycle_stage_fn=_run_model_persistence_and_lifecycle_stage_fn,
+            cfg={},
+            cached_models={"cached": True},
+            cached_manifest={},
+            detectors_just_trained=False,
+            score_out={},
+            regime_quality_ok=True,
+            current_model_maturity="LEARNING",
+            boolean_only_metrics=[],
+            equip="FD_FAN",
+            logger=type("L", (), {"warn": lambda *a, **k: None})(),
+            record_model_refit_fn=lambda *a, **k: None,
+            fit_all_detectors_fn=lambda **k: {},
+            train=pd.DataFrame({"a": [1.0, 2.0]}),
+            det_flags={},
+            output_manager=object(),
+            sql_client=object(),
+            run_id="r1",
+            equip_id=1,
+            regime_model=None,
+            detectors={
+                "ar1_detector": None,
+                "pca_detector": None,
+                "iforest_detector": None,
+                "gmm_detector": None,
+                "omr_detector": None,
+                "pca_train_spe": None,
+                "pca_train_t2": None,
+            },
+            detector_cache=None,
+            col_meds=None,
+            timing_sections={},
+            model_state=None,
+            regime_state_version=1,
+            update_and_persist_model_lifecycle_fn=lambda **k: None,
+            load_model_state_safe_fn=lambda **k: None,
+        )
+
+        assert out.force_retrain is True
+        assert out.saved_model_version == 12
+        assert out.model_state == {"state": "ok"}
+        assert out.regime_model == {"k": "v"}
+        assert isinstance(out.detectors["pca_train_spe"], np.ndarray)
+        assert sections == ["models.auto_retrain", "models.persistence.save"]
+
     def test_load_manifest_protected_columns_returns_none_when_cache_skipped(self):
         """Manifest protection helper should no-op when cache is disabled or run is coldstart."""
         from core.model_persistence import load_manifest_protected_columns
