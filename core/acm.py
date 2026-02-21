@@ -421,7 +421,6 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
     err_json: Optional[str] = None
     rows_read = 0
     rows_written = 0
-    errors = []
     degradations: List[str] = []  # Track partial failures for DEGRADED outcome.
     
     # Track run timing for ACM_Runs metadata.
@@ -500,7 +499,7 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
         
         # ===== Adaptive rolling baseline (cold-start helper) =====
         with T.section("baseline.seed"):
-            train, score, baseline_source = seed_baseline_safe(
+            train, score, _ = seed_baseline_safe(
                 train=train.copy(),
                 score=score.copy(),
                 sql_client=sql_client,
@@ -516,9 +515,8 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
         # Detect daily/weekly cycles and optionally adjust data to reduce
         # false positives from predictable seasonality.
         seasonal_patterns: Dict[str, List[SeasonalPattern]] = {}
-        seasonal_adjusted = False
         with T.section("seasonality.detect"):
-            train, score, seasonal_patterns, seasonal_adjusted = detect_and_adjust_safe(
+            train, score, seasonal_patterns, _ = detect_and_adjust_safe(
                 train=train,
                 score=score,
                 cfg=cfg,
@@ -745,7 +743,7 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
 
         # ===== Regime occupancy and transitions =====
         with T.section("regimes.occupancy"):
-            occupancy_count, transition_count = regimes.write_regime_occupancy_and_transitions(
+            regimes.write_regime_occupancy_and_transitions(
                 score_regime_labels=score_regime_labels,
                 frame=frame,
                 output_manager=output_manager,
@@ -830,8 +828,6 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
                 load_model_state_safe_fn=load_model_state_safe,
                 logger=Console,
             )
-        detectors_fitted_this_run = persistence_out["detectors_fitted_this_run"]
-        models_were_trained = persistence_out["models_were_trained"]
         saved_model_version = persistence_out["saved_model_version"]
         model_state = persistence_out["model_state"]
 
@@ -928,9 +924,8 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
             )
 
         # Regime health labeling and transient detection.
-        regime_stats: Dict[int, Dict[str, float]] = {}
         transient_counts: Dict[str, int] = {}
-        frame, regime_stats = regimes.apply_regime_health_labels(
+        frame, _ = regimes.apply_regime_health_labels(
             frame=frame,
             regime_model=regime_model,
             regime_quality_ok=regime_quality_ok,
