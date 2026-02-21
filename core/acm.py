@@ -23,7 +23,6 @@ from __future__ import annotations
 # Standard library imports
 # ============================
 import argparse
-import time
 from datetime import datetime
 # NOTE: Parallel fitting via ThreadPoolExecutor was removed due to BLAS/OpenMP
 # deadlocks; model fitting is intentionally single-threaded here.
@@ -324,10 +323,6 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
     train_feature_hash: Optional[str] = None
     current_train_columns: Optional[List[str]] = None
     regime_model: Optional[regimes.RegimeModel] = None
-    regime_basis_train: Optional[pd.DataFrame] = None
-    regime_basis_score: Optional[pd.DataFrame] = None
-    regime_basis_meta: Dict[str, Any] = {}
-    regime_basis_hash: Optional[int] = None
     raw_train: Optional[pd.DataFrame] = None
     raw_score: Optional[pd.DataFrame] = None
     regime_quality_ok: bool = True
@@ -531,99 +526,49 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
         detectors_just_trained = detector_init.detectors_just_trained
         use_cache = detector_init.use_cache
 
-        # ===== Phase 3: Build regime feature basis (required for labeling) =====
-        regime_basis_result = regimes.build_regime_feature_basis_stage(
-            train_features=train,
-            score_features=score,
+        # ===== Phase 3-5: Regime basis + detector scoring + regime labeling =====
+        scoring_regime_stage = regimes.run_scoring_regime_stage(
+            train_df=train,
+            score_df=score,
             raw_train=raw_train,
             raw_score=raw_score,
-            pca_detector=pca_detector,
             cfg=cfg,
+            pca_detector=pca_detector,
             regime_model=regime_model,
+            regime_state=regime_state,
+            regime_state_version=regime_state_version,
+            regime_loaded_from_state=regime_loaded_from_state,
+            det_flags=det_flags,
+            detectors={
+                "ar1_detector": ar1_detector,
+                "pca_detector": pca_detector,
+                "iforest_detector": iforest_detector,
+                "gmm_detector": gmm_detector,
+                "omr_detector": omr_detector,
+            },
             equip=equip,
-            logger=Console,
-        )
-        regime_basis_train = regime_basis_result.regime_basis_train
-        regime_basis_score = regime_basis_result.regime_basis_score
-        regime_basis_meta = regime_basis_result.regime_basis_meta
-        regime_basis_hash = regime_basis_result.regime_basis_hash
-        regime_model = regime_basis_result.regime_model
-        if regime_basis_result.degraded:
-            degradations.append("regime_feature_basis")
-
-        # ===== Phase 4: Score on SCORE window =====
-        # Scoring is delegated to detector_orchestrator.score_all_detectors().
-        with T.section("score.detector_score"):
-            score_start_time = time.perf_counter()
-            
-            frame, omr_contributions_data = score_all_detectors(
-                data=score,
-                ar1_detector=ar1_detector,
-                pca_detector=pca_detector,
-                iforest_detector=iforest_detector,
-                gmm_detector=gmm_detector,
-                omr_detector=omr_detector,
-                **det_flags,
-            )
-
-        # ===== Phase 5: Regimes (before calibration for regime-aware thresholds) =====
-        train_regime_labels = None
-        score_regime_labels = None
-        
-        # v11.4.0: Load model maturity state BEFORE regimes to control discovery
-        # v11.5.0: Override maturity to LEARNING if refit was requested (models just retrained)
-        current_model_maturity = resolve_maturity_for_regime_stage(
-            sql_client=sql_client,
             equip_id=equip_id,
+            sql_client=sql_client,
+            output_manager=output_manager,
             refit_requested=refit_requested,
+            section_fn=T.section,
+            score_all_detectors_fn=score_all_detectors,
+            resolve_maturity_for_regime_stage_fn=resolve_maturity_for_regime_stage,
+            record_regime_fn=record_regime,
             logger=Console,
         )
-        
-        with T.section("regimes.label"):
-            regime_labeling_result = regimes.run_regime_labeling_stage(
-                score_df=score,
-                frame=frame,
-                train_df=train,
-                cfg=cfg,
-                regime_basis_train=regime_basis_train,
-                regime_basis_score=regime_basis_score,
-                regime_basis_meta=regime_basis_meta,
-                regime_basis_hash=regime_basis_hash,
-                regime_model=regime_model,
-                regime_loaded_from_state=regime_loaded_from_state,
-                regime_state=regime_state,
-                regime_state_version=regime_state_version,
-                raw_train=raw_train,
-                output_manager=output_manager,
-                current_model_maturity=current_model_maturity,
-                equip=equip,
-                equip_id=equip_id,
-                sql_client=sql_client,
-                logger=Console,
-                record_regime_fn=record_regime,
-            )
-
-            frame = regime_labeling_result.frame
-            regime_out = regime_labeling_result.score_out
-            regime_model = regime_labeling_result.regime_model
-            train_regime_labels = regime_labeling_result.train_regime_labels
-            score_regime_labels = regime_labeling_result.score_regime_labels
-            regime_quality_ok = regime_labeling_result.regime_quality_ok
-            regime_state_version = regime_labeling_result.regime_state_version
-            regime_loaded_from_state = regime_labeling_result.regime_loaded_from_state
-        
-        score_out = regime_out
-        regime_quality_ok = bool(regime_out.get("regime_quality_ok", True))
-
-        # ===== Regime occupancy and transitions =====
-        with T.section("regimes.occupancy"):
-            regimes.write_regime_occupancy_and_transitions(
-                score_regime_labels=score_regime_labels,
-                frame=frame,
-                output_manager=output_manager,
-                logger=Console,
-                equip=equip,
-            )
+        frame = scoring_regime_stage.frame
+        omr_contributions_data = scoring_regime_stage.omr_contributions_data
+        score_out = scoring_regime_stage.score_out
+        regime_model = scoring_regime_stage.regime_model
+        train_regime_labels = scoring_regime_stage.train_regime_labels
+        score_regime_labels = scoring_regime_stage.score_regime_labels
+        regime_quality_ok = scoring_regime_stage.regime_quality_ok
+        regime_state_version = scoring_regime_stage.regime_state_version
+        regime_loaded_from_state = scoring_regime_stage.regime_loaded_from_state
+        current_model_maturity = scoring_regime_stage.current_model_maturity
+        if scoring_regime_stage.degraded_regime_basis:
+            degradations.append("regime_feature_basis")
 
         # ===== Model quality assessment: check if retraining is needed =====
         # Runs after first scoring so cached model performance can be evaluated.

@@ -1406,6 +1406,99 @@ class TestRefactorHelpers:
         assert "transient_state" in result.frame.columns
         assert result.transient_counts == {"steady": 1, "startup": 1}
 
+    def test_run_scoring_regime_stage_orchestrates_basis_score_label_and_occupancy(self, monkeypatch):
+        """Scoring-regime stage should orchestrate basis build, detector score, regime label, and occupancy writes."""
+        from core import regimes
+
+        idx = pd.date_range("2026-01-01", periods=2, freq="h")
+        train_df = pd.DataFrame({"a": [1.0, 2.0]}, index=idx)
+        score_df = pd.DataFrame({"a": [1.5, 2.5]}, index=idx)
+        base_frame = pd.DataFrame({"a": [1.5, 2.5]}, index=idx)
+
+        def _basis_stage(**kwargs):
+            return regimes.RegimeBasisBuildResult(
+                regime_basis_train=train_df,
+                regime_basis_score=score_df,
+                regime_basis_meta={},
+                regime_basis_hash=101,
+                regime_model=kwargs["regime_model"],
+                degraded=False,
+            )
+
+        def _score_all_detectors_fn(**kwargs):
+            frame = base_frame.copy()
+            frame["ar1_raw"] = [0.1, 0.2]
+            return frame, pd.DataFrame({"contrib": [0.4, 0.6]}, index=idx)
+
+        def _resolve_maturity(**kwargs):
+            return "LEARNING"
+
+        def _run_regime_labeling_stage(**kwargs):
+            frame = kwargs["frame"].copy()
+            frame["regime_label"] = [0, 1]
+            return regimes.RegimeLabelingStageResult(
+                frame=frame,
+                score_out={"frame": frame, "regime_quality_ok": True},
+                regime_model=kwargs["regime_model"],
+                train_regime_labels=np.array([0, 0]),
+                score_regime_labels=np.array([0, 1]),
+                regime_quality_ok=True,
+                regime_state_version=kwargs["regime_state_version"],
+                regime_loaded_from_state=kwargs["regime_loaded_from_state"],
+            )
+
+        occupancy_called = {"called": False}
+        def _write_occupancy(**kwargs):
+            occupancy_called["called"] = True
+            return 1, 1
+
+        sections = []
+        class _Section:
+            def __init__(self, name):
+                self.name = name
+            def __enter__(self):
+                sections.append(self.name)
+                return self
+            def __exit__(self, exc_type, exc, tb):
+                return False
+        def _section_fn(name):
+            return _Section(name)
+
+        monkeypatch.setattr(regimes, "build_regime_feature_basis_stage", _basis_stage)
+        monkeypatch.setattr(regimes, "run_regime_labeling_stage", _run_regime_labeling_stage)
+        monkeypatch.setattr(regimes, "write_regime_occupancy_and_transitions", _write_occupancy)
+
+        result = regimes.run_scoring_regime_stage(
+            train_df=train_df,
+            score_df=score_df,
+            raw_train=train_df,
+            raw_score=score_df,
+            cfg={},
+            pca_detector=None,
+            regime_model=None,
+            regime_state=None,
+            regime_state_version=3,
+            regime_loaded_from_state=False,
+            det_flags={"ar1_enabled": True, "pca_enabled": False, "iforest_enabled": False, "gmm_enabled": False, "omr_enabled": False},
+            detectors={"ar1_detector": object(), "pca_detector": None, "iforest_detector": None, "gmm_detector": None, "omr_detector": None},
+            equip="FD_FAN",
+            equip_id=1,
+            sql_client=object(),
+            output_manager=object(),
+            refit_requested=False,
+            section_fn=_section_fn,
+            score_all_detectors_fn=_score_all_detectors_fn,
+            resolve_maturity_for_regime_stage_fn=_resolve_maturity,
+            record_regime_fn=None,
+        )
+
+        assert "regime_label" in result.frame.columns
+        assert result.regime_quality_ok is True
+        assert result.current_model_maturity == "LEARNING"
+        assert result.degraded_regime_basis is False
+        assert occupancy_called["called"] is True
+        assert sections == ["score.detector_score", "regimes.label", "regimes.occupancy"]
+
     def test_release_persist_memory_clears_raw_frames_and_detector_models(self):
         """Output manager persist cleanup helper should clear raw frames and detector model pointers."""
         from core.output_manager import OutputManager
