@@ -195,7 +195,7 @@ try:
         load_config_required_from_sql,
         start_acm_run,
     )
-except Exception:
+except ImportError:
     SQLClient = None  # type: ignore
     execute_with_deadlock_retry = None  # type: ignore
     connect_acm_sql = None  # type: ignore
@@ -409,8 +409,6 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
         raise SystemExit(1)
 
     with T.section("startup"):
-        if load_config_required_from_sql is None:
-            raise RuntimeError("SQL helper load_config_required_from_sql is unavailable.")
         # Load config from SQL (no CSV fallback; SQL is the source of truth).
         cfg = load_config_required_from_sql(sql_client, equipment_name=equip, logger=Console)
         
@@ -422,8 +420,6 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
     _configure_logging(logging_cfg, args)
 
     # Get equipment ID from SQL (already resolved during config loading)
-    if resolve_equipment_id_required is None:
-        raise RuntimeError("SQL helper resolve_equipment_id_required is unavailable.")
     equip_id = resolve_equipment_id_required(equip, sql_client)
     if not hasattr(cfg, '_equip_id') or cfg._equip_id == 0:
         cfg._equip_id = equip_id
@@ -517,8 +513,6 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
     cli_overrides = []
 
     # Start the run in SQL.
-    if start_acm_run is None:
-        raise RuntimeError("SQL helper start_acm_run is unavailable.")
     run_id, win_start, win_end, equip_id = start_acm_run(
         cli=sql_client,
         cfg=cfg,

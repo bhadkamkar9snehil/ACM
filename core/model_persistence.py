@@ -2015,4 +2015,3 @@ def load_manifest_protected_columns(
             equip=equip,
         )
         return None
-        return False

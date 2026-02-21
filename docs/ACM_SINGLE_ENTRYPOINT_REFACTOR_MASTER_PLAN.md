@@ -17,7 +17,7 @@ Current snapshot:
    - `python -m core.acm` is the only runtime entrypoint.
 2. `core/acm.py` is shrinking:
    - recent high watermark in this effort: 1758 lines
-   - current: 1237 lines
+   - current: 1231 lines
 3. Extracted and wired into ownership modules:
    - calibration and fusion orchestration pieces in `core/fuse.py`
    - NOOP outcome/error/finalization helpers in `core/run_metadata_writer.py`
@@ -30,6 +30,9 @@ Current snapshot:
    - auto-retrain stage orchestration in `core/model_evaluation.py`
    - model persistence and lifecycle stage orchestration in `core/model_persistence.py`
    - consolidated teardown orchestration in `core/run_metadata_writer.py`
+   - startup guard cleanup in `core/acm.py`:
+     - removed repeated helper-availability checks in main path
+     - tightened SQL import guard to `ImportError` so non-import failures are not silently masked
 4. Tests were updated throughout extraction:
    - `tests/test_v11_modules.py` currently passes with new helper coverage.
 5. Source control policy has been followed:
