@@ -59,7 +59,7 @@ from core.pipeline_types import (
 from core.seasonality import SeasonalPattern, detect_and_adjust_safe
 from core.sensor_attribution import build_sensor_analytics_context
 from core.adaptive_thresholds import maybe_update_adaptive_thresholds
-from core.smart_coldstart import seed_baseline, load_and_validate_data_stage
+from core.smart_coldstart import seed_baseline_safe, load_and_validate_data_stage
 from core.detector_orchestrator import (
     score_all_detectors,
     calibrate_all_detectors,
@@ -106,6 +106,7 @@ from core.sql_client import (
     load_config_required_from_sql,
     start_acm_run,
     get_acm_run_count,
+    apply_cli_window_overrides,
 )
 
 # Data utilities: index hygiene and deduplication helpers.
@@ -396,19 +397,13 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
     set_acm_context(run_id=run_id, equip_id=equip_id)
     
     # Override window if CLI args provided (e.g., backfill).
-    if args.start_time:
-        try:
-            win_start = pd.Timestamp(args.start_time)
-            cli_overrides.append(f"start={win_start}")
-        except Exception as e:
-            Console.warn(f"Failed to parse --start-time: {e}", component="RUN")
-    
-    if args.end_time:
-        try:
-            win_end = pd.Timestamp(args.end_time)
-            cli_overrides.append(f"end={win_end}")
-        except Exception as e:
-            Console.warn(f"Failed to parse --end-time: {e}", component="RUN")
+    win_start, win_end, cli_overrides = apply_cli_window_overrides(
+        win_start=win_start,
+        win_end=win_end,
+        start_time_arg=args.start_time,
+        end_time_arg=args.end_time,
+        logger=Console,
+    )
     
     if cli_overrides:
         Console.info(f"CLI overrides: {', '.join(cli_overrides)}", component="RUN")
@@ -505,21 +500,17 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
         
         # ===== Adaptive rolling baseline (cold-start helper) =====
         with T.section("baseline.seed"):
-            try:
-                train, score, baseline_source = seed_baseline(
-                    train.copy(), 
-                    score.copy(), 
-                    sql_client,
-                    equip_id,
-                    cfg,
-                    equip=equip,
-                    is_coldstart=coldstart_complete,
-                    ensure_local_index_fn=ensure_local_index,
-                )
-            except Exception as be:
-                Console.warn(f"Cold-start baseline setup failed: {be}", component="BASELINE",
-                             equip=equip, train_rows=len(train) if train is not None else 0,
-                             error=str(be))
+            train, score, baseline_source = seed_baseline_safe(
+                train=train.copy(),
+                score=score.copy(),
+                sql_client=sql_client,
+                equip_id=equip_id,
+                cfg=cfg,
+                equip=equip,
+                is_coldstart=coldstart_complete,
+                ensure_local_index_fn=ensure_local_index,
+                logger=Console,
+            )
 
         # ===== Seasonality detection and adjustment =====
         # Detect daily/weekly cycles and optionally adjust data to reduce

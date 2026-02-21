@@ -32,6 +32,7 @@ from typing import Any, Callable, Dict, Optional, Tuple
 from contextlib import contextmanager
 import configparser
 from pathlib import Path
+import pandas as pd
 
 try:
     import pyodbc
@@ -754,3 +755,34 @@ def get_acm_run_count(
             return int(row[0]) if row else 0
     except Exception:
         return 0
+
+
+def apply_cli_window_overrides(
+    win_start: Any,
+    win_end: Any,
+    start_time_arg: Optional[str] = None,
+    end_time_arg: Optional[str] = None,
+    logger: Optional[Any] = None,
+) -> Tuple[Any, Any, list[str]]:
+    """
+    Apply optional CLI window overrides and return updated bounds plus applied markers.
+    """
+    overrides: list[str] = []
+
+    if start_time_arg:
+        try:
+            win_start = pd.Timestamp(start_time_arg)
+            overrides.append(f"start={win_start}")
+        except Exception as e:
+            if logger is not None and hasattr(logger, "warn"):
+                logger.warn(f"Failed to parse --start-time: {e}", component="RUN")
+
+    if end_time_arg:
+        try:
+            win_end = pd.Timestamp(end_time_arg)
+            overrides.append(f"end={win_end}")
+        except Exception as e:
+            if logger is not None and hasattr(logger, "warn"):
+                logger.warn(f"Failed to parse --end-time: {e}", component="RUN")
+
+    return win_start, win_end, overrides

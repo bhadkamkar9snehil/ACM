@@ -834,3 +834,41 @@ def seed_baseline(
         Console.info(f"Baseline: {used} | extended={extended}", component="BASELINE")
     
     return train, score, used
+
+
+def seed_baseline_safe(
+    train: pd.DataFrame,
+    score: pd.DataFrame,
+    sql_client: Optional[Any],
+    equip_id: int,
+    cfg: Dict[str, Any],
+    equip: str = "",
+    is_coldstart: bool = False,
+    ensure_local_index_fn: Optional[Any] = None,
+    logger: Any = Console,
+) -> Tuple[pd.DataFrame, pd.DataFrame, Optional[str]]:
+    """
+    Safe wrapper for baseline seeding.
+
+    Returns original train/score on failure and logs a warning.
+    """
+    try:
+        return seed_baseline(
+            train=train,
+            score=score,
+            sql_client=sql_client,
+            equip_id=equip_id,
+            cfg=cfg,
+            equip=equip,
+            is_coldstart=is_coldstart,
+            ensure_local_index_fn=ensure_local_index_fn,
+        )
+    except Exception as e:
+        logger.warn(
+            f"Cold-start baseline setup failed: {e}",
+            component="BASELINE",
+            equip=equip,
+            train_rows=len(train) if train is not None else 0,
+            error=str(e)[:200],
+        )
+        return train, score, None
