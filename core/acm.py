@@ -1283,13 +1283,10 @@ def main() -> None:
         # v11.5.0: Override maturity to LEARNING if refit was requested (models just retrained)
         current_model_maturity: Optional[str] = None
         if sql_client and equip_id:
-            try:
-                early_model_state = load_model_state_from_sql(sql_client, equip_id)
-                if early_model_state is not None:
-                    current_model_maturity = early_model_state.maturity.value
-                    Console.info(f"Model maturity: {current_model_maturity}", component="LIFECYCLE")
-            except Exception as e:
-                Console.warn(f"Could not load model state for maturity check: {e}", component="LIFECYCLE")
+            early_model_state = load_model_state_from_sql(sql_client, equip_id)
+            if early_model_state is not None:
+                current_model_maturity = early_model_state.maturity.value
+                Console.info(f"Model maturity: {current_model_maturity}", component="LIFECYCLE")
         
         # v11.5.0 FIX: If refit was requested, detectors were retrained - must allow regime rediscovery
         # Otherwise CONVERGED state blocks regime discovery but cached regime model is stale/missing
@@ -1517,10 +1514,7 @@ def main() -> None:
         # because the lifecycle block above only runs when models are fitted. Load it from
         # SQL so the batch summary [model] field is populated on every run.
         if model_state is None and sql_client and equip_id:
-            try:
-                model_state = load_model_state_from_sql(sql_client, equip_id)
-            except Exception:
-                pass  # Summary field is best-effort; never fail the batch.
+            model_state = load_model_state_from_sql(sql_client, equip_id)
 
         # ===== Phase 6: Calibration (z-score normalization) =====
         # Fit calibrators on TRAIN data, transform SCORE data.
