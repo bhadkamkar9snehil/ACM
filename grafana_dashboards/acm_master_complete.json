@@ -322,7 +322,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT TOP 1 DurationHours\nFROM ACM_AlertAge\nWHERE EquipID = $equipment\nORDER BY CreatedAt DESC",
+          "rawSql": "SELECT DATEDIFF(HOUR,\n  (SELECT MIN(Timestamp) FROM dbo.ACM_HealthTimeline WHERE EquipID = $equipment\n     AND HealthZone IN ('WATCH','ALERT')\n     AND RunID = (SELECT TOP 1 RunID FROM dbo.ACM_Runs WHERE EquipID = $equipment ORDER BY StartedAt DESC)),\n  (SELECT MAX(Timestamp) FROM dbo.ACM_HealthTimeline WHERE EquipID = $equipment\n     AND HealthZone IN ('WATCH','ALERT')\n     AND RunID = (SELECT TOP 1 RunID FROM dbo.ACM_Runs WHERE EquipID = $equipment ORDER BY StartedAt DESC))\n) AS DurationHours",
           "refId": "A"
         }
       ],
@@ -392,7 +392,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT TOP 1 TotalEpisodes\nFROM ACM_EpisodeMetrics\nWHERE EquipID = $equipment\nORDER BY CreatedAt DESC",
+          "rawSql": "SELECT COUNT(*) AS TotalEpisodes\nFROM dbo.ACM_Episodes\nWHERE EquipID = $equipment\n  AND RunID = (SELECT TOP 1 RunID FROM dbo.ACM_Runs WHERE EquipID = $equipment ORDER BY StartedAt DESC)",
           "refId": "A"
         }
       ],
@@ -495,7 +495,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT TOP 1 Status\nFROM ACM_DefectSummary\nWHERE EquipID = $equipment\nORDER BY CreatedAt DESC",
+          "rawSql": "SELECT TOP 1 HealthZone AS Status\nFROM dbo.ACM_HealthTimeline\nWHERE EquipID = $equipment\nORDER BY Timestamp DESC",
           "refId": "A"
         }
       ],
@@ -557,7 +557,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT TOP 1 WorstSensor\nFROM ACM_DefectSummary\nWHERE EquipID = $equipment\nORDER BY CreatedAt DESC",
+          "rawSql": "SELECT TOP 1 SensorName AS WorstSensor\nFROM dbo.ACM_SensorHotspots\nWHERE EquipID = $equipment\n  AND RunID = (SELECT TOP 1 RunID FROM dbo.ACM_Runs WHERE EquipID = $equipment ORDER BY StartedAt DESC)\nORDER BY MaxAbsZ DESC",
           "refId": "A"
         }
       ],
@@ -1028,7 +1028,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT Timestamp AS time, ar1_z, pca_spe_z, pca_t2_z, mhal_z, iforest_z, gmm_z, cusum_z\nFROM ACM_Scores_Wide\nWHERE EquipID = $equipment\n  AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY EntryDateTime ASC",
+          "rawSql": "SELECT Timestamp AS time, ar1_z, pca_spe_z, pca_t2_z, mhal_z, iforest_z, gmm_z, cusum_z\nFROM ACM_Scores_Wide\nWHERE EquipID = $equipment\n  AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY Timestamp ASC",
           "refId": "A"
         }
       ],
@@ -1136,7 +1136,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT Timestamp AS time, fused AS value\nFROM ACM_Scores_Wide\nWHERE EquipID = $equipment\n  AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY EntryDateTime ASC",
+          "rawSql": "SELECT Timestamp AS time, fused AS value\nFROM ACM_Scores_Wide\nWHERE EquipID = $equipment\n  AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY Timestamp ASC",
           "refId": "A"
         }
       ],
@@ -1661,7 +1661,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT CASE WHEN RegimeLabel = -1 THEN 'UNKNOWN' ELSE CONCAT('Regime ', RegimeLabel) END AS regime, ROUND(MeanSeconds / 60.0, 1) AS avg_minutes\nFROM ACM_RegimeDwellStats\nWHERE EquipID = $equipment\n  AND RunID = (SELECT TOP 1 RunID FROM ACM_RegimeDwellStats WHERE EquipID = $equipment ORDER BY CreatedAt DESC)\nORDER BY avg_minutes DESC",
+          "rawSql": "SELECT\n  ro.RegimeLabel,\n  ROUND(ro.DwellTimeHours, 2) AS DwellTimeHours,\n  ROUND(ro.DwellFraction * 100, 1) AS DwellPct,\n  ro.EntryCount\nFROM dbo.ACM_RegimeOccupancy ro\nWHERE ro.EquipID = $equipment\n  AND ro.RunID = (SELECT TOP 1 RunID FROM dbo.ACM_Runs WHERE EquipID = $equipment ORDER BY StartedAt DESC)\nORDER BY ro.DwellTimeHours DESC",
           "refId": "A"
         }
       ],
@@ -2818,7 +2818,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT HealthBin, RecordCount\nFROM ACM_HealthHistogram\nWHERE EquipID = $equipment\n  AND RunID = (SELECT TOP 1 RunID FROM ACM_HealthHistogram WHERE EquipID = $equipment ORDER BY CreatedAt DESC)\nORDER BY HealthBin ASC",
+          "rawSql": "SELECT\n  CAST(FLOOR(HealthIndex / 10) * 10 AS varchar) + '-' +\n  CAST(FLOOR(HealthIndex / 10) * 10 + 10 AS varchar) AS HealthBin,\n  COUNT(*) AS RecordCount\nFROM dbo.ACM_HealthTimeline\nWHERE EquipID = $equipment\n  AND RunID = (SELECT TOP 1 RunID FROM dbo.ACM_Runs WHERE EquipID = $equipment ORDER BY StartedAt DESC)\nGROUP BY FLOOR(HealthIndex / 10)\nORDER BY FLOOR(HealthIndex / 10)",
           "refId": "A"
         }
       ],
@@ -2897,7 +2897,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT Timestamp AS time, fused AS value\nFROM ACM_Scores_Wide\nWHERE EquipID = $equipment\n  AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\n  AND fused IS NOT NULL\nORDER BY EntryDateTime ASC",
+          "rawSql": "SELECT Timestamp AS time, fused AS value\nFROM ACM_Scores_Wide\nWHERE EquipID = $equipment\n  AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\n  AND fused IS NOT NULL\nORDER BY Timestamp ASC",
           "refId": "A"
         }
       ],
@@ -2978,7 +2978,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT PeriodStart AS time, AnomalyRatePct AS value, DetectorType AS metric\nFROM ACM_SensorAnomalyByPeriod\nWHERE EquipID = $equipment\n  AND PeriodStart BETWEEN $__timeFrom() AND $__timeTo()\n  AND PeriodType = 'day'\nORDER BY PeriodStart ASC",
+          "rawSql": "SELECT\n  sd.DetectorType,\n  ROUND(sd.ViolationPct, 1) AS AnomalyRatePct,\n  ROUND(sd.MaxZ, 2) AS MaxZ,\n  ROUND(sd.AvgZ, 2) AS AvgZ\nFROM dbo.ACM_SensorDefects sd\nWHERE sd.EquipID = $equipment\n  AND sd.RunID = (SELECT TOP 1 RunID FROM dbo.ACM_Runs WHERE EquipID = $equipment ORDER BY StartedAt DESC)\nORDER BY sd.ViolationPct DESC",
           "refId": "A"
         }
       ],
@@ -3592,7 +3592,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT TOP 25\n    rl.StartTime,\n    rl.Stage,\n    rl.Outcome,\n    DATEDIFF(SECOND, rl.StartTime, rl.EndTime) AS DurationSec,\n    rl.RowsRead,\n    rl.RowsWritten,\n    rl.TriggerReason,\n    rl.Version\nFROM ACM_RunLogs rl\nWHERE rl.EquipID = $equipment\nORDER BY rl.StartTime DESC",
+          "rawSql": "SELECT TOP 20\n  eq.EquipCode AS Equipment,\n  r.HealthStatus,\n  r.ScoreRowCount,\n  r.EpisodeCount,\n  r.DurationSeconds,\n  CONVERT(varchar(19), r.StartedAt, 120) AS StartedAt\nFROM dbo.ACM_Runs r\nJOIN dbo.Equipment eq ON eq.EquipID = r.EquipID\nWHERE r.EquipID = $equipment\n  AND r.StartedAt BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY r.StartedAt DESC",
           "refId": "A"
         }
       ],
@@ -3702,7 +3702,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT Outcome AS metric, COUNT(*) AS value\nFROM ACM_RunLogs\nWHERE EquipID = $equipment\n  AND StartTime BETWEEN $__timeFrom() AND $__timeTo()\nGROUP BY Outcome\nORDER BY value DESC",
+          "rawSql": "SELECT\n  r.HealthStatus,\n  COUNT(*) AS RunCount\nFROM dbo.ACM_Runs r\nWHERE r.EquipID = $equipment\n  AND r.StartedAt BETWEEN $__timeFrom() AND $__timeTo()\nGROUP BY r.HealthStatus\nORDER BY RunCount DESC",
           "refId": "A"
         }
       ],
@@ -3802,7 +3802,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT StartTime AS time,\n    DATEDIFF(SECOND, StartTime, EndTime) AS value\nFROM ACM_RunLogs\nWHERE EquipID = $equipment\n  AND StartTime BETWEEN $__timeFrom() AND $__timeTo()\n  AND EndTime IS NOT NULL\nORDER BY StartTime ASC",
+          "rawSql": "SELECT\n  r.StartedAt AS time,\n  r.DurationSeconds AS value,\n  'Duration (s)' AS metric\nFROM dbo.ACM_Runs r\nWHERE r.EquipID = $equipment\n  AND r.StartedAt BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY r.StartedAt",
           "refId": "A"
         }
       ],
