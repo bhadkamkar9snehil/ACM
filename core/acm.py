@@ -60,7 +60,7 @@ from core.detector_orchestrator import (
     score_all_detectors,
     calibrate_all_detectors,
     fit_all_detectors,
-    initialize_detectors_for_run,
+    run_detector_initialization_stage,
     load_and_rebuild_detectors_from_sql_cache,
     reconcile_detector_flags_with_loaded_models,
 )
@@ -93,7 +93,6 @@ from core.observability import (
     shutdown_run_observability,
     start_profiling,
 )
-_OBSERVABILITY_AVAILABLE = True
 
 from core.sql_client import (
     execute_with_deadlock_retry,
@@ -341,11 +340,10 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
     degradations: List[str] = []  # Track partial failures for DEGRADED outcome.
     
     # Track run timing for ACM_Runs metadata.
-    from datetime import datetime
     run_start_time = datetime.now()
 
     # Initialize tracing span for the run (equipment name in span for Tempo).
-    tracer = get_tracer() if _OBSERVABILITY_AVAILABLE else None
+    tracer = get_tracer()
     _span_ctx = None
     root_span = None
     
@@ -463,30 +461,25 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
         cached_manifest = None
         previous_weights = None  # Initialize for fusion pipeline.
         cached_calibration_params = None
-
-        def _fit_all_detectors_with_timer(**kwargs: Any) -> Dict[str, Any]:
-            with T.section("train.detector_fit"):
-                return fit_all_detectors(**kwargs)
-
-        with T.section("models.load"):
-            detector_init = initialize_detectors_for_run(
-                train=train,
-                score=score,
-                cfg=cfg,
-                meta=meta,
-                detector_cache=detector_cache,
-                output_manager=output_manager,
-                sql_client=sql_client,
-                run_id=run_id,
-                equip_id=equip_id,
-                equip=equip,
-                load_and_rebuild_detectors_fn=load_and_rebuild_detectors_from_sql_cache,
-                restore_detectors_from_runtime_cache_fn=restore_detectors_from_runtime_cache,
-                load_quality_regime_state_if_needed_fn=load_quality_regime_state_if_needed,
-                fit_all_detectors_fn=_fit_all_detectors_with_timer,
-                reconcile_detector_flags_fn=reconcile_detector_flags_with_loaded_models,
-                logger=Console,
-            )
+        detector_init = run_detector_initialization_stage(
+            section_fn=T.section,
+            fit_all_detectors_fn=fit_all_detectors,
+            train=train,
+            score=score,
+            cfg=cfg,
+            meta=meta,
+            detector_cache=detector_cache,
+            output_manager=output_manager,
+            sql_client=sql_client,
+            run_id=run_id,
+            equip_id=equip_id,
+            equip=equip,
+            load_and_rebuild_detectors_fn=load_and_rebuild_detectors_from_sql_cache,
+            restore_detectors_from_runtime_cache_fn=restore_detectors_from_runtime_cache,
+            load_quality_regime_state_if_needed_fn=load_quality_regime_state_if_needed,
+            reconcile_detector_flags_fn=reconcile_detector_flags_with_loaded_models,
+            logger=Console,
+        )
 
         train = detector_init.train
         score = detector_init.score
@@ -767,7 +760,7 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
                 config_signature=config_signature,
                 per_regime_enabled=bool(quality_ok and use_per_regime),
                 regime_count=len(set(score_regime_labels)) if score_regime_labels is not None else 0,
-                observability_enabled=_OBSERVABILITY_AVAILABLE,
+                observability_enabled=True,
                 record_data_quality_fn=record_data_quality,
                 record_run_fn=record_run,
                 record_batch_processed_fn=record_batch_processed,

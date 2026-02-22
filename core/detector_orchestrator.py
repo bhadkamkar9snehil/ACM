@@ -17,6 +17,7 @@ Date: January 2026
 from __future__ import annotations
 
 import time
+from contextlib import nullcontext
 from typing import Any, Dict, Optional, Tuple
 from dataclasses import dataclass
 
@@ -87,6 +88,56 @@ class DetectorInitState:
             "pca_train_spe": self.pca_train_spe,
             "pca_train_t2": self.pca_train_t2,
         }
+
+
+def run_detector_initialization_stage(
+    *,
+    section_fn: Any,
+    fit_all_detectors_fn: Any,
+    train: pd.DataFrame,
+    score: pd.DataFrame,
+    cfg: Dict[str, Any],
+    meta: Any,
+    detector_cache: Optional[Dict[str, Any]],
+    output_manager: Any,
+    sql_client: Any,
+    run_id: Optional[str],
+    equip_id: int,
+    equip: str,
+    load_and_rebuild_detectors_fn: Any,
+    restore_detectors_from_runtime_cache_fn: Any,
+    load_quality_regime_state_if_needed_fn: Any,
+    reconcile_detector_flags_fn: Any,
+    logger: Any = Console,
+) -> DetectorInitState:
+    """
+    Execute detector initialization with stage-aware timing sections.
+    """
+    def _fit_with_section(**kwargs: Any) -> Dict[str, Any]:
+        fit_ctx = section_fn("train.detector_fit") if section_fn is not None else nullcontext()
+        with fit_ctx:
+            return fit_all_detectors_fn(**kwargs)
+
+    load_ctx = section_fn("models.load") if section_fn is not None else nullcontext()
+    with load_ctx:
+        return initialize_detectors_for_run(
+            train=train,
+            score=score,
+            cfg=cfg,
+            meta=meta,
+            detector_cache=detector_cache,
+            output_manager=output_manager,
+            sql_client=sql_client,
+            run_id=run_id,
+            equip_id=equip_id,
+            equip=equip,
+            load_and_rebuild_detectors_fn=load_and_rebuild_detectors_fn,
+            restore_detectors_from_runtime_cache_fn=restore_detectors_from_runtime_cache_fn,
+            load_quality_regime_state_if_needed_fn=load_quality_regime_state_if_needed_fn,
+            fit_all_detectors_fn=_fit_with_section,
+            reconcile_detector_flags_fn=reconcile_detector_flags_fn,
+            logger=logger,
+        )
 
 
 def score_all_detectors(
