@@ -2167,48 +2167,9 @@ class TestRefactorHelpers:
         assert result.sensor_context is None
         assert record_calls == [("FD_FAN", 3, "info")]
 
-    def test_write_sql_artifacts_for_run_delegates_to_module_function(self, monkeypatch):
-        """Output manager wrapper should delegate SQL artifact writing to module helper."""
-        from core import output_manager as om_module
-        from core.output_manager import OutputManager
-
-        captured = {}
-
-        def _fake_write_sql_artifacts(**kwargs):
-            captured.update(kwargs)
-            return 123
-
-        monkeypatch.setattr(om_module, "write_sql_artifacts", _fake_write_sql_artifacts)
-        out = OutputManager.__new__(OutputManager)
-
-        result = out.write_sql_artifacts_for_run(
-            frame=pd.DataFrame({"fused": [0.1]}),
-            episodes=pd.DataFrame({"episode_id": [1]}),
-            train=pd.DataFrame({"sensor": [1.0]}),
-            pca_detector=object(),
-            sql_client=object(),
-            run_id="r1",
-            equip_id=1,
-            equip="FD_FAN",
-            cfg={},
-            meta=object(),
-            win_start=pd.Timestamp("2026-01-01"),
-            win_end=pd.Timestamp("2026-01-02"),
-            rows_read=10,
-            spe_p95_train=1.1,
-            t2_p95_train=2.2,
-            anomaly_count=3,
-            T=object(),
-            culprit_writer_func=lambda *_a, **_k: None,
-        )
-
-        assert result == 123
-        assert captured["output_manager"] is out
-        assert captured["equip"] == "FD_FAN"
-        assert captured["rows_read"] == 10
-
-    def test_run_persistence_stage_orchestrates_pipeline_outputs_and_sql_artifacts(self):
+    def test_run_persistence_stage_orchestrates_pipeline_outputs_and_sql_artifacts(self, monkeypatch):
         """Output manager persistence stage should run pipeline outputs and SQL artifact writes in order."""
+        from core import output_manager as om_module
         from core.output_manager import OutputManager, PersistPipelineOutputsResult
 
         out = OutputManager.__new__(OutputManager)
@@ -2241,7 +2202,10 @@ class TestRefactorHelpers:
             raw_score=None,
             sensor_context=None,
         )
-        out.write_sql_artifacts_for_run = lambda **kwargs: 88
+        def _fake_write_sql_artifacts(**kwargs):
+            calls["sql"] = True
+            return 88
+        monkeypatch.setattr(om_module, "write_sql_artifacts", _fake_write_sql_artifacts)
 
         class _Logger:
             def info(self, *args, **kwargs):
@@ -2284,6 +2248,7 @@ class TestRefactorHelpers:
 
         assert result.rows_written == 88
         assert result.analytics_table_count == 11
+        assert calls["sql"] is True
         assert calls["sections"] == ["persist", "persist.pipeline_outputs"]
 
     def test_prepare_persistence_inputs_updates_baseline_and_builds_sensor_context(self):

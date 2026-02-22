@@ -3335,52 +3335,6 @@ class OutputManager:
             sensor_context=sensor_context,
         )
 
-    def write_sql_artifacts_for_run(
-        self,
-        frame: pd.DataFrame,
-        episodes: pd.DataFrame,
-        train: pd.DataFrame,
-        pca_detector: Any,
-        sql_client: Any,
-        run_id: Optional[str],
-        equip_id: int,
-        equip: str,
-        cfg: Dict[str, Any],
-        meta: Any,
-        win_start: Optional[pd.Timestamp],
-        win_end: Optional[pd.Timestamp],
-        rows_read: int,
-        spe_p95_train: float,
-        t2_p95_train: float,
-        anomaly_count: int,
-        T: Any,
-        culprit_writer_func: Optional[Callable[..., Any]] = None,
-        ) -> int:
-        """
-        Wrapper for SQL artifact persistence bound to this output manager instance.
-        """
-        return write_sql_artifacts(
-            output_manager=self,
-            frame=frame,
-            episodes=episodes,
-            train=train,
-            pca_detector=pca_detector,
-            sql_client=sql_client,
-            run_id=run_id,
-            equip_id=equip_id,
-            equip=equip,
-            cfg=cfg,
-            meta=meta,
-            win_start=win_start,
-            win_end=win_end,
-            rows_read=rows_read,
-            spe_p95_train=spe_p95_train,
-            t2_p95_train=t2_p95_train,
-            anomaly_count=anomaly_count,
-            T=T,
-            culprit_writer_func=culprit_writer_func,
-        )
-
     def run_persistence_stage(
         self,
         *,
@@ -3440,7 +3394,8 @@ class OutputManager:
                         component="OUTPUTS",
                     )
 
-        rows_written = self.write_sql_artifacts_for_run(
+        rows_written = write_sql_artifacts(
+            output_manager=self,
             frame=scores_df,
             episodes=episodes_df,
             train=train_df,

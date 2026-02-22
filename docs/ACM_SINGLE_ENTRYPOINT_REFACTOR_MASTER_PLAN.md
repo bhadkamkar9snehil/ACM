@@ -813,6 +813,35 @@ Main branch status:
 1. `main` was not touched.
 2. Work remains on refactor phase branch pending integration merge.
 
+### 2026-02-21 - Section 18 Execution: Guard and Availability Cleanup Pass
+
+Branch flow used:
+1. `refactor/acm-entrypoint-p4-guard-audit-pass` (in progress)
+
+Completed:
+1. `core/model_persistence.py`:
+   - `ModelVersionManager` now enforces SQL invariants at construction time (fail-fast).
+   - removed repeated per-method `sql_client/equip_id/conn` availability checks in manager methods.
+   - kept boundary checks in top-level helper wrappers (`load_cached_models_with_validation`, safe wrappers).
+2. `core/run_metadata_writer.py`:
+   - replaced repeated `callable(...)` checks in finalization metrics path with normalized no-op callables at function entry.
+   - runtime finalization path is simpler and linear.
+3. `core/detector_orchestrator.py`:
+   - removed fallback-to-default reconcile helper behavior in deep runtime path.
+   - reconcile function is now treated as required input and fails fast when omitted.
+4. `core/acm.py`:
+   - passes explicit reconcile helper into detector initialization.
+5. `core/output_manager.py`:
+   - removed duplicated SQL client availability check in `_bulk_insert_sql`.
+
+Validation completed:
+1. `python -m py_compile core/acm.py core/model_persistence.py core/run_metadata_writer.py core/detector_orchestrator.py core/output_manager.py tests/test_v11_modules.py` passed.
+2. `pytest tests/test_v11_modules.py -v` passed (69 tests).
+
+Main branch status:
+1. `main` was not touched.
+2. Work remains on refactor phase branch pending integration merge.
+
 ---
 
 ## 18. Guard and Availability Audit (Separate Track)
@@ -884,3 +913,124 @@ Audit snapshot (2026-02-21):
    - run `python -m py_compile` on touched modules
    - run `pytest tests/test_v11_modules.py -v`
    - run one batch dry-run through `scripts/sql_batch_runner.py`.
+
+---
+
+## 19. Duplicate and Ownership Audit (2026-02-22)
+
+Objective:
+1. Ensure extraction work did not introduce unnecessary duplicate logic.
+2. Distinguish intentional layering from accidental duplication.
+3. Add a mandatory duplicate audit gate to each remaining refactor PR.
+
+Scope audited:
+1. `core/acm.py`
+2. `core/sql_client.py`
+3. `core/smart_coldstart.py`
+4. `core/fast_features.py`
+5. `core/detector_orchestrator.py`
+6. `core/regimes.py`
+7. `core/fuse.py`
+8. `core/drift.py`
+9. `core/output_manager.py`
+10. `core/run_metadata_writer.py`
+11. `core/observability.py`
+12. `core/model_persistence.py`
+13. `core/model_evaluation.py`
+
+Method:
+1. Enumerated top-level function definitions and cross-file call sites.
+2. Identified exact-name duplicates and multi-layer wrappers.
+3. Classified each finding as:
+   - `INTENTIONAL_LAYERING`
+   - `UNNECESSARY_DUPLICATE`
+   - `LEGACY_DEBT`
+
+Audit findings:
+1. `core/output_manager.py`
+   - Finding: Dual API for SQL artifact write path:
+     - `write_sql_artifacts_for_run(...)` (instance method)
+     - `write_sql_artifacts(...)` (module-level function)
+   - Call footprint:
+     - method used by `run_persistence_stage(...)` and tests
+     - function used only through the wrapper method
+   - Classification: `UNNECESSARY_DUPLICATE`
+   - Action: Keep one canonical API in OutputManager (prefer instance method); remove redundant wrapper/function path in a dedicated pass.
+
+2. `core/detector_orchestrator.py`
+   - Finding: Two public initialization entrypoints:
+     - `run_detector_initialization_stage(...)`
+     - `initialize_detectors_for_run(...)`
+   - Current behavior: stage function owns timing boundary; core function owns pure initialization logic.
+   - Classification: `INTENTIONAL_LAYERING` (for now)
+   - Action: keep both until phase-end; after orchestration stabilization, reduce public surface by making core helper internal (`_initialize_detectors_for_run`) if no external callers remain.
+
+3. `core/drift.py`
+   - Finding: `run_drift_pipeline(...)` plus `run_drift_postprocess_stage(...)`.
+   - Current behavior: postprocess stage composes pipeline + episode schema normalization.
+   - Classification: `INTENTIONAL_LAYERING`
+   - Action: no change now.
+
+4. `core/fuse.py`
+   - Finding: stacked orchestration helpers:
+     - `run_calibration_stage(...)`
+     - `run_fusion_stage(...)`
+     - `run_health_stage(...)`
+   - Current behavior: each layer owns a separable concern and has test coverage.
+   - Classification: `INTENTIONAL_LAYERING`
+   - Action: no change now.
+
+5. Cross-module utility duplication:
+   - Finding: `_cfg_get(...)` duplicated in:
+     - `core/data_loader.py`
+     - `core/output_manager.py`
+     - `core/regimes.py`
+   - Finding: `_future_cutoff_ts(...)` duplicated in:
+     - `core/data_loader.py`
+     - `core/output_manager.py`
+   - Classification: `UNNECESSARY_DUPLICATE`
+   - Action: consolidate to one shared helper location in an existing module (`utils/config_dict.py` or `core/data_loader.py`) and remove duplicates after call-site migration.
+
+6. `core/regimes.py`
+   - Finding: `run(ctx)` legacy reporting hook has no active runtime callers in current pipeline path.
+   - Classification: `LEGACY_DEBT`
+   - Action: deprecate and remove after confirming no non-test external usage.
+
+7. Entrypoint duplication status:
+   - Finding: `core/acm_main.py` is not present in current workspace.
+   - Classification: resolved; single runtime entrypoint remains `core/acm.py`.
+
+### 19.1 Mandatory PR Gate: Duplicate Check
+
+Effective immediately for remaining refactor phases, every PR must include:
+1. `Duplicate audit delta` section in PR description.
+2. List of new or removed public functions in touched modules.
+3. Explicit statement:
+   - `No new duplicate logic introduced`, or
+   - `Intentional layering introduced` with reason and planned collapse phase.
+4. If a duplicate is accepted temporarily, include:
+   - owner module
+   - removal target phase
+   - acceptance test proving parity.
+
+### 19.2 Planned Execution Order for Duplicate Cleanup
+
+1. Pass E1: OutputManager SQL artifact API unification.
+2. Pass E2: `_cfg_get` and `_future_cutoff_ts` consolidation.
+3. Pass E3: Detector initialization API surface reduction.
+4. Pass E4: Regimes legacy hook cleanup (`run(ctx)` path).
+5. After each pass:
+   - run `python -m py_compile` on touched modules
+   - run `pytest tests/test_v11_modules.py -v`
+   - run one batch dry-run through `scripts/sql_batch_runner.py`.
+
+### 19.3 Execution Status
+
+1. Pass E1 completed (2026-02-22):
+   - removed redundant `OutputManager.write_sql_artifacts_for_run(...)` wrapper
+   - `run_persistence_stage(...)` now calls `write_sql_artifacts(...)` directly
+   - tests updated to validate direct module function usage
+2. Remaining:
+   - Pass E2 `_cfg_get` and `_future_cutoff_ts` consolidation
+   - Pass E3 detector initialization API surface reduction
+   - Pass E4 regimes legacy hook cleanup.
