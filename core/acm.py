@@ -90,6 +90,7 @@ from core.observability import (
     record_data_quality,
     record_model_refit,
     close_run_span,
+    start_run_span,
     shutdown_run_observability,
     start_profiling,
 )
@@ -343,25 +344,14 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
 
     # Initialize tracing span for the run (equipment name in span for Tempo).
     tracer = get_tracer()
-    _span_ctx = None
-    root_span = None
-    
-    # v11.1.6: Removed custom TRACEPARENT env propagation. Correlation is now
-    # done via acm.run_id/acm.run_count/acm.equipment attributes in Tempo/Loki.
-    
-    if tracer and hasattr(tracer, 'start_as_current_span'):
-        span_name = f"acm.run:{equip}" if equip else "acm.run"
-        _span_ctx = tracer.start_as_current_span(
-            span_name,
-            attributes={
-                "acm.phase": "startup",
-                "acm.equipment": equip,
-                "acm.equip_id": equip_id,
-                "acm.run_id": run_id,
-                "acm.run_count": run_count,
-            }
-        )
-        root_span = _span_ctx.__enter__()
+    # v11.1.6: Correlation uses acm.run_id/acm.run_count/acm.equipment attributes.
+    _span_ctx, root_span = start_run_span(
+        tracer=tracer,
+        equip=equip,
+        equip_id=equip_id,
+        run_id=run_id,
+        run_count=run_count,
+    )
 
     model_state = None  # Single source of truth for model lifecycle state.
     
