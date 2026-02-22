@@ -860,7 +860,7 @@ python scripts/sql_batch_runner.py \
 Process a specific time range:
 
 ```powershell
-python -m core.acm_main \
+python -m core.acm \\
     --equip FD_FAN \
     --start-time "2024-01-01T00:00:00" \
     --end-time "2024-01-31T23:59:59"
@@ -1008,7 +1008,7 @@ sqlcmd -S "server\instance" -d ACM -E -Q "SELECT RegimeLabel, COUNT(*) FROM ACM_
 ```
 ACM/
 ├── core/                    # Main pipeline code
-│   ├── acm_main.py         # Pipeline orchestrator
+│   ├── acm.py              # Pipeline orchestrator
 │   ├── ar1_detector.py     # AR1 detector
 │   ├── regimes.py          # Regime clustering
 │   ├── fuse.py             # Detector fusion
@@ -1036,7 +1036,7 @@ ACM/
 ## Changelog
 
 ### v11.15.5 (2026-02-20) - Drift hysteresis continuity and controller state fix
-- **FIX**: `acm_main.py` now loads previous drift controller state from `ACM_DriftController` using a real SQL cursor query (the old `execute_scalar()` call did not exist).
+- **FIX**: `core.acm` now loads previous drift controller state from `ACM_DriftController` using a real SQL cursor query (the old `execute_scalar()` call did not exist).
 - **FIX**: Previous state is normalized/validated (`DRIFT` or `FAULT`) and passed to `compute_drift_alert_mode(..., prev_alert_mode=...)` so hysteresis persists correctly across batches.
 - **FIX**: `CUSUMDetector.fit()` resets accumulators (`sum_pos`, `sum_neg`) to prevent stale carry-over when detector objects are reused.
 - **FIX**: Drift output consistently uses `frame['drift_mode']`; fused drift condition uses floor-only gating (`fused_p95 >= fused_drift_min`) so severe drift is not suppressed.

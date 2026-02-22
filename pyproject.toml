@@ -76,4 +76,4 @@ testpaths = ["tests"]
 addopts = "-v"
 
 [tool.acm]
-entry = "core/acm_main.py"
+entry = "core/acm.py"

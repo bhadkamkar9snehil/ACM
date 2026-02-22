@@ -2624,9 +2624,6 @@ class TestRefactorHelpers:
         def _load_manifest_protected_columns_fn(**kwargs):
             return ["a"]
 
-        def _compute_feature_hash_fn(_train, _equip):
-            return "hash-123"
-
         def _build_features_for_pipeline(**kwargs):
             out_train = kwargs["train"].copy()
             out_score = kwargs["score"].copy()
@@ -2662,7 +2659,6 @@ class TestRefactorHelpers:
             detect_and_adjust_fn=_detect_and_adjust_fn,
             run_data_guardrails_fn=_run_data_guardrails_fn,
             load_manifest_protected_columns_fn=_load_manifest_protected_columns_fn,
-            compute_feature_hash_fn=_compute_feature_hash_fn,
         )
 
         assert "a_feat" in result.train.columns
@@ -2670,7 +2666,6 @@ class TestRefactorHelpers:
         assert result.raw_train.equals(train)
         assert result.raw_score.equals(score)
         assert result.seasonal_patterns == {"sensor_a": []}
-        assert result.train_feature_hash == "hash-123"
         assert result.refit_requested is True
         assert calls["impute"]["low_var_threshold"] == pytest.approx(0.25)
         assert calls["impute"]["protected_columns"] == ["a"]
@@ -2679,7 +2674,6 @@ class TestRefactorHelpers:
             "data.guardrails",
             "features.build",
             "features.impute",
-            "features.hash",
             "models.refit_flag",
         ]
 
