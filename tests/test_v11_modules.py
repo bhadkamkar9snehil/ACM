@@ -624,6 +624,38 @@ class TestRefactorHelpers:
         assert ex.value.code == 1
         assert len(errors) >= 1
 
+    def test_bootstrap_acm_run_state_uses_default_deadlock_retry_when_omitted(self, monkeypatch):
+        """Run bootstrap should pass module deadlock retry when no override is provided."""
+        from core import sql_client as sql
+        from utils.config_dict import ConfigDict
+
+        captured = {}
+
+        monkeypatch.setattr(
+            sql,
+            "load_config_required_from_sql",
+            lambda sql_client, equipment_name, logger=None: ConfigDict({}, mode="sql", equip_id=10),
+        )
+        monkeypatch.setattr(sql, "resolve_equipment_id_required", lambda equip, sql_client: 10)
+        monkeypatch.setattr(sql, "get_acm_run_count", lambda sql_client, equip_id: 3)
+
+        def _start_acm_run(cli, cfg, equip_code, deadlock_retry_func=None, logger=None):
+            captured["deadlock_retry_func"] = deadlock_retry_func
+            return "run-1", pd.Timestamp("2026-01-01"), pd.Timestamp("2026-01-02"), 10
+
+        monkeypatch.setattr(sql, "start_acm_run", _start_acm_run)
+        monkeypatch.setattr(
+            sql,
+            "apply_cli_window_overrides",
+            lambda win_start, win_end, start_time_arg=None, end_time_arg=None, logger=None: (win_start, win_end, []),
+        )
+
+        args = type("Args", (), {"start_time": None, "end_time": None})()
+        out = sql.bootstrap_acm_run_state(sql_client=object(), equip="FD_FAN", args=args, logger=None)
+
+        assert out.equip_id == 10
+        assert captured["deadlock_retry_func"] is sql.execute_with_deadlock_retry
+
     def test_run_drift_pipeline_smoke(self):
         """Drift pipeline wrapper should return frame and score_out keys."""
         from core.drift import run_drift_pipeline

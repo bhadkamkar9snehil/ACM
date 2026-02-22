@@ -95,9 +95,8 @@ from core.observability import (
 )
 
 from core.sql_client import (
-    execute_with_deadlock_retry,
-    connect_acm_sql_failfast,
     bootstrap_acm_run_state,
+    connect_acm_sql_failfast,
 )
 
 # Data utilities: index hygiene and deduplication helpers.
@@ -235,7 +234,6 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
             sql_client=sql_client,
             equip=equip,
             args=args,
-            deadlock_retry_func=execute_with_deadlock_retry,
             logger=Console,
         )
     cfg = bootstrap.cfg

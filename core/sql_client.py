@@ -862,11 +862,12 @@ def bootstrap_acm_run_state(
         cfg["runtime"] = {}
     cfg["runtime"]["run_count"] = run_count
 
+    deadlock_retry = deadlock_retry_func or execute_with_deadlock_retry
     run_id, win_start, win_end, equip_id = start_acm_run(
         cli=sql_client,
         cfg=cfg,
         equip_code=equip,
-        deadlock_retry_func=deadlock_retry_func,
+        deadlock_retry_func=deadlock_retry,
         logger=logger,
     )
     if equip_id <= 0:
