@@ -800,6 +800,68 @@ class TestRefactorHelpers:
         assert isinstance(out["detectors"]["pca_train_spe"], np.ndarray)
         assert isinstance(out["detectors"]["pca_train_t2"], np.ndarray)
 
+    def test_run_auto_retrain_stage_honors_force_retrain_requested(self, monkeypatch):
+        """Auto-retrain stage should fit detectors immediately when CLI force retrain is requested."""
+        from core import model_evaluation
+
+        def _should_not_run(**kwargs):
+            raise AssertionError("quality trigger evaluation should be bypassed when force_retrain_requested=True")
+
+        monkeypatch.setattr(model_evaluation, "evaluate_and_maybe_refit_cached_models", _should_not_run)
+
+        retrained_detector = object()
+        record_calls = []
+
+        def _fit_all_detectors_fn(**kwargs):
+            return {
+                "ar1_detector": retrained_detector,
+                "pca_detector": retrained_detector,
+                "iforest_detector": retrained_detector,
+                "gmm_detector": None,
+                "omr_detector": None,
+                "pca_train_spe": np.array([0.5]),
+                "pca_train_t2": np.array([0.6]),
+            }
+
+        out = model_evaluation.run_auto_retrain_stage(
+            cfg={},
+            cached_models={"k": "v"},
+            cached_manifest={},
+            detectors_just_trained=False,
+            score_out={},
+            regime_quality_ok=True,
+            current_model_maturity="LEARNING",
+            boolean_only_metrics=[],
+            equip="FD_FAN",
+            logger=type("L", (), {"warn": lambda *a, **k: None})(),
+            record_model_refit_fn=lambda *a, **k: record_calls.append((a, k)),
+            fit_all_detectors_fn=_fit_all_detectors_fn,
+            train=pd.DataFrame({"a": [1.0, 2.0]}),
+            det_flags={"ar1_enabled": True, "pca_enabled": True, "iforest_enabled": True, "gmm_enabled": False, "omr_enabled": False},
+            output_manager=None,
+            sql_client=None,
+            run_id="r1",
+            equip_id=1,
+            regime_model=None,
+            detectors={
+                "ar1_detector": None,
+                "pca_detector": None,
+                "iforest_detector": None,
+                "gmm_detector": None,
+                "omr_detector": None,
+                "pca_train_spe": None,
+                "pca_train_t2": None,
+            },
+            force_retrain_requested=True,
+        )
+
+        assert out["force_retrain"] is True
+        assert out["cached_models"] is None
+        assert out["detectors"]["ar1_detector"] is retrained_detector
+        assert out["detectors"]["pca_detector"] is retrained_detector
+        assert out["detectors"]["iforest_detector"] is retrained_detector
+        assert len(record_calls) == 1
+
     def test_run_model_persistence_and_lifecycle_stage_trained_path(self):
         """Persistence stage helper should save models and update lifecycle when trained."""
         from core.model_persistence import run_model_persistence_and_lifecycle_stage
@@ -905,6 +967,7 @@ class TestRefactorHelpers:
         from core.model_persistence import run_model_adaptation_and_persistence_stage, ModelPersistenceStageResult
 
         sections = []
+        captured = {"force_retrain_requested": None}
         class _Section:
             def __init__(self, name):
                 self.name = name
@@ -927,6 +990,7 @@ class TestRefactorHelpers:
         }
 
         def _run_auto_retrain_stage_fn(**kwargs):
+            captured["force_retrain_requested"] = kwargs.get("force_retrain_requested")
             return type(
                 "AutoRetrainStageResult",
                 (),
@@ -993,6 +1057,7 @@ class TestRefactorHelpers:
         assert out.regime_model == {"k": "v"}
         assert isinstance(out.detectors["pca_train_spe"], np.ndarray)
         assert sections == ["models.auto_retrain", "models.persistence.save"]
+        assert captured["force_retrain_requested"] is False
 
     def test_load_manifest_protected_columns_returns_none_when_cache_skipped(self):
         """Manifest protection helper should no-op when cache is disabled or run is coldstart."""

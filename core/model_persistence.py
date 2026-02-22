@@ -1890,6 +1890,7 @@ def run_model_adaptation_and_persistence_stage(
     regime_state_version: int,
     update_and_persist_model_lifecycle_fn: Any,
     load_model_state_safe_fn: Any,
+    force_retrain_requested: bool = False,
 ) -> ModelAdaptationPersistenceResult:
     """
     Execute auto-retrain decision and model persistence/lifecycle stages.
@@ -1916,6 +1917,7 @@ def run_model_adaptation_and_persistence_stage(
             equip_id=equip_id,
             regime_model=regime_model,
             detectors=detectors,
+            force_retrain_requested=force_retrain_requested,
         )
 
     force_retrain = bool(retrain_out.force_retrain)
