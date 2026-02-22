@@ -592,31 +592,56 @@ def run_auto_retrain_stage(
     equip_id: int,
     regime_model: Optional[Any],
     detectors: Dict[str, Any],
+    force_retrain_requested: bool = False,
 ) -> "AutoRetrainStageResult":
     """
     Run auto-retrain evaluation and apply retrain detector outputs when triggered.
     """
-    retrain_out = evaluate_and_maybe_refit_cached_models(
-        cfg=cfg,
-        cached_models=cached_models,
-        cached_manifest=cached_manifest,
-        detectors_just_trained=detectors_just_trained,
-        score_out=score_out if isinstance(score_out, dict) else {},
-        regime_quality_ok=regime_quality_ok,
-        current_model_maturity=current_model_maturity,
-        boolean_only_metrics=boolean_only_metrics,
-        equip=equip,
-        logger=logger,
-        record_model_refit_fn=record_model_refit_fn,
-        fit_all_detectors_fn=fit_all_detectors_fn,
-        train=train,
-        det_flags=det_flags,
-        output_manager=output_manager,
-        sql_client=sql_client,
-        run_id=run_id,
-        equip_id=equip_id,
-        regime_model=regime_model,
-    )
+    if force_retrain_requested:
+        logger.warn(
+            "Force retrain requested from CLI - fitting detectors unconditionally",
+            component="MODEL",
+            equip=equip,
+        )
+        record_model_refit_fn(equip, reason="force_retrain_cli", detector="all")
+        retrain_result = fit_all_detectors_fn(
+            train=train,
+            cfg=cfg,
+            **det_flags,
+            output_manager=output_manager,
+            sql_client=sql_client,
+            run_id=run_id,
+            equip_id=equip_id,
+            equip=equip,
+        )
+        retrain_out = {
+            "force_retrain": True,
+            "cached_models": None,
+            "regime_model": regime_model,
+            "retrain_result": retrain_result,
+        }
+    else:
+        retrain_out = evaluate_and_maybe_refit_cached_models(
+            cfg=cfg,
+            cached_models=cached_models,
+            cached_manifest=cached_manifest,
+            detectors_just_trained=detectors_just_trained,
+            score_out=score_out if isinstance(score_out, dict) else {},
+            regime_quality_ok=regime_quality_ok,
+            current_model_maturity=current_model_maturity,
+            boolean_only_metrics=boolean_only_metrics,
+            equip=equip,
+            logger=logger,
+            record_model_refit_fn=record_model_refit_fn,
+            fit_all_detectors_fn=fit_all_detectors_fn,
+            train=train,
+            det_flags=det_flags,
+            output_manager=output_manager,
+            sql_client=sql_client,
+            run_id=run_id,
+            equip_id=equip_id,
+            regime_model=regime_model,
+        )
 
     retrain_result = retrain_out.get("retrain_result")
     detectors_out = dict(detectors)

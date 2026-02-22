@@ -524,6 +524,7 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
             regime_state_version=regime_state_version,
             update_and_persist_model_lifecycle_fn=update_and_persist_model_lifecycle_safe,
             load_model_state_safe_fn=load_model_state_safe,
+            force_retrain_requested=force_retraining,
         )
         cached_models = model_stage.cached_models
         regime_model = model_stage.regime_model
