@@ -2110,6 +2110,641 @@ class TestRefactorHelpers:
         assert result.episode_count == 3
         assert result.rows_written_delta == 18
 
+    def test_populate_standard_metadata_fills_all_three_columns(self):
+        """Payload generation helper should always populate RunID, EquipID, CreatedAt."""
+        from core.output_manager import OutputManager
+
+        out_mgr = OutputManager.__new__(OutputManager)
+        out_mgr.run_id = "r-meta"
+        out_mgr.equip_id = 99
+        df = pd.DataFrame({"Timestamp": [pd.Timestamp("2026-01-01T00:00:00")], "x": [1.0]})
+
+        out = out_mgr._populate_standard_metadata(df)
+        assert out.loc[0, "RunID"] == "r-meta"
+        assert int(out.loc[0, "EquipID"]) == 99
+        assert pd.notna(out.loc[0, "CreatedAt"])
+
+    def test_populate_standard_metadata_uses_fallbacks(self):
+        """Payload generation helper should use stable fallbacks when context is missing."""
+        from core.output_manager import OutputManager
+
+        out_mgr = OutputManager.__new__(OutputManager)
+        out_mgr.run_id = None
+        out_mgr.equip_id = None
+        df = pd.DataFrame({"x": [1.0]})
+
+        out = out_mgr._populate_standard_metadata(df)
+        assert out.loc[0, "RunID"] == "00000000-0000-0000-0000-000000000000"
+        assert int(out.loc[0, "EquipID"]) == 0
+        assert pd.notna(out.loc[0, "CreatedAt"])
+
+    def test_prepare_dataframe_for_sql_uses_schema_datetime_columns(self):
+        """Datetime coercion should follow schema-derived datetime columns."""
+        from core.output_manager import OutputManager
+
+        out_mgr = OutputManager.__new__(OutputManager)
+        out_mgr._get_datetime_columns_for_table = lambda _table: {"ObservedAt"}
+
+        df = pd.DataFrame(
+            {
+                "ObservedAt": ["2026-01-01 00:00:00", "2026-01-01 00:05:00"],
+                "value": [1.0, 2.0],
+            }
+        )
+        prepared = out_mgr._prepare_dataframe_for_sql(
+            df,
+            non_numeric_cols=set(),
+            sql_table="ACM_Scores_Wide",
+        )
+
+        assert isinstance(prepared.loc[0, "ObservedAt"], datetime)
+        assert isinstance(prepared.loc[1, "ObservedAt"], datetime)
+
+    def test_audit_allowed_tables_write_coverage_returns_shape(self):
+        """Write coverage audit should return expected keys and list payloads."""
+        from core.output_manager import OutputManager
+
+        out = OutputManager.__new__(OutputManager)
+        report = out.audit_allowed_tables_write_coverage()
+
+        assert isinstance(report, dict)
+        assert "allowed_count" in report
+        assert "referenced_count" in report
+        assert "missing_write_paths" in report
+        assert "referenced_not_allowed" in report
+        assert isinstance(report["missing_write_paths"], list)
+        assert isinstance(report["referenced_not_allowed"], list)
+
+    def test_audit_allowed_tables_write_integrity_requires_sql_client(self):
+        """Write integrity audit should require SQL client context."""
+        from core.output_manager import OutputManager
+
+        out = OutputManager.__new__(OutputManager)
+        out.sql_client = None
+        with pytest.raises(RuntimeError):
+            out.audit_allowed_tables_write_integrity()
+
+    def test_write_dataframe_uses_explicit_upsert_policy_handler(self):
+        """write_dataframe should use generator-declared upsert policy instead of static table map."""
+        from core.output_manager import OutputManager, WritePolicy
+
+        output_manager = OutputManager(
+            sql_client=None,
+            run_id="r-policy",
+            equip_id=1,
+            enable_batching=False,
+        )
+        captured = {}
+
+        def _upsert_handler(df):
+            captured["columns"] = list(df.columns)
+            captured["rows"] = len(df)
+            return 5
+
+        df = pd.DataFrame({"Timestamp": [pd.Timestamp("2026-01-01T00:00:00")], "value": [1.0]})
+        result = output_manager.write_dataframe(
+            df=df,
+            artifact_name="policy-test",
+            sql_table="ACM_PCA_Metrics",
+            write_policy=WritePolicy(mode="upsert", upsert_handler=_upsert_handler),
+        )
+
+        assert result["inserted"] == 5
+        assert result["sql_written"] is True
+        assert captured["rows"] == 1
+        assert "RunID" in captured["columns"]
+        assert "EquipID" in captured["columns"]
+        assert "CreatedAt" in captured["columns"]
+
+    def test_build_replace_policy_derives_keys_from_contract(self):
+        """build_replace_policy should derive key columns from centralized table contract map."""
+        from core.output_manager import OutputManager
+
+        output_manager = OutputManager(
+            sql_client=None,
+            run_id="r-policy",
+            equip_id=1,
+            enable_batching=False,
+        )
+        captured = {}
+        output_manager._replace_by_keys = (
+            lambda table_name, payload, keys: captured.update(
+                {"table": table_name, "keys": list(keys), "rows": len(payload)}
+            ) or len(payload)
+        )
+        policy = output_manager.build_replace_policy("ACM_HealthForecast")
+        assert policy.mode == "upsert"
+        assert callable(policy.upsert_handler)
+        written = policy.upsert_handler(pd.DataFrame({"RunID": ["r"], "EquipID": [1], "Timestamp": [datetime.now()]}))
+        assert written == 1
+        assert captured["table"] == "ACM_HealthForecast"
+        assert captured["keys"] == ["RunID", "EquipID", "Timestamp"]
+
+    def test_audit_replace_policy_contract_is_valid(self):
+        """Centralized replace-policy contract should resolve only allowed tables with non-empty keys."""
+        from core.output_manager import OutputManager
+
+        report = OutputManager.audit_replace_policy_contract()
+        assert report["is_valid"] is True
+        assert report["invalid_tables"] == []
+        assert report["empty_key_tables"] == []
+
+    def test_audit_table_write_contracts_is_valid(self):
+        """Canonical table write contract registry should be complete and internally consistent."""
+        from core.output_manager import OutputManager
+
+        report = OutputManager.audit_table_write_contracts()
+        assert report["is_valid"] is True
+        assert report["missing_contracts"] == []
+        assert report["invalid_contracts"] == []
+        assert report["replace_without_keys"] == []
+
+    def test_write_dataframe_injects_metadata_before_sql_for_representative_tables(self):
+        """Representative SQL payloads should include RunID, EquipID, and CreatedAt before insert."""
+        from core.output_manager import OutputManager
+
+        output_manager = OutputManager(
+            sql_client=None,
+            run_id="r-meta-integrated",
+            equip_id=777,
+            enable_batching=False,
+        )
+        captured = {}
+
+        def _capture_bulk_insert(table, frame):
+            captured[table] = frame.copy()
+            return len(frame)
+
+        output_manager._bulk_insert_sql = _capture_bulk_insert
+
+        scores_df = pd.DataFrame({"timestamp": [pd.Timestamp("2026-01-01T00:00:00")], "fused": [0.5]})
+        output_manager.write_dataframe(
+            scores_df,
+            "scores-meta",
+            sql_table="ACM_Scores_Wide",
+            sql_columns={"timestamp": "Timestamp", "fused": "fused"},
+            write_policy=output_manager.build_insert_policy(),
+        )
+
+        episodes_df = pd.DataFrame({"episode_id": [1], "start_ts": [pd.Timestamp("2026-01-01T00:00:00")]})
+        output_manager.write_dataframe(
+            episodes_df,
+            "episodes-meta",
+            sql_table="ACM_EpisodeDiagnostics",
+            sql_columns={"episode_id": "EpisodeID", "start_ts": "StartTime"},
+            write_policy=output_manager.build_insert_policy(),
+        )
+
+        dq_df = pd.DataFrame({"sensor": ["s1"], "CheckName": ["data_quality"], "CheckResult": ["OK"]})
+        output_manager.write_dataframe(
+            dq_df,
+            "dq-meta",
+            sql_table="ACM_DataQuality",
+            write_policy=output_manager.build_insert_policy(),
+        )
+
+        for table in ("ACM_Scores_Wide", "ACM_EpisodeDiagnostics", "ACM_DataQuality"):
+            assert table in captured
+            out = captured[table]
+            assert "RunID" in out.columns
+            assert "EquipID" in out.columns
+            assert "CreatedAt" in out.columns
+            assert str(out["RunID"].iloc[0]) == "r-meta-integrated"
+            assert int(out["EquipID"].iloc[0]) == 777
+            assert pd.notna(out["CreatedAt"].iloc[0])
+
+    def test_write_sql_table_derives_replace_policy_from_contract(self):
+        """write_sql_table should route replace-mode tables through contract-derived key semantics."""
+        from core.output_manager import OutputManager
+
+        output_manager = OutputManager(
+            sql_client=None,
+            run_id="r-contract",
+            equip_id=44,
+            enable_batching=False,
+        )
+        captured = {}
+        output_manager._replace_by_keys = (
+            lambda table_name, payload, keys: captured.update(
+                {"table": table_name, "keys": list(keys), "rows": len(payload)}
+            ) or len(payload)
+        )
+
+        df = pd.DataFrame(
+            {
+                "RunID": ["r-contract"],
+                "EquipID": [44],
+                "Timestamp": [datetime.now()],
+                "ForecastHealth": [95.0],
+            }
+        )
+        result = output_manager.write_sql_table(
+            table_name="ACM_HealthForecast",
+            df=df,
+            artifact_name="health_fcst",
+        )
+        assert result["inserted"] == 1
+        assert captured["table"] == "ACM_HealthForecast"
+        assert captured["keys"] == ["RunID", "EquipID", "Timestamp"]
+
+    def test_write_dataframe_sql_requires_explicit_policy(self):
+        """Low-level write_dataframe SQL path should require explicit policy declaration."""
+        from core.output_manager import OutputManager
+
+        output_manager = OutputManager(
+            sql_client=None,
+            run_id="r-policy-enforced",
+            equip_id=1,
+            enable_batching=False,
+        )
+        result = output_manager.write_dataframe(
+            pd.DataFrame({"Timestamp": [datetime.now()], "v": [1.0]}),
+            artifact_name="no-policy",
+            sql_table="ACM_Scores_Wide",
+        )
+        assert result["sql_written"] is False
+        assert "requires explicit write_policy" in str(result.get("error", ""))
+
+    def test_write_sql_table_unknown_table_falls_back_with_error_result(self):
+        """Unknown/non-contracted tables should return a non-written result with explicit contract error."""
+        from core.output_manager import OutputManager
+
+        output_manager = OutputManager(
+            sql_client=None,
+            run_id="r-unknown",
+            equip_id=1,
+            enable_batching=False,
+        )
+        df = pd.DataFrame({"x": [1.0]})
+        result = output_manager.write_sql_table(
+            table_name="ACM_UnknownTable",
+            df=df,
+            artifact_name="unknown",
+        )
+        assert result["sql_written"] is False
+        assert result["inserted"] == 0
+        assert "no write contract" in str(result.get("error", "")).lower()
+
+    def test_persist_episode_rows_uses_write_dataframe_pipeline(self):
+        """Episode row persistence should route through write_dataframe and include metadata columns."""
+        from core.output_manager import OutputManager
+
+        output_manager = OutputManager(
+            sql_client=None,
+            run_id="r-episodes",
+            equip_id=12,
+            enable_batching=False,
+        )
+        captured = {}
+
+        def _capture_bulk_insert(table, frame):
+            captured[table] = frame.copy()
+            return len(frame)
+
+        output_manager._bulk_insert_sql = _capture_bulk_insert
+        episodes = pd.DataFrame(
+            [
+                {
+                    "episode_id": 5,
+                    "start_ts": pd.Timestamp("2026-01-01T00:00:00"),
+                    "duration_s": 3600.0,
+                    "culprits": "A -> B",
+                    "dominant_sensor": "A",
+                    "severity": "HIGH",
+                }
+            ]
+        )
+        inserted = output_manager._persist_episode_rows(episodes)
+        assert inserted == 1
+        assert "ACM_Episodes" in captured
+        out = captured["ACM_Episodes"]
+        assert "RunID" in out.columns
+        assert "EquipID" in out.columns
+        assert "CreatedAt" in out.columns
+        assert str(out.loc[0, "RunID"]) == "r-episodes"
+        assert int(out.loc[0, "EquipID"]) == 12
+
+    def test_normalize_episodes_sanitizes_invalid_episode_ids(self):
+        """Episode normalization should coerce invalid episode_id values to stable sequential fallbacks."""
+        from core.output_manager import OutputManager
+
+        output_manager = OutputManager(
+            sql_client=None,
+            run_id="r-episodes",
+            equip_id=12,
+            enable_batching=False,
+        )
+        episodes = pd.DataFrame(
+            {
+                "episode_id": [np.nan, "bad", 7.0, -1, 3.5],
+                "start_ts": pd.to_datetime(
+                    [
+                        "2026-01-01 00:00:00",
+                        "2026-01-01 01:00:00",
+                        "2026-01-01 02:00:00",
+                        "2026-01-01 03:00:00",
+                        "2026-01-01 04:00:00",
+                    ]
+                ),
+            }
+        )
+
+        normalized, repairs = output_manager._normalize_episodes_for_diagnostics(episodes)
+        assert normalized["episode_id"].tolist() == [1, 2, 7, 4, 5]
+        assert any(r.startswith("episode_id_sanitized:") for r in repairs)
+
+    def test_normalize_active_models_payload_sanitizes_fields(self):
+        """Active model payload should normalize maturity and numeric version fields."""
+        from core.output_manager import OutputManager
+
+        output_manager = OutputManager(
+            sql_client=None,
+            run_id="r-active",
+            equip_id=8,
+            enable_batching=False,
+        )
+        df = output_manager._normalize_active_models_payload(
+            {
+                "RegimeMaturityState": "MaturityState.learning",
+                "ActiveRegimeVersion": "12",
+                "ActiveThresholdVersion": "bad",
+                "ActiveForecastVersion": 14.0,
+            }
+        )
+        assert df is not None
+        assert int(df.loc[0, "EquipID"]) == 8
+        assert str(df.loc[0, "RegimeMaturityState"]) == "LEARNING"
+        assert int(df.loc[0, "ActiveRegimeVersion"]) == 12
+        assert pd.isna(df.loc[0, "ActiveThresholdVersion"])
+        assert int(df.loc[0, "ActiveForecastVersion"]) == 14
+        assert str(df.loc[0, "LastUpdatedBy"]) == "r-active"
+
+    def test_normalize_active_models_payload_rejects_invalid_equip_id(self):
+        """Active model payload normalization should reject missing/non-positive EquipID."""
+        from core.output_manager import OutputManager
+
+        output_manager = OutputManager(
+            sql_client=None,
+            run_id="r-active",
+            equip_id=None,
+            enable_batching=False,
+        )
+        assert output_manager._normalize_active_models_payload({"ActiveRegimeVersion": 1}) is None
+        assert output_manager._normalize_active_models_payload({"EquipID": 0, "ActiveRegimeVersion": 1}) is None
+
+    def test_write_threshold_metadata_routes_to_contract_writer(self):
+        """Threshold metadata writer should use contract-based write_sql_table path."""
+        from core.output_manager import OutputManager
+
+        output_manager = OutputManager.__new__(OutputManager)
+        output_manager.sql_client = object()
+        output_manager.equip_id = 12
+        output_manager.run_id = "r-th"
+        captured = {}
+        output_manager.write_sql_table = lambda **kwargs: captured.update(kwargs) or {"inserted": 1}
+
+        inserted = output_manager.write_threshold_metadata(
+            equip_id=12,
+            threshold_type="fused_alert_z",
+            threshold_value=3.2,
+            calculation_method="quantile",
+            sample_count=500,
+        )
+
+        assert inserted == 1
+        assert captured["table_name"] == "ACM_AdaptiveConfig"
+        assert "ConfigKey" in captured["df"].columns
+        assert "ConfigValue" in captured["df"].columns
+
+    def test_write_refit_request_routes_to_contract_writer(self):
+        """Refit request writer should use contract-based write_sql_table path."""
+        from core.output_manager import OutputManager
+
+        output_manager = OutputManager.__new__(OutputManager)
+        output_manager.sql_client = object()
+        output_manager.equip_id = 7
+        output_manager.run_id = "r-refit"
+        captured = {}
+        output_manager.write_sql_table = lambda **kwargs: captured.update(kwargs) or {"inserted": 1}
+
+        inserted = output_manager.write_refit_request(
+            reasons=["drift rising", "anomaly burst"],
+            anomaly_rate=0.2,
+            drift_score=3.1,
+            regime_quality=0.4,
+        )
+
+        assert inserted == 1
+        assert captured["table_name"] == "ACM_RefitRequests"
+        assert "Reason" in captured["df"].columns
+        assert "AnomalyRate" in captured["df"].columns
+        assert "DriftScore" in captured["df"].columns
+        assert "RegimeQuality" in captured["df"].columns
+
+    def test_write_fusion_metrics_routes_to_contract_writer(self):
+        """Fusion metrics writer should emit EAV rows via write_sql_table."""
+        from core.output_manager import OutputManager
+
+        output_manager = OutputManager.__new__(OutputManager)
+        output_manager.sql_client = object()
+        output_manager.equip_id = 9
+        output_manager.run_id = "r-fusion"
+        output_manager.equipment = "FD_FAN"
+        captured = {}
+        output_manager.write_sql_table = lambda **kwargs: captured.update(kwargs) or {"inserted": len(kwargs["df"])}
+
+        inserted = output_manager.write_fusion_metrics(
+            fusion_weights={"ar1_z": 0.6, "iforest_z": 0.4},
+            tuning_diagnostics={
+                "method": "meta_learner",
+                "detector_metrics": {
+                    "ar1_z": {"n_samples": 10, "quality_score": 0.8},
+                    "iforest_z": {"n_samples": 10, "quality_score": 0.7},
+                },
+            },
+            previous_weights=None,
+        )
+
+        assert inserted == 6
+        assert captured["table_name"] == "ACM_RunMetrics"
+        assert set(["MetricName", "MetricValue"]).issubset(set(captured["df"].columns))
+
+    def test_write_feature_drop_log_routes_to_contract_writer(self):
+        """Feature-drop writer should use contract-based write_sql_table path."""
+        from core.output_manager import OutputManager
+
+        output_manager = OutputManager.__new__(OutputManager)
+        output_manager.sql_client = object()
+        output_manager.equip_id = 9
+        output_manager.run_id = "r-feature-drop"
+        captured = {}
+        output_manager.write_sql_table = lambda **kwargs: captured.update(kwargs) or {"inserted": 2}
+
+        inserted = output_manager.write_feature_drop_log(
+            [
+                {"FeatureName": "S01", "DropReason": "low_variance", "DropValue": 0.0, "Threshold": 1e-6},
+                {"FeatureName": "S02", "DropReason": "missingness", "DropValue": 0.95, "Threshold": 0.90},
+            ]
+        )
+
+        assert inserted == 2
+        assert captured["table_name"] == "ACM_FeatureDropLog"
+        assert set(["RunID", "EquipID", "FeatureName", "DropReason"]).issubset(set(captured["df"].columns))
+
+    def test_write_regime_transitions_routes_to_contract_writer(self):
+        """Regime transition writer should emit rows via write_sql_table."""
+        from core.output_manager import OutputManager
+
+        output_manager = OutputManager.__new__(OutputManager)
+        output_manager.sql_client = object()
+        output_manager.equip_id = 4
+        output_manager.run_id = "r-regime-trans"
+        captured = {}
+        output_manager.write_sql_table = lambda **kwargs: captured.update(kwargs) or {"inserted": len(kwargs["df"])}
+
+        inserted = output_manager.write_regime_transitions({"0": {"0": 8, "1": 2}, "1": {"1": 5}})
+
+        assert inserted == 3
+        assert captured["table_name"] == "ACM_RegimeTransitions"
+        assert set(["FromRegime", "ToRegime", "TransitionCount", "TransitionProbability"]).issubset(
+            set(captured["df"].columns)
+        )
+        probs = captured["df"].set_index(["FromRegime", "ToRegime"])["TransitionProbability"].to_dict()
+        assert probs[("0", "0")] == 0.8
+        assert probs[("0", "1")] == 0.2
+        assert probs[("1", "1")] == 1.0
+
+    def test_write_active_models_routes_to_contract_writer(self):
+        """Active-model writer should use contract-based write_sql_table path."""
+        from core.output_manager import OutputManager
+
+        output_manager = OutputManager.__new__(OutputManager)
+        output_manager.sql_client = object()
+        output_manager.equip_id = 31
+        output_manager.run_id = "r-active-models"
+        output_manager.maturity_state = "LEARNING"
+        captured = {}
+        output_manager.write_sql_table = lambda **kwargs: captured.update(kwargs) or {"inserted": 1}
+
+        inserted = output_manager.write_active_models(
+            {
+                "ActiveRegimeVersion": "2",
+                "ActiveThresholdVersion": 5,
+                "ActiveForecastVersion": "7",
+                "RegimeMaturityState": "MaturityState.converged",
+            }
+        )
+
+        assert inserted == 1
+        assert captured["table_name"] == "ACM_ActiveModels"
+        out = captured["df"]
+        assert int(out.loc[0, "EquipID"]) == 31
+        assert str(out.loc[0, "RegimeMaturityState"]) == "CONVERGED"
+        assert int(out.loc[0, "ActiveRegimeVersion"]) == 2
+
+    def test_write_seasonal_patterns_routes_to_contract_writer(self):
+        """Seasonal-pattern writer should use contract-based write_sql_table path."""
+        from core.output_manager import OutputManager
+
+        output_manager = OutputManager.__new__(OutputManager)
+        output_manager.sql_client = object()
+        output_manager.equip_id = 12
+        output_manager.run_id = "r-seasonal"
+        captured = {}
+        output_manager.write_sql_table = lambda **kwargs: captured.update(kwargs) or {"inserted": len(kwargs["df"])}
+
+        inserted = output_manager.write_seasonal_patterns(
+            [
+                {"SensorName": "S1", "PatternType": "DAILY", "PeriodHours": 24.0, "Amplitude": 0.6},
+                {"SensorName": "S2", "PatternType": "WEEKLY", "PeriodHours": 168.0, "Amplitude": 0.3},
+            ]
+        )
+
+        assert inserted == 2
+        assert captured["table_name"] == "ACM_SeasonalPatterns"
+        assert set(["RunID", "EquipID", "DetectedAt", "SensorName"]).issubset(set(captured["df"].columns))
+
+    def test_replace_policy_contract_covers_standardized_optional_writers(self):
+        """Contract map should own replace semantics for standardized optional writers."""
+        from core.output_contracts import TABLE_WRITE_CONTRACTS
+
+        tables = [
+            "ACM_Anomaly_Events",
+            "ACM_Regime_Episodes",
+            "ACM_PCA_Models",
+            "ACM_DetectorCorrelation",
+            "ACM_DriftSeries",
+            "ACM_DriftController",
+            "ACM_DataContractValidation",
+            "ACM_SeasonalPatterns",
+            "ACM_FeatureDropLog",
+            "ACM_CalibrationSummary",
+            "ACM_RegimeOccupancy",
+            "ACM_RegimeTransitions",
+            "ACM_ContributionTimeline",
+        ]
+        for table_name in tables:
+            contract = TABLE_WRITE_CONTRACTS[table_name]
+            assert contract.mode == "replace"
+            assert tuple(contract.key_columns) == ("RunID", "EquipID")
+
+    def test_regime_conditioned_estimate_excludes_legacy_hazard_payload(self, monkeypatch):
+        """Regime-conditioned estimate should not emit legacy ACM_RegimeHazard payload keys."""
+        from core import forecast_engine as fe
+
+        class _FakeRul:
+            def __init__(self, p50):
+                self.p10_lower_bound = p50 - 2.0
+                self.p50_median = p50
+                self.p90_upper_bound = p50 + 2.0
+                self.confidence_level = 0.9
+
+        class _FakeEstimator:
+            def __init__(self, **kwargs):
+                _ = kwargs
+
+            def estimate_rul(self, current_health, dt_hours, max_horizon_hours):
+                _ = (current_health, dt_hours, max_horizon_hours)
+                return _FakeRul(24.0)
+
+        monkeypatch.setattr(fe, "RULEstimator", _FakeEstimator)
+
+        forecaster = fe.RegimeConditionedForecaster(
+            sql_client=None,
+            output_manager=None,
+            equip_id=1,
+            run_id="r-test",
+            config={"failure_threshold": 70.0},
+        )
+        forecaster.compute_regime_stats = lambda lookback_days=90: {
+            1: fe.RegimeStats(
+                regime_label=1,
+                health_state="healthy",
+                degradation_rate=0.2,
+                degradation_rate_lower=0.1,
+                degradation_rate_upper=0.3,
+                degradation_r_squared=0.8,
+                health_mean=85.0,
+                health_std=3.0,
+                dwell_fraction=0.6,
+                transition_count=3,
+                failure_threshold=70.0,
+                sample_count=120,
+            )
+        }
+
+        out = forecaster.estimate_rul_by_regime(
+            current_health=88.0,
+            degradation_model=object(),
+            current_regime=1,
+            forecast_config={"dt_hours": 1.0, "max_forecast_hours": 48.0},
+        )
+
+        assert "rul_global" in out
+        assert "rul_by_regime" in out
+        assert "rul_conditioned" in out
+        assert "regime_hazards" not in out
+
     def test_generate_all_analytics_with_context_injects_fusion_weights(self):
         """Analytics helper should inject fusion weights and delegate to analytics writer."""
         from core.output_manager import OutputManager
@@ -2271,7 +2906,7 @@ class TestRefactorHelpers:
             culprit_writer_func=None,
         )
 
-        assert result.rows_written == 88
+        assert result.rows_written == 97
         assert result.analytics_table_count == 11
         assert calls["sql"] is True
         assert calls["sections"] == ["persist", "persist.pipeline_outputs"]

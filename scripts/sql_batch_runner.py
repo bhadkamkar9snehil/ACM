@@ -33,25 +33,97 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, List, Dict, Optional, Tuple
 from datetime import datetime, timedelta
-import pyodbc
-import numpy as np
+try:
+    import numpy as np  # type: ignore
+except ImportError:  # pragma: no cover - optional dependency in lean environments
+    class _NumpyCompat:
+        @staticmethod
+        def isclose(a: float, b: float, rtol: float = 1e-05, atol: float = 1e-08) -> bool:
+            return abs(float(a) - float(b)) <= (atol + rtol * abs(float(b)))
+
+    np = _NumpyCompat()
+
+try:
+    import pyodbc  # type: ignore
+except ImportError:  # pragma: no cover - optional dependency in dev/test environments
+    pyodbc = None
 
 # Ensure project root is on sys.path so `core` imports work when running as a script
 project_root = Path(__file__).resolve().parents[1]
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-from core.output_manager import ALLOWED_TABLES
-from core.observability import (
-    Console, 
-    init as init_observability, 
-    shutdown as shutdown_observability,
-    record_run,
-    record_error,
-    start_profiling,
-    stop_profiling,
-    get_trace_context,  # For propagating trace context to subprocess
-)
+from core.output_contracts import ALLOWED_TABLES
+try:
+    from core.observability import (
+        Console,
+        init as init_observability,
+        shutdown as shutdown_observability,
+        record_run,
+        record_error,
+        start_profiling,
+        stop_profiling,
+        get_trace_context,  # For propagating trace context to subprocess
+    )
+except Exception:  # pragma: no cover - keeps runner usable without optional observability deps
+    class _FallbackConsole:
+        @staticmethod
+        def info(msg: str, **kwargs: Any) -> None:
+            _ = kwargs
+            print(msg)
+
+        @staticmethod
+        def warn(msg: str, **kwargs: Any) -> None:
+            _ = kwargs
+            print(msg)
+
+        @staticmethod
+        def error(msg: str, **kwargs: Any) -> None:
+            _ = kwargs
+            print(msg)
+
+        @staticmethod
+        def ok(msg: str, **kwargs: Any) -> None:
+            _ = kwargs
+            print(msg)
+
+        @staticmethod
+        def header(msg: str, **kwargs: Any) -> None:
+            _ = kwargs
+            print(msg)
+
+        @staticmethod
+        def status(msg: str, **kwargs: Any) -> None:
+            _ = kwargs
+            print(msg)
+
+        @staticmethod
+        def debug(msg: str, **kwargs: Any) -> None:
+            _ = kwargs
+            print(msg)
+
+    Console = _FallbackConsole()
+
+    def init_observability(*args: Any, **kwargs: Any) -> None:
+        _ = (args, kwargs)
+
+    def shutdown_observability(*args: Any, **kwargs: Any) -> None:
+        _ = (args, kwargs)
+
+    def record_run(*args: Any, **kwargs: Any) -> None:
+        _ = (args, kwargs)
+
+    def record_error(*args: Any, **kwargs: Any) -> None:
+        _ = (args, kwargs)
+
+    def start_profiling(*args: Any, **kwargs: Any) -> None:
+        _ = (args, kwargs)
+
+    def stop_profiling(*args: Any, **kwargs: Any) -> None:
+        _ = (args, kwargs)
+
+    def get_trace_context() -> Dict[str, Any]:
+        return {}
 
 
 class SQLBatchRunner:
@@ -125,6 +197,10 @@ class SQLBatchRunner:
     
     def _get_sql_connection(self) -> pyodbc.Connection:
         """Create SQL connection with a short timeout."""
+        if pyodbc is None:
+            raise RuntimeError(
+                "pyodbc is not installed. Install it to run SQLBatchRunner against SQL Server."
+            )
         # Use the pyodbc timeout parameter instead of a custom
         # connection-string attribute to avoid driver errors.
         return pyodbc.connect(self.sql_conn_string, timeout=10)
@@ -741,8 +817,8 @@ class SQLBatchRunner:
         except Exception as e:
             Console.error(f"Output inspection failed for {equip_name}: {e}", component="QA", equipment=equip_name, error=str(e), error_type=type(e).__name__)
 
-    def _reset_progress_to_beginning(self, equip_id: int) -> None:
-        """Optional: Clear Runs and Coldstart state to force start from earliest EntryDateTime."""
+    def _reset_progress_to_beginning(self, equip_id: int, equip_name: Optional[str] = None) -> None:
+        """Clear SQL and local progress state to force restart from earliest EntryDateTime."""
         try:
             with self._get_sql_connection() as conn:
                 cur = conn.cursor()
@@ -754,6 +830,28 @@ class SQLBatchRunner:
                 Console.info(f"Cleared ACM_Runs and Coldstart for EquipID={equip_id}", component="RESET", equip_id=equip_id)
         except Exception as e:
             Console.warn(f"Could not reset progress for EquipID={equip_id}: {e}", component="RESET", equip_id=equip_id, error=str(e), error_type=type(e).__name__)
+
+        if equip_name:
+            try:
+                progress = self._load_progress()
+                if equip_name in progress:
+                    progress.pop(equip_name, None)
+                    self._save_progress(progress)
+                    Console.info(
+                        f"Cleared local batch progress for {equip_name}",
+                        component="RESET",
+                        equipment=equip_name,
+                        equip_id=equip_id,
+                    )
+            except Exception as e:
+                Console.warn(
+                    f"Could not clear local progress for {equip_name}: {e}",
+                    component="RESET",
+                    equipment=equip_name,
+                    equip_id=equip_id,
+                    error=str(e),
+                    error_type=type(e).__name__,
+                )
     
     def _load_progress(self) -> Dict[str, Dict]:
         """Load progress tracking state.
@@ -1127,19 +1225,30 @@ class SQLBatchRunner:
         
         # Determine starting point
         if resume and 'last_batch_end' in equip_progress:
-            current_ts = datetime.fromisoformat(equip_progress['last_batch_end'])
-            batches_completed = equip_progress.get('batches_completed', 0)
-            Console.info(f"{equip_name}: Resuming from {current_ts} ({batches_completed} batches already completed)", component="BATCH", equipment=equip_name, resume_from=current_ts, batches_completed=batches_completed)
+            last_batch_end = datetime.fromisoformat(equip_progress['last_batch_end'])
+            current_ts = last_batch_end + timedelta(seconds=1)
+            historical_batches_completed = int(equip_progress.get('batches_completed', 0) or 0)
+            Console.info(
+                f"{equip_name}: Resuming from {current_ts} ({historical_batches_completed} batches already completed)",
+                component="BATCH",
+                equipment=equip_name,
+                resume_from=current_ts,
+                previous_batch_end=last_batch_end,
+                batches_completed=historical_batches_completed,
+            )
         elif start_from:
             current_ts = start_from
-            batches_completed = 0
+            historical_batches_completed = 0
         else:
             current_ts = min_ts
-            batches_completed = 0
+            historical_batches_completed = 0
+
+        batches_completed_total = historical_batches_completed
+        batches_completed_session = 0
         
         # Calculate total batches
         total_minutes = max((max_ts - current_ts).total_seconds() / 60, 0)
-        total_batches = int(total_minutes / self.tick_minutes) if self.tick_minutes > 0 else 0
+        total_batches = int(math.ceil(total_minutes / self.tick_minutes)) if self.tick_minutes > 0 and total_minutes > 0 else 0
 
         # If a demo cap is provided, automatically widen the batch window so
         # the full history fits in at most max_batches windows. This keeps
@@ -1153,7 +1262,7 @@ class SQLBatchRunner:
                     component="BATCH", equipment=equip_name, old_tick=self.tick_minutes, new_tick=new_tick, max_batches=self.max_batches
                 )
                 self.tick_minutes = new_tick
-                total_batches = int(total_minutes / self.tick_minutes) if self.tick_minutes > 0 else 0
+                total_batches = int(math.ceil(total_minutes / self.tick_minutes)) if self.tick_minutes > 0 and total_minutes > 0 else 0
         
         Console.info(f"{equip_name}: Processing {total_batches} batch(es) ({self.tick_minutes}-minute windows)", component="BATCH", equipment=equip_name, total_batches=total_batches, tick_minutes=self.tick_minutes)
         
@@ -1176,17 +1285,25 @@ class SQLBatchRunner:
             # Run ACM (it will automatically use the current batch window from SQL)
             # Pass batches_completed (total count including previous runs) for frequency control
             # is_post_coldstart=True since _process_batches is called after coldstart completes
-            success, outcome = self._run_acm_batch(equip_name, start_time=current_ts, end_time=next_ts, dry_run=dry_run, batch_num=batches_completed, is_post_coldstart=True)
+            success, outcome = self._run_acm_batch(
+                equip_name,
+                start_time=current_ts,
+                end_time=next_ts,
+                dry_run=dry_run,
+                batch_num=batches_completed_total,
+                is_post_coldstart=True,
+            )
             
             if not success:
                 Console.error(f"{equip_name}: Batch {batch_num} FAILED", component="BATCH", equipment=equip_name, batch=batch_num)
                 break
             
-            batches_completed += 1
+            batches_completed_total += 1
+            batches_completed_session += 1
             
             # Update progress
             equip_progress['last_batch_end'] = next_ts.isoformat()
-            equip_progress['batches_completed'] = batches_completed
+            equip_progress['batches_completed'] = batches_completed_total
             equip_progress['coldstart_complete'] = True
             progress[equip_name] = equip_progress
             
@@ -1203,8 +1320,15 @@ class SQLBatchRunner:
             # Move to next window (add 1 second to move past the end of the current window)
             current_ts = next_ts + timedelta(seconds=1)
         
-        Console.info(f"\n{equip_name}: Processed {batches_completed} batch(es)", component="BATCH", equipment=equip_name, batches_completed=batches_completed)
-        return batches_completed
+        Console.info(
+            f"\n{equip_name}: Processed {batches_completed_session} batch(es) this run "
+            f"({batches_completed_total} total)",
+            component="BATCH",
+            equipment=equip_name,
+            batches_completed=batches_completed_session,
+            batches_completed_total=batches_completed_total,
+        )
+        return batches_completed_session
     
     def process_equipment(self, equip_name: str, *, dry_run: bool = False, 
                          resume: bool = False) -> bool:
@@ -1249,7 +1373,7 @@ class SQLBatchRunner:
                 # starts with fresh coldstart training. This ensures batch 0 trains new models,
                 # and subsequent batches evolve those models incrementally.
                 self._delete_models_for_equip(equip_id)
-                self._reset_progress_to_beginning(equip_id)
+                self._reset_progress_to_beginning(equip_id, equip_name=equip_name)
             else:
                 self._set_tick_minutes(equip_id, self.tick_minutes)
             

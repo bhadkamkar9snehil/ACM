@@ -24,6 +24,42 @@ Versioning rule:
 
 ## [Unreleased]
 
+### Changed - OUTPUT MANAGER COMPLEXITY REDUCTION AND ARTIFACT SPLIT
+
+- Continued `core/output_manager.py` hardening and simplification:
+  - added `_write_optional_table(...)` to centralize best-effort optional writes
+  - removed repeated local `try/except` wrappers from multiple optional write methods
+  - made `write_active_models(...)` replace path explicit (delete then insert) without silent delete skip
+- Split low-hanging module-level artifact writers out of `core/output_manager.py` into:
+  - `core/output_artifacts.py`
+  - moved `write_pca_artifacts(...)` and `write_sql_artifacts(...)`
+  - `core/output_manager.py` now imports these helpers
+- Added full per-function audit for OutputManager:
+  - `docs/OUTPUT_MANAGER_DEF_INDEX_AUDIT.md`
+  - includes all defs with purpose, complexity, overprotection score, and simplification flags
+- Updated system overview call-chain references for artifact writing ownership:
+  - `docs/ACM_SYSTEM_OVERVIEW.md`
+
+### Changed - SYSTEM OVERVIEW DEEP REWRITE
+
+- Rewrote `docs/ACM_SYSTEM_OVERVIEW.md` end-to-end with:
+  - formal problem framing and inference objective
+  - detector/fusion/regime/drift theoretical rationale
+  - detailed module-to-module call chain for active `core.acm` runtime
+  - explicit list of mitigated reliability/data issues and remaining hard areas
+  - updated ownership and execution order aligned to current code path
+
+### Changed - README RECOVERY WITH RELEVANT LEGACY CONTENT
+
+- Reworked `README.md` to restore relevant rich content style from previous versions while keeping current runtime truth.
+- Restored and modernized:
+  - detailed ASCII diagram sections
+  - deeper conceptual explanation of regimes, detectors, fusion, episodes, and drift
+  - expanded architecture and pipeline flow documentation
+- Removed obsolete assumptions while preserving relevant guidance:
+  - kept `core.acm` as single operational entrypoint
+  - retained note that forecasting/RUL stage is currently disabled in active orchestrator path
+
 ### Added - AGENT-MANAGED ACM MEMORY MECHANISM
 
 - Added repository skill for agent memory:

@@ -39,6 +39,43 @@ Observed issues:
 3. Duplicate or overlapping write paths increase maintenance cost.
 4. Some utility methods still perform guard checks that should have been validated earlier.
 
+## 3.1 Progress Snapshot
+
+Completed in current branch:
+
+1. `write_dataframe` remains the single authoritative SQL write entry for most table writes.
+2. `write_table` is routed through `write_dataframe` and shares one core path.
+3. Repeated optional write wrappers were consolidated with `_write_optional_table`.
+4. Duplicate local `try/except` blocks were removed from optional methods:
+   - `write_regime_episodes`
+   - `write_detector_correlation`
+   - `write_drift_series`
+   - `write_drift_controller`
+   - `write_regime_definitions`
+   - `write_data_contract_validation`
+   - `write_seasonal_patterns`
+   - `write_sensor_normalized_ts_from_raw`
+   - `write_seasonal_patterns_from_detected`
+5. `write_active_models` delete-then-insert path is now explicit and no longer silently ignores delete failures.
+6. Low-hanging split started: module-level artifact writers moved out of `core/output_manager.py` into `core/output_artifacts.py`:
+   - `write_pca_artifacts(...)`
+   - `write_sql_artifacts(...)`
+7. `core/output_manager.py` now imports artifact writers from `core/output_artifacts.py`, reducing class-file scope.
+
+Current complexity snapshot after this slice:
+
+1. `core/output_manager.py` lines: 3544
+2. `core/output_manager.py` `try`: 77
+3. `core/output_manager.py` `except`: 65
+4. `core/output_artifacts.py` lines: 208
+5. `core/output_artifacts.py` `try`: 3
+6. `core/output_artifacts.py` `except`: 3
+
+Validation status:
+
+1. `python -m py_compile core/output_manager.py core/acm.py` passed
+2. `pytest tests/test_v11_modules.py -q` passed (90 passed)
+
 ## 4. Behavior Classification
 
 All methods in this module should be classified into one of two categories.

@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-02-22T13:46:41+00:00",
-  "module_count": 36,
+  "generated_at": "2026-02-22T16:36:43+00:00",
+  "module_count": 40,
   "modules": [
     {
       "module_name": "core.acm",
@@ -146,7 +146,7 @@
     {
       "module_name": "core.forecast_engine",
       "source_path": "core/forecast_engine.py",
-      "symbol_count": 31,
+      "symbol_count": 29,
       "core_import_count": 11,
       "core_imports": [
         "core.confidence",
@@ -249,13 +249,49 @@
       ]
     },
     {
+      "module_name": "core.output_artifacts",
+      "source_path": "core/output_artifacts.py",
+      "symbol_count": 2,
+      "core_import_count": 1,
+      "core_imports": [
+        "core.observability"
+      ]
+    },
+    {
+      "module_name": "core.output_contracts",
+      "source_path": "core/output_contracts.py",
+      "symbol_count": 5,
+      "core_import_count": 0,
+      "core_imports": []
+    },
+    {
+      "module_name": "core.output_dataframe_builders",
+      "source_path": "core/output_dataframe_builders.py",
+      "symbol_count": 1,
+      "core_import_count": 0,
+      "core_imports": []
+    },
+    {
       "module_name": "core.output_manager",
       "source_path": "core/output_manager.py",
-      "symbol_count": 87,
-      "core_import_count": 4,
+      "symbol_count": 109,
+      "core_import_count": 7,
       "core_imports": [
         "core.analytics_builder",
         "core.data_loader",
+        "core.observability",
+        "core.output_artifacts",
+        "core.output_contracts",
+        "core.output_dataframe_builders",
+        "core.output_manager_services"
+      ]
+    },
+    {
+      "module_name": "core.output_manager_services",
+      "source_path": "core/output_manager_services.py",
+      "symbol_count": 31,
+      "core_import_count": 2,
+      "core_imports": [
         "core.observability",
         "core.sensor_attribution"
       ]

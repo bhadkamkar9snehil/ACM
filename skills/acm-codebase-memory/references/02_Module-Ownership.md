@@ -20,7 +20,7 @@ type: agent-memory
 | `[core.episode_culprits_writer]` | 4 | 1 |
 | `[core.failure_probability]` | 18 | 0 |
 | `[core.fast_features]` | 36 | 1 |
-| `[core.forecast_engine]` | 31 | 11 |
+| `[core.forecast_engine]` | 29 | 11 |
 | `[core.fuse]` | 48 | 1 |
 | `[core.health_tracker]` | 13 | 1 |
 | `[core.metrics]` | 14 | 1 |
@@ -31,7 +31,11 @@ type: agent-memory
 | `[core.observability]` | 110 | 0 |
 | `[core.omr]` | 19 | 0 |
 | `[core.outliers]` | 12 | 1 |
-| `[core.output_manager]` | 87 | 4 |
+| `[core.output_artifacts]` | 2 | 1 |
+| `[core.output_contracts]` | 5 | 0 |
+| `[core.output_dataframe_builders]` | 1 | 0 |
+| `[core.output_manager]` | 109 | 7 |
+| `[core.output_manager_services]` | 31 | 2 |
 | `[core.pipeline_types]` | 23 | 0 |
 | `[core.regimes]` | 55 | 1 |
 | `[core.resource_monitor]` | 27 | 0 |

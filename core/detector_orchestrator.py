@@ -422,11 +422,10 @@ def fit_all_detectors(
                         "CalibrationStatus": "VALID",
                         "FitTimestamp": pd.Timestamp.now()
                     }])
-                    output_manager.write_dataframe(
-                        diag_df,
-                        "omr_diagnostics",
-                        sql_table="ACM_OMR_Diagnostics",
-                        add_created_at=True
+                    output_manager.write_sql_table(
+                        table_name="ACM_OMR_Diagnostics",
+                        df=diag_df,
+                        artifact_name="omr_diagnostics",
                     )
             except Exception as e:
                 Console.warn(f"OMR diagnostics write failed: {e}", component="OMR", equip=equip, error=str(e)[:200])

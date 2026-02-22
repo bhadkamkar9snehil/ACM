@@ -586,7 +586,11 @@ def run_data_guardrails(
             dq['EquipID'] = int(equip_id)
             dq['CheckName'] = 'data_quality'
             dq['CheckResult'] = 'OK'
-            output_manager.write_dataframe(dq, "data_quality", sql_table="ACM_DataQuality", add_created_at=True)
+            output_manager.write_sql_table(
+                table_name="ACM_DataQuality",
+                df=dq,
+                artifact_name="data_quality",
+            )
             result.data_quality_written = True
     except Exception as dq_e:
         Console.warn(f"Data quality summary skipped: {dq_e}", component="DATA",
