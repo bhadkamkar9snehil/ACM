@@ -912,7 +912,7 @@ class SQLBatchRunner:
         v11.8.0: ADAPTIVE - No mode selection needed
         =============================================
         The pipeline automatically determines behavior based on model state and
-        quality metrics. No ONLINE/OFFLINE mode distinction - acm_main decides
+        quality metrics. No ONLINE/OFFLINE mode distinction - core.acm decides
         adaptively whether to train or score.
         """
         cmd = [
@@ -925,7 +925,7 @@ class SQLBatchRunner:
         if end_time:
             cmd.extend(["--end-time", end_time.isoformat()])
         
-        # v11.8.0: No mode argument - acm_main decides adaptively
+        # v11.8.0: No mode argument - core.acm decides adaptively
         printable = " ".join(cmd)
         if dry_run:
             Console.info(f"{printable}", mode="dry-run", component="DRY")
@@ -1001,17 +1001,17 @@ class SQLBatchRunner:
         batch_duration = time.time() - batch_start_time if 'batch_start_time' in locals() else 0.0
 
         # If the batch failed or outcome was not OK/NOOP, surface logs so the
-        # caller can see exactly what went wrong inside acm_main.
+        # caller can see exactly what went wrong inside core.acm.
         if not success or outcome == "FAIL":
-            Console.error(f"[RUN-DEBUG] {equip_name}: acm_main exited with code {process.returncode}", component="RUN", equipment=equip_name, return_code=process.returncode)
+            Console.error(f"[RUN-DEBUG] {equip_name}: core.acm exited with code {process.returncode}", component="RUN", equipment=equip_name, return_code=process.returncode)
             if stdout_text:
                 # Show only the last 20 lines to avoid duplicating the entire run output
                 tail_lines = stdout_text.rstrip().splitlines()[-20:]
                 Console.error(
-                    f"[RUN-DEBUG] {equip_name}: --- acm_main stdout (last 20 lines) ---\n" + "\n".join(tail_lines),
+                    f"[RUN-DEBUG] {equip_name}: --- core.acm stdout (last 20 lines) ---\n" + "\n".join(tail_lines),
                     component="RUN", equipment=equip_name,
                 )
-            # Record FAIL in Prometheus metrics (since acm_main didn't complete)
+            # Record FAIL in Prometheus metrics (since core.acm did not complete)
             record_run(equip_name, "FAIL", batch_duration)
             record_error(equip_name, f"Exit code {process.returncode}", "subprocess_failure")
 
@@ -1394,7 +1394,7 @@ def main() -> int:
     artifact_root = Path("artifacts").resolve()
     
     # Initialize observability for batch runner logging to Loki/Tempo/Prometheus
-    # Note: acm_main.py will re-init with per-equipment context, but this enables
+    # Note: core.acm will re-init with per-equipment context, but this enables
     # batch runner Console calls to also go to Loki before ACM invocation
     import os
     loki_url = os.environ.get("LOKI_URL", "http://localhost:3100")
