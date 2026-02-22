@@ -7,6 +7,7 @@ typically the fused anomaly score.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 from typing import Any, Dict, Optional
@@ -480,3 +481,62 @@ def run_drift_pipeline(
         "drift_controller_rows": rows_written,
         "prev_mode": prev_mode,
     }
+
+
+@dataclass
+class DriftPostprocessStageResult:
+    """Result bundle for drift stage plus episode schema normalization."""
+    frame: pd.DataFrame
+    score_out: Dict[str, Any]
+    episodes: pd.DataFrame
+
+
+def run_drift_postprocess_stage(
+    *,
+    section_fn: Any,
+    score_data: pd.DataFrame,
+    frame: pd.DataFrame,
+    score_out: Dict[str, Any],
+    episodes: pd.DataFrame,
+    cfg: Dict[str, Any],
+    regime_quality_ok: bool,
+    equip: str,
+    sql_client: Optional[Any],
+    equip_id: int,
+    output_manager: Optional[Any],
+    logger: Optional[Any] = None,
+    normalize_episodes_schema_fn: Any = None,
+) -> DriftPostprocessStageResult:
+    """
+    Execute drift pipeline and normalize episodes schema for persistence/reporting.
+    """
+    if normalize_episodes_schema_fn is None:
+        normalize_episodes_schema_fn = fuse.normalize_episodes_schema
+
+    with section_fn("drift"):
+        drift_out = run_drift_pipeline(
+            score_data=score_data,
+            frame=frame,
+            score_out=score_out,
+            cfg=cfg,
+            regime_quality_ok=regime_quality_ok,
+            equip=equip,
+            sql_client=sql_client,
+            equip_id=equip_id,
+            output_manager=output_manager,
+            logger=logger,
+        )
+        frame = drift_out["frame"]
+        score_out = drift_out["score_out"]
+
+    episodes, frame = normalize_episodes_schema_fn(
+        episodes=episodes,
+        frame=frame,
+        equip=equip,
+    )
+
+    return DriftPostprocessStageResult(
+        frame=frame,
+        score_out=score_out,
+        episodes=episodes,
+    )
