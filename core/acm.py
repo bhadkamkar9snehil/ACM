@@ -311,7 +311,6 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
     )
 
     # Initialize cross-phase state variables.
-    detector_cache: Optional[Dict[str, Any]] = None
     regime_model: Optional[regimes.RegimeModel] = None
     raw_train: Optional[pd.DataFrame] = None
     raw_score: Optional[pd.DataFrame] = None
@@ -453,14 +452,6 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
 
         # ===== Phase 2: Load or fit detectors =====
         regime_model = None
-        regime_state = None
-        regime_state_version = 0
-        regime_loaded_from_state = False
-        col_meds = None
-        cached_models = None
-        cached_manifest = None
-        previous_weights = None  # Initialize for fusion pipeline.
-        cached_calibration_params = None
         detector_init = run_detector_initialization_stage(
             section_fn=T.section,
             fit_all_detectors_fn=fit_all_detectors,
@@ -468,7 +459,7 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
             score=score,
             cfg=cfg,
             meta=meta,
-            detector_cache=detector_cache,
+            detector_cache=None,
             output_manager=output_manager,
             sql_client=sql_client,
             run_id=run_id,
@@ -559,7 +550,7 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
             equip_id=equip_id,
             regime_model=regime_model,
             detectors=detectors,
-            detector_cache=detector_cache,
+            detector_cache=None,
             col_meds=col_meds,
             timing_sections=T.timings if hasattr(T, "timings") else None,
             model_state=model_state,
@@ -602,7 +593,7 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
             output_manager=output_manager,
             logger=Console,
             equip=equip,
-            previous_weights=previous_weights,
+            previous_weights=None,
             omr_contributions_data=omr_contributions_data,
             record_detector_scores_fn=record_detector_scores,
             record_episode_fn=record_episode,
