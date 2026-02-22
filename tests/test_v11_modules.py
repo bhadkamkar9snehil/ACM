@@ -1037,6 +1037,144 @@ class TestRefactorHelpers:
         assert out["pca_detector"] is cached_detector
         assert out["iforest_detector"] is cached_detector
 
+    def test_run_detector_initialization_stage_wraps_models_load_and_train_fit_sections(self):
+        """Stage wrapper should always time models.load and time train.detector_fit when fitting occurs."""
+        from core.detector_orchestrator import run_detector_initialization_stage
+
+        train = pd.DataFrame({"a": [1.0, 2.0, 3.0]})
+        score = pd.DataFrame({"a": [1.5, 2.5]})
+        section_calls = []
+
+        class _Section:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        def _section_fn(name):
+            section_calls.append(name)
+            return _Section()
+
+        fitted = object()
+
+        def _fit_all_detectors_fn(**kwargs):
+            return {
+                "ar1_detector": fitted,
+                "pca_detector": fitted,
+                "iforest_detector": fitted,
+                "gmm_detector": None,
+                "omr_detector": None,
+                "pca_train_spe": np.array([0.1, 0.2, 0.3]),
+                "pca_train_t2": np.array([0.2, 0.3, 0.4]),
+            }
+
+        out = run_detector_initialization_stage(
+            section_fn=_section_fn,
+            fit_all_detectors_fn=_fit_all_detectors_fn,
+            train=train,
+            score=score,
+            cfg={
+                "models": {"use_cache": True},
+                "fusion": {"weights": {"ar1_z": 1.0, "pca_spe_z": 1.0, "iforest_z": 1.0}},
+            },
+            meta={"is_coldstart_run": True},
+            detector_cache=None,
+            output_manager=None,
+            sql_client=None,
+            run_id="r1",
+            equip_id=1,
+            equip="FD_FAN",
+            load_and_rebuild_detectors_fn=lambda **kwargs: (_ for _ in ()).throw(
+                AssertionError("cache load should not run for coldstart")
+            ),
+            restore_detectors_from_runtime_cache_fn=lambda **kwargs: {},
+            load_quality_regime_state_if_needed_fn=lambda **kwargs: (None, 0, False),
+            reconcile_detector_flags_fn=lambda **kwargs: {
+                "ar1_enabled": True,
+                "pca_enabled": True,
+                "iforest_enabled": True,
+                "gmm_enabled": False,
+                "omr_enabled": False,
+            },
+            logger=type("L", (), {"info": lambda *a, **k: None, "warn": lambda *a, **k: None, "error": lambda *a, **k: None})(),
+        )
+
+        assert section_calls == ["models.load", "train.detector_fit"]
+        assert out.detectors_just_trained is True
+        assert out.ar1_detector is fitted
+        assert out.pca_detector is fitted
+        assert out.iforest_detector is fitted
+
+    def test_run_detector_initialization_stage_skips_train_fit_section_when_cache_is_valid(self):
+        """Stage wrapper should not open train.detector_fit section when cache provides required detectors."""
+        from core.detector_orchestrator import run_detector_initialization_stage
+
+        train = pd.DataFrame({"a": [1.0, 2.0, 3.0]})
+        score = pd.DataFrame({"a": [1.5, 2.5]})
+        section_calls = []
+
+        class _Section:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        def _section_fn(name):
+            section_calls.append(name)
+            return _Section()
+
+        cached_detector = object()
+
+        out = run_detector_initialization_stage(
+            section_fn=_section_fn,
+            fit_all_detectors_fn=lambda **kwargs: (_ for _ in ()).throw(AssertionError("fit should not run")),
+            train=train,
+            score=score,
+            cfg={
+                "models": {"use_cache": True},
+                "fusion": {"weights": {"ar1_z": 1.0, "pca_spe_z": 1.0, "iforest_z": 1.0}},
+            },
+            meta={"is_coldstart_run": False},
+            detector_cache=None,
+            output_manager=None,
+            sql_client=object(),
+            run_id="r1",
+            equip_id=1,
+            equip="FD_FAN",
+            load_and_rebuild_detectors_fn=lambda **kwargs: {
+                "train": kwargs["train"],
+                "score": kwargs["score"],
+                "cached_models": {"ok": True},
+                "cached_manifest": {"train_sensors": ["a"]},
+                "cached_calibration_params": {"ar1_z": {"med": 0.0}},
+                "ar1_detector": cached_detector,
+                "pca_detector": cached_detector,
+                "iforest_detector": cached_detector,
+                "gmm_detector": None,
+                "omr_detector": None,
+                "regime_model": None,
+                "col_meds": {"a": 2.0},
+            },
+            restore_detectors_from_runtime_cache_fn=lambda **kwargs: {},
+            load_quality_regime_state_if_needed_fn=lambda **kwargs: (None, 0, False),
+            reconcile_detector_flags_fn=lambda **kwargs: {
+                "ar1_enabled": True,
+                "pca_enabled": True,
+                "iforest_enabled": True,
+                "gmm_enabled": False,
+                "omr_enabled": False,
+            },
+            logger=type("L", (), {"info": lambda *a, **k: None, "warn": lambda *a, **k: None, "error": lambda *a, **k: None})(),
+        )
+
+        assert section_calls == ["models.load"]
+        assert out.detectors_just_trained is False
+        assert out.ar1_detector is cached_detector
+        assert out.pca_detector is cached_detector
+        assert out.iforest_detector is cached_detector
+
     def test_load_and_rebuild_detectors_from_sql_cache_uses_local_rebuild(self, monkeypatch):
         """SQL cache loader in detector orchestrator should rebuild detectors directly without callback injection."""
         from core import detector_orchestrator as orch
