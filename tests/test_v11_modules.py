@@ -1918,6 +1918,58 @@ class TestRefactorHelpers:
         assert result.analytics_table_count == 11
         assert calls["sections"] == ["persist", "persist.pipeline_outputs"]
 
+    def test_prepare_persistence_inputs_updates_baseline_and_builds_sensor_context(self):
+        """Persistence input preparation should update baseline buffer and build sensor context."""
+        from core.output_manager import OutputManager
+
+        out = OutputManager.__new__(OutputManager)
+        calls = {"sections": [], "baseline": False, "sensor": False}
+
+        class _Section:
+            def __init__(self, name):
+                self.name = name
+            def __enter__(self):
+                calls["sections"].append(self.name)
+                return self
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        def _section_fn(name):
+            return _Section(name)
+
+        def _update_baseline_buffer(**kwargs):
+            calls["baseline"] = True
+
+        def _build_sensor_context(**kwargs):
+            calls["sensor"] = True
+            return {"ctx": 1}
+
+        out.update_baseline_buffer = _update_baseline_buffer
+
+        idx = pd.date_range("2026-01-01", periods=2, freq="h")
+        raw_train = pd.DataFrame({"a": [1.0, 2.0]}, index=idx)
+        raw_score = pd.DataFrame({"a": [1.5, 2.5]}, index=idx)
+        frame = pd.DataFrame({"fused": [0.1, 0.2]}, index=idx)
+
+        result = out.prepare_persistence_inputs(
+            section_fn=_section_fn,
+            raw_train=raw_train,
+            raw_score=raw_score,
+            frame=frame,
+            omr_contributions_data=None,
+            regime_model=None,
+            cfg={},
+            coldstart_complete=True,
+            build_sensor_analytics_context_fn=_build_sensor_context,
+            logger=type("L", (), {"warn": lambda *a, **k: None})(),
+            equip="FD_FAN",
+        )
+
+        assert result.sensor_context == {"ctx": 1}
+        assert calls["baseline"] is True
+        assert calls["sensor"] is True
+        assert calls["sections"] == ["baseline.buffer_write", "sensor.context"]
+
     def test_resolve_run_outcome_from_degradations(self):
         """Run metadata helper should map degradation list to DEGRADED outcome and payload."""
         from core.run_metadata_writer import resolve_run_outcome_from_degradations

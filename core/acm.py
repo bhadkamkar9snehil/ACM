@@ -714,25 +714,20 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
         score_out = drift_stage.score_out
         episodes = drift_stage.episodes
 
-        # ===== Rolling baseline buffer: update with latest raw SCORE =====
-        with T.section("baseline.buffer_write"):
-            output_manager.update_baseline_buffer(
-                score_numeric=raw_score,
-                cfg=cfg,
-                coldstart_complete=coldstart_complete,
-            )
-
-        sensor_context: Optional[Dict[str, Any]] = None
-        with T.section("sensor.context"):
-            sensor_context = build_sensor_analytics_context(
-                raw_train=raw_train,
-                raw_score=raw_score,
-                frame=frame,
-                omr_contributions_data=omr_contributions_data,
-                regime_model=regime_model,
-                logger=Console,
-                equip=equip,
-            )
+        prep_inputs = output_manager.prepare_persistence_inputs(
+            section_fn=T.section,
+            raw_train=raw_train,
+            raw_score=raw_score,
+            frame=frame,
+            omr_contributions_data=omr_contributions_data,
+            regime_model=regime_model,
+            cfg=cfg,
+            coldstart_complete=coldstart_complete,
+            build_sensor_analytics_context_fn=build_sensor_analytics_context,
+            logger=Console,
+            equip=equip,
+        )
+        sensor_context: Optional[Dict[str, Any]] = prep_inputs.sensor_context
 
         # ===== Phase 9: Persist artifacts / finalize (SQL-only) =====
         rows_read = int(score.shape[0])
