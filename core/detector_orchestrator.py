@@ -120,7 +120,7 @@ def run_detector_initialization_stage(
 
     load_ctx = section_fn("models.load") if section_fn is not None else nullcontext()
     with load_ctx:
-        return initialize_detectors_for_run(
+        return _initialize_detectors_for_run(
             train=train,
             score=score,
             cfg=cfg,
@@ -438,7 +438,7 @@ def fit_all_detectors(
     return result
 
 
-def initialize_detectors_for_run(
+def _initialize_detectors_for_run(
     *,
     train: pd.DataFrame,
     score: pd.DataFrame,

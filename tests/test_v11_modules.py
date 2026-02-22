@@ -1133,7 +1133,7 @@ class TestRefactorHelpers:
 
     def test_initialize_detectors_for_run_trains_when_required_detectors_missing(self):
         """Detector init helper should fit detectors when enabled models are missing."""
-        from core.detector_orchestrator import initialize_detectors_for_run
+        from core.detector_orchestrator import _initialize_detectors_for_run
 
         train = pd.DataFrame({"a": [1.0, 2.0, 3.0], "b": [2.0, 3.0, 4.0]})
         score = pd.DataFrame({"a": [1.5, 2.5], "b": [2.5, 3.5]})
@@ -1179,7 +1179,7 @@ class TestRefactorHelpers:
             def error(self, *args, **kwargs):
                 pass
 
-        out = initialize_detectors_for_run(
+        out = _initialize_detectors_for_run(
             train=train,
             score=score,
             cfg={
@@ -1213,7 +1213,7 @@ class TestRefactorHelpers:
 
     def test_initialize_detectors_for_run_uses_sql_cache_without_refit(self):
         """Detector init helper should reuse cached detectors when cache payload is valid."""
-        from core.detector_orchestrator import initialize_detectors_for_run
+        from core.detector_orchestrator import _initialize_detectors_for_run
 
         train = pd.DataFrame({"a": [1.0, 2.0, 3.0]})
         score = pd.DataFrame({"a": [1.5, 2.5]})
@@ -1263,7 +1263,7 @@ class TestRefactorHelpers:
             def error(self, *args, **kwargs):
                 pass
 
-        out = initialize_detectors_for_run(
+        out = _initialize_detectors_for_run(
             train=train,
             score=score,
             cfg={
@@ -1509,7 +1509,7 @@ class TestRefactorHelpers:
 
     def test_initialize_detectors_for_run_requires_reconcile_fn(self):
         """Detector init should fail fast when reconcile callback is not provided."""
-        from core.detector_orchestrator import initialize_detectors_for_run
+        from core.detector_orchestrator import _initialize_detectors_for_run
 
         train = pd.DataFrame({"a": [1.0, 2.0]})
         score = pd.DataFrame({"a": [1.5]})
@@ -1537,7 +1537,7 @@ class TestRefactorHelpers:
             return None, 0, False
 
         with pytest.raises(ValueError):
-            initialize_detectors_for_run(
+            _initialize_detectors_for_run(
                 train=train,
                 score=score,
                 cfg={"models": {"use_cache": False}, "fusion": {"weights": {"ar1_z": 0, "pca_spe_z": 0, "iforest_z": 0}}},

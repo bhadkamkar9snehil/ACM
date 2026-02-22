@@ -229,7 +229,7 @@ Phase 4 extraction highlights:
   - model force-retrain policy extracted from `core/acm.py` to `core/model_evaluation.py`:
     - `evaluate_force_retrain_triggers`
   - detector runtime initialization extracted from `core/acm.py` to `core/detector_orchestrator.py`:
-    - `initialize_detectors_for_run`
+    - `_initialize_detectors_for_run`
     - includes cache load path, runtime cache restore path, fit-when-missing path, flag reconcile, and required-detector validation
   - regime basis stage extracted from `core/acm.py` to `core/regimes.py`:
     - `build_regime_feature_basis_stage`
@@ -958,12 +958,12 @@ Audit findings:
    - Action: Keep one canonical API in OutputManager (prefer instance method); remove redundant wrapper/function path in a dedicated pass.
 
 2. `core/detector_orchestrator.py`
-   - Finding: Two public initialization entrypoints:
+   - Finding: Two initialization entrypoints:
      - `run_detector_initialization_stage(...)`
-     - `initialize_detectors_for_run(...)`
+     - `_initialize_detectors_for_run(...)`
    - Current behavior: stage function owns timing boundary; core function owns pure initialization logic.
    - Classification: `INTENTIONAL_LAYERING` (for now)
-   - Action: keep both until phase-end; after orchestration stabilization, reduce public surface by making core helper internal (`_initialize_detectors_for_run`) if no external callers remain.
+   - Action: keep stage entrypoint public; keep core helper internal only.
 
 3. `core/drift.py`
    - Finding: `run_drift_pipeline(...)` plus `run_drift_postprocess_stage(...)`.
@@ -1040,6 +1040,10 @@ Effective immediately for remaining refactor phases, every PR must include:
      - `core/regimes.py` (for `_cfg_get`)
    - updated modules to import shared helpers
    - added helper behavior tests in `tests/test_v11_modules.py`
-3. Remaining:
-   - Pass E3 detector initialization API surface reduction
+3. Pass E3 completed (2026-02-22):
+   - reduced detector initialization API surface:
+     - `initialize_detectors_for_run(...)` renamed to internal `_initialize_detectors_for_run(...)`
+     - `run_detector_initialization_stage(...)` remains the public stage entrypoint
+   - updated tests to call the internal helper where direct unit coverage is needed
+4. Remaining:
    - Pass E4 regimes legacy hook cleanup.
