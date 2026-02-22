@@ -75,7 +75,6 @@ from core.model_persistence import (
 from core.model_evaluation import auto_tune_parameters, run_auto_retrain_stage
 
 from core.observability import (
-    init as init_observability,
     get_tracer,
     set_context as set_acm_context,
     Console,
@@ -92,12 +91,12 @@ from core.observability import (
     close_run_span,
     start_run_span,
     shutdown_run_observability,
-    start_profiling,
+    init_run_observability,
 )
 
 from core.sql_client import (
     execute_with_deadlock_retry,
-    connect_acm_sql,
+    connect_acm_sql_failfast,
     bootstrap_acm_run_state,
 )
 
@@ -214,22 +213,11 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
     # failures are captured. Use equip_id=0 until SQL is available.
     # ========================================================================
     
-    try:
-        init_observability(
-            equipment=equip,
-            equip_id=0,  # Will be updated after SQL connects
-            service_name="acm-pipeline",
-            otlp_endpoint="http://localhost:4318",
-            loki_endpoint="http://localhost:3100",
-            enable_tracing=True,
-            enable_metrics=True,
-            enable_loki=True,
-            enable_profiling=True,
-        )
-        start_profiling()
-    except Exception as e:
-        Console.warn(f"Observability init failed (non-fatal): {e}", component="OTEL",
-                     error_type=type(e).__name__, error=str(e)[:200])
+    init_run_observability(
+        equip=equip,
+        equip_id=0,  # Will be updated after SQL connects
+        logger=Console,
+    )
 
     T = Timer(enable=True)
 
@@ -240,15 +228,7 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
     # ========================================================================
     # Fail-fast SQL connect: ACM is SQL-only and must abort if SQL is down.
     # ========================================================================
-    Console.info("Connecting to SQL Server...", component="SQL")
-    try:
-        sql_client = connect_acm_sql(cfg={}, logger=Console)
-        Console.ok("SQL connection established", component="SQL")
-    except Exception as e:
-        Console.error(f"SQL connection failed: {e}", component="SQL",
-                      error_type=type(e).__name__, error=str(e)[:500])
-        Console.error("Check configs/sql_connection.ini and ensure SQL Server is running.", component="SQL")
-        raise SystemExit(1)
+    sql_client = connect_acm_sql_failfast(cfg={}, logger=Console)
 
     with T.section("startup"):
         bootstrap = bootstrap_acm_run_state(

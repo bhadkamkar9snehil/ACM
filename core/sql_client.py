@@ -611,6 +611,37 @@ def connect_acm_sql(
         return cli
 
 
+def connect_acm_sql_failfast(
+    cfg: Dict[str, Any],
+    logger: Optional[Any] = None,
+) -> Any:
+    """
+    Connect to ACM SQL and exit process on failure.
+
+    This keeps fail-fast semantics centralized for ACM entrypoint startup.
+    """
+    if logger is not None and hasattr(logger, "info"):
+        logger.info("Connecting to SQL Server...", component="SQL")
+    try:
+        sql_client = connect_acm_sql(cfg=cfg, logger=logger)
+        if logger is not None and hasattr(logger, "ok"):
+            logger.ok("SQL connection established", component="SQL")
+        return sql_client
+    except Exception as e:
+        if logger is not None and hasattr(logger, "error"):
+            logger.error(
+                f"SQL connection failed: {e}",
+                component="SQL",
+                error_type=type(e).__name__,
+                error=str(e)[:500],
+            )
+            logger.error(
+                "Check configs/sql_connection.ini and ensure SQL Server is running.",
+                component="SQL",
+            )
+        raise SystemExit(1)
+
+
 def resolve_equipment_id_required(
     equipment_name: str,
     sql_client: Any,

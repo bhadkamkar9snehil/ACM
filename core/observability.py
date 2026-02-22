@@ -1022,6 +1022,36 @@ def start_profiling() -> None:
         pass
 
 
+def init_run_observability(
+    equip: str,
+    equip_id: int = 0,
+    logger: Optional[Any] = None,
+) -> None:
+    """Initialize run observability and profiling with non-fatal error handling."""
+    log = logger if logger is not None else Console
+    try:
+        init(
+            equipment=equip,
+            equip_id=equip_id,
+            service_name="acm-pipeline",
+            otlp_endpoint="http://localhost:4318",
+            loki_endpoint="http://localhost:3100",
+            enable_tracing=True,
+            enable_metrics=True,
+            enable_loki=True,
+            enable_profiling=True,
+        )
+        start_profiling()
+    except Exception as e:
+        if hasattr(log, "warn"):
+            log.warn(
+                f"Observability init failed (non-fatal): {e}",
+                component="OTEL",
+                error_type=type(e).__name__,
+                error=str(e)[:200],
+            )
+
+
 def stop_profiling() -> None:
     """Stop CPU profiling and push results to Pyroscope.
     
@@ -3305,6 +3335,7 @@ __all__ = [
     "record_disk_io",
     "record_section_resources",
     "log_timer",
+    "init_run_observability",
     "start_profiling",
     "stop_profiling",
     "start_run_span",
