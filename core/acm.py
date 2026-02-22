@@ -441,7 +441,6 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
         refit_requested = feature_stage.refit_requested
 
         # ===== Phase 2: Load or fit detectors =====
-        regime_model = None
         detector_init = run_detector_initialization_stage(
             section_fn=T.section,
             fit_all_detectors_fn=fit_all_detectors,
