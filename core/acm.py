@@ -694,29 +694,25 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
         quality_ok = health_stage.quality_ok
         use_per_regime = health_stage.use_per_regime
 
-        # ===== Phase 8: Drift =====
-        with T.section("drift"):
-            drift_out = drift.run_drift_pipeline(
-                score_data=score,
-                frame=frame,
-                score_out=score_out,
-                cfg=cfg,
-                regime_quality_ok=regime_quality_ok,
-                equip=equip,
-                sql_client=sql_client,
-                equip_id=equip_id,
-                output_manager=output_manager,
-                logger=Console,
-            )
-            frame = drift_out["frame"]
-            score_out = drift_out["score_out"]
-
-        # Normalize episodes schema for report/export.
-        episodes, frame = fuse.normalize_episodes_schema(
-            episodes=episodes,
+        # ===== Phase 8: Drift + episode schema normalization =====
+        drift_stage = drift.run_drift_postprocess_stage(
+            section_fn=T.section,
+            score_data=score,
             frame=frame,
+            score_out=score_out,
+            episodes=episodes,
+            cfg=cfg,
+            regime_quality_ok=regime_quality_ok,
             equip=equip,
+            sql_client=sql_client,
+            equip_id=equip_id,
+            output_manager=output_manager,
+            logger=Console,
+            normalize_episodes_schema_fn=fuse.normalize_episodes_schema,
         )
+        frame = drift_stage.frame
+        score_out = drift_stage.score_out
+        episodes = drift_stage.episodes
 
         # ===== Rolling baseline buffer: update with latest raw SCORE =====
         with T.section("baseline.buffer_write"):

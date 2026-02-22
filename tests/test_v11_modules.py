@@ -1593,6 +1593,63 @@ class TestRefactorHelpers:
         assert occupancy_called["called"] is True
         assert sections == ["score.detector_score", "regimes.label", "regimes.occupancy"]
 
+    def test_run_drift_postprocess_stage_orchestrates_drift_and_episode_normalization(self, monkeypatch):
+        """Drift postprocess stage should run drift pipeline and normalize episode schema."""
+        from core import drift
+
+        idx = pd.date_range("2026-01-01", periods=2, freq="h")
+        frame = pd.DataFrame({"fused": [0.1, 0.2]}, index=idx)
+        score_out = {"k": "v"}
+        episodes = pd.DataFrame({"episode_id": [1]}, index=[0])
+
+        sections = []
+        class _Section:
+            def __init__(self, name):
+                self.name = name
+            def __enter__(self):
+                sections.append(self.name)
+                return self
+            def __exit__(self, exc_type, exc, tb):
+                return False
+        def _section_fn(name):
+            return _Section(name)
+
+        def _run_drift_pipeline(**kwargs):
+            out_frame = kwargs["frame"].copy()
+            out_frame["drift_mode"] = ["FAULT", "DRIFT"]
+            return {"frame": out_frame, "score_out": {"updated": True}}
+
+        def _normalize_episodes_schema_fn(**kwargs):
+            out_episodes = kwargs["episodes"].copy()
+            out_episodes["severity"] = [0.9]
+            out_frame = kwargs["frame"].copy()
+            out_frame["normalized"] = [1, 1]
+            return out_episodes, out_frame
+
+        monkeypatch.setattr(drift, "run_drift_pipeline", _run_drift_pipeline)
+
+        result = drift.run_drift_postprocess_stage(
+            section_fn=_section_fn,
+            score_data=frame[["fused"]],
+            frame=frame,
+            score_out=score_out,
+            episodes=episodes,
+            cfg={},
+            regime_quality_ok=True,
+            equip="FD_FAN",
+            sql_client=object(),
+            equip_id=1,
+            output_manager=object(),
+            logger=type("L", (), {"warn": lambda *a, **k: None})(),
+            normalize_episodes_schema_fn=_normalize_episodes_schema_fn,
+        )
+
+        assert "drift_mode" in result.frame.columns
+        assert "normalized" in result.frame.columns
+        assert "severity" in result.episodes.columns
+        assert result.score_out == {"updated": True}
+        assert sections == ["drift"]
+
     def test_release_persist_memory_clears_raw_frames_and_detector_models(self):
         """Output manager persist cleanup helper should clear raw frames and detector model pointers."""
         from core.output_manager import OutputManager
