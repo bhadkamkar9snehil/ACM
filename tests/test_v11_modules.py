@@ -2368,6 +2368,122 @@ class TestRefactorHelpers:
         assert len(result.episodes) == 1
         assert result.fusion_weights_used == {"ar1_z": 1.0}
 
+    def test_run_health_stage_orchestrates_calibration_fusion_thresholds_postprocess_and_autotune(self, monkeypatch):
+        """Health stage helper should orchestrate calibration, fusion, thresholds, postprocess, and auto-tune."""
+        from core import fuse
+
+        idx = pd.date_range("2026-01-01", periods=2, freq="h")
+        train = pd.DataFrame({"a": [1.0, 2.0]}, index=idx)
+        score = pd.DataFrame({"a": [1.5, 2.5]}, index=idx)
+        frame = pd.DataFrame({"ar1_raw": [0.1, 0.2]}, index=idx)
+
+        sections = []
+        class _Section:
+            def __init__(self, name):
+                self.name = name
+            def __enter__(self):
+                sections.append(self.name)
+                return self
+            def __exit__(self, exc_type, exc, tb):
+                return False
+        def _section_fn(name):
+            return _Section(name)
+
+        def _run_calibration_stage(**kwargs):
+            out_frame = kwargs["frame"].copy()
+            out_frame["ar1_z"] = [0.3, 0.4]
+            out_train = kwargs["train"].copy()
+            out_train["ar1_z"] = [0.1, 0.2]
+            return type(
+                "CalibrationStageResult",
+                (),
+                {
+                    "frame": out_frame,
+                    "train_frame": out_train,
+                    "spe_p95_train": 1.1,
+                    "t2_p95_train": 2.2,
+                    "quality_ok": True,
+                    "use_per_regime": True,
+                },
+            )()
+
+        def _run_fusion_stage(**kwargs):
+            out_frame = kwargs["frame"].copy()
+            out_frame["fused"] = [1.0, 1.1]
+            out_train = kwargs["train_frame"].copy()
+            out_train["fused"] = [0.8, 0.9]
+            return fuse.FusionStageResult(
+                frame=out_frame,
+                train_frame=out_train,
+                episodes=pd.DataFrame({"episode_id": [1]}),
+                fusion_weights_used={"ar1_z": 1.0},
+            )
+
+        monkeypatch.setattr(fuse, "run_calibration_stage", _run_calibration_stage)
+        monkeypatch.setattr(fuse, "run_fusion_stage", _run_fusion_stage)
+
+        threshold_calls = {"called": False}
+        def _maybe_update_adaptive_thresholds_fn(**kwargs):
+            threshold_calls["called"] = True
+
+        def _run_regime_postprocess_stage_fn(**kwargs):
+            out_frame = kwargs["frame"].copy()
+            out_frame["regime_state"] = ["steady", "steady"]
+            return type("RegimePostprocessResult", (), {"frame": out_frame, "transient_counts": {"steady": 2}})()
+
+        auto_tune_calls = {"called": False}
+        def _auto_tune_parameters_fn(**kwargs):
+            auto_tune_calls["called"] = True
+
+        result = fuse.run_health_stage(
+            section_fn=_section_fn,
+            train=train,
+            score=score,
+            frame=frame,
+            cfg={},
+            regime_quality_ok=True,
+            train_regime_labels=np.array([0, 0]),
+            score_regime_labels=np.array([0, 1]),
+            pca_train_spe=None,
+            pca_train_t2=None,
+            detectors={"ar1_detector": object(), "pca_detector": None, "iforest_detector": None, "gmm_detector": None, "omr_detector": None},
+            detector_flags={"ar1_enabled": True, "pca_enabled": False, "iforest_enabled": False, "gmm_enabled": False, "omr_enabled": False},
+            cached_calibration_params=None,
+            saved_model_version=1,
+            score_all_detectors_fn=lambda **kwargs: (pd.DataFrame(), None),
+            calibrate_all_detectors_fn=lambda **kwargs: (pd.DataFrame(), {}),
+            persist_calibration_params_fn=lambda *args, **kwargs: True,
+            output_manager=object(),
+            logger=type("L", (), {"info": lambda *a, **k: None, "warn": lambda *a, **k: None})(),
+            equip="FD_FAN",
+            previous_weights=None,
+            omr_contributions_data=None,
+            record_detector_scores_fn=None,
+            record_episode_fn=None,
+            maybe_update_adaptive_thresholds_fn=_maybe_update_adaptive_thresholds_fn,
+            coldstart_complete=True,
+            continuous_learning=True,
+            threshold_update_interval=1,
+            equip_id=1,
+            run_regime_postprocess_stage_fn=_run_regime_postprocess_stage_fn,
+            regime_model=None,
+            auto_tune_parameters_fn=_auto_tune_parameters_fn,
+            score_out={},
+            sql_client=object(),
+            run_id="r1",
+            cached_manifest={},
+        )
+
+        assert "fused" in result.frame.columns
+        assert "regime_state" in result.frame.columns
+        assert result.spe_p95_train == pytest.approx(1.1)
+        assert result.t2_p95_train == pytest.approx(2.2)
+        assert result.quality_ok is True
+        assert result.use_per_regime is True
+        assert threshold_calls["called"] is True
+        assert auto_tune_calls["called"] is True
+        assert sections == ["calibrate", "fusion", "thresholds.adaptive", "regimes.postprocess"]
+
     def test_run_feature_preparation_stage_orchestrates_pipeline(self, monkeypatch):
         """Feature preparation stage should orchestrate seasonality, guardrails, build, impute, hash, and refit flag."""
         from core import fast_features

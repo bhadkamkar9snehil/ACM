@@ -2794,3 +2794,159 @@ def run_fusion_stage(
         episodes=episodes,
         fusion_weights_used=fusion_weights_used,
     )
+
+
+@dataclass
+class HealthStageResult:
+    """Result bundle for calibration, fusion, thresholds, and regime postprocess stages."""
+    frame: pd.DataFrame
+    train_frame: pd.DataFrame
+    episodes: pd.DataFrame
+    fusion_weights_used: Dict[str, float]
+    spe_p95_train: float
+    t2_p95_train: float
+    quality_ok: bool
+    use_per_regime: bool
+
+
+def run_health_stage(
+    *,
+    section_fn: Any,
+    train: pd.DataFrame,
+    score: pd.DataFrame,
+    frame: pd.DataFrame,
+    cfg: Dict[str, Any],
+    regime_quality_ok: bool,
+    train_regime_labels: Optional[np.ndarray],
+    score_regime_labels: Optional[np.ndarray],
+    pca_train_spe: Optional[np.ndarray],
+    pca_train_t2: Optional[np.ndarray],
+    detectors: Dict[str, Any],
+    detector_flags: Dict[str, bool],
+    cached_calibration_params: Optional[Dict[str, Any]],
+    saved_model_version: Optional[int],
+    score_all_detectors_fn: Any,
+    calibrate_all_detectors_fn: Any,
+    persist_calibration_params_fn: Any,
+    output_manager: Any,
+    logger: Any,
+    equip: str,
+    previous_weights: Optional[Dict[str, float]],
+    omr_contributions_data: Optional[pd.DataFrame],
+    record_detector_scores_fn: Optional[Callable[..., None]],
+    record_episode_fn: Optional[Callable[..., None]],
+    maybe_update_adaptive_thresholds_fn: Any,
+    coldstart_complete: bool,
+    continuous_learning: bool,
+    threshold_update_interval: int,
+    equip_id: int,
+    run_regime_postprocess_stage_fn: Any,
+    regime_model: Any,
+    auto_tune_parameters_fn: Any,
+    score_out: Dict[str, Any],
+    sql_client: Any,
+    run_id: Optional[str],
+    cached_manifest: Optional[Dict[str, Any]],
+) -> HealthStageResult:
+    """
+    Execute post-model health stages in pipeline order.
+    """
+    with section_fn("calibrate"):
+        calibration_result = run_calibration_stage(
+            train=train,
+            frame=frame,
+            cfg=cfg,
+            regime_quality_ok=regime_quality_ok,
+            train_regime_labels=train_regime_labels,
+            score_regime_labels=score_regime_labels,
+            pca_train_spe=pca_train_spe,
+            pca_train_t2=pca_train_t2,
+            detectors=detectors,
+            detector_flags=detector_flags,
+            cached_calibration_params=cached_calibration_params,
+            saved_model_version=saved_model_version,
+            score_all_detectors_fn=score_all_detectors_fn,
+            calibrate_all_detectors_fn=calibrate_all_detectors_fn,
+            persist_calibration_params_fn=persist_calibration_params_fn,
+            output_manager=output_manager,
+            logger=logger,
+            equip=equip,
+        )
+        frame = calibration_result.frame
+        train_frame = calibration_result.train_frame
+        spe_p95_train = calibration_result.spe_p95_train
+        t2_p95_train = calibration_result.t2_p95_train
+        quality_ok = calibration_result.quality_ok
+        use_per_regime = calibration_result.use_per_regime
+
+    with section_fn("fusion"):
+        fusion_stage = run_fusion_stage(
+            frame=frame,
+            train_frame=train_frame,
+            score_data=score,
+            train_data=train,
+            cfg=cfg,
+            score_regime_labels=score_regime_labels,
+            train_regime_labels=train_regime_labels,
+            output_manager=output_manager,
+            previous_weights=previous_weights,
+            omr_contributions=omr_contributions_data,
+            equip=equip,
+            record_detector_scores_fn=record_detector_scores_fn,
+            record_episode_fn=record_episode_fn,
+        )
+        frame = fusion_stage.frame
+        train_frame = fusion_stage.train_frame
+        episodes = fusion_stage.episodes
+        fusion_weights_used = fusion_stage.fusion_weights_used
+
+    with section_fn("thresholds.adaptive"):
+        maybe_update_adaptive_thresholds_fn(
+            train_frame=train_frame,
+            train_data=train,
+            cfg=cfg,
+            equip_id=equip_id,
+            output_manager=output_manager,
+            coldstart_complete=coldstart_complete,
+            continuous_learning=continuous_learning,
+            threshold_update_interval=threshold_update_interval,
+            regime_quality_ok=regime_quality_ok,
+            logger=logger,
+        )
+
+    with section_fn("regimes.postprocess"):
+        regime_post = run_regime_postprocess_stage_fn(
+            frame=frame,
+            score_data=score,
+            regime_model=regime_model,
+            regime_quality_ok=regime_quality_ok,
+            cfg=cfg,
+            output_manager=output_manager,
+            logger=logger,
+        )
+        frame = regime_post.frame
+
+    auto_tune_parameters_fn(
+        frame=frame,
+        episodes=episodes,
+        score_out=score_out,
+        regime_quality_ok=regime_quality_ok,
+        cfg=cfg,
+        sql_client=sql_client,
+        run_id=run_id,
+        equip_id=equip_id,
+        equip=equip,
+        output_manager=output_manager,
+        cached_manifest=cached_manifest,
+    )
+
+    return HealthStageResult(
+        frame=frame,
+        train_frame=train_frame,
+        episodes=episodes,
+        fusion_weights_used=fusion_weights_used,
+        spe_p95_train=spe_p95_train,
+        t2_p95_train=t2_p95_train,
+        quality_ok=quality_ok,
+        use_per_regime=use_per_regime,
+    )

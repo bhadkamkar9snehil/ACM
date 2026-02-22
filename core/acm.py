@@ -422,6 +422,8 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
             meta = load_stage.meta
             coldstart_complete = load_stage.coldstart_complete
 
+        if train is None or score is None:
+            raise RuntimeError("Load stage returned no train/score data with should_continue=True")
         T.log("data_split_complete", train_rows=train.shape[0], train_cols=train.shape[1], score_rows=score.shape[0], score_cols=score.shape[1])
         
         # ===== Adaptive rolling baseline (cold-start helper) =====
@@ -625,121 +627,72 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
         saved_model_version = model_stage.saved_model_version
         model_state = model_stage.model_state
 
-        # ===== Phase 6: Calibration (z-score normalization) =====
-        # Fit calibrators on TRAIN data, transform SCORE data.
-        # v11.3.3: Now includes contamination filtering for robust calibration.
-        with T.section("calibrate"):
-            calibration_result = fuse.run_calibration_stage(
-                train=train,
-                frame=frame,
-                cfg=cfg,
-                regime_quality_ok=regime_quality_ok,
-                train_regime_labels=train_regime_labels,
-                score_regime_labels=score_regime_labels,
-                pca_train_spe=pca_train_spe,
-                pca_train_t2=pca_train_t2,
-                detectors={
-                    "ar1_detector": ar1_detector,
-                    "pca_detector": pca_detector,
-                    "iforest_detector": iforest_detector,
-                    "gmm_detector": gmm_detector,
-                    "omr_detector": omr_detector,
-                },
-                detector_flags={
-                    "ar1_enabled": ar1_enabled,
-                    "pca_enabled": pca_enabled,
-                    "iforest_enabled": iforest_enabled,
-                    "gmm_enabled": gmm_enabled,
-                    "omr_enabled": omr_enabled,
-                },
-                cached_calibration_params=cached_calibration_params,
-                saved_model_version=saved_model_version,
-                score_all_detectors_fn=score_all_detectors,
-                calibrate_all_detectors_fn=calibrate_all_detectors,
-                persist_calibration_params_fn=lambda version, calibrators_dict: persist_calibration_params_safe(
-                    equip=equip,
-                    sql_client=sql_client,
-                    equip_id=equip_id,
-                    saved_model_version=version,
-                    calibrators_dict=calibrators_dict,
-                    logger=Console,
-                ),
-                output_manager=output_manager,
-                logger=Console,
-                equip=equip,
-            )
-            frame = calibration_result.frame
-            train_frame = calibration_result.train_frame
-            spe_p95_train = calibration_result.spe_p95_train
-            t2_p95_train = calibration_result.t2_p95_train
-            quality_ok = calibration_result.quality_ok
-            use_per_regime = calibration_result.use_per_regime
-
-        # ===== Phase 7: Fusion + episodes =====
-        with T.section("fusion"):
-            fusion_stage = fuse.run_fusion_stage(
-                frame=frame,
-                train_frame=train_frame,
-                score_data=score,
-                train_data=train,
-                cfg=cfg,
-                score_regime_labels=score_regime_labels,
-                train_regime_labels=train_regime_labels,
-                output_manager=output_manager,
-                previous_weights=previous_weights,
-                omr_contributions=omr_contributions_data,
-                equip=equip,
-                record_detector_scores_fn=record_detector_scores,
-                record_episode_fn=record_episode,
-            )
-            frame = fusion_stage.frame
-            train_frame = fusion_stage.train_frame
-            episodes = fusion_stage.episodes
-            fusion_weights_used = fusion_stage.fusion_weights_used
-
-        # ===== Adaptive thresholds =====
-        with T.section("thresholds.adaptive"):
-            maybe_update_adaptive_thresholds(
-                train_frame=train_frame,
-                train_data=train,
-                cfg=cfg,
-                equip_id=equip_id,
-                output_manager=output_manager,
-                coldstart_complete=coldstart_complete,
-                continuous_learning=CONTINUOUS_LEARNING,
-                threshold_update_interval=threshold_update_interval,
-                regime_quality_ok=regime_quality_ok,
-                logger=Console,
-            )
-
-        # Regime health labeling and transient detection.
-        with T.section("regimes.postprocess"):
-            regime_post = regimes.run_regime_postprocess_stage(
-                frame=frame,
-                score_data=score,
-                regime_model=regime_model,
-                regime_quality_ok=regime_quality_ok,
-                cfg=cfg,
-                output_manager=output_manager,
-                logger=Console,
-            )
-            frame = regime_post.frame
-
-        # ===== Autonomous parameter tuning =====
-        # Delegated to model_evaluation.auto_tune_parameters().
-        auto_tune_parameters(
+        # ===== Phase 6-7 + adaptive postprocess =====
+        health_stage = fuse.run_health_stage(
+            section_fn=T.section,
+            train=train,
+            score=score,
             frame=frame,
-            episodes=episodes,
-            score_out=score_out,
-            regime_quality_ok=regime_quality_ok,
             cfg=cfg,
+            regime_quality_ok=regime_quality_ok,
+            train_regime_labels=train_regime_labels,
+            score_regime_labels=score_regime_labels,
+            pca_train_spe=pca_train_spe,
+            pca_train_t2=pca_train_t2,
+            detectors={
+                "ar1_detector": ar1_detector,
+                "pca_detector": pca_detector,
+                "iforest_detector": iforest_detector,
+                "gmm_detector": gmm_detector,
+                "omr_detector": omr_detector,
+            },
+            detector_flags={
+                "ar1_enabled": ar1_enabled,
+                "pca_enabled": pca_enabled,
+                "iforest_enabled": iforest_enabled,
+                "gmm_enabled": gmm_enabled,
+                "omr_enabled": omr_enabled,
+            },
+            cached_calibration_params=cached_calibration_params,
+            saved_model_version=saved_model_version,
+            score_all_detectors_fn=score_all_detectors,
+            calibrate_all_detectors_fn=calibrate_all_detectors,
+            persist_calibration_params_fn=lambda version, calibrators_dict: persist_calibration_params_safe(
+                equip=equip,
+                sql_client=sql_client,
+                equip_id=equip_id,
+                saved_model_version=version,
+                calibrators_dict=calibrators_dict,
+                logger=Console,
+            ),
+            output_manager=output_manager,
+            logger=Console,
+            equip=equip,
+            previous_weights=previous_weights,
+            omr_contributions_data=omr_contributions_data,
+            record_detector_scores_fn=record_detector_scores,
+            record_episode_fn=record_episode,
+            maybe_update_adaptive_thresholds_fn=maybe_update_adaptive_thresholds,
+            coldstart_complete=coldstart_complete,
+            continuous_learning=CONTINUOUS_LEARNING,
+            threshold_update_interval=threshold_update_interval,
+            equip_id=equip_id,
+            run_regime_postprocess_stage_fn=regimes.run_regime_postprocess_stage,
+            regime_model=regime_model,
+            auto_tune_parameters_fn=auto_tune_parameters,
+            score_out=score_out,
             sql_client=sql_client,
             run_id=run_id,
-            equip_id=equip_id,
-            equip=equip,
-            output_manager=output_manager,
             cached_manifest=cached_manifest,
         )
+        frame = health_stage.frame
+        train_frame = health_stage.train_frame
+        episodes = health_stage.episodes
+        fusion_weights_used = health_stage.fusion_weights_used
+        spe_p95_train = health_stage.spe_p95_train
+        t2_p95_train = health_stage.t2_p95_train
+        quality_ok = health_stage.quality_ok
+        use_per_regime = health_stage.use_per_regime
 
         # ===== Phase 8: Drift =====
         with T.section("drift"):
