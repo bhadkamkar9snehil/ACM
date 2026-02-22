@@ -454,8 +454,6 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
         refit_requested = feature_stage.refit_requested
 
         # ===== Phase 2: Load or fit detectors =====
-        ar1_detector = pca_detector = iforest_detector = gmm_detector = omr_detector = None
-        pca_train_spe = pca_train_t2 = None
         regime_model = None
         regime_state = None
         regime_state_version = 0
@@ -493,18 +491,8 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
         train = detector_init.train
         score = detector_init.score
         det_flags = detector_init.det_flags
-        ar1_enabled = detector_init.ar1_enabled
-        pca_enabled = detector_init.pca_enabled
-        iforest_enabled = detector_init.iforest_enabled
-        gmm_enabled = detector_init.gmm_enabled
-        omr_enabled = detector_init.omr_enabled
-        ar1_detector = detector_init.ar1_detector
-        pca_detector = detector_init.pca_detector
-        iforest_detector = detector_init.iforest_detector
-        gmm_detector = detector_init.gmm_detector
-        omr_detector = detector_init.omr_detector
-        pca_train_spe = detector_init.pca_train_spe
-        pca_train_t2 = detector_init.pca_train_t2
+        detector_flags = detector_init.enabled_flags()
+        detectors = detector_init.detector_payload()
         regime_model = detector_init.regime_model
         regime_state = detector_init.regime_state
         regime_state_version = detector_init.regime_state_version
@@ -522,19 +510,13 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
             raw_train=raw_train,
             raw_score=raw_score,
             cfg=cfg,
-            pca_detector=pca_detector,
+            pca_detector=detectors["pca_detector"],
             regime_model=regime_model,
             regime_state=regime_state,
             regime_state_version=regime_state_version,
             regime_loaded_from_state=regime_loaded_from_state,
             det_flags=det_flags,
-            detectors={
-                "ar1_detector": ar1_detector,
-                "pca_detector": pca_detector,
-                "iforest_detector": iforest_detector,
-                "gmm_detector": gmm_detector,
-                "omr_detector": omr_detector,
-            },
+            detectors=detectors,
             equip=equip,
             equip_id=equip_id,
             sql_client=sql_client,
@@ -583,15 +565,7 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
             run_id=run_id,
             equip_id=equip_id,
             regime_model=regime_model,
-            detectors={
-                "ar1_detector": ar1_detector,
-                "pca_detector": pca_detector,
-                "iforest_detector": iforest_detector,
-                "gmm_detector": gmm_detector,
-                "omr_detector": omr_detector,
-                "pca_train_spe": pca_train_spe,
-                "pca_train_t2": pca_train_t2,
-            },
+            detectors=detectors,
             detector_cache=detector_cache,
             col_meds=col_meds,
             timing_sections=T.timings if hasattr(T, "timings") else None,
@@ -602,14 +576,7 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
         )
         cached_models = model_stage.cached_models
         regime_model = model_stage.regime_model
-        detectors_after_stage = model_stage.detectors
-        ar1_detector = detectors_after_stage["ar1_detector"]
-        pca_detector = detectors_after_stage["pca_detector"]
-        iforest_detector = detectors_after_stage["iforest_detector"]
-        gmm_detector = detectors_after_stage["gmm_detector"]
-        omr_detector = detectors_after_stage["omr_detector"]
-        pca_train_spe = detectors_after_stage["pca_train_spe"]
-        pca_train_t2 = detectors_after_stage["pca_train_t2"]
+        detectors = model_stage.detectors
         saved_model_version = model_stage.saved_model_version
         model_state = model_stage.model_state
 
@@ -623,22 +590,10 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
             regime_quality_ok=regime_quality_ok,
             train_regime_labels=train_regime_labels,
             score_regime_labels=score_regime_labels,
-            pca_train_spe=pca_train_spe,
-            pca_train_t2=pca_train_t2,
-            detectors={
-                "ar1_detector": ar1_detector,
-                "pca_detector": pca_detector,
-                "iforest_detector": iforest_detector,
-                "gmm_detector": gmm_detector,
-                "omr_detector": omr_detector,
-            },
-            detector_flags={
-                "ar1_enabled": ar1_enabled,
-                "pca_enabled": pca_enabled,
-                "iforest_enabled": iforest_enabled,
-                "gmm_enabled": gmm_enabled,
-                "omr_enabled": omr_enabled,
-            },
+            pca_train_spe=detectors["pca_train_spe"],
+            pca_train_t2=detectors["pca_train_t2"],
+            detectors=detectors,
+            detector_flags=detector_flags,
             cached_calibration_params=cached_calibration_params,
             saved_model_version=saved_model_version,
             score_all_detectors_fn=score_all_detectors,
@@ -727,15 +682,15 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
             train_df=train,
             raw_train=raw_train,
             raw_score=raw_score,
-            iforest_detector=iforest_detector,
-            omr_detector=omr_detector,
+            iforest_detector=detectors["iforest_detector"],
+            omr_detector=detectors["omr_detector"],
             seasonal_patterns=seasonal_patterns,
             cfg=cfg,
             sensor_context=sensor_context,
             fusion_weights_used=fusion_weights_used,
             record_episode_fn=record_episode,
             equip=equip,
-            pca_detector=pca_detector,
+            pca_detector=detectors["pca_detector"],
             sql_client=sql_client,
             run_id=run_id,
             equip_id=equip_id,

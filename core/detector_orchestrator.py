@@ -66,6 +66,28 @@ class DetectorInitState:
         """Backward-compatible dict-like access for legacy call sites/tests."""
         return getattr(self, key)
 
+    def enabled_flags(self) -> Dict[str, bool]:
+        """Return detector enabled-flag mapping."""
+        return {
+            "ar1_enabled": self.ar1_enabled,
+            "pca_enabled": self.pca_enabled,
+            "iforest_enabled": self.iforest_enabled,
+            "gmm_enabled": self.gmm_enabled,
+            "omr_enabled": self.omr_enabled,
+        }
+
+    def detector_payload(self) -> Dict[str, Any]:
+        """Return detector objects plus cached PCA train outputs."""
+        return {
+            "ar1_detector": self.ar1_detector,
+            "pca_detector": self.pca_detector,
+            "iforest_detector": self.iforest_detector,
+            "gmm_detector": self.gmm_detector,
+            "omr_detector": self.omr_detector,
+            "pca_train_spe": self.pca_train_spe,
+            "pca_train_t2": self.pca_train_t2,
+        }
+
 
 def score_all_detectors(
     data: pd.DataFrame,
