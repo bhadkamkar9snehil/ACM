@@ -40,6 +40,7 @@ import matplotlib.pyplot as plt
 
 from core.observability import Console, Span
 import hashlib
+from utils.config_dict import cfg_get as _cfg_get
 
 try:
     from scipy.ndimage import median_filter as _median_filter
@@ -186,29 +187,6 @@ _REGIME_CONFIG_SCHEMA = {
 # ----------------------------
 # Small helpers / sane defaults
 # ----------------------------
-def _cfg_get(cfg: Dict[str, Any], path: str, default: Any) -> Any:
-    cur = cfg or {}
-    for part in path.split("."):
-        if not isinstance(cur, dict) or part not in cur:
-            return default
-        cur = cur[part]
-    val = cur
-    if default is not None:
-        expected_type = type(default)
-        if expected_type in (int, float, bool, str) and not isinstance(val, expected_type):
-            try:
-                # Cast val to the expected type (only for scalar types)
-                if expected_type is int:
-                    val = int(val)  # type: ignore[arg-type]
-                elif expected_type is float:
-                    val = float(val)  # type: ignore[arg-type]
-                elif expected_type is bool:
-                    val = bool(val)
-                elif expected_type is str:
-                    val = str(val)
-            except Exception:
-                return default
-    return val
 
 def _as_f32(X) -> np.ndarray:
     arr = np.asarray(X)

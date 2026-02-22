@@ -656,6 +656,33 @@ class TestRefactorHelpers:
         assert out.equip_id == 10
         assert captured["deadlock_retry_func"] is sql.execute_with_deadlock_retry
 
+    def test_cfg_get_reads_nested_value_and_casts_scalar_type(self):
+        """Shared config getter should read nested paths and cast scalar defaults consistently."""
+        from utils.config_dict import cfg_get
+
+        cfg = {
+            "runtime": {"future_grace_minutes": "7"},
+            "models": {"enabled": "true"},
+        }
+
+        assert cfg_get(cfg, "runtime.future_grace_minutes", 0) == 7
+        assert cfg_get(cfg, "runtime.missing", 5) == 5
+        assert cfg_get(cfg, "models.enabled", False) is True
+
+    def test_future_cutoff_ts_applies_non_negative_grace_minutes(self):
+        """Shared future cutoff helper should clamp invalid/negative values and return Timestamp."""
+        from utils.config_dict import future_cutoff_ts
+
+        t0 = future_cutoff_ts({"runtime": {"future_grace_minutes": -10}})
+        t1 = future_cutoff_ts({"runtime": {"future_grace_minutes": 0}})
+        t2 = future_cutoff_ts({"runtime": {"future_grace_minutes": 5}})
+
+        assert isinstance(t0, pd.Timestamp)
+        assert isinstance(t1, pd.Timestamp)
+        assert isinstance(t2, pd.Timestamp)
+        assert t2 >= t1
+        assert t1 >= t0 - pd.Timedelta(seconds=1)
+
     def test_run_drift_pipeline_smoke(self):
         """Drift pipeline wrapper should return frame and score_out keys."""
         from core.drift import run_drift_pipeline

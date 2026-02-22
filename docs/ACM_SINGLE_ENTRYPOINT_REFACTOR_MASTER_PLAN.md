@@ -1030,7 +1030,16 @@ Effective immediately for remaining refactor phases, every PR must include:
    - removed redundant `OutputManager.write_sql_artifacts_for_run(...)` wrapper
    - `run_persistence_stage(...)` now calls `write_sql_artifacts(...)` directly
    - tests updated to validate direct module function usage
-2. Remaining:
-   - Pass E2 `_cfg_get` and `_future_cutoff_ts` consolidation
+2. Pass E2 completed (2026-02-22):
+   - consolidated `_cfg_get` and `_future_cutoff_ts` into shared helpers:
+     - `utils/config_dict.py::cfg_get(...)`
+     - `utils/config_dict.py::future_cutoff_ts(...)`
+   - removed duplicate local helper implementations from:
+     - `core/data_loader.py`
+     - `core/output_manager.py`
+     - `core/regimes.py` (for `_cfg_get`)
+   - updated modules to import shared helpers
+   - added helper behavior tests in `tests/test_v11_modules.py`
+3. Remaining:
    - Pass E3 detector initialization API surface reduction
    - Pass E4 regimes legacy hook cleanup.
