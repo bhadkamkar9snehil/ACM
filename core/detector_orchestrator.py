@@ -1060,37 +1060,3 @@ def rebuild_detectors_from_cache(
         result["omr_detector"] = None
     
     return result
-
-
-def compute_stable_feature_hash(train: pd.DataFrame, equip: str = "") -> Optional[str]:
-    """
-    Compute a stable schema-only hash for training features.
-
-    The hash captures ONLY the feature schema (column names + dtypes + count),
-    NOT the training data values. This ensures the hash is stable across batches
-    with different training windows, which would otherwise cause spurious cache
-    misses on every scoring batch when the window shifts forward in time.
-
-    Hash includes:
-    - Column count
-    - Sorted column names and their dtypes
-
-    Args:
-        train: Training DataFrame to hash
-        equip: Equipment name for logging
-
-    Returns:
-        16-character hex hash string, or None if computation fails
-    """
-    import hashlib
-
-    try:
-        col_count = train.shape[1]
-        dtype_str = "|".join(f"{col}:{train[col].dtype}" for col in sorted(train.columns))
-        combined = f"ncols={col_count}|{dtype_str}"
-        feature_hash = hashlib.sha256(combined.encode("utf-8")).hexdigest()[:16]
-        return feature_hash
-    except Exception as e:
-        Console.warn(f"Hash computation failed: {e}", component="HASH",
-                     equip=equip, error_type=type(e).__name__, error=str(e)[:200])
-        return None

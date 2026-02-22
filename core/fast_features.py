@@ -1382,8 +1382,6 @@ class FeaturePreparationResult:
     raw_train: pd.DataFrame
     raw_score: pd.DataFrame
     seasonal_patterns: Dict[str, List[Any]]
-    train_feature_hash: str
-    current_train_columns: List[str]
     refit_requested: bool
 
 
@@ -1409,7 +1407,6 @@ def run_feature_preparation_stage(
     detect_and_adjust_fn: Any,
     run_data_guardrails_fn: Any,
     load_manifest_protected_columns_fn: Any,
-    compute_feature_hash_fn: Any,
 ) -> FeaturePreparationResult:
     """
     Execute feature preparation sequence used by ACM pipeline.
@@ -1421,8 +1418,7 @@ def run_feature_preparation_stage(
     4. Feature build
     5. Manifest-protected feature resolve
     6. Feature imputation and pruning
-    7. Feature hash
-    8. Refit flag read
+    7. Refit flag read
     """
     seasonal_patterns: Dict[str, List[Any]] = {}
     with section_fn("seasonality.detect"):
@@ -1476,10 +1472,6 @@ def run_feature_preparation_stage(
             protected_columns=manifest_protected_columns,
         )
 
-    current_train_columns = list(train.columns)
-    with section_fn("features.hash"):
-        train_feature_hash = compute_feature_hash_fn(train, equip)
-
     with section_fn("models.refit_flag"):
         refit_requested = output_manager.check_refit_request()
 
@@ -1489,7 +1481,5 @@ def run_feature_preparation_stage(
         raw_train=raw_train,
         raw_score=raw_score,
         seasonal_patterns=seasonal_patterns,
-        train_feature_hash=train_feature_hash,
-        current_train_columns=current_train_columns,
         refit_requested=bool(refit_requested),
     )

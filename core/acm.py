@@ -39,10 +39,6 @@ import pandas as pd
 
 from core import regimes, drift, fuse, fast_features
 
-# FORECASTING_DISABLED: Stub so pipeline can import without ForecastEngine.
-# Remove this stub when re-enabling forecasting.
-ForecastEngine = None
-
 from core.output_manager import OutputManager
 from core.run_metadata_writer import (
     PipelineTeardownState,
@@ -65,7 +61,6 @@ from core.detector_orchestrator import (
     calibrate_all_detectors,
     fit_all_detectors,
     initialize_detectors_for_run,
-    compute_stable_feature_hash,
     load_and_rebuild_detectors_from_sql_cache,
     reconcile_detector_flags_with_loaded_models,
 )
@@ -111,9 +106,6 @@ from core.fast_features import ensure_local_index, deduplicate_index
 
 from utils.timer import Timer, enable_timer_metrics  # type: ignore
 from core.resource_monitor import enable_resource_metrics
-
-# Version constant for logging and run metadata.
-from utils.version import __version__ as ACM_VERSION
 
 
 # Console from observability (backwards compatible). Do not reimport here to
@@ -321,8 +313,6 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
 
     # Initialize cross-phase state variables.
     detector_cache: Optional[Dict[str, Any]] = None
-    train_feature_hash: Optional[str] = None
-    current_train_columns: Optional[List[str]] = None
     regime_model: Optional[regimes.RegimeModel] = None
     raw_train: Optional[pd.DataFrame] = None
     raw_score: Optional[pd.DataFrame] = None
@@ -455,15 +445,12 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
             detect_and_adjust_fn=detect_and_adjust_safe,
             run_data_guardrails_fn=run_data_guardrails_safe,
             load_manifest_protected_columns_fn=load_manifest_protected_columns,
-            compute_feature_hash_fn=compute_stable_feature_hash,
         )
         train = feature_stage.train
         score = feature_stage.score
         raw_train = feature_stage.raw_train
         raw_score = feature_stage.raw_score
         seasonal_patterns = feature_stage.seasonal_patterns
-        train_feature_hash = feature_stage.train_feature_hash
-        current_train_columns = feature_stage.current_train_columns
         refit_requested = feature_stage.refit_requested
 
         # ===== Phase 2: Load or fit detectors =====
@@ -527,7 +514,6 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
         cached_manifest = detector_init.cached_manifest
         cached_calibration_params = detector_init.cached_calibration_params
         detectors_just_trained = detector_init.detectors_just_trained
-        use_cache = detector_init.use_cache
 
         # ===== Phase 3-5: Regime basis + detector scoring + regime labeling =====
         scoring_regime_stage = regimes.run_scoring_regime_stage(
