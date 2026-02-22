@@ -12,9 +12,7 @@ except Exception:
     orjson = None  # type: ignore
 import numpy as np
 import pandas as pd
-from pathlib import Path
 
-import joblib
 # v11.1.0: Removed MiniBatchKMeans - using HDBSCAN (primary) and GMM (fallback) only
 from sklearn.mixture import GaussianMixture  # v11.0.1: Probabilistic clustering
 from sklearn.metrics import silhouette_score, calinski_harabasz_score, pairwise_distances_argmin
@@ -95,9 +93,9 @@ CONDITION_TAG_KEYWORDS = [
 # RATIONALE (v11.4.0 Architectural Fix):
 # Using detector z-scores (health indicators) in regime clustering creates
 # a CIRCULAR DEPENDENCY that masks degradation:
-#   1. Equipment degrades → detector z-scores rise
+#   1. Equipment degrades -> detector z-scores rise
 #   2. Health-state features cause point to cluster into "new regime"
-#   3. New regime gets fresh baseline → degradation masked
+#   3. New regime gets fresh baseline -> degradation masked
 #   4. Equipment appears "healthy in its current regime"
 #
 # CORRECT ARCHITECTURE:
@@ -109,50 +107,6 @@ CONDITION_TAG_KEYWORDS = [
 # not INPUTS to regime clustering.
 
 
-class ModelVersionMismatch(Exception):
-    """Raised when a cached regime model version differs from the expected version."""
-
-
-def _parse_semver(version: str) -> Tuple[int, int, int]:
-    """
-    Parse semantic version string into (major, minor, patch) tuple.
-    
-    FIX #10: Supports version strings like "2.0", "2.1.0", "2"
-    """
-    parts = version.split(".")
-    major = int(parts[0]) if len(parts) > 0 else 0
-    minor = int(parts[1]) if len(parts) > 1 else 0
-    patch = int(parts[2]) if len(parts) > 2 else 0
-    return (major, minor, patch)
-
-# To-DO Is this required? What is the basis for versioning. Need clarity on this.
-def _is_version_compatible(cached_version: str, expected_version: str) -> bool:
-    """
-    Check if cached model version is compatible with expected version.
-    
-    FIX #10: Implements semantic versioning compatibility:
-    - Major version must match (breaking changes)
-    - Minor version can be <= expected (backward compatible features)
-    - Patch version is ignored (bug fixes)
-    
-    Examples:
-    - cached="2.0", expected="2.1" -> True (minor upgrade)
-    - cached="2.1", expected="2.0" -> True (can use newer model)
-    - cached="1.9", expected="2.0" -> False (major mismatch)
-    """
-    try:
-        cached_semver = _parse_semver(cached_version)
-        expected_semver = _parse_semver(expected_version)
-        
-        # Major version must match
-        if cached_semver[0] != expected_semver[0]:
-            return False
-        
-        # Same major version = compatible
-        return True
-    except Exception:
-        # If parsing fails, fall back to exact match
-        return cached_version == expected_version
 # TO-DO This is not needed. Need to remove this properly.
 _HEALTH_PRIORITY = {
     "healthy": 0,
@@ -988,7 +942,7 @@ def _fit_hdbscan_scaled(
     4. Robust to outliers - won't distort regime boundaries
     5. Hierarchical - provides cluster stability/persistence metrics
     
-    v11.1.7: Added subsampling for large datasets to prevent O(n²) memory issues
+    v11.1.7: Added subsampling for large datasets to prevent O(n^2) memory issues
     
     Args:
         X: Feature matrix (n_samples, n_features)
@@ -1016,7 +970,7 @@ def _fit_hdbscan_scaled(
     n_samples, n_features = X_scaled.shape
     
     # v11.1.7: PERFORMANCE FIX - Subsample for large datasets
-    # HDBSCAN has O(n²) memory/time complexity, becomes very slow >10k samples
+    # HDBSCAN has O(n^2) memory/time complexity, becomes very slow >10k samples
     hdb_cfg = _cfg_get(cfg, "regimes.hdbscan", {}) or {}
     max_fit_samples = int(hdb_cfg.get("max_fit_samples", 8000))  # Cap at 8k for reasonable performance
     
@@ -1919,14 +1873,9 @@ def update_health_labels(
     
     # v11.4.0: Identify the "Normal" operating regime using config parameters
     normal_cfg = _cfg_get(cfg, "regimes.normal_identification", {})
-    normal_enabled = bool(normal_cfg.get("enabled", True))
     min_dwell = float(normal_cfg.get("min_dwell_fraction", 0.15))
     max_fused = float(normal_cfg.get("max_median_fused", 2.0))
-    
-    if normal_enabled:
-        normal_label = identify_normal_regime(stats, min_dwell_fraction=min_dwell, max_median_fused=max_fused)
-    else:
-        normal_label = None
+    normal_label = identify_normal_regime(stats, min_dwell_fraction=min_dwell, max_median_fused=max_fused)
     model.normal_regime_label_ = normal_label
     
     # v11.4.0: Generate semantic labels for all regimes
@@ -2076,14 +2025,6 @@ def _generate_regime_semantic_labels(
             labels[label] = f"Regime_{label}"
     
     return labels
-
-
-def _persist_regime_error(e: Exception, models_dir: Path):
-    """Helper to write error details to a file."""
-    err_file = models_dir / "regime_persist.errors.txt"
-    import traceback
-    with err_file.open("w", encoding="utf-8") as f:
-        f.write(f"Error type: {type(e).__name__}\n\n{traceback.format_exc()}")
 
 
 def build_summary_dataframe(model: RegimeModel) -> pd.DataFrame:
@@ -2737,130 +2678,6 @@ def regime_state_to_model(
     
     return model
 
-# TO-DO Probably is causing issues
-def align_regime_labels(
-    new_model: RegimeModel,
-    prev_model: RegimeModel
-) -> RegimeModel:
-    """
-    Align new regime cluster labels to match previous regime labels for continuity.
-    
-    v11.1.6 FIX #4: Now creates and stores a label_map_ that is applied to all
-    predicted labels via apply_label_map(). This ensures stable label semantics
-    across refits.
-    
-    Uses nearest cluster center matching to ensure consistent regime IDs when
-    operating conditions recur across batches.
-    
-    Args:
-        new_model: Newly fitted RegimeModel
-        prev_model: Previously fitted RegimeModel for reference
-    
-    Returns:
-        RegimeModel with label_map_ set for stable predictions
-    """
-    if prev_model is None or new_model is None:
-        return new_model
-    
-    # Extract cluster centers (v11.1.0: Property works for HDBSCAN and GMM)
-    new_centers = new_model.cluster_centers_
-    prev_centers = prev_model.cluster_centers_
-
-    # Handle dimension mismatch (different k or feature space)
-    if new_centers.shape[1] != prev_centers.shape[1]:
-        if new_model.meta.get("alignment_skip_reason") != "feature_dim_mismatch":
-            Console.warn(
-                f"[REGIME_ALIGN] Feature dimension mismatch: new={new_centers.shape[1]}, prev={prev_centers.shape[1]}. Skipping alignment.",
-                component="REGIME_ALIGN", new_dim=new_centers.shape[1], prev_dim=prev_centers.shape[1]
-            )
-        new_model.meta["alignment_skip_reason"] = "feature_dim_mismatch"
-        new_model.meta["alignment_skip_dims"] = {
-            "new_dim": int(new_centers.shape[1]),
-            "prev_dim": int(prev_centers.shape[1]),
-        }
-        return new_model
-    
-    # Use Hungarian algorithm for optimal 1:1 assignment
-    from scipy.optimize import linear_sum_assignment
-    from scipy.spatial.distance import cdist
-    
-    cost_matrix = cdist(new_centers, prev_centers, metric='euclidean')
-    new_k = new_centers.shape[0]
-    prev_k = prev_centers.shape[0]
-    
-    # v11.1.6 FIX #4: Create explicit label_map: raw_label -> stable_label
-    # This map is applied in apply_label_map() to all predictions
-    label_map: Dict[int, int] = {}
-    
-    if new_k == prev_k:
-        # Same cluster count: 1:1 optimal assignment
-        row_ind, col_ind = linear_sum_assignment(cost_matrix)
-        # row_ind[i] = new cluster index, col_ind[i] = prev cluster index it maps to
-        for new_idx, prev_idx in zip(row_ind, col_ind):
-            label_map[int(new_idx)] = int(prev_idx)
-        
-        # Also reorder centroids for centroid-based fallback prediction
-        reorder_idx = np.argsort(col_ind)  # Sort by target position
-        reordered_centers = new_centers[row_ind[reorder_idx]]
-        new_model.set_cluster_centers_(reordered_centers)
-        
-    elif new_k < prev_k:
-        # Fewer new clusters: each maps to closest previous
-        row_ind, col_ind = linear_sum_assignment(cost_matrix)
-        for new_idx, prev_idx in zip(row_ind, col_ind):
-            label_map[int(new_idx)] = int(prev_idx)
-        
-        # Reorder centroids
-        reordered = np.zeros_like(new_centers)
-        used_positions = set()
-        for new_idx in range(new_k):
-            prev_idx = label_map.get(new_idx, new_idx)
-            if prev_idx < new_k:
-                reordered[prev_idx] = new_centers[new_idx]
-                used_positions.add(prev_idx)
-        # Fill gaps
-        free_positions = [i for i in range(new_k) if i not in used_positions]
-        unmapped = [i for i in range(new_k) if label_map.get(i, -1) >= new_k]
-        for pos, new_idx in zip(free_positions, unmapped):
-            reordered[pos] = new_centers[new_idx]
-        new_model.set_cluster_centers_(reordered)
-        
-    else:
-        # More new clusters: map previous to closest new, extras get new indices
-        row_ind, col_ind = linear_sum_assignment(cost_matrix.T)
-        # col_ind[prev_idx] = new_idx that maps to it
-        for prev_idx, new_idx in zip(row_ind, col_ind):
-            label_map[int(new_idx)] = int(prev_idx)
-        
-        # Assign new indices to unmatched new clusters
-        used_prev = set(label_map.values())
-        next_label = max(used_prev) + 1 if used_prev else prev_k
-        for new_idx in range(new_k):
-            if new_idx not in label_map:
-                label_map[new_idx] = next_label
-                next_label += 1
-        
-        # Reorder centroids for matched clusters
-        reordered = np.zeros_like(new_centers)
-        for new_idx in range(new_k):
-            target_pos = label_map.get(new_idx, new_idx)
-            if target_pos < new_k:
-                reordered[target_pos] = new_centers[new_idx]
-        new_model.set_cluster_centers_(reordered)
-    
-    # v11.1.6 FIX #4: Store the label map in the model
-    new_model.label_map_ = label_map
-    new_model.meta["label_map"] = {str(k): v for k, v in label_map.items()}
-    new_model.meta["alignment_applied"] = True
-    
-    Console.info(
-        f"Aligned {new_k} clusters to {prev_k} previous clusters. "
-        f"Label map: {dict(list(label_map.items())[:5])}{'...' if len(label_map) > 5 else ''}",
-        component="REGIME_ALIGN"
-    )
-    
-    return new_model
-
 # TO-DO See if this is still needed like this
 # ------------------------------------------------
 # Public API: label(score_df, ctx, score_out, cfg)
@@ -3108,138 +2925,6 @@ def _legacy_label(score_df, ctx: Dict[str, Any], out: Dict[str, Any], cfg: Dict[
 # Model Persistence Functions
 # ----------------------------
 
-def save_regime_model(model: RegimeModel, models_dir: Path) -> None:  
-    """
-    Save regime model with joblib persistence for sklearn objects.
-    
-    Saves:
-    - regime_model.joblib: HDBSCAN/GMM clustering model and StandardScaler
-    - regime_model.json: Metadata (feature columns, health labels, stats)
-    
-    Args:
-        model: RegimeModel to persist
-        models_dir: Directory for model storage (typically artifacts/{EQUIP}/models)
-    """
-    models_dir = Path(models_dir)
-    models_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Save sklearn objects with joblib
-    joblib_path = models_dir / "regime_model.joblib"
-    try:
-        joblib.dump({
-            'scaler': model.scaler,
-            'clustering_model': model.clustering_model,
-            'exemplars_': model.exemplars_,  # v11.1.0: Needed for HDBSCAN prediction
-            'train_hash': model.train_hash,
-        }, joblib_path)
-        model_type = "HDBSCAN" if model.is_hdbscan else "GMM"
-        Console.info(f"Saved regime models ({model_type}+Scaler) -> {joblib_path}", component="REGIME")
-    except Exception as e:
-        Console.warn(f"Failed to save regime joblib: {e}", component="REGIME", models_dir=str(models_dir), error_type=type(e).__name__)
-        _persist_regime_error(e, models_dir)
-        raise
-    
-    # Save metadata as JSON
-    json_path = models_dir / "regime_model.json"
-    model.meta.setdefault("model_version", REGIME_MODEL_VERSION)
-    model.meta.setdefault("sklearn_version", sklearn.__version__)
-
-    metadata = _regime_metadata_dict(model)
-    try:
-        if orjson:
-            json_path.write_bytes(orjson.dumps(metadata, option=orjson.OPT_INDENT_2))
-        else:
-            with json_path.open("w", encoding="utf-8") as f:
-                json.dump(metadata, f, indent=2, ensure_ascii=False)
-        Console.info(f"Saved regime metadata -> {json_path}", component="REGIME")
-    except Exception as e:
-        Console.warn(f"Failed to save regime metadata: {e}", component="REGIME", models_dir=str(models_dir), json_path=str(json_path), error_type=type(e).__name__)
-        _persist_regime_error(e, models_dir)
-        raise
-
-
-def load_regime_model(models_dir: Path) -> Optional[RegimeModel]:
-    """
-    Load regime model from disk.
-    
-    Loads:
-    - regime_model.joblib: HDBSCAN/GMM clustering model and StandardScaler
-    - regime_model.json: Metadata
-    
-    Args:
-        models_dir: Directory containing model files
-        
-    Returns:
-        RegimeModel if found and valid, None otherwise
-    """
-    models_dir = Path(models_dir)
-    joblib_path = models_dir / "regime_model.joblib"
-    json_path = models_dir / "regime_model.json"
-    
-    # Check if both files exist
-    if not joblib_path.exists():
-        Console.info(f"No cached regime model found at {joblib_path}", component="REGIME")
-        return None
-    
-    if not json_path.exists():
-        Console.warn(f"Regime joblib exists but metadata missing: {json_path}", component="REGIME", joblib_path=str(joblib_path), json_path=str(json_path))
-        return None
-    
-    try:
-        # Load sklearn objects
-        joblib_data = joblib.load(joblib_path)
-        scaler = joblib_data['scaler']
-        clustering_model = joblib_data['clustering_model']
-        exemplars = joblib_data.get('exemplars_')
-        train_hash = joblib_data.get('train_hash')
-        
-        # Load metadata
-        with json_path.open("r", encoding="utf-8") as f:
-            metadata = json.load(f)
-        
-        # Reconstruct RegimeModel
-        meta = metadata.get("meta", {})
-        version = meta.get("model_version")
-        
-        # FIX #10: Use semantic versioning compatibility check
-        if version and not _is_version_compatible(version, REGIME_MODEL_VERSION):
-            raise ModelVersionMismatch(
-                f"Cached model version {version} incompatible with expected {REGIME_MODEL_VERSION} "
-                f"(major version mismatch)"
-            )
-        elif version and version != REGIME_MODEL_VERSION:
-            Console.info(
-                f"Cached model version {version} compatible with {REGIME_MODEL_VERSION} (same major)",
-                component="REGIME"
-            )
-            
-        model = RegimeModel(
-            scaler=scaler,
-            clustering_model=clustering_model,
-            feature_columns=metadata.get("feature_columns", []),
-            raw_tags=metadata.get("raw_tags", []),
-            n_pca_components=metadata.get("n_pca_components", 0),
-            train_hash=train_hash,
-            health_labels={int(k): v for k, v in metadata.get("health_labels", {}).items()},
-            stats={int(k): v for k, v in metadata.get("stats", {}).items()},
-            meta=meta,
-            exemplars_=exemplars,  # v11.1.0: HDBSCAN centroids
-        )
-        
-        Console.info(f"Loaded cached regime model from {joblib_path}", component="REGIME")
-        cluster_count = model.n_clusters  # Use property
-        model_type = "HDBSCAN" if model.is_hdbscan else "GMM"
-        Console.info(
-            f"  - K={cluster_count}, type={model_type}, features={len(model.feature_columns)}, train_hash={train_hash}",
-            component="REGIME"
-        )
-        return model
-        
-    except Exception as e:
-        Console.warn(f"Failed to load regime model: {e}", component="REGIME", models_dir=str(models_dir), error_type=type(e).__name__)
-        return None
-
-
 def detect_transient_states(
     data: pd.DataFrame,
     regime_labels: np.ndarray,
@@ -3248,14 +2933,9 @@ def detect_transient_states(
     """Classify transient regimes using weighted ROC and a state machine."""
 
     transient_cfg = (cfg or {}).get("regimes", {}).get("transient_detection", {})
-    enabled = transient_cfg.get("enabled", True)
 
     n_samples = len(data)
     default_states = np.array(["steady"] * n_samples, dtype=object)
-
-    if not enabled:
-        Console.info("Detection disabled in config", component="TRANSIENT")
-        return default_states
 
     if n_samples == 0:
         return default_states
@@ -3423,21 +3103,18 @@ def apply_regime_health_labels(
         and "regime_label" in frame.columns
         and "fused" in frame.columns
     ):
-        try:
-            regime_stats = update_health_labels(
-                regime_model,
-                frame["regime_label"].to_numpy(copy=False),
-                frame["fused"],
-                cfg,
-            )
-            frame["regime_state"] = frame["regime_label"].map(
-                lambda x: regime_model.health_labels.get(int(x), "unknown")
-            )
-            summary_df = build_summary_dataframe(regime_model)
-            if output_manager is not None and not summary_df.empty:
-                output_manager.write_dataframe(summary_df, "regime_summary")
-        except Exception as e:
-            logger.warn(f"Health labelling skipped: {e}", component="REGIME")
+        regime_stats = update_health_labels(
+            regime_model,
+            frame["regime_label"].to_numpy(copy=False),
+            frame["fused"],
+            cfg,
+        )
+        frame["regime_state"] = frame["regime_label"].map(
+            lambda x: regime_model.health_labels.get(int(x), "unknown")
+        )
+        summary_df = build_summary_dataframe(regime_model)
+        if output_manager is not None and not summary_df.empty:
+            output_manager.write_dataframe(summary_df, "regime_summary")
 
     if "regime_label" in frame.columns and "regime_state" not in frame.columns:
         frame["regime_state"] = frame["regime_label"].map(
@@ -3568,23 +3245,12 @@ def run_regime_labeling_stage(
     regime_model_was_trained = False
 
     if regime_loaded_from_state and regime_state is not None and regime_basis_train is not None:
-        try:
-            regime_model = regime_state_to_model(
-                state=regime_state,
-                feature_columns=list(regime_basis_train.columns),
-                raw_tags=list(raw_train.columns) if raw_train is not None else [],
-                train_hash=regime_basis_hash,
-            )
-        except Exception as e:
-            logger.warn(
-                f"Failed to reconstruct model from state: {e}",
-                component="REGIME_STATE",
-                equip=equip,
-                state_version=getattr(regime_state, "state_version", 0),
-                error=str(e)[:200],
-            )
-            regime_model = None
-            regime_loaded_from_state = False
+        regime_model = regime_state_to_model(
+            state=regime_state,
+            feature_columns=list(regime_basis_train.columns),
+            raw_tags=list(raw_train.columns) if raw_train is not None else [],
+            train_hash=regime_basis_hash,
+        )
 
     regime_ctx: Dict[str, Any] = {
         "regime_basis_train": regime_basis_train,
@@ -3620,43 +3286,31 @@ def run_regime_labeling_stage(
         current_regime_id = int(score_regime_labels[-1]) if hasattr(score_regime_labels[-1], "__int__") else 0
         regime_label = ""
         if regime_model is not None and hasattr(regime_model, "cluster_labels_"):
-            try:
-                regime_label = regime_model.cluster_labels_.get(current_regime_id, f"regime_{current_regime_id}")
-            except Exception:
-                regime_label = f"regime_{current_regime_id}"
+            regime_label = regime_model.cluster_labels_.get(current_regime_id, f"regime_{current_regime_id}")
         record_regime_fn(equip, current_regime_id, regime_label)
 
     if regime_model_was_trained and regime_model is not None:
-        try:
-            from core.model_persistence import save_regime_state
+        from core.model_persistence import save_regime_state
 
-            regime_cfg_str = str(cfg.get("regimes", {}))
-            config_hash = hashlib.sha256(regime_cfg_str.encode()).hexdigest()[:16]
-            new_state = regime_model_to_state(
-                model=regime_model,
-                equip_id=equip_id,
-                state_version=regime_state_version + 1,
-                config_hash=config_hash,
-                regime_basis_hash=str(regime_basis_hash) if regime_basis_hash else "",
-            )
-            save_regime_state(
-                state=new_state,
-                equip=equip,
-                sql_client=sql_client,
-            )
-            regime_state_version = new_state.state_version
-            logger.info(
-                f"Regime state: saved_v{regime_state_version} | K={new_state.n_clusters}",
-                component="REGIME_STATE",
-            )
-        except Exception as e:
-            logger.warn(
-                f"Failed to save regime state: {e}",
-                component="REGIME_STATE",
-                equip=equip,
-                error_type=type(e).__name__,
-                error=str(e)[:200],
-            )
+        regime_cfg_str = str(cfg.get("regimes", {}))
+        config_hash = hashlib.sha256(regime_cfg_str.encode()).hexdigest()[:16]
+        new_state = regime_model_to_state(
+            model=regime_model,
+            equip_id=equip_id,
+            state_version=regime_state_version + 1,
+            config_hash=config_hash,
+            regime_basis_hash=str(regime_basis_hash) if regime_basis_hash else "",
+        )
+        save_regime_state(
+            state=new_state,
+            equip=equip,
+            sql_client=sql_client,
+        )
+        regime_state_version = new_state.state_version
+        logger.info(
+            f"Regime state: saved_v{regime_state_version} | K={new_state.n_clusters}",
+            component="REGIME_STATE",
+        )
 
     write_regime_definitions_for_audit(
         output_manager=output_manager,
@@ -3836,17 +3490,13 @@ def apply_transient_state_labels(
     if "regime_label" not in frame.columns:
         return frame, transient_counts
 
-    try:
-        transient_states = detect_transient_states(
-            data=score_data,
-            regime_labels=frame["regime_label"].to_numpy(copy=False),
-            cfg=cfg,
-        )
-        frame["transient_state"] = transient_states
-        transient_counts = frame["transient_state"].value_counts().to_dict()
-    except Exception as trans_e:
-        logger.warn(f"Transient detection failed: {trans_e}", component="TRANSIENT")
-        frame["transient_state"] = "unknown"
+    transient_states = detect_transient_states(
+        data=score_data,
+        regime_labels=frame["regime_label"].to_numpy(copy=False),
+        cfg=cfg,
+    )
+    frame["transient_state"] = transient_states
+    transient_counts = frame["transient_state"].value_counts().to_dict()
 
     return frame, transient_counts
 

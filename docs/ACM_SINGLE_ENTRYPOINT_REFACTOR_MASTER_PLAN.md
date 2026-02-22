@@ -8,17 +8,24 @@ Status: Active execution on integration branch
 
 ## 0. Execution Progress Log
 
-Updated: 2026-02-21
+Updated: 2026-02-22
 
 Current snapshot:
 
 1. Runtime entrypoint migration is complete:
    - `core/acm_main.py` is removed.
    - `python -m core.acm` is the only runtime entrypoint.
-2. `core/acm.py` is shrinking:
+2. `core/acm.py` orchestration reduction is real:
    - recent high watermark in this effort: 1758 lines
-   - current: 1283 lines
-3. Extracted and wired into ownership modules:
+   - current: 694 lines
+   - current complexity marker: `try=2`, `except=2`
+3. Destination-module complexity now dominates and must be reduced:
+   - `core/output_manager.py`: 4017 lines, `try=93`, `except=90`
+   - `core/regimes.py`: 3678 lines, `try=35`, `except=35`
+   - `core/fuse.py`: 2916 lines, `try=10`, `except=10`
+   - `core/model_evaluation.py`: 876 lines, `try=7`, `except=7`
+   - `core/drift.py`: 513 lines, `try=4`, `except=4`
+4. Extracted and wired into ownership modules:
    - calibration and fusion orchestration pieces in `core/fuse.py`
    - NOOP outcome/error/finalization helpers in `core/run_metadata_writer.py`
    - persist-stage orchestration helpers in `core/output_manager.py`
@@ -30,44 +37,43 @@ Current snapshot:
    - auto-retrain stage orchestration in `core/model_evaluation.py`
    - model persistence and lifecycle stage orchestration in `core/model_persistence.py`
    - consolidated teardown orchestration in `core/run_metadata_writer.py`
-    - startup guard cleanup in `core/acm.py`:
-      - removed repeated helper-availability checks in main path
-      - tightened SQL import guard to `ImportError` so non-import failures are not silently masked
-    - dead-code cleanup in `core/acm.py` and `core/model_persistence.py`:
-      - removed permanently disabled model-cache branch from orchestrator
-      - removed stale unused imports and local variables
-      - added explicit `False` return on calibration-persistence failure path
-4. Tests were updated throughout extraction:
-   - `tests/test_v11_modules.py` currently passes with new helper coverage.
-5. Source control policy has been followed:
+5. Recent hardening completed in core behavior paths:
+   - removed runtime kill-switch gates in feature prep, thresholds, drift, fuse, regimes, and model evaluation paths
+   - converted key core-write and core-algorithm paths toward fail-fast semantics
+   - cleaned non-ASCII artifacts in touched core files
+6. Tests were updated throughout extraction:
+   - `tests/test_v11_modules.py` currently passes with helper-stage coverage (`90 passed`).
+7. Source control policy has been followed:
    - all work through `refactor/*` branches merged into `integration/acm-single-entrypoint`
    - `main` remains untouched.
 
 Progress interpretation:
 
 1. Entrypoint unification and runtime cutover are done.
-2. Monolith extraction is in progress and moving in the right direction.
-3. The orchestrator is lighter than before but still too large for final target.
+2. Orchestrator extraction is in good shape.
+3. High-risk complexity has shifted into destination modules, especially `core/output_manager.py` and `core/regimes.py`.
 
 Remaining structural backlog:
 
-1. Additional cleanup is needed to reduce nested conditional and exception handling in orchestrator path.
-2. Orchestrator still carries local state plumbing that can be collapsed into stage payloads.
-3. Startup and run-context initialization path can be further decomposed into ownership helpers.
+1. `core/output_manager.py`: remove broad catch-heavy flow in core write paths and enforce strict failure policy for required tables.
+2. `core/regimes.py`: reduce broad exception swallowing in core algorithm paths and keep deterministic fallback only where it is algorithmic.
+3. `core/fuse.py`: continue cleanup of residual fallback complexity and duplicated defensive branches.
+4. `core/acm.py`: finish remaining state-plumbing simplification after destination modules are hardened.
 
 Validation executed after each extraction slice:
 
 1. `python -m py_compile` on touched modules.
 2. `pytest tests/test_v11_modules.py -q`.
 3. `python scripts/sql_batch_runner.py --equip FD_FAN --dry-run --max-batches 1`.
+4. Runtime parity checks for outcome and SQL finalization fields.
 
 Notes:
 
 1. `main` branch remains untouched.
 2. Work continues only through phase branches merged into `integration/acm-single-entrypoint`.
+3. Remaining `core.acm_main` strings are historical text references in docs and SQL migration/archive scripts, not runtime imports.
 
 ---
-
 ## 1. Objective
 
 Migrate the ACM runtime to a **single supported entrypoint**:
@@ -521,6 +527,7 @@ Update active docs (non-archive) to use `core.acm`:
 3. `docs/CHANGELOG.md`
 4. `docs/SOURCE_CONTROL_PRACTICES.md`
 5. `docs/ACM Main Refactoring Analysis - Action.md`
+6. `docs/OUTPUT_MANAGER_REFACTOR_MASTER_PLAN.md`
 
 Archive docs remain historical and may keep legacy command references.
 
@@ -1045,11 +1052,109 @@ Effective immediately for remaining refactor phases, every PR must include:
      - `initialize_detectors_for_run(...)` renamed to internal `_initialize_detectors_for_run(...)`
      - `run_detector_initialization_stage(...)` remains the public stage entrypoint
    - updated tests to call the internal helper where direct unit coverage is needed
-4. Remaining:
-   - none in duplicate cleanup track.
-5. Pass E4 completed (2026-02-22):
+4. Pass E4 completed (2026-02-22):
    - removed unused legacy reporting hook `regimes.run(ctx)`
    - removed dead helper functions tied only to that hook:
      - `_to_datetime_mixed(...)`
      - `_read_episodes_csv(...)`
      - `_read_scores_csv(...)`
+5. Pass E5 completed (2026-02-22):
+   - removed dict-style compatibility shims from typed stage result dataclasses:
+     - `core/detector_orchestrator.py::DetectorInitState.__getitem__`
+     - `core/model_persistence.py::ModelPersistenceStageResult.__getitem__`
+     - `core/model_evaluation.py::AutoRetrainStageResult.__getitem__`
+   - updated tests to assert attribute access on typed results.
+6. Pass E6 completed (2026-02-22):
+   - converted cached-model retrain decision payload from untyped dict to typed dataclass:
+     - `core/model_evaluation.py::AutoRetrainDecision`
+   - updated:
+     - `evaluate_and_maybe_refit_cached_models(...)` return contract
+     - `run_auto_retrain_stage(...)` internal decision handling
+     - unit tests and monkeypatch stubs to typed contract.
+7. Pass E7 completed (2026-02-22):
+   - consolidated duplicated numeric-sensor column detection logic in `core/output_manager.py`:
+     - added `_get_numeric_sensor_columns(...)`
+     - added `_filter_low_variance_columns(...)`
+   - migrated call sites:
+     - `write_sensor_correlations_from_raw(...)`
+     - `write_sensor_normalized_ts(...)`
+     - `write_sensor_normalized_ts_from_raw(...)`
+   - removed repeated inline dtype and variance selection blocks.
+8. Pass E8 completed (2026-02-22):
+   - removed redundant defensive type checks in model adaptation flow where contracts are typed and stage-ordered:
+     - `core/model_persistence.py`
+     - `core/acm.py`
+   - removed `isinstance(score_out, dict)` fallback branches and now pass typed `score_out` directly.
+9. Pass E9 completed (2026-02-22):
+   - removed remaining `score_out` dict-fallback checks in `core/model_evaluation.py`:
+     - `evaluate_and_maybe_refit_cached_models(...)`
+     - `run_auto_retrain_stage(...)`
+   - retrain trigger evaluation now uses a strict typed score payload end to end.
+10. Pass E10 completed (2026-02-22):
+   - removed dead backward-compat analytics wrapper methods from `core/output_manager.py`:
+     - `_generate_health_timeline(...)`
+     - `_generate_regime_timeline(...)`
+     - `_generate_sensor_defects(...)`
+     - `_generate_sensor_hotspots_table(...)`
+   - retained canonical path through `AnalyticsBuilder.generate_all(...)` only.
+11. Pass E11 completed (2026-02-22):
+   - removed dead, unreferenced file-based and legacy persistence functions:
+     - `core/model_persistence.py`:
+       - `save_forecast_state(...)`
+       - `load_forecast_state(...)`
+     - `core/regimes.py`:
+       - `align_regime_labels(...)`
+       - `save_regime_model(...)`
+       - `load_regime_model(...)`
+       - `_persist_regime_error(...)`
+       - legacy version compatibility helpers used only by removed file-model loader
+   - removed now-unused imports in `core/regimes.py` (`Path`, `joblib`).
+12. Pass E12 completed (2026-02-22):
+   - reduced orchestrator coupling in `core/acm.py` by moving runtime-policy normalization out of the entrypoint:
+     - added `core/sql_client.py::AcmRuntimePolicy`
+     - added `core/sql_client.py::resolve_runtime_policy(...)`
+   - `core/acm.py` now consumes normalized policy values instead of inline interval/flag validation.
+13. Pass E13 completed (2026-02-22):
+   - reduced dependency-injection noise at call sites by adding stage defaults in ownership modules:
+     - `core/detector_orchestrator.py::run_detector_initialization_stage(...)`
+     - `core/model_persistence.py::run_model_adaptation_and_persistence_stage(...)`
+     - `core/model_persistence.py::run_model_persistence_and_lifecycle_stage(...)`
+     - `core/fuse.py::run_health_stage(...)`
+   - `core/acm.py` stage calls now omit module-level function plumbing and focus on run data/state.
+14. Pass E14 completed (2026-02-22):
+   - simplified teardown payload wiring in `core/acm.py` by removing redundant `isinstance(...)` wrappers for already typed optional values.
+   - `core/acm.py` reduced from approximately 741 lines to approximately 640 lines in this simplification tranche.
+15. Pass E15 completed (2026-02-22):
+   - removed continuous-learning runtime toggle path from code execution flow:
+     - `core/sql_client.py::AcmRuntimePolicy` now carries only `force_retraining`
+     - `core/sql_client.py::resolve_runtime_policy(...)` now resolves CLI force-retrain only
+   - removed continuous-learning and interval wiring from:
+     - `core/acm.py`
+     - `core/fuse.py::run_health_stage(...)`
+     - `core/adaptive_thresholds.py::maybe_update_adaptive_thresholds(...)`
+   - adaptive threshold refresh is now part of normal runtime behavior and no longer gated by a continuous-learning config branch.
+
+### 19.4 Redundancy Heatmap (Heuristic, 2026-02-22)
+
+Method:
+1. Heuristic marker density across runtime modules:
+   - markers: `legacy`, `compatibility`, `deprecated`, `backward`, `try/except`, `safe`.
+2. Purpose:
+   - identify refactor hot spots for next cleanup passes.
+
+Current snapshot:
+1. `core/output_manager.py`: 2.9 percent marker density (highest).
+2. `core/model_persistence.py`: 2.6 percent marker density.
+3. `core/regimes.py`: 1.7 percent marker density.
+4. `core/run_metadata_writer.py`: 1.4 percent marker density.
+5. `core/drift.py`: 1.3 percent marker density.
+6. `core/detector_orchestrator.py`: 1.1 percent marker density.
+7. `core/acm.py`: 0.9 percent marker density.
+8. `core/model_evaluation.py`: 0.9 percent marker density.
+9. `core/fuse.py`: 0.6 percent marker density.
+
+Next cleanup order from this heatmap:
+1. `core/output_manager.py`
+2. `core/model_persistence.py`
+3. `core/regimes.py`
+

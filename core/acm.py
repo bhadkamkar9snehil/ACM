@@ -23,6 +23,7 @@ from __future__ import annotations
 # Standard library imports
 # ============================
 import argparse
+from functools import partial
 from datetime import datetime
 # NOTE: Parallel fitting via ThreadPoolExecutor was removed due to BLAS/OpenMP
 # deadlocks; model fitting is intentionally single-threaded here.
@@ -58,21 +59,14 @@ from core.adaptive_thresholds import maybe_update_adaptive_thresholds
 from core.smart_coldstart import seed_baseline_safe, load_and_validate_data_stage
 from core.detector_orchestrator import (
     score_all_detectors,
-    calibrate_all_detectors,
     fit_all_detectors,
     run_detector_initialization_stage,
-    load_and_rebuild_detectors_from_sql_cache,
-    reconcile_detector_flags_with_loaded_models,
 )
 from core.model_persistence import (
     persist_calibration_params_safe,
     load_manifest_protected_columns,
-    restore_detectors_from_runtime_cache,
-    load_quality_regime_state_if_needed,
     run_model_adaptation_and_persistence_stage,
-    run_model_persistence_and_lifecycle_stage,
 )
-from core.model_evaluation import auto_tune_parameters, run_auto_retrain_stage
 
 from core.observability import (
     get_tracer,
@@ -97,6 +91,7 @@ from core.observability import (
 from core.sql_client import (
     bootstrap_acm_run_state,
     connect_acm_sql_failfast,
+    resolve_runtime_policy,
 )
 
 # Data utilities: index hygiene and deduplication helpers.
@@ -112,9 +107,7 @@ from core.resource_monitor import enable_resource_metrics
 # Model lifecycle management (maturity, promotion, and active model tracking).
 from core.model_lifecycle import (
     BOOLEAN_ONLY_METRICS,
-    load_model_state_safe,
     resolve_maturity_for_regime_stage,
-    update_and_persist_model_lifecycle_safe,
 )
 
 
@@ -248,29 +241,8 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
     logging_cfg = cfg.get("logging") or {}
     _configure_logging(logging_cfg, args)
 
-    # Continuous learning is a core ACM capability and always enabled.
-    CONTINUOUS_LEARNING = True
-
-    # Continuous learning settings.
-    cl_cfg = cfg.get("continuous_learning", {})
-    model_update_interval = int(cl_cfg.get("model_update_interval", 1))  # Default: update every batch
-    threshold_update_interval = int(cl_cfg.get("threshold_update_interval", 1))  # Default: update every batch
-
-    # v11.8.0: Force retraining only via explicit CLI flag.
-    # CONTINUOUS_LEARNING controls quality-based retraining evaluation downstream,
-    # not forced retraining every batch.
-    force_retraining = bool(getattr(args, "force_retrain", False))
-    
-    # Validate interval settings to avoid zero/negative values in production.
-    invalid_intervals = []
-    if model_update_interval <= 0:
-        invalid_intervals.append(f"model_update_interval={model_update_interval}")
-        model_update_interval = 1
-    if threshold_update_interval <= 0:
-        invalid_intervals.append(f"threshold_update_interval={threshold_update_interval}")
-        threshold_update_interval = 1
-    if invalid_intervals:
-        Console.warn(f"Invalid intervals defaulted to 1: {', '.join(invalid_intervals)}", component="CONFIG")
+    runtime_policy = resolve_runtime_policy(args=args)
+    force_retraining = runtime_policy.force_retraining
     
     # Set observability context (equipment metadata only).
     set_acm_context(
@@ -279,13 +251,9 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
     )
     
     # Consolidated startup log.
-    continuous_learning_str = "true" if CONTINUOUS_LEARNING else "false"
     force_retrain_str = "true" if force_retraining else "false"
-    intervals_info = f"model:{model_update_interval},thresh:{threshold_update_interval}"
     Console.info(
-        f"Run #{run_count + 1} | equip={equip} mode=adaptive "
-        f"continuous_learning={continuous_learning_str} force_retrain={force_retrain_str} "
-        f"intervals={intervals_info}",
+        f"Run #{run_count + 1} | equip={equip} mode=adaptive force_retrain={force_retrain_str}",
         component="RUN",
     )
 
@@ -421,7 +389,6 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
         # ===== Phase 2: Load or fit detectors =====
         detector_init = run_detector_initialization_stage(
             section_fn=T.section,
-            fit_all_detectors_fn=fit_all_detectors,
             train=train,
             score=score,
             cfg=cfg,
@@ -432,10 +399,6 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
             run_id=run_id,
             equip_id=equip_id,
             equip=equip,
-            load_and_rebuild_detectors_fn=load_and_rebuild_detectors_from_sql_cache,
-            restore_detectors_from_runtime_cache_fn=restore_detectors_from_runtime_cache,
-            load_quality_regime_state_if_needed_fn=load_quality_regime_state_if_needed,
-            reconcile_detector_flags_fn=reconcile_detector_flags_with_loaded_models,
             logger=Console,
         )
 
@@ -495,13 +458,11 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
         # ===== Model adaptation + persistence =====
         model_stage = run_model_adaptation_and_persistence_stage(
             section_fn=T.section,
-            run_auto_retrain_stage_fn=run_auto_retrain_stage,
-            run_model_persistence_and_lifecycle_stage_fn=run_model_persistence_and_lifecycle_stage,
             cfg=cfg,
             cached_models=cached_models,
             cached_manifest=cached_manifest,
             detectors_just_trained=detectors_just_trained,
-            score_out=score_out if isinstance(score_out, dict) else {},
+            score_out=score_out,
             regime_quality_ok=regime_quality_ok,
             current_model_maturity=current_model_maturity,
             boolean_only_metrics=list(BOOLEAN_ONLY_METRICS),
@@ -522,8 +483,6 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
             timing_sections=T.timings if hasattr(T, "timings") else None,
             model_state=model_state,
             regime_state_version=regime_state_version,
-            update_and_persist_model_lifecycle_fn=update_and_persist_model_lifecycle_safe,
-            load_model_state_safe_fn=load_model_state_safe,
             force_retrain_requested=force_retraining,
         )
         cached_models = model_stage.cached_models
@@ -533,6 +492,13 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
         model_state = model_stage.model_state
 
         # ===== Phase 6-7 + adaptive postprocess =====
+        persist_calibration = partial(
+            persist_calibration_params_safe,
+            equip=equip,
+            sql_client=sql_client,
+            equip_id=equip_id,
+            logger=Console,
+        )
         health_stage = fuse.run_health_stage(
             section_fn=T.section,
             train=train,
@@ -548,16 +514,7 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
             detector_flags=detector_flags,
             cached_calibration_params=cached_calibration_params,
             saved_model_version=saved_model_version,
-            score_all_detectors_fn=score_all_detectors,
-            calibrate_all_detectors_fn=calibrate_all_detectors,
-            persist_calibration_params_fn=lambda version, calibrators_dict: persist_calibration_params_safe(
-                equip=equip,
-                sql_client=sql_client,
-                equip_id=equip_id,
-                saved_model_version=version,
-                calibrators_dict=calibrators_dict,
-                logger=Console,
-            ),
+            persist_calibration_params_fn=persist_calibration,
             output_manager=output_manager,
             logger=Console,
             equip=equip,
@@ -567,12 +524,8 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
             record_episode_fn=record_episode,
             maybe_update_adaptive_thresholds_fn=maybe_update_adaptive_thresholds,
             coldstart_complete=coldstart_complete,
-            continuous_learning=CONTINUOUS_LEARNING,
-            threshold_update_interval=threshold_update_interval,
             equip_id=equip_id,
-            run_regime_postprocess_stage_fn=regimes.run_regime_postprocess_stage,
             regime_model=regime_model,
-            auto_tune_parameters_fn=auto_tune_parameters,
             score_out=score_out,
             sql_client=sql_client,
             run_id=run_id,
@@ -698,13 +651,13 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
                 win_start=win_start,
                 win_end=win_end,
                 outcome=outcome,
-                frame=frame if isinstance(frame, pd.DataFrame) else None,
-                episodes=episodes if isinstance(episodes, pd.DataFrame) else None,
-                score_out=score_out if isinstance(score_out, dict) else None,
+                frame=frame,
+                episodes=episodes,
+                score_out=score_out,
                 regime_quality_ok=regime_quality_ok,
                 model_state=model_state,
                 rows_read=rows_read,
-                train=train if isinstance(train, pd.DataFrame) else None,
+                train=train,
                 degradations=degradations,
                 refit_requested=refit_requested,
                 timer=T,

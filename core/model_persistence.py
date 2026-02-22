@@ -142,127 +142,6 @@ class ForecastState:
             return "[]"
 
 
-def save_forecast_state(state: ForecastState, equip: str, sql_client) -> None:
-    """
-    Save ForecastState to SQL (SQL-ONLY MODE).
-    
-    Args:
-        state: ForecastState object to persist
-        equip: Equipment name (for logging)
-        sql_client: SQL client for persistence
-    """
-    if sql_client is None:
-        Console.error("SQL client required for SQL-only mode", component="FORECAST_STATE", equipment=equip, equip_id=state.equip_id)
-        return
-    
-    try:
-        cur = sql_client.cursor()
-        
-        # Convert dicts to JSON strings for SQL storage
-        model_params_json = json.dumps(state.model_params)
-        forecast_quality_json = json.dumps(state.forecast_quality)
-        
-        # Upsert into ACM_ForecastState
-        cur.execute("""
-            MERGE INTO dbo.ACM_ForecastState AS target
-            USING (SELECT ? AS EquipID, ? AS StateVersion) AS source
-            ON target.EquipID = source.EquipID AND target.StateVersion = source.StateVersion
-            WHEN MATCHED THEN
-                UPDATE SET
-                    ModelType = ?,
-                    ModelParamsJson = ?,
-                    ResidualVariance = ?,
-                    LastForecastHorizonJson = ?,
-                    HazardBaseline = ?,
-                    LastRetrainTime = ?,
-                    TrainingDataHash = ?,
-                    TrainingWindowHours = ?,
-                    ForecastQualityJson = ?
-            WHEN NOT MATCHED THEN
-                INSERT (EquipID, StateVersion, ModelType, ModelParamsJson, ResidualVariance,
-                        LastForecastHorizonJson, HazardBaseline, LastRetrainTime,
-                        TrainingDataHash, TrainingWindowHours, ForecastQualityJson)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-        """, (
-            state.equip_id, state.state_version,  # MERGE match
-            state.model_type, model_params_json, state.residual_variance,
-            state.last_forecast_horizon_json, state.hazard_baseline,
-            state.last_retrain_time, state.training_data_hash,
-            state.training_window_hours, forecast_quality_json,  # UPDATE values
-            state.equip_id, state.state_version, state.model_type,
-            model_params_json, state.residual_variance,
-            state.last_forecast_horizon_json, state.hazard_baseline,
-            state.last_retrain_time, state.training_data_hash,
-            state.training_window_hours, forecast_quality_json  # INSERT values
-        ))
-        
-        if not sql_client.conn.autocommit:
-            sql_client.conn.commit()
-        
-        Console.info(f"Saved state v{state.state_version} to ACM_ForecastState (EquipID={state.equip_id})", component="FORECAST_STATE")
-    except Exception as e:
-        Console.error(f"Failed to save state to SQL: {e}", component="FORECAST_STATE", equip_id=state.equip_id, state_version=state.state_version, error_type=type(e).__name__, error=str(e)[:200])
-
-
-def load_forecast_state(equip: str, equip_id: int, sql_client) -> Optional[ForecastState]:
-    """
-    Load latest ForecastState from SQL (SQL-ONLY MODE).
-    
-    Args:
-        equip: Equipment name (for logging)
-        equip_id: Equipment ID (required)
-        sql_client: SQL client to load from database
-    
-    Returns:
-        ForecastState object or None if not found
-    """
-    if sql_client is None:
-        Console.error("SQL client required for SQL-only mode", component="FORECAST_STATE", equipment=equip, equip_id=equip_id)
-        return None
-    
-    if equip_id is None:
-        Console.error("equip_id required for SQL-only mode", component="FORECAST_STATE", equipment=equip)
-        return None
-    
-    try:
-        cur = sql_client.cursor()
-        cur.execute("""
-            SELECT TOP 1
-                EquipID, StateVersion, ModelType, ModelParamsJson, ResidualVariance,
-                LastForecastHorizonJson, HazardBaseline, LastRetrainTime,
-                TrainingDataHash, TrainingWindowHours, ForecastQualityJson
-            FROM dbo.ACM_ForecastState
-            WHERE EquipID = ?
-            ORDER BY StateVersion DESC
-        """, (equip_id,))
-        
-        row = cur.fetchone()
-        cur.close()
-        
-        if row:
-            state = ForecastState(
-                equip_id=row[0],
-                state_version=row[1],
-                model_type=row[2],
-                model_params=json.loads(row[3]) if row[3] else {},
-                residual_variance=float(row[4]) if row[4] is not None else 0.0,
-                last_forecast_horizon_json=row[5] or "[]",
-                hazard_baseline=float(row[6]) if row[6] is not None else 0.0,
-                last_retrain_time=row[7].isoformat() if row[7] else datetime.now(timezone.utc).isoformat(),
-                training_data_hash=row[8] or "",
-                training_window_hours=int(row[9]) if row[9] is not None else 72,
-                forecast_quality=json.loads(row[10]) if row[10] else {}
-            )
-            Console.info(f"Loaded state v{state.state_version} from SQL (EquipID={equip_id})", component="FORECAST_STATE")
-            return state
-        else:
-            Console.info(f"No prior forecast state found for EquipID={equip_id}", component="FORECAST_STATE")
-            return None
-    except Exception as e:
-        Console.error(f"Failed to load state from SQL: {e}", component="FORECAST_STATE", equip_id=equip_id, equipment=equip, error_type=type(e).__name__, error=str(e)[:200])
-        return None
-
-
 # ============================================================================
 # Regime State Persistence (REGIME-STATE-01)
 # ============================================================================
@@ -1774,14 +1653,22 @@ def run_model_persistence_and_lifecycle_stage(
     output_manager: Any,
     regime_state_version: int,
     score_out: Dict[str, Any],
-    update_and_persist_model_lifecycle_fn: Any,
-    load_model_state_safe_fn: Any,
+    update_and_persist_model_lifecycle_fn: Optional[Any] = None,
+    load_model_state_safe_fn: Optional[Any] = None,
     logger: Any = Console,
     save_trained_models_fn: Any = save_trained_models,
 ) -> "ModelPersistenceStageResult":
     """
     Persist trained models and update lifecycle state for the current run.
     """
+    update_lifecycle_fn = update_and_persist_model_lifecycle_fn
+    if update_lifecycle_fn is None:
+        from core.model_lifecycle import update_and_persist_model_lifecycle_safe as update_lifecycle_fn
+
+    load_state_fn = load_model_state_safe_fn
+    if load_state_fn is None:
+        from core.model_lifecycle import load_model_state_safe as load_state_fn
+
     detectors_fitted_this_run = (not cached_models and detector_cache is None) or force_retrain
     models_were_trained = bool(detectors_fitted_this_run)
     saved_model_version = None
@@ -1805,7 +1692,7 @@ def run_model_persistence_and_lifecycle_stage(
             timing_sections=timing_sections,
             run_id=run_id or "",
         )
-        model_state_out = update_and_persist_model_lifecycle_fn(
+        model_state_out = update_lifecycle_fn(
             sql_client=sql_client,
             output_manager=output_manager,
             equip_id=int(equip_id),
@@ -1814,13 +1701,13 @@ def run_model_persistence_and_lifecycle_stage(
             train_data=train,
             run_id=run_id,
             regime_model=regime_model,
-            score_out=score_out if isinstance(score_out, dict) else {},
+            score_out=score_out,
             regime_quality_ok=regime_quality_ok,
             logger=logger,
         )
 
     if model_state_out is None:
-        model_state_out = load_model_state_safe_fn(
+        model_state_out = load_state_fn(
             sql_client=sql_client,
             equip_id=int(equip_id),
             logger=logger,
@@ -1842,10 +1729,6 @@ class ModelPersistenceStageResult:
     saved_model_version: Optional[int]
     model_state: Optional[Any]
 
-    def __getitem__(self, key: str) -> Any:
-        """Backward-compatible dict-like access."""
-        return getattr(self, key)
-
 
 @dataclass
 class ModelAdaptationPersistenceResult:
@@ -1861,8 +1744,6 @@ class ModelAdaptationPersistenceResult:
 def run_model_adaptation_and_persistence_stage(
     *,
     section_fn: Any,
-    run_auto_retrain_stage_fn: Any,
-    run_model_persistence_and_lifecycle_stage_fn: Any,
     cfg: Dict[str, Any],
     cached_models: Optional[Dict[str, Any]],
     cached_manifest: Optional[Dict[str, Any]],
@@ -1888,20 +1769,28 @@ def run_model_adaptation_and_persistence_stage(
     timing_sections: Optional[Dict[str, Any]],
     model_state: Optional[Any],
     regime_state_version: int,
-    update_and_persist_model_lifecycle_fn: Any,
-    load_model_state_safe_fn: Any,
+    run_auto_retrain_stage_fn: Optional[Any] = None,
+    run_model_persistence_and_lifecycle_stage_fn: Optional[Any] = None,
+    update_and_persist_model_lifecycle_fn: Optional[Any] = None,
+    load_model_state_safe_fn: Optional[Any] = None,
     force_retrain_requested: bool = False,
 ) -> ModelAdaptationPersistenceResult:
     """
     Execute auto-retrain decision and model persistence/lifecycle stages.
     """
+    auto_retrain_stage_fn = run_auto_retrain_stage_fn
+    if auto_retrain_stage_fn is None:
+        from core.model_evaluation import run_auto_retrain_stage as auto_retrain_stage_fn
+
+    persistence_stage_fn = run_model_persistence_and_lifecycle_stage_fn or run_model_persistence_and_lifecycle_stage
+
     with section_fn("models.auto_retrain"):
-        retrain_out = run_auto_retrain_stage_fn(
+        retrain_out = auto_retrain_stage_fn(
             cfg=cfg,
             cached_models=cached_models,
             cached_manifest=cached_manifest,
             detectors_just_trained=detectors_just_trained,
-            score_out=score_out if isinstance(score_out, dict) else {},
+            score_out=score_out,
             regime_quality_ok=regime_quality_ok,
             current_model_maturity=current_model_maturity,
             boolean_only_metrics=list(boolean_only_metrics),
@@ -1926,7 +1815,7 @@ def run_model_adaptation_and_persistence_stage(
     detectors_out = retrain_out.detectors
 
     with section_fn("models.persistence.save"):
-        persistence_out = run_model_persistence_and_lifecycle_stage_fn(
+        persistence_out = persistence_stage_fn(
             cached_models=cached_models_out,
             detector_cache=detector_cache,
             force_retrain=force_retrain,
@@ -1948,7 +1837,7 @@ def run_model_adaptation_and_persistence_stage(
             model_state=model_state,
             output_manager=output_manager,
             regime_state_version=regime_state_version,
-            score_out=score_out if isinstance(score_out, dict) else {},
+            score_out=score_out,
             update_and_persist_model_lifecycle_fn=update_and_persist_model_lifecycle_fn,
             load_model_state_safe_fn=load_model_state_safe_fn,
             logger=logger,

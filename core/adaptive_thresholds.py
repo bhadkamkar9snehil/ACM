@@ -448,27 +448,16 @@ def calculate_thresholds_from_config(
     """
     # Extract config parameters
     adaptive_cfg = cfg.get('thresholds', {}).get('adaptive', {})
-    
-    enabled = adaptive_cfg.get('enabled', True)
-    if not enabled:
-        logger.info("Adaptive thresholds disabled - using fallback")
-        return {
-            'fused_alert_z': 3.0,
-            'fused_warn_z': 1.5,
-            'method': 'hardcoded',
-            'confidence': 0.997
-        }
-    
+
     method = adaptive_cfg.get('method', 'quantile')
     confidence = adaptive_cfg.get('confidence', 0.997)
-    per_regime = adaptive_cfg.get('per_regime', False)
     min_samples = adaptive_cfg.get('min_samples', 100)
     fallback = adaptive_cfg.get('fallback_threshold', 3.0)
     
     # Calculate thresholds
     calc = AdaptiveThresholdCalculator(min_samples=min_samples)
     
-    regime_input = regime_labels if per_regime else None
+    regime_input = regime_labels
     
     alert_threshold = calc.calculate_fused_threshold(
         train_fused_z=train_fused_z,
@@ -534,14 +523,7 @@ def calculate_and_persist_thresholds(
     
     try:
         threshold_cfg = cfg.get("thresholds", {}).get("adaptive", {})
-        if not threshold_cfg.get("enabled", True):
-            Console.info("Adaptive thresholds disabled - using static config", component="THRESHOLD")
-            return {}
-        
-        # Get regime labels if per_regime enabled and quality OK
-        use_regime_labels = None
-        if threshold_cfg.get("per_regime", False) and regime_quality_ok and regime_labels is not None:
-            use_regime_labels = regime_labels
+        use_regime_labels = regime_labels if regime_quality_ok and regime_labels is not None else None
         
         # Calculate thresholds
         threshold_results = calculate_thresholds_from_config(
@@ -624,8 +606,6 @@ def maybe_update_adaptive_thresholds(
     equip_id: int,
     output_manager: Optional[Any],
     coldstart_complete: bool,
-    continuous_learning: bool,
-    threshold_update_interval: int,
     regime_quality_ok: bool,
     logger: Any,
 ) -> bool:
@@ -636,11 +616,8 @@ def maybe_update_adaptive_thresholds(
         True when thresholds were recalculated and persisted, otherwise False.
     """
     run_count = cfg.get("runtime", {}).get("run_count", 0)
-    interval_reached = (run_count % threshold_update_interval == 0) if threshold_update_interval > 0 else True
-    should_update = (
-        (coldstart_complete and not hasattr(cfg, "_thresholds_calculated"))
-        or (continuous_learning and interval_reached)
-    )
+    # Continuous threshold updates are part of normal runtime behavior.
+    should_update = True
 
     if not should_update or "fused" not in train_frame.columns:
         return False

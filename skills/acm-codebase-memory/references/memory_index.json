@@ -1,28 +1,29 @@
 {
-  "generated_at": "2026-02-21T14:23:15+00:00",
+  "generated_at": "2026-02-22T13:46:41+00:00",
   "module_count": 36,
   "modules": [
     {
       "module_name": "core.acm",
       "source_path": "core/acm.py",
-      "symbol_count": 13,
-      "core_import_count": 15,
+      "symbol_count": 4,
+      "core_import_count": 16,
       "core_imports": [
+        "core",
         "core.adaptive_thresholds",
-        "core.config_history_writer",
         "core.detector_orchestrator",
         "core.episode_culprits_writer",
         "core.fast_features",
-        "core.model_evaluation",
         "core.model_lifecycle",
         "core.model_persistence",
-        "core.omr",
+        "core.observability",
         "core.output_manager",
         "core.pipeline_types",
+        "core.resource_monitor",
         "core.run_metadata_writer",
         "core.seasonality",
         "core.sensor_attribution",
-        "core.smart_coldstart"
+        "core.smart_coldstart",
+        "core.sql_client"
       ]
     },
     {
@@ -80,7 +81,7 @@
     {
       "module_name": "core.data_loader",
       "source_path": "core/data_loader.py",
-      "symbol_count": 12,
+      "symbol_count": 10,
       "core_import_count": 1,
       "core_imports": [
         "core.observability"
@@ -98,11 +99,12 @@
     {
       "module_name": "core.detector_orchestrator",
       "source_path": "core/detector_orchestrator.py",
-      "symbol_count": 8,
-      "core_import_count": 4,
+      "symbol_count": 13,
+      "core_import_count": 5,
       "core_imports": [
         "core",
         "core.ar1_detector",
+        "core.model_persistence",
         "core.observability",
         "core.omr"
       ]
@@ -110,7 +112,7 @@
     {
       "module_name": "core.drift",
       "source_path": "core/drift.py",
-      "symbol_count": 12,
+      "symbol_count": 14,
       "core_import_count": 1,
       "core_imports": [
         "core.fuse"
@@ -135,7 +137,7 @@
     {
       "module_name": "core.fast_features",
       "source_path": "core/fast_features.py",
-      "symbol_count": 33,
+      "symbol_count": 36,
       "core_import_count": 1,
       "core_imports": [
         "core.observability"
@@ -163,7 +165,7 @@
     {
       "module_name": "core.fuse",
       "source_path": "core/fuse.py",
-      "symbol_count": 44,
+      "symbol_count": 48,
       "core_import_count": 1,
       "core_imports": [
         "core.observability"
@@ -190,7 +192,7 @@
     {
       "module_name": "core.model_evaluation",
       "source_path": "core/model_evaluation.py",
-      "symbol_count": 12,
+      "symbol_count": 15,
       "core_import_count": 1,
       "core_imports": [
         "core.observability"
@@ -199,7 +201,7 @@
     {
       "module_name": "core.model_lifecycle",
       "source_path": "core/model_lifecycle.py",
-      "symbol_count": 20,
+      "symbol_count": 21,
       "core_import_count": 1,
       "core_imports": [
         "core.observability"
@@ -208,7 +210,7 @@
     {
       "module_name": "core.model_persistence",
       "source_path": "core/model_persistence.py",
-      "symbol_count": 39,
+      "symbol_count": 41,
       "core_import_count": 1,
       "core_imports": [
         "core.observability"
@@ -226,7 +228,7 @@
     {
       "module_name": "core.observability",
       "source_path": "core/observability.py",
-      "symbol_count": 108,
+      "symbol_count": 110,
       "core_import_count": 0,
       "core_imports": []
     },
@@ -249,12 +251,13 @@
     {
       "module_name": "core.output_manager",
       "source_path": "core/output_manager.py",
-      "symbol_count": 75,
-      "core_import_count": 3,
+      "symbol_count": 87,
+      "core_import_count": 4,
       "core_imports": [
         "core.analytics_builder",
         "core.data_loader",
-        "core.observability"
+        "core.observability",
+        "core.sensor_attribution"
       ]
     },
     {
@@ -267,7 +270,7 @@
     {
       "module_name": "core.regimes",
       "source_path": "core/regimes.py",
-      "symbol_count": 59,
+      "symbol_count": 55,
       "core_import_count": 1,
       "core_imports": [
         "core.observability"
@@ -294,7 +297,7 @@
     {
       "module_name": "core.run_metadata_writer",
       "source_path": "core/run_metadata_writer.py",
-      "symbol_count": 10,
+      "symbol_count": 12,
       "core_import_count": 1,
       "core_imports": [
         "core.observability"
@@ -310,7 +313,7 @@
     {
       "module_name": "core.sensor_attribution",
       "source_path": "core/sensor_attribution.py",
-      "symbol_count": 31,
+      "symbol_count": 30,
       "core_import_count": 1,
       "core_imports": [
         "core.observability"
@@ -319,7 +322,7 @@
     {
       "module_name": "core.smart_coldstart",
       "source_path": "core/smart_coldstart.py",
-      "symbol_count": 14,
+      "symbol_count": 17,
       "core_import_count": 1,
       "core_imports": [
         "core.observability"
@@ -328,7 +331,7 @@
     {
       "module_name": "core.sql_client",
       "source_path": "core/sql_client.py",
-      "symbol_count": 22,
+      "symbol_count": 29,
       "core_import_count": 0,
       "core_imports": []
     },

@@ -31,6 +31,8 @@ from core import correlation, outliers, fuse
 from core.model_persistence import (
     align_current_features_to_cached_manifest,
     load_cached_models_with_validation,
+    restore_detectors_from_runtime_cache,
+    load_quality_regime_state_if_needed,
 )
 
 
@@ -63,10 +65,6 @@ class DetectorInitState:
     detectors_just_trained: bool
     use_cache: bool
 
-    def __getitem__(self, key: str) -> Any:
-        """Backward-compatible dict-like access for legacy call sites/tests."""
-        return getattr(self, key)
-
     def enabled_flags(self) -> Dict[str, bool]:
         """Return detector enabled-flag mapping."""
         return {
@@ -93,7 +91,6 @@ class DetectorInitState:
 def run_detector_initialization_stage(
     *,
     section_fn: Any,
-    fit_all_detectors_fn: Any,
     train: pd.DataFrame,
     score: pd.DataFrame,
     cfg: Dict[str, Any],
@@ -104,19 +101,26 @@ def run_detector_initialization_stage(
     run_id: Optional[str],
     equip_id: int,
     equip: str,
-    load_and_rebuild_detectors_fn: Any,
-    restore_detectors_from_runtime_cache_fn: Any,
-    load_quality_regime_state_if_needed_fn: Any,
-    reconcile_detector_flags_fn: Any,
+    fit_all_detectors_fn: Optional[Any] = None,
+    load_and_rebuild_detectors_fn: Optional[Any] = None,
+    restore_detectors_from_runtime_cache_fn: Optional[Any] = None,
+    load_quality_regime_state_if_needed_fn: Optional[Any] = None,
+    reconcile_detector_flags_fn: Optional[Any] = None,
     logger: Any = Console,
 ) -> DetectorInitState:
     """
     Execute detector initialization with stage-aware timing sections.
     """
+    fit_fn = fit_all_detectors_fn or fit_all_detectors
+    load_and_rebuild_fn = load_and_rebuild_detectors_fn or load_and_rebuild_detectors_from_sql_cache
+    restore_from_runtime_fn = restore_detectors_from_runtime_cache_fn or restore_detectors_from_runtime_cache
+    load_quality_regime_fn = load_quality_regime_state_if_needed_fn or load_quality_regime_state_if_needed
+    reconcile_flags_fn = reconcile_detector_flags_fn or reconcile_detector_flags_with_loaded_models
+
     def _fit_with_section(**kwargs: Any) -> Dict[str, Any]:
         fit_ctx = section_fn("train.detector_fit") if section_fn is not None else nullcontext()
         with fit_ctx:
-            return fit_all_detectors_fn(**kwargs)
+            return fit_fn(**kwargs)
 
     load_ctx = section_fn("models.load") if section_fn is not None else nullcontext()
     with load_ctx:
@@ -131,11 +135,11 @@ def run_detector_initialization_stage(
             run_id=run_id,
             equip_id=equip_id,
             equip=equip,
-            load_and_rebuild_detectors_fn=load_and_rebuild_detectors_fn,
-            restore_detectors_from_runtime_cache_fn=restore_detectors_from_runtime_cache_fn,
-            load_quality_regime_state_if_needed_fn=load_quality_regime_state_if_needed_fn,
+            load_and_rebuild_detectors_fn=load_and_rebuild_fn,
+            restore_detectors_from_runtime_cache_fn=restore_from_runtime_fn,
+            load_quality_regime_state_if_needed_fn=load_quality_regime_fn,
             fit_all_detectors_fn=_fit_with_section,
-            reconcile_detector_flags_fn=reconcile_detector_flags_fn,
+            reconcile_detector_flags_fn=reconcile_flags_fn,
             logger=logger,
         )
 

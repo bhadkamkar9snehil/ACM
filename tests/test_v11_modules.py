@@ -374,8 +374,6 @@ class TestRefactorHelpers:
             equip_id=1,
             output_manager=None,
             coldstart_complete=False,
-            continuous_learning=False,
-            threshold_update_interval=1,
             regime_quality_ok=False,
             logger=_Logger(),
         )
@@ -762,9 +760,9 @@ class TestRefactorHelpers:
             equip_id=1,
             regime_model=None,
         )
-        assert out["force_retrain"] is False
-        assert out["cached_models"] is None
-        assert out["retrain_result"] is None
+        assert out.force_retrain is False
+        assert out.cached_models is None
+        assert out.retrain_result is None
 
     def test_run_auto_retrain_stage_applies_retrain_outputs(self, monkeypatch):
         """Auto-retrain stage helper should apply detector outputs from retrain payload."""
@@ -773,11 +771,11 @@ class TestRefactorHelpers:
         retrained_detector = object()
 
         def _eval_and_refit(**kwargs):
-            return {
-                "force_retrain": True,
-                "cached_models": None,
-                "regime_model": None,
-                "retrain_result": {
+            return model_evaluation.AutoRetrainDecision(
+                force_retrain=True,
+                cached_models=None,
+                regime_model=None,
+                retrain_result={
                     "ar1_detector": retrained_detector,
                     "pca_detector": retrained_detector,
                     "iforest_detector": retrained_detector,
@@ -786,7 +784,7 @@ class TestRefactorHelpers:
                     "pca_train_spe": np.array([0.1, 0.2]),
                     "pca_train_t2": np.array([0.2, 0.3]),
                 },
-            }
+            )
 
         monkeypatch.setattr(model_evaluation, "evaluate_and_maybe_refit_cached_models", _eval_and_refit)
         out = model_evaluation.run_auto_retrain_stage(
@@ -819,13 +817,13 @@ class TestRefactorHelpers:
                 "pca_train_t2": None,
             },
         )
-        assert out["force_retrain"] is True
-        assert out["cached_models"] is None
-        assert out["detectors"]["ar1_detector"] is retrained_detector
-        assert out["detectors"]["pca_detector"] is retrained_detector
-        assert out["detectors"]["iforest_detector"] is retrained_detector
-        assert isinstance(out["detectors"]["pca_train_spe"], np.ndarray)
-        assert isinstance(out["detectors"]["pca_train_t2"], np.ndarray)
+        assert out.force_retrain is True
+        assert out.cached_models is None
+        assert out.detectors["ar1_detector"] is retrained_detector
+        assert out.detectors["pca_detector"] is retrained_detector
+        assert out.detectors["iforest_detector"] is retrained_detector
+        assert isinstance(out.detectors["pca_train_spe"], np.ndarray)
+        assert isinstance(out.detectors["pca_train_t2"], np.ndarray)
 
     def test_run_auto_retrain_stage_honors_force_retrain_requested(self, monkeypatch):
         """Auto-retrain stage should fit detectors immediately when CLI force retrain is requested."""
@@ -882,11 +880,11 @@ class TestRefactorHelpers:
             force_retrain_requested=True,
         )
 
-        assert out["force_retrain"] is True
-        assert out["cached_models"] is None
-        assert out["detectors"]["ar1_detector"] is retrained_detector
-        assert out["detectors"]["pca_detector"] is retrained_detector
-        assert out["detectors"]["iforest_detector"] is retrained_detector
+        assert out.force_retrain is True
+        assert out.cached_models is None
+        assert out.detectors["ar1_detector"] is retrained_detector
+        assert out.detectors["pca_detector"] is retrained_detector
+        assert out.detectors["iforest_detector"] is retrained_detector
         assert len(record_calls) == 1
 
     def test_run_model_persistence_and_lifecycle_stage_trained_path(self):
@@ -935,10 +933,10 @@ class TestRefactorHelpers:
             save_trained_models_fn=_save_trained_models_fn,
             logger=type("L", (), {"warn": lambda *a, **k: None})(),
         )
-        assert out["detectors_fitted_this_run"] is True
-        assert out["models_were_trained"] is True
-        assert out["saved_model_version"] == 7
-        assert out["model_state"] == {"state": "updated"}
+        assert out.detectors_fitted_this_run is True
+        assert out.models_were_trained is True
+        assert out.saved_model_version == 7
+        assert out.model_state == {"state": "updated"}
         assert captured["saved"] is True
         assert captured["updated"] is True
         assert captured["loaded"] is False
@@ -983,10 +981,10 @@ class TestRefactorHelpers:
             load_model_state_safe_fn=_load_model_state_safe_fn,
             logger=type("L", (), {"warn": lambda *a, **k: None})(),
         )
-        assert out["detectors_fitted_this_run"] is False
-        assert out["models_were_trained"] is False
-        assert out["saved_model_version"] is None
-        assert out["model_state"] == {"state": "loaded"}
+        assert out.detectors_fitted_this_run is False
+        assert out.models_were_trained is False
+        assert out.saved_model_version is None
+        assert out.model_state == {"state": "loaded"}
         assert captured["loaded"] is True
 
     def test_run_model_adaptation_and_persistence_stage_orchestrates_two_stages(self):
@@ -1201,15 +1199,15 @@ class TestRefactorHelpers:
             logger=_Logger(),
         )
 
-        assert out["detectors_just_trained"] is True
-        assert out["use_cache"] is False
-        assert out["ar1_detector"] is fitted
-        assert out["pca_detector"] is fitted
-        assert out["iforest_detector"] is fitted
-        assert out["gmm_detector"] is None
-        assert out["omr_detector"] is None
-        assert isinstance(out["pca_train_spe"], np.ndarray)
-        assert isinstance(out["pca_train_t2"], np.ndarray)
+        assert out.detectors_just_trained is True
+        assert out.use_cache is False
+        assert out.ar1_detector is fitted
+        assert out.pca_detector is fitted
+        assert out.iforest_detector is fitted
+        assert out.gmm_detector is None
+        assert out.omr_detector is None
+        assert isinstance(out.pca_train_spe, np.ndarray)
+        assert isinstance(out.pca_train_t2, np.ndarray)
 
     def test_initialize_detectors_for_run_uses_sql_cache_without_refit(self):
         """Detector init helper should reuse cached detectors when cache payload is valid."""
@@ -1285,14 +1283,14 @@ class TestRefactorHelpers:
             logger=_Logger(),
         )
 
-        assert out["use_cache"] is True
-        assert out["detectors_just_trained"] is False
-        assert out["cached_models"] is not None
-        assert out["cached_manifest"] is not None
-        assert out["cached_calibration_params"] is not None
-        assert out["ar1_detector"] is cached_detector
-        assert out["pca_detector"] is cached_detector
-        assert out["iforest_detector"] is cached_detector
+        assert out.use_cache is True
+        assert out.detectors_just_trained is False
+        assert out.cached_models is not None
+        assert out.cached_manifest is not None
+        assert out.cached_calibration_params is not None
+        assert out.ar1_detector is cached_detector
+        assert out.pca_detector is cached_detector
+        assert out.iforest_detector is cached_detector
 
     def test_run_detector_initialization_stage_wraps_models_load_and_train_fit_sections(self):
         """Stage wrapper should always time models.load and time train.detector_fit when fitting occurs."""
@@ -2931,8 +2929,6 @@ class TestRefactorHelpers:
             record_episode_fn=None,
             maybe_update_adaptive_thresholds_fn=_maybe_update_adaptive_thresholds_fn,
             coldstart_complete=True,
-            continuous_learning=True,
-            threshold_update_interval=1,
             equip_id=1,
             run_regime_postprocess_stage_fn=_run_regime_postprocess_stage_fn,
             regime_model=None,

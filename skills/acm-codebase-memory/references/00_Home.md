@@ -1,6 +1,6 @@
 ---
 type: index
-generated_at: 2026-02-21T14:23:15+00:00
+generated_at: 2026-02-22T13:46:41+00:00
 ---
 
 # ACM Obsidian Knowledge Graph
@@ -9,8 +9,8 @@ Generated from code in `core/`.
 
 ## Snapshot
 - modules: 36
-- symbols (functions/classes/methods): 818
-- generated_at_utc: 2026-02-21T14:23:15+00:00
+- symbols (functions/classes/methods): 848
+- generated_at_utc: 2026-02-22T13:46:41+00:00
 
 ## Start Here
 - [[01_Modules]]

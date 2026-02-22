@@ -784,6 +784,12 @@ class AcmRunBootstrapState:
     cli_overrides: list[str]
 
 
+@dataclass
+class AcmRuntimePolicy:
+    """Normalized runtime policy values for one ACM run."""
+    force_retraining: bool
+
+
 def get_acm_run_count(
     sql_client: Any,
     equip_id: int,
@@ -893,4 +899,17 @@ def bootstrap_acm_run_state(
         win_start=win_start,
         win_end=win_end,
         cli_overrides=cli_overrides,
+    )
+
+
+def resolve_runtime_policy(
+    args: Any,
+) -> AcmRuntimePolicy:
+    """
+    Normalize runtime policy flags from CLI.
+    """
+    force_retraining = bool(getattr(args, "force_retrain", False))
+
+    return AcmRuntimePolicy(
+        force_retraining=force_retraining,
     )

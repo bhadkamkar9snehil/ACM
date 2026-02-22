@@ -39,6 +39,9 @@ configs/sql_connection.ini
 **/artifacts/
 ACM_V6_BACKUP_*/
 
+## Local Obsidian vault (agent memory graph)
+docs/obsidian_vault/
+
 ## Archive folder (historical docs - tracked but organized)
 # docs/archive/ is tracked intentionally
 

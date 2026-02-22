@@ -505,7 +505,7 @@ def evaluate_and_maybe_refit_cached_models(
     run_id: Optional[str],
     equip_id: int,
     regime_model: Optional[Any],
-) -> Dict[str, Any]:
+) -> "AutoRetrainDecision":
     """
     Evaluate auto-retrain triggers for cached models and optionally refit detectors.
     """
@@ -514,19 +514,19 @@ def evaluate_and_maybe_refit_cached_models(
     cached_models_out = cached_models
     regime_model_out = regime_model
 
-    if not (cached_models and not detectors_just_trained and cfg.get("models", {}).get("auto_retrain", True)):
-        return {
-            "force_retrain": force_retrain,
-            "cached_models": cached_models_out,
-            "regime_model": regime_model_out,
-            "retrain_result": retrain_result,
-        }
+    if not (cached_models and not detectors_just_trained):
+        return AutoRetrainDecision(
+            force_retrain=force_retrain,
+            cached_models=cached_models_out,
+            regime_model=regime_model_out,
+            retrain_result=retrain_result,
+        )
 
     try:
         trigger_eval = evaluate_force_retrain_triggers(
             cfg=cfg,
             cached_manifest=cached_manifest,
-            score_out=score_out if isinstance(score_out, dict) else {},
+            score_out=score_out,
             regime_quality_ok=regime_quality_ok,
             current_model_maturity=current_model_maturity,
             boolean_only_metrics=boolean_only_metrics,
@@ -554,20 +554,23 @@ def evaluate_and_maybe_refit_cached_models(
                 equip=equip,
             )
     except Exception as e:
-        logger.warn(
-            f"Quality assessment failed: {e}",
-            component="MODEL",
-            equip=equip,
-            error_type=type(e).__name__,
-            error=str(e)[:200],
-        )
+        raise RuntimeError(f"Quality assessment failed: {e}") from e
 
-    return {
-        "force_retrain": force_retrain,
-        "cached_models": cached_models_out,
-        "regime_model": regime_model_out,
-        "retrain_result": retrain_result,
-    }
+    return AutoRetrainDecision(
+        force_retrain=force_retrain,
+        cached_models=cached_models_out,
+        regime_model=regime_model_out,
+        retrain_result=retrain_result,
+    )
+
+
+@dataclass
+class AutoRetrainDecision:
+    """Internal decision payload for cached-model retrain evaluation."""
+    force_retrain: bool
+    cached_models: Optional[Dict[str, Any]]
+    regime_model: Optional[Any]
+    retrain_result: Optional[Dict[str, Any]]
 
 
 def run_auto_retrain_stage(
@@ -614,19 +617,19 @@ def run_auto_retrain_stage(
             equip_id=equip_id,
             equip=equip,
         )
-        retrain_out = {
-            "force_retrain": True,
-            "cached_models": None,
-            "regime_model": regime_model,
-            "retrain_result": retrain_result,
-        }
+        retrain_out = AutoRetrainDecision(
+            force_retrain=True,
+            cached_models=None,
+            regime_model=regime_model,
+            retrain_result=retrain_result,
+        )
     else:
         retrain_out = evaluate_and_maybe_refit_cached_models(
             cfg=cfg,
             cached_models=cached_models,
             cached_manifest=cached_manifest,
             detectors_just_trained=detectors_just_trained,
-            score_out=score_out if isinstance(score_out, dict) else {},
+            score_out=score_out,
             regime_quality_ok=regime_quality_ok,
             current_model_maturity=current_model_maturity,
             boolean_only_metrics=boolean_only_metrics,
@@ -643,7 +646,7 @@ def run_auto_retrain_stage(
             regime_model=regime_model,
         )
 
-    retrain_result = retrain_out.get("retrain_result")
+    retrain_result = retrain_out.retrain_result
     detectors_out = dict(detectors)
     if retrain_result is not None:
         detectors_out["ar1_detector"] = retrain_result["ar1_detector"]
@@ -655,9 +658,9 @@ def run_auto_retrain_stage(
         detectors_out["pca_train_t2"] = retrain_result["pca_train_t2"]
 
     return AutoRetrainStageResult(
-        force_retrain=bool(retrain_out["force_retrain"]),
-        cached_models=retrain_out["cached_models"],
-        regime_model=retrain_out["regime_model"],
+        force_retrain=bool(retrain_out.force_retrain),
+        cached_models=retrain_out.cached_models,
+        regime_model=retrain_out.regime_model,
         detectors=detectors_out,
     )
 
@@ -669,10 +672,6 @@ class AutoRetrainStageResult:
     cached_models: Optional[Dict[str, Any]]
     regime_model: Optional[Any]
     detectors: Dict[str, Any]
-
-    def __getitem__(self, key: str) -> Any:
-        """Backward-compatible dict-like access."""
-        return getattr(self, key)
 
 
 def auto_tune_parameters(
@@ -722,9 +721,6 @@ def auto_tune_parameters(
     Guard: CONVERGED models skip refit evaluation entirely (v11.6.0).
     Quality thresholds (silhouette, drift, anomaly rate) gate refit requests.
     """
-    if not cfg.get("models", {}).get("auto_tune", True):
-        return
-    
     # v11.6.0 FIX #3: Skip refit evaluation entirely for CONVERGED models
     # CONVERGED models are stable and should NOT trigger refit requests.
     # This prevents 170+ spurious refit requests for stable equipment.
@@ -877,5 +873,4 @@ def auto_tune_parameters(
             )
     
     except Exception as e:
-        Console.warn(f"Autonomous tuning failed: {e}", component="AUTO-TUNE",
-                    equip=equip, error_type=type(e).__name__, error=str(e)[:200])
+        raise RuntimeError(f"Autonomous tuning failed: {e}") from e

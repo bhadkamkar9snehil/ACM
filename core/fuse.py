@@ -88,7 +88,7 @@ class CalibrationContaminationFilter:
         Args:
             method: Filtering method ('iqr', 'iterative_mad', 'z_trim', 'hybrid', 'none')
             z_threshold: Z-score threshold for exclusion (MAD-scaled)
-            iqr_multiplier: IQR multiplier for IQR method (default 2.5 = ~3.5σ for normal)
+            iqr_multiplier: IQR multiplier for IQR method (default 2.5 = about 3.5 std for normal)
             max_iterations: Maximum iterations for iterative methods
             convergence_tol: Convergence tolerance (median change) for iterative methods
             min_retained_ratio: Minimum ratio of samples to retain (0.70 = keep at least 70%)
@@ -488,10 +488,6 @@ def tune_detector_weights(
         Tuple of (tuned_weights, diagnostics)
     """
     tune_cfg = (cfg or {}).get("fusion", {}).get("auto_tune", {}) if cfg else {}
-    enabled = tune_cfg.get("enabled", False)
-    
-    if not enabled:
-        return current_weights, {"enabled": False, "reason": "auto_tune.enabled=False in config"}
 
     with Span("fusion.tune_weights", n_detectors=len(streams), n_samples=len(fused) if isinstance(fused, np.ndarray) else 0):
         # FUSE-09: Configurable parameters
@@ -530,17 +526,6 @@ def tune_detector_weights(
                     component="TUNE", episode_source=episode_source
                 )
                 use_statistical_fallback = True
-            elif fallback_method == "disable":
-                Console.warn(
-                    "Circular tuning guard: require_external_labels=True but episodes appear to be from "
-                    f"same run (source='{episode_source}'). Weight tuning disabled to prevent mode collapse.",
-                    component="TUNE", episode_source=episode_source
-                )
-                return current_weights, {
-                    "enabled": False, 
-                    "reason": "circular_tuning_guard",
-                    "episode_source": episode_source
-                }
             else:
                 # Use explicit fallback method
                 Console.info(
@@ -797,18 +782,9 @@ def tune_detector_weights(
                     diagnostics["detector_metrics"][detector_name] = det_diag
 
                 except Exception as e:
-                    Console.warn(f"{detector_name}: metric calculation failed - {e}", component="TUNE", detector=detector_name, method=tuning_method, error_type=type(e).__name__, error=str(e)[:200])
-                    prior = float(detector_priors.get(detector_name, 0.1))
-                    fallback_score = prior
-                    quality_scores[detector_name] = fallback_score
-                    diagnostics["detector_metrics"][detector_name] = {
-                        "status": "error",
-                        "error": str(e),
-                        "metric_type": "prior_only",
-                        "metric_value": 0.0,
-                        "prior": prior,
-                        "final_score": float(fallback_score)
-                    }
+                    raise RuntimeError(
+                        f"{detector_name}: metric calculation failed for method={tuning_method}: {e}"
+                    ) from e
 
             if not quality_scores:
                 diagnostics["reason"] = "no_valid_quality_scores"
@@ -1131,25 +1107,22 @@ class ScoreCalibrator:
         self.regime_thresh_.clear()
         self.regime_params_.clear()
 
-        # Self-tuning path: find threshold that matches target FP rate
-        # NOTE: Uses CLEANED data for threshold calculation
-        if self.self_tune_cfg.get("enabled", False):
-            target_fp_rate = float(self.self_tune_cfg.get("target_fp_rate", 0.001))
-            # The quantile for the target FP rate is (1 - rate)
-            auto_q = float(np.clip(1.0 - target_fp_rate, 0.9, 0.995))
-            try:
-                q_val = float(np.quantile(x_clean, auto_q))
-            except Exception:
-                q_val = float(np.quantile(x_clean, min(0.99, self.q)))
-            spread = abs(q_val - self.med)
-            if spread < 1e-6 or spread > 1e6 or not np.isfinite(spread):
-                fallback_q = min(0.99, max(self.q, 0.95))
-                q_val = float(np.quantile(x_clean, fallback_q))
-            self.q_thresh = float(q_val)
-            Console.info(f"Self-tuning enabled. Target FP rate {target_fp_rate:.3%} -> q={auto_q:.4f}, threshold={self.q_thresh:.4f}", component="CAL")
-        else:
-            # Standard quantile-based threshold (on cleaned data)
-            self.q_thresh = float(np.quantile(x_clean, self.q))
+        # Self-tuning path is always active.
+        target_fp_rate = float(self.self_tune_cfg.get("target_fp_rate", 0.001))
+        auto_q = float(np.clip(1.0 - target_fp_rate, 0.9, 0.995))
+        try:
+            q_val = float(np.quantile(x_clean, auto_q))
+        except Exception:
+            q_val = float(np.quantile(x_clean, min(0.99, self.q)))
+        spread = abs(q_val - self.med)
+        if spread < 1e-6 or spread > 1e6 or not np.isfinite(spread):
+            fallback_q = min(0.99, max(self.q, 0.95))
+            q_val = float(np.quantile(x_clean, fallback_q))
+        self.q_thresh = float(q_val)
+        Console.info(
+            f"Self-tuning active. Target FP rate {target_fp_rate:.3%} -> q={auto_q:.4f}, threshold={self.q_thresh:.4f}",
+            component="CAL",
+        )
         
         # FUSE-FIX-04: Validate and clamp threshold to reasonable range
         # Thresholds should be in a sensible range for z-scores/raw anomaly metrics
@@ -1246,7 +1219,7 @@ class ScoreCalibrator:
         denom = max(self.scale, 1e-9)
         z = (x - self.med) / denom
         z = np.nan_to_num(z, nan=0.0, posinf=clip_z, neginf=-clip_z)
-        # FUSE-FIX-02: Apply global z-score clipping to ±10
+        # FUSE-FIX-02: Apply global z-score clipping to +/-10
         if clip_z > 0:
             z = np.clip(z, -clip_z, clip_z)
         z = np.clip(z, -10.0, 10.0)  # Enforce hard limit for all fused z-scores
@@ -1772,7 +1745,7 @@ class Fuser:
         """Clean calibrated z-scores for fusion (NaN/inf handling only).
 
         v11.9.0: Input z-scores are already training-anchored via ScoreCalibrator.
-        Do NOT re-center or re-scale — that destroys cross-batch comparability.
+        Do NOT re-center or re-scale; that destroys cross-batch comparability.
         Previous _zscore() re-normalized against the current batch, making health
         scores incomparable between batches (e.g., 39% vs 94% on same data).
         """
@@ -1798,7 +1771,7 @@ class Fuser:
             streams: Dict of detector_name -> z-score array.
             original_features: Score-window feature DataFrame (provides index).
             discounted_weights: Pre-computed correlation-discounted weights from
-                compute_discounted_weights(). Compute once upstream and pass in —
+                compute_discounted_weights(). Compute once upstream and pass in,
                 never compute inside fuse() per call.
         """
         # ANA-03: normalize weights over PRESENT keys only (robust to missing detectors)
@@ -2030,7 +2003,7 @@ class Fuser:
             # PERF-FIX (v11.1.7): Precompute global baseline statistics for feature attribution
             # This avoids recomputing median/MAD for each episode (was causing 700s+ overhead)
             # PERF-FIX (v11.15.2): Precompute the FULL feature z-score matrix as numpy array once.
-            # Per-episode attribution then just slices rows and calls np.nanmean(abs, axis=0) —
+            # Per-episode attribution then just slices rows and calls np.nanmean(abs, axis=0),
             # eliminating the 5789 pandas Series.fillna() calls that caused 191s in coldstart.
             global_feature_medians: Optional[pd.Series] = None
             global_feature_mads: Optional[pd.Series] = None
@@ -2086,7 +2059,7 @@ class Fuser:
                 culprits_raw = primary_detector
                 if 'pca' in primary_detector or 'mhal' in primary_detector:
                     # P2-FIX (v11.1.6): Improved PCA attribution using absolute deviation
-                    # PERF-FIX (v11.15.2): Use precomputed numpy z-score matrix — slice rows for
+                    # PERF-FIX (v11.15.2): Use precomputed numpy z-score matrix; slice rows for
                     # the episode window and call np.nanmean(abs, axis=0) once.  Eliminates
                     # 5789 pandas Series.fillna() calls that were costing 191s in coldstart.
                     top_feature: Optional[str] = None
@@ -2194,10 +2167,8 @@ class Fuser:
 def compute_episode_params(streams: Dict[str, np.ndarray], cfg: Dict[str, Any]) -> EpisodeParams:
     """Compute CUSUM episode detection parameters from current stream statistics.
 
-    Computed once in run_fusion_pipeline() and shared across the baseline, train,
-    and score passes — avoiding redundant computation and triplicated log output.
-
-    Logs CUSUM tuning at INFO level (intended to appear exactly once per pipeline run).
+    Computed once in run_fusion_pipeline() and shared across baseline, train, and
+    score passes to avoid redundant computation and duplicate logging.
     """
     epcfg = (cfg or {}).get("episodes", {})
     cpd = epcfg.get("cpd", {}) if isinstance(epcfg, dict) else {}
@@ -2216,57 +2187,47 @@ def compute_episode_params(streams: Dict[str, np.ndarray], cfg: Dict[str, Any]) 
     min_release = int(epcfg.get("min_release", 3))
 
     auto_tune_cfg = cpd.get("auto_tune", {})
-    auto_tune_enabled = auto_tune_cfg.get("enabled", False)
+    all_values: List[np.ndarray] = []
+    for stream in streams.values():
+        finite_mask = np.isfinite(stream)
+        if finite_mask.any():
+            all_values.append(stream[finite_mask])
 
-    if auto_tune_enabled:
-        try:
-            all_values = []
-            for stream in streams.values():
-                finite_mask = np.isfinite(stream)
-                if finite_mask.any():
-                    all_values.append(stream[finite_mask])
+    statistic_vals = np.concatenate(all_values) if all_values else np.array([], dtype=float)
 
-            statistic_vals = np.concatenate(all_values) if all_values else np.array([], dtype=float)
+    if statistic_vals.size:
+        statistic_median = float(np.nanmedian(statistic_vals))
+        statistic_mad = float(np.nanmedian(np.abs(statistic_vals - statistic_median)))
+        std = max(statistic_mad * 1.4826, 1e-3)
+        p50 = float(np.nanpercentile(statistic_vals, 50))
+        p95 = float(np.nanpercentile(statistic_vals, 95))
+        spread = max(p95 - p50, 1e-3)
 
-            if statistic_vals.size:
-                # v11.1.3: Use MAD * 1.4826 instead of std for robustness
-                statistic_median = float(np.nanmedian(statistic_vals))
-                statistic_mad = float(np.nanmedian(np.abs(statistic_vals - statistic_median)))
-                std = max(statistic_mad * 1.4826, 1e-3)
-                p50 = float(np.nanpercentile(statistic_vals, 50))
-                p95 = float(np.nanpercentile(statistic_vals, 95))
-                spread = max(p95 - p50, 1e-3)
+        # k_factor and h_factor are dimensionless multipliers; detect_episodes()
+        # applies the actual scale based on stream dispersion.
+        k_factor = float(auto_tune_cfg.get("k_factor", 0.5))
+        h_factor = float(auto_tune_cfg.get("h_factor", 5.0))
+        k_min = float(auto_tune_cfg.get("k_min", 0.25))
+        k_max = float(auto_tune_cfg.get("k_max", max(base_k_sigma, 2.0)))
+        h_min = float(auto_tune_cfg.get("h_min", 3.0))
+        h_max = float(auto_tune_cfg.get("h_max", max(base_h_sigma, 10.0)))
 
-                # P0-FIX (v11.1.6): k_factor and h_factor ARE the dimensionless multipliers.
-                # DO NOT multiply by std or spread — detect_episodes() does that.
-                k_factor = float(auto_tune_cfg.get("k_factor", 0.5))
-                h_factor = float(auto_tune_cfg.get("h_factor", 5.0))
-                k_min = float(auto_tune_cfg.get("k_min", 0.25))
-                k_max = float(auto_tune_cfg.get("k_max", max(base_k_sigma, 2.0)))
-                h_min = float(auto_tune_cfg.get("h_min", 3.0))
-                h_max = float(auto_tune_cfg.get("h_max", max(base_h_sigma, 10.0)))
+        spread_ratio = spread / std if std > 1e-6 else 1.0
+        adaptive_h_factor = h_factor * min(1.5, max(0.8, spread_ratio / 2.0))
+        k_sigma = float(np.clip(k_factor, k_min, k_max))
+        h_sigma = float(np.clip(adaptive_h_factor, h_min, h_max))
 
-                spread_ratio = spread / std if std > 1e-6 else 1.0
-                adaptive_h_factor = h_factor * min(1.5, max(0.8, spread_ratio / 2.0))
-                k_sigma = float(np.clip(k_factor, k_min, k_max))
-                h_sigma = float(np.clip(adaptive_h_factor, h_min, h_max))
-
-                Console.info(
-                    f"CUSUM auto-tuned: k_sigma={base_k_sigma:.3f}->{k_sigma:.3f}, "
-                    f"h_sigma={base_h_sigma:.3f}->{h_sigma:.3f} (spread_ratio={spread_ratio:.2f})",
-                    component="FUSE",
-                )
-            else:
-                Console.warn(
-                    "CUSUM auto-tune skipped: no finite stream values",
-                    component="FUSE",
-                    n_streams=len(streams),
-                )
-        except Exception as tune_e:
-            Console.warn(
-                f"CUSUM auto-tune failed: {tune_e}",
-                component="FUSE", error_type=type(tune_e).__name__, error=str(tune_e)[:200],
-            )
+        Console.info(
+            f"CUSUM auto-tuned: k_sigma={base_k_sigma:.3f}->{k_sigma:.3f}, "
+            f"h_sigma={base_h_sigma:.3f}->{h_sigma:.3f} (spread_ratio={spread_ratio:.2f})",
+            component="FUSE",
+        )
+    else:
+        Console.warn(
+            "CUSUM auto-tune skipped: no finite stream values",
+            component="FUSE",
+            n_streams=len(streams),
+        )
 
     return EpisodeParams(
         k_sigma=k_sigma,
@@ -2280,7 +2241,6 @@ def compute_episode_params(streams: Dict[str, np.ndarray], cfg: Dict[str, Any]) 
         min_release=min_release,
     )
 
-
 def compute_discounted_weights(
     weights: Dict[str, float],
     streams: Dict[str, np.ndarray],
@@ -2291,7 +2251,7 @@ def compute_discounted_weights(
     Detectors that are strongly correlated (|r| > 0.5) with others receive
     a downward weight adjustment to prevent double-counting of redundant signal.
 
-    Computed once in run_fusion_pipeline() and passed into Fuser.fuse() —
+    Computed once in run_fusion_pipeline() and passed into Fuser.fuse();
     never computed inside fuse() per-call.
 
     Returns a new dict of (unnormalized) discounted weights keyed by detector name.
@@ -2308,58 +2268,53 @@ def compute_discounted_weights(
     pairs_checked = 0
     pairs_correlated = 0
 
-    try:
-        zs = {k: Fuser._sanitize(np.asarray(streams[k], dtype=float)) for k in keys}
-        sorted_keys = sorted(keys)
-        for i, k1 in enumerate(sorted_keys):
-            for k2 in sorted_keys[i + 1:]:
-                arr1, arr2 = zs[k1], zs[k2]
-                valid_mask = np.isfinite(arr1) & np.isfinite(arr2)
-                if valid_mask.sum() > 10:
-                    # P3-FIX (v11.1.6): Spearman over Pearson — robust to outliers
-                    # Skip constant arrays — Spearman is undefined and scipy raises
-                    # ConstantInputWarning. Correlation simply doesn't apply here.
-                    valid_1, valid_2 = arr1[valid_mask], arr2[valid_mask]
-                    if np.unique(valid_1).size < 2 or np.unique(valid_2).size < 2:
-                        continue
-                    pairs_checked += 1
-                    spearman_result = spearmanr(valid_1, valid_2)
-                    corr = float(spearman_result.correlation)  # type: ignore[union-attr]
-                    if np.isfinite(corr) and abs(corr) > 0.5:
-                        pairs_correlated += 1
-                        correlation_count[k1] += 1
-                        correlation_count[k2] += 1
-                        correlation_sum[k1] += abs(corr)
-                        correlation_sum[k2] += abs(corr)
-                        if not quiet:
-                            Console.debug(
-                                f"Detector Spearman correlation {k1}<->{k2}: {corr:.2f}",
-                                component="FUSE",
-                            )
+    zs = {k: Fuser._sanitize(np.asarray(streams[k], dtype=float)) for k in keys}
+    sorted_keys = sorted(keys)
+    for i, k1 in enumerate(sorted_keys):
+        for k2 in sorted_keys[i + 1:]:
+            arr1, arr2 = zs[k1], zs[k2]
+            valid_mask = np.isfinite(arr1) & np.isfinite(arr2)
+            if valid_mask.sum() > 10:
+                # P3-FIX (v11.1.6): Spearman over Pearson - robust to outliers.
+                valid_1, valid_2 = arr1[valid_mask], arr2[valid_mask]
+                if np.unique(valid_1).size < 2 or np.unique(valid_2).size < 2:
+                    continue
+                pairs_checked += 1
+                spearman_result = spearmanr(valid_1, valid_2)
+                corr = float(spearman_result.correlation)  # type: ignore[union-attr]
+                if np.isfinite(corr) and abs(corr) > 0.5:
+                    pairs_correlated += 1
+                    correlation_count[k1] += 1
+                    correlation_count[k2] += 1
+                    correlation_sum[k1] += abs(corr)
+                    correlation_sum[k2] += abs(corr)
+                    if not quiet:
+                        Console.debug(
+                            f"Detector Spearman correlation {k1}<->{k2}: {corr:.2f}",
+                            component="FUSE",
+                        )
 
-        for k in keys:
-            if correlation_count[k] > 0:
-                avg_corr = correlation_sum[k] / correlation_count[k]
-                # At avg_corr=0.8, discount=15%; capped at 30%
-                discount_factor = min(0.3, (avg_corr - 0.5) * 0.5)
-                w_raw[k] *= (1 - discount_factor)
-                if not quiet:
-                    Console.debug(
-                        f"Detector {k}: correlated with {correlation_count[k]} others, "
-                        f"avg_corr={avg_corr:.2f}, discount={discount_factor:.1%}",
-                        component="FUSE",
-                    )
+    for k in keys:
+        if correlation_count[k] > 0:
+            avg_corr = correlation_sum[k] / correlation_count[k]
+            # At avg_corr=0.8, discount=15%; capped at 30%
+            discount_factor = min(0.3, (avg_corr - 0.5) * 0.5)
+            w_raw[k] *= (1 - discount_factor)
+            if not quiet:
+                Console.debug(
+                    f"Detector {k}: correlated with {correlation_count[k]} others, "
+                    f"avg_corr={avg_corr:.2f}, discount={discount_factor:.1%}",
+                    component="FUSE",
+                )
 
-        if pairs_correlated > 0 and not quiet:
-            Console.info(
-                f"{pairs_correlated}/{pairs_checked} detector pairs correlated, "
-                f"weight adjustments applied",
-                component="FUSE",
-                pairs_checked=pairs_checked,
-                pairs_correlated=pairs_correlated,
-            )
-    except Exception as ce:
-        Console.debug(f"Correlation adjustment failed: {ce}", component="FUSE")
+    if pairs_correlated > 0 and not quiet:
+        Console.info(
+            f"{pairs_correlated}/{pairs_checked} detector pairs correlated, "
+            f"weight adjustments applied",
+            component="FUSE",
+            pairs_checked=pairs_checked,
+            pairs_correlated=pairs_correlated,
+        )
 
     return w_raw
 
@@ -2507,15 +2462,9 @@ def normalize_episodes_schema(
     start_ts = pd.to_datetime(episodes["start_ts"], errors="coerce")
     end_ts = pd.to_datetime(episodes["end_ts"], errors="coerce")
     episodes["duration_s"] = (end_ts - start_ts).dt.total_seconds()
-    try:
-        episodes["duration_hours"] = episodes["duration_s"].astype(float) / 3600.0
-    except Exception:
-        duration_s_series = episodes["duration_s"] if "duration_s" in episodes.columns else pd.Series(0.0, index=episodes.index)
-        episodes["duration_hours"] = np.where(
-            pd.notna(duration_s_series),
-            duration_s_series.astype(float) / 3600.0,
-            0.0
-        )
+    episodes["duration_hours"] = (
+        pd.to_numeric(episodes["duration_s"], errors="coerce").fillna(0.0).astype(float) / 3600.0
+    )
     
     # Sort and finalize
     episodes = episodes.sort_values(["start_ts", "end_ts", "episode_id"]).reset_index(drop=True)
@@ -2600,7 +2549,7 @@ def run_fusion_pipeline(
     equip: str = "",
 ) -> FusionResult:
     """
-    Execute complete fusion pipeline: validate → auto-tune → fuse → detect episodes.
+    Execute complete fusion pipeline: validate -> auto-tune -> fuse -> detect episodes.
     
     Args:
         frame: Score data with detector z-score columns
@@ -2628,54 +2577,48 @@ def run_fusion_pipeline(
     episode_params = compute_episode_params(present, effective_cfg)
     discounted_weights = compute_discounted_weights(weights, present)
 
-    # 3. Auto-tune detector weights (optional — quick baseline fuse pass, no episodes)
+    # 3. Auto-tune detector weights (baseline fuse pass, no episodes)
     auto_tuned = False
     tuning_diagnostics = None
-    try:
-        with Span("fusion.baseline", n_detectors=len(present), n_samples=len(score_data)):
-            fused_baseline = Fuser(weights=weights, ep=episode_params).fuse(
-                present, score_data, discounted_weights=discounted_weights
-            )
-        fused_baseline_np = np.asarray(fused_baseline, dtype=np.float32).reshape(-1)
-
-        tuned, diagnostics = tune_detector_weights(
-            streams=present, fused=fused_baseline_np,
-            current_weights=weights, cfg=cfg,
+    with Span("fusion.baseline", n_detectors=len(present), n_samples=len(score_data)):
+        fused_baseline = Fuser(weights=weights, ep=episode_params).fuse(
+            present, score_data, discounted_weights=discounted_weights
         )
+    fused_baseline_np = np.asarray(fused_baseline, dtype=np.float32).reshape(-1)
 
-        if diagnostics.get("enabled"):
-            weights = tuned
-            auto_tuned = True
-            tuning_diagnostics = diagnostics
-            # Recompute discounted weights with the newly tuned base weights
-            discounted_weights = compute_discounted_weights(weights, present, quiet=True)
+    tuned, diagnostics = tune_detector_weights(
+        streams=present, fused=fused_baseline_np,
+        current_weights=weights, cfg=cfg,
+    )
 
-            if output_manager:
-                output_manager.write_fusion_metrics(
-                    fusion_weights=weights,
-                    tuning_diagnostics=diagnostics,
-                    previous_weights=previous_weights,
-                )
-    except Exception as e:
-        Console.warn(f"Auto-tuning failed: {e}", component="FUSE", equip=equip)
+    if diagnostics.get("enabled"):
+        weights = tuned
+        auto_tuned = True
+        tuning_diagnostics = diagnostics
+        # Recompute discounted weights with the newly tuned base weights
+        discounted_weights = compute_discounted_weights(weights, present, quiet=True)
 
-    # 4. Fuse training data (for threshold baseline — no episodes needed)
+        if output_manager:
+            output_manager.write_fusion_metrics(
+                fusion_weights=weights,
+                tuning_diagnostics=diagnostics,
+                previous_weights=previous_weights,
+            )
+
+    # 4. Fuse training data (for threshold baseline, no episodes needed)
     train_fused = None
     if train_frame is not None and train_data is not None and not train_data.empty:
         train_present = {k: train_frame[k].to_numpy(copy=False)
                         for k in present.keys() if k in train_frame.columns}
         if train_present:
-            try:
-                # Train uses its own discounted weights — Spearman correlations may
-                # differ on the training population vs the current scoring window.
-                train_discounted = compute_discounted_weights(weights, train_present)
-                with Span("fusion.train", n_detectors=len(train_present), n_samples=len(train_data)):
-                    train_fused_series = Fuser(weights=weights, ep=episode_params).fuse(
-                        train_present, train_data, discounted_weights=train_discounted
-                    )
-                train_fused = np.asarray(train_fused_series, dtype=np.float32).reshape(-1)
-            except Exception as e:
-                Console.warn(f"Train fusion failed: {e}", component="FUSE", equip=equip)
+            # Train uses its own discounted weights; Spearman correlations may
+            # differ on the training population vs the current scoring window.
+            train_discounted = compute_discounted_weights(weights, train_present)
+            with Span("fusion.train", n_detectors=len(train_present), n_samples=len(train_data)):
+                train_fused_series = Fuser(weights=weights, ep=episode_params).fuse(
+                    train_present, train_data, discounted_weights=train_discounted
+                )
+            train_fused = np.asarray(train_fused_series, dtype=np.float32).reshape(-1)
 
     # 5. Score fusion with episode detection
     with Span("fusion.score", n_detectors=len(present), n_samples=len(score_data)):
@@ -2825,9 +2768,6 @@ def run_health_stage(
     detector_flags: Dict[str, bool],
     cached_calibration_params: Optional[Dict[str, Any]],
     saved_model_version: Optional[int],
-    score_all_detectors_fn: Any,
-    calibrate_all_detectors_fn: Any,
-    persist_calibration_params_fn: Any,
     output_manager: Any,
     logger: Any,
     equip: str,
@@ -2835,22 +2775,47 @@ def run_health_stage(
     omr_contributions_data: Optional[pd.DataFrame],
     record_detector_scores_fn: Optional[Callable[..., None]],
     record_episode_fn: Optional[Callable[..., None]],
-    maybe_update_adaptive_thresholds_fn: Any,
     coldstart_complete: bool,
-    continuous_learning: bool,
-    threshold_update_interval: int,
     equip_id: int,
-    run_regime_postprocess_stage_fn: Any,
     regime_model: Any,
-    auto_tune_parameters_fn: Any,
     score_out: Dict[str, Any],
     sql_client: Any,
     run_id: Optional[str],
     cached_manifest: Optional[Dict[str, Any]],
+    score_all_detectors_fn: Optional[Any] = None,
+    calibrate_all_detectors_fn: Optional[Any] = None,
+    persist_calibration_params_fn: Optional[Any] = None,
+    maybe_update_adaptive_thresholds_fn: Optional[Any] = None,
+    run_regime_postprocess_stage_fn: Optional[Any] = None,
+    auto_tune_parameters_fn: Optional[Any] = None,
 ) -> HealthStageResult:
     """
     Execute post-model health stages in pipeline order.
     """
+    score_detectors_fn = score_all_detectors_fn
+    calibrate_detectors_fn = calibrate_all_detectors_fn
+    adaptive_thresholds_fn = maybe_update_adaptive_thresholds_fn
+    regime_postprocess_fn = run_regime_postprocess_stage_fn
+    auto_tune_fn = auto_tune_parameters_fn
+
+    if score_detectors_fn is None or calibrate_detectors_fn is None:
+        from core.detector_orchestrator import score_all_detectors as _score_all_detectors
+        from core.detector_orchestrator import calibrate_all_detectors as _calibrate_all_detectors
+        score_detectors_fn = score_detectors_fn or _score_all_detectors
+        calibrate_detectors_fn = calibrate_detectors_fn or _calibrate_all_detectors
+
+    if adaptive_thresholds_fn is None:
+        from core.adaptive_thresholds import maybe_update_adaptive_thresholds as _adaptive_thresholds
+        adaptive_thresholds_fn = _adaptive_thresholds
+
+    if regime_postprocess_fn is None:
+        from core.regimes import run_regime_postprocess_stage as _run_regime_postprocess_stage
+        regime_postprocess_fn = _run_regime_postprocess_stage
+
+    if auto_tune_fn is None:
+        from core.model_evaluation import auto_tune_parameters as _auto_tune_parameters
+        auto_tune_fn = _auto_tune_parameters
+
     with section_fn("calibrate"):
         calibration_result = run_calibration_stage(
             train=train,
@@ -2865,8 +2830,8 @@ def run_health_stage(
             detector_flags=detector_flags,
             cached_calibration_params=cached_calibration_params,
             saved_model_version=saved_model_version,
-            score_all_detectors_fn=score_all_detectors_fn,
-            calibrate_all_detectors_fn=calibrate_all_detectors_fn,
+            score_all_detectors_fn=score_detectors_fn,
+            calibrate_all_detectors_fn=calibrate_detectors_fn,
             persist_calibration_params_fn=persist_calibration_params_fn,
             output_manager=output_manager,
             logger=logger,
@@ -2901,21 +2866,19 @@ def run_health_stage(
         fusion_weights_used = fusion_stage.fusion_weights_used
 
     with section_fn("thresholds.adaptive"):
-        maybe_update_adaptive_thresholds_fn(
+        adaptive_thresholds_fn(
             train_frame=train_frame,
             train_data=train,
             cfg=cfg,
             equip_id=equip_id,
             output_manager=output_manager,
             coldstart_complete=coldstart_complete,
-            continuous_learning=continuous_learning,
-            threshold_update_interval=threshold_update_interval,
             regime_quality_ok=regime_quality_ok,
             logger=logger,
         )
 
     with section_fn("regimes.postprocess"):
-        regime_post = run_regime_postprocess_stage_fn(
+        regime_post = regime_postprocess_fn(
             frame=frame,
             score_data=score,
             regime_model=regime_model,
@@ -2926,7 +2889,7 @@ def run_health_stage(
         )
         frame = regime_post.frame
 
-    auto_tune_parameters_fn(
+    auto_tune_fn(
         frame=frame,
         episodes=episodes,
         score_out=score_out,
@@ -2950,3 +2913,4 @@ def run_health_stage(
         quality_ok=quality_ok,
         use_per_regime=use_per_regime,
     )
+

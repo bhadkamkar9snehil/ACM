@@ -1,8 +1,26 @@
-# Changelog
+# ACM Version and Changelog
 
 All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## Version Index
+
+This document is the single canonical source for both:
+1. Current version context
+2. Full change history
+
+Current code version constant:
+- Source: `utils/version.py`
+- `__version__ = 11.15.5`
+- `__version_date__ = 2026-02-20`
+
+Current integration changelog head:
+- Latest documented release section: `11.16.0` (integration stream)
+- `Unreleased` section captures pending changes on top of that
+
+Versioning rule:
+- If code version changes, update `utils/version.py` and this file in the same change set.
 
 ## [Unreleased]
 

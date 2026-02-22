@@ -1174,10 +1174,6 @@ def build_features_for_pipeline(
 
     Keeps fill-value derivation strictly from TRAIN data to avoid leakage.
     """
-    if not cfg.get("runtime", {}).get("phases", {}).get("features", True):
-        Console.info("Feature building disabled in config", component="FEAT", equip=equip)
-        return train, score
-
     feat_win = int((cfg.get("features", {}) or {}).get("window", 3))
     Console.info(f"Building features with window={feat_win}", component="FEAT", equip=equip)
 
