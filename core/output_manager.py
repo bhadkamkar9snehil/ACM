@@ -23,7 +23,7 @@ import gc
 import threading
 from pathlib import Path
 from contextlib import contextmanager, nullcontext
-from typing import Dict, Any, List, Optional, Union, Tuple, TypeVar, Callable, cast, Set
+from typing import Dict, Any, List, Optional, Union, Tuple, Callable, cast, Set
 from dataclasses import dataclass, field
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -41,6 +41,7 @@ from utils.timestamp_utils import (
 )
 
 from utils.detector_labels import get_detector_label, format_culprit_label
+from utils.config_dict import cfg_get as _cfg_get, future_cutoff_ts as _future_cutoff_ts
 
 from core.observability import Console
 
@@ -265,31 +266,6 @@ UPSERT_TABLES: Dict[str, str] = {
     "ACM_DetectorForecast_TS": "_upsert_detector_forecast_ts",
     "ACM_PCA_Metrics": "_upsert_pca_metrics",
 }
-
-# Enhanced config getter with typing
-T = TypeVar("T")
-
-def _cfg_get(cfg: Dict[str, Any], path: str, default: T) -> T:
-    """Get config value by dot path with type preservation."""
-    keys = path.split('.')
-    current: Any = cfg
-    for key in keys:
-        if isinstance(current, dict) and key in current:
-            current = current[key]
-        else:
-            return default
-    return current  # type: ignore[return-value]
-
-
-def _future_cutoff_ts(cfg: Dict[str, Any]) -> pd.Timestamp:
-    """Return timestamp cutoff that optionally allows future data via config."""
-    raw_value = _cfg_get(cfg, "runtime.future_grace_minutes", 0) or 0
-    try:
-        minutes = int(raw_value)
-    except (TypeError, ValueError):
-        minutes = 0
-    minutes = max(0, minutes)
-    return pd.Timestamp.now() + pd.Timedelta(minutes=minutes)
 
 # ==================== DATA LOADING ====================
 # Data loading functions extracted to core/data_loader.py (Phase 2)

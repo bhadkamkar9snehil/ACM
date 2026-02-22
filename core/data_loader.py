@@ -32,6 +32,7 @@ import numpy as np
 import pandas as pd
 
 from core.observability import Console
+from utils.config_dict import cfg_get as _cfg_get, future_cutoff_ts as _future_cutoff_ts
 
 
 # ============================================================================
@@ -56,27 +57,6 @@ class DataMeta:
 # ============================================================================
 # HELPER FUNCTIONS
 # ============================================================================
-def _cfg_get(cfg: Dict[str, Any], path: str, default: Any) -> Any:
-    """Get config value by dot path with type preservation."""
-    keys = path.split('.')
-    current: Any = cfg
-    for key in keys:
-        if isinstance(current, dict) and key in current:
-            current = current[key]
-        else:
-            return default
-    return current
-
-
-def _future_cutoff_ts(cfg: Dict[str, Any]) -> pd.Timestamp:
-    """Return timestamp cutoff that optionally allows future data via config."""
-    raw_value = _cfg_get(cfg, "runtime.future_grace_minutes", 0) or 0
-    try:
-        minutes = int(raw_value)
-    except (TypeError, ValueError):
-        minutes = 0
-    minutes = max(0, minutes)
-    return pd.Timestamp.now() + pd.Timedelta(minutes=minutes)
 
 
 def parse_ts_index(df: pd.DataFrame, ts_col: str) -> pd.DataFrame:
