@@ -358,6 +358,12 @@ class PersistenceStageResult:
     sensor_context: Optional[Dict[str, Any]] = None
 
 
+@dataclass
+class PersistenceInputPreparationResult:
+    """Result bundle for pre-persistence context preparation."""
+    sensor_context: Optional[Dict[str, Any]] = None
+
+
 class OutputManager:
     """
     Unified output manager that consolidates all scattered output generation.
@@ -3462,6 +3468,44 @@ class OutputManager:
             raw_score=persist_result.raw_score,
             sensor_context=persist_result.sensor_context,
         )
+
+    def prepare_persistence_inputs(
+        self,
+        *,
+        section_fn: Any,
+        raw_train: Optional[pd.DataFrame],
+        raw_score: Optional[pd.DataFrame],
+        frame: pd.DataFrame,
+        omr_contributions_data: Optional[pd.DataFrame],
+        regime_model: Any,
+        cfg: Dict[str, Any],
+        coldstart_complete: bool,
+        build_sensor_analytics_context_fn: Any,
+        logger: Any,
+        equip: str,
+    ) -> PersistenceInputPreparationResult:
+        """
+        Prepare persistence-stage inputs: baseline buffer update and sensor context.
+        """
+        with section_fn("baseline.buffer_write"):
+            self.update_baseline_buffer(
+                score_numeric=raw_score,
+                cfg=cfg,
+                coldstart_complete=coldstart_complete,
+            )
+
+        with section_fn("sensor.context"):
+            sensor_context = build_sensor_analytics_context_fn(
+                raw_train=raw_train,
+                raw_score=raw_score,
+                frame=frame,
+                omr_contributions_data=omr_contributions_data,
+                regime_model=regime_model,
+                logger=logger,
+                equip=equip,
+            )
+
+        return PersistenceInputPreparationResult(sensor_context=sensor_context)
 
     def release_persist_memory(
         self,
