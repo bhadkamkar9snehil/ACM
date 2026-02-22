@@ -538,6 +538,92 @@ class TestRefactorHelpers:
         assert captured["attributes"]["acm.run_id"] == "r1"
         assert captured["attributes"]["acm.equip_id"] == 1
 
+    def test_init_run_observability_invokes_init_and_profiling(self, monkeypatch):
+        """Observability startup helper should initialize and start profiling."""
+        from core import observability as obs
+
+        calls = {"init": 0, "profile": 0}
+
+        def _init(**kwargs):
+            calls["init"] += 1
+
+        def _start_profiling():
+            calls["profile"] += 1
+
+        monkeypatch.setattr(obs, "init", _init)
+        monkeypatch.setattr(obs, "start_profiling", _start_profiling)
+
+        obs.init_run_observability(equip="FD_FAN", equip_id=1, logger=None)
+
+        assert calls["init"] == 1
+        assert calls["profile"] == 1
+
+    def test_init_run_observability_warns_when_init_fails(self, monkeypatch):
+        """Observability startup helper should warn and continue on init errors."""
+        from core import observability as obs
+
+        warns = []
+
+        def _init(**kwargs):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(obs, "init", _init)
+
+        class _Logger:
+            def warn(self, msg, **kwargs):
+                warns.append((msg, kwargs))
+
+        obs.init_run_observability(equip="FD_FAN", equip_id=1, logger=_Logger())
+
+        assert len(warns) == 1
+        assert "Observability init failed" in warns[0][0]
+
+    def test_connect_acm_sql_failfast_returns_sql_client(self, monkeypatch):
+        """SQL fail-fast helper should return connected client on success."""
+        from core import sql_client as sql
+
+        class _Logger:
+            def info(self, *args, **kwargs):
+                pass
+
+            def ok(self, *args, **kwargs):
+                pass
+
+            def error(self, *args, **kwargs):
+                pass
+
+        expected = object()
+        monkeypatch.setattr(sql, "connect_acm_sql", lambda cfg, logger=None: expected)
+
+        out = sql.connect_acm_sql_failfast(cfg={}, logger=_Logger())
+        assert out is expected
+
+    def test_connect_acm_sql_failfast_raises_system_exit_on_failure(self, monkeypatch):
+        """SQL fail-fast helper should exit with code 1 when SQL connection fails."""
+        from core import sql_client as sql
+
+        errors = []
+
+        class _Logger:
+            def info(self, *args, **kwargs):
+                pass
+
+            def ok(self, *args, **kwargs):
+                pass
+
+            def error(self, *args, **kwargs):
+                errors.append((args, kwargs))
+
+        def _fail(cfg, logger=None):
+            raise RuntimeError("db down")
+
+        monkeypatch.setattr(sql, "connect_acm_sql", _fail)
+
+        with pytest.raises(SystemExit) as ex:
+            sql.connect_acm_sql_failfast(cfg={}, logger=_Logger())
+        assert ex.value.code == 1
+        assert len(errors) >= 1
+
     def test_run_drift_pipeline_smoke(self):
         """Drift pipeline wrapper should return frame and score_out keys."""
         from core.drift import run_drift_pipeline
