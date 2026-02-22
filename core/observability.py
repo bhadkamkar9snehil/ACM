@@ -46,7 +46,7 @@ import textwrap
 import shutil
 from contextlib import contextmanager
 from datetime import datetime
-from typing import Any, Callable, Dict, Generator, List, Optional, TypeVar
+from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, TypeVar
 
 # =============================================================================
 # STRUCTLOG + COLORAMA SETUP (Rich doesn't work reliably when piped)
@@ -1035,6 +1035,31 @@ def stop_profiling() -> None:
     else:
         # Silently skip if not initialized
         pass
+
+
+def start_run_span(
+    tracer: Optional[Any],
+    equip: str,
+    equip_id: int,
+    run_id: Optional[str],
+    run_count: int,
+) -> Tuple[Optional[Any], Optional[Any]]:
+    """Start and return the root run span context and span object."""
+    if tracer is None or not hasattr(tracer, "start_as_current_span"):
+        return None, None
+    span_name = f"acm.run:{equip}" if equip else "acm.run"
+    span_ctx = tracer.start_as_current_span(
+        span_name,
+        attributes={
+            "acm.phase": "startup",
+            "acm.equipment": equip,
+            "acm.equip_id": equip_id,
+            "acm.run_id": run_id,
+            "acm.run_count": run_count,
+        },
+    )
+    root_span = span_ctx.__enter__()
+    return span_ctx, root_span
 
 
 def close_run_span(
@@ -3282,6 +3307,7 @@ __all__ = [
     "log_timer",
     "start_profiling",
     "stop_profiling",
+    "start_run_span",
     "close_run_span",
     "shutdown_run_observability",
     "profile_section",

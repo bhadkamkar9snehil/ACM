@@ -491,6 +491,53 @@ class TestRefactorHelpers:
         )
         assert rows == 0
 
+    def test_start_run_span_returns_none_without_tracer(self):
+        """Run span helper should no-op when tracer is unavailable."""
+        from core.observability import start_run_span
+
+        span_ctx, root_span = start_run_span(
+            tracer=None,
+            equip="FD_FAN",
+            equip_id=1,
+            run_id="r1",
+            run_count=1,
+        )
+        assert span_ctx is None
+        assert root_span is None
+
+    def test_start_run_span_builds_root_span_with_expected_attributes(self):
+        """Run span helper should create span context with ACM run attributes."""
+        from core.observability import start_run_span
+
+        captured = {}
+
+        class _SpanCtx:
+            def __enter__(self):
+                return {"root": "span"}
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        class _Tracer:
+            def start_as_current_span(self, name, attributes=None):
+                captured["name"] = name
+                captured["attributes"] = attributes
+                return _SpanCtx()
+
+        span_ctx, root_span = start_run_span(
+            tracer=_Tracer(),
+            equip="FD_FAN",
+            equip_id=1,
+            run_id="r1",
+            run_count=7,
+        )
+
+        assert span_ctx is not None
+        assert root_span == {"root": "span"}
+        assert captured["name"] == "acm.run:FD_FAN"
+        assert captured["attributes"]["acm.run_id"] == "r1"
+        assert captured["attributes"]["acm.equip_id"] == 1
+
     def test_run_drift_pipeline_smoke(self):
         """Drift pipeline wrapper should return frame and score_out keys."""
         from core.drift import run_drift_pipeline
