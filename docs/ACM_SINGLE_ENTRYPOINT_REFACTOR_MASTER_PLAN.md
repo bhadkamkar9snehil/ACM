@@ -994,7 +994,7 @@ Audit findings:
 6. `core/regimes.py`
    - Finding: `run(ctx)` legacy reporting hook has no active runtime callers in current pipeline path.
    - Classification: `LEGACY_DEBT`
-   - Action: deprecate and remove after confirming no non-test external usage.
+   - Action: remove after confirming no non-test external usage.
 
 7. Entrypoint duplication status:
    - Finding: `core/acm_main.py` is not present in current workspace.
@@ -1046,4 +1046,10 @@ Effective immediately for remaining refactor phases, every PR must include:
      - `run_detector_initialization_stage(...)` remains the public stage entrypoint
    - updated tests to call the internal helper where direct unit coverage is needed
 4. Remaining:
-   - Pass E4 regimes legacy hook cleanup.
+   - none in duplicate cleanup track.
+5. Pass E4 completed (2026-02-22):
+   - removed unused legacy reporting hook `regimes.run(ctx)`
+   - removed dead helper functions tied only to that hook:
+     - `_to_datetime_mixed(...)`
+     - `_read_episodes_csv(...)`
+     - `_read_scores_csv(...)`
