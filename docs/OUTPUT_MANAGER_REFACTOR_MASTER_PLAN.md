@@ -123,6 +123,51 @@ Actions:
    - strict or optional
 2. Confirm call chains from `core/acm.py` into persistence stage.
 
+### Method Inventory
+
+| Method                                      | Target Table(s)               | Callsites (in `core/output_manager.py`)                                  | Strictness |
+| ------------------------------------------- | ----------------------------- | ------------------------------------------------------------------------ | ---------- |
+| `_bulk_insert_sql`                          | (dynamic)                     | `_execute_write_policy`, `_replace_by_keys`                              | **Strict** |
+| `persist_core_outputs`                      | `ACM_Scores_Wide`, `ACM_EpisodeDiagnostics`, `ACM_Episodes` | `persist_pipeline_outputs`                                               | **Strict** |
+| `write_scores`                              | `ACM_Scores_Wide`             | `persist_core_outputs`                                                   | **Strict** |
+| `write_episodes`                            | `ACM_EpisodeDiagnostics`, `ACM_Episodes` | `persist_core_outputs`                                                   | **Strict** |
+| `_persist_episode_rows`                     | `ACM_Episodes`                | `write_episodes`                                                         | **Strict** |
+| `write_dataframe`                           | (dynamic)                     | `write_sql_table`                                                        | Conditional (`required` param) |
+| `write_sql_table`                           | (dynamic)                     | `write_table`, `write_pca_metrics`, `write_pca_loadings`, `write_run_stats`, `write_threshold_metadata`, `write_drift_controller`, `write_regime_definitions`, `write_active_models`, `write_data_contract_validation`, `write_seasonal_patterns` | Conditional (`required` param) |
+| `write_table`                               | (dynamic)                     | (numerous)                                                               | Optional   |
+| `write_pca_metrics`                         | `ACM_PCA_Metrics`             | `_write_sql_artifacts`                                                   | Optional   |
+| `write_pca_loadings`                        | `ACM_PCA_Loadings`            | `_write_sql_artifacts`                                                   | Optional   |
+| `write_run_stats`                           | `ACM_Run_Stats`               | `_write_sql_artifacts`                                                   | Optional   |
+| `write_threshold_metadata`                  | `ACM_AdaptiveConfig`          | `run_persistence_stage_service` (indirect)                               | Optional   |
+| `write_anomaly_events`                      | `ACM_Anomaly_Events`          | `run_persistence_stage_service`                                          | Optional   |
+| `write_regime_episodes`                     | `ACM_Regime_Episodes`         | `run_persistence_stage_service`                                          | Optional   |
+| `write_pca_model`                           | `ACM_PCA_Models`              | `run_persistence_stage_service`                                          | Optional   |
+| `write_detector_correlation`                | `ACM_DetectorCorrelation`     | `persist_additional_artifacts_service`                                   | Optional   |
+| `write_detector_correlation_from_scores`    | `ACM_DetectorCorrelation`     | `persist_additional_artifacts_service`                                   | Optional   |
+| `write_drift_series`                        | `ACM_DriftSeries`             | `run_persistence_stage_service`                                          | Optional   |
+| `write_sensor_normalized_ts`                | `ACM_SensorNormalized_TS`     | `persist_additional_artifacts_service`                                   | Optional   |
+| `write_sensor_correlations`                 | `ACM_SensorCorrelations`      | `persist_additional_artifacts_service`                                   | Optional   |
+| `write_sensor_correlations_from_raw`        | `ACM_SensorCorrelations`      | `persist_additional_artifacts_service`                                   | Optional   |
+| `write_feature_drop_log`                    | `ACM_FeatureDropLog`          | `run_persistence_stage_service`                                          | Optional   |
+| `write_calibration_summary`                 | `ACM_CalibrationSummary`      | `run_persistence_stage_service`                                          | Optional   |
+| `write_regime_occupancy`                    | `ACM_RegimeOccupancy`         | `run_persistence_stage_service`                                          | Optional   |
+| `write_regime_transitions`                  | `ACM_RegimeTransitions`       | `run_persistence_stage_service`                                          | Optional   |
+| `write_contribution_timeline`               | `ACM_ContributionTimeline`    | `run_persistence_stage_service`                                          | Optional   |
+| `write_contribution_timeline_from_frame`    | `ACM_ContributionTimeline`    | `generate_all_analytics_with_context_service`                            | Optional   |
+| `write_regime_promotion_log`                | `ACM_RegimePromotionLog`      | `run_persistence_stage_service`                                          | Optional   |
+| `write_refit_request`                       | `ACM_RefitRequests`           | `run_persistence_stage_service`                                          | Optional   |
+| `write_fusion_metrics`                      | `ACM_RunMetrics`              | `run_persistence_stage_service`                                          | Optional   |
+| `write_drift_controller`                    | `ACM_DriftController`         | `run_persistence_stage_service`                                          | Optional   |
+| `write_regime_definitions`                  | `ACM_RegimeDefinitions`       | `run_persistence_stage_service`                                          | Optional   |
+| `write_active_models`                       | `ACM_ActiveModels`            | `run_persistence_stage_service`                                          | Optional   |
+| `write_data_contract_validation`            | `ACM_DataContractValidation`  | `run_persistence_stage_service`                                          | Optional   |
+| `write_seasonal_patterns`                   | `ACM_SeasonalPatterns`        | `persist_additional_artifacts_service`                                   | Optional   |
+| `write_sensor_normalized_ts_from_raw`       | `ACM_SensorNormalized_TS`     | `persist_additional_artifacts_service`                                   | Optional   |
+| `write_seasonal_patterns_from_detected`     | `ACM_SeasonalPatterns`        | `persist_additional_artifacts_service`                                   | Optional   |
+| `persist_additional_artifacts`              | (multiple)                    | `persist_pipeline_outputs`                                               | Optional   |
+| `generate_all_analytics_with_context`       | (multiple)                    | `persist_pipeline_outputs`                                               | Optional   |
+| `generate_all_analytics_tables`             | (multiple)                    | `generate_all_analytics_with_context_service`                            | Optional   |
+
 Acceptance:
 
 1. Every write method is classified.
