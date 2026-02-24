@@ -955,11 +955,41 @@ def rebuild_detectors_from_cache(
         # PCA detector
         if "pca_model" in cached_models and cached_models["pca_model"]:
             pca_detector = correlation.PCASubspaceDetector(pca_cfg={})
-            pca_detector.pca = cached_models["pca_model"]
+            pca_data = cached_models["pca_model"]
+            # v11.7.1 FIX: Handle new dict format (with keep_cols, scaler, col_medians)
+            # and legacy format (raw sklearn PCA object)
+            if isinstance(pca_data, dict):
+                pca_detector.pca = pca_data.get("pca")
+                pca_detector.keep_cols = pca_data.get("keep_cols", [])
+                if pca_data.get("scaler") is not None:
+                    pca_detector.scaler = pca_data["scaler"]
+                if pca_data.get("col_medians") is not None:
+                    pca_detector.col_medians = pca_data["col_medians"]
+            else:
+                # Legacy format: raw sklearn PCA object
+                pca_detector.pca = pca_data
             pca_detector._is_fitted = True
             
             # Validate PCA feature compatibility
-            if current_columns and hasattr(pca_detector.pca, 'n_features_in_'):
+            # v11.7.1 FIX: PCA internally filters constant/low-variance columns via keep_cols,
+            # so pca.n_features_in_ reflects the post-filtering count (e.g., 786) while
+            # current_columns has the pre-filtering count (e.g., 790). PCA.score() already
+            # handles column selection via keep_cols, so we validate against keep_cols
+            # membership rather than raw n_features_in_ count.
+            if current_columns and hasattr(pca_detector, 'keep_cols') and pca_detector.keep_cols:
+                missing_keep = set(pca_detector.keep_cols) - set(current_columns)
+                if missing_keep:
+                    result["validation_warnings"].append(
+                        f"PCA keep_cols missing from current features: {len(missing_keep)} columns"
+                    )
+                    Console.warn(
+                        f"PCA detector keep_cols not in current features - will retrain",
+                        component="MODEL", equip=equip,
+                        missing_count=len(missing_keep), missing_cols=list(missing_keep)[:5]
+                    )
+                    pca_detector = None
+            elif current_columns and hasattr(pca_detector.pca, 'n_features_in_'):
+                # Fallback: no keep_cols available (legacy cache), use n_features_in_
                 n_features_cached = pca_detector.pca.n_features_in_
                 n_features_current = len(current_columns)
                 if n_features_cached != n_features_current:
@@ -1001,11 +1031,42 @@ def rebuild_detectors_from_cache(
         # GMM detector
         if "gmm_model" in cached_models and cached_models["gmm_model"]:
             gmm_detector = outliers.GMMDetector(gmm_cfg={})
-            gmm_detector.model = cached_models["gmm_model"]
+            gmm_data = cached_models["gmm_model"]
+            # v11.7.1 FIX: Handle new dict format (with _var_mask, _columns_, scaler)
+            # and legacy format (raw sklearn GaussianMixture object)
+            if isinstance(gmm_data, dict):
+                gmm_detector.model = gmm_data.get("model")
+                gmm_detector._var_mask = gmm_data.get("_var_mask")
+                gmm_detector._columns_ = gmm_data.get("_columns_")
+                if gmm_data.get("scaler") is not None:
+                    gmm_detector.scaler = gmm_data["scaler"]
+                gmm_detector._score_mu_ = gmm_data.get("_score_mu_")
+                gmm_detector._score_sd_ = gmm_data.get("_score_sd_")
+            else:
+                # Legacy format: raw sklearn GaussianMixture object
+                gmm_detector.model = gmm_data
             gmm_detector._is_fitted = True
             
             # Validate GMM feature compatibility
-            if current_columns and hasattr(gmm_detector.model, 'n_features_in_'):
+            # v11.7.1 FIX: GMM internally drops constant features via _var_mask during fit(),
+            # so model.n_features_in_ reflects the post-filtering count (e.g., 786) while
+            # current_columns has the pre-filtering count (e.g., 790). GMM.score() already
+            # handles column selection via _columns_ and _var_mask, so we validate against
+            # _columns_ membership rather than raw n_features_in_ count.
+            if current_columns and hasattr(gmm_detector, '_columns_') and gmm_detector._columns_:
+                missing_cols = set(gmm_detector._columns_) - set(current_columns)
+                if missing_cols:
+                    result["validation_warnings"].append(
+                        f"GMM _columns_ missing from current features: {len(missing_cols)} columns"
+                    )
+                    Console.warn(
+                        f"GMM detector columns not in current features - will retrain",
+                        component="MODEL", equip=equip,
+                        missing_count=len(missing_cols), missing_cols=list(missing_cols)[:5]
+                    )
+                    gmm_detector = None
+            elif current_columns and hasattr(gmm_detector.model, 'n_features_in_'):
+                # Fallback: no _columns_ available (legacy cache), use n_features_in_
                 n_features_cached = gmm_detector.model.n_features_in_
                 n_features_current = len(current_columns)
                 if n_features_cached != n_features_current:

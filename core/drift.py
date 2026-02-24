@@ -348,8 +348,8 @@ def build_drift_controller_state(
     if drift_state:
         return drift_state
 
-    drift_mode = frame.get("drift_mode", ["STABLE"])[-1] if "drift_mode" in frame.columns else "STABLE"
-    drift_z = frame.get("drift_z", [0.0])
+    drift_mode = frame["drift_mode"].iloc[-1] if "drift_mode" in frame.columns else "STABLE"
+    drift_z = frame["drift_z"] if "drift_z" in frame.columns else pd.Series([0.0])
     return {
         "ControllerState": str(drift_mode) if isinstance(drift_mode, str) else "STABLE",
         "CurrentDriftZ": float(drift_z.iloc[-1]) if hasattr(drift_z, "iloc") else 0.0,

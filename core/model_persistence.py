@@ -1158,7 +1158,11 @@ def create_model_metadata(
     
     # PCA metadata with enhanced quality metrics
     if "pca_model" in models_dict and models_dict["pca_model"]:
-        pca = models_dict["pca_model"]
+        pca_data = models_dict["pca_model"]
+        # v11.7.1: Handle new dict format and legacy raw PCA object
+        pca = pca_data.get("pca") if isinstance(pca_data, dict) else pca_data
+        if pca is None:
+            pca = pca_data  # Fallback
         explained_var_ratio = pca.explained_variance_ratio_
         metadata["models"]["pca"] = {
             "n_components": pca.n_components_,
@@ -1181,7 +1185,11 @@ def create_model_metadata(
     
     # GMM metadata with BIC and AIC
     if "gmm_model" in models_dict and models_dict["gmm_model"]:
-        gmm = models_dict["gmm_model"]
+        gmm_data = models_dict["gmm_model"]
+        # v11.7.1: Handle new dict format and legacy raw GMM object
+        gmm = gmm_data.get("model") if isinstance(gmm_data, dict) else gmm_data
+        if gmm is None:
+            gmm = gmm_data  # Fallback
         gmm_meta = {
             "n_components": gmm.n_components,
             "covariance_type": gmm.covariance_type
@@ -1309,25 +1317,16 @@ def load_cached_models_with_validation(
             # This prevents using corrupted cache where manifest and models are desynchronized
             manifest_feature_count = len(cached_manifest.get("train_sensors", []))
 
-            # Check PCA model feature count (if exists)
-            if "pca_model" in cached_models:
-                pca_model = cached_models["pca_model"]
-                if hasattr(pca_model, 'pca') and hasattr(pca_model.pca, 'n_features_in_'):
-                    pca_features = pca_model.pca.n_features_in_
-                    if manifest_feature_count != pca_features:
-                        Console.error(
-                            f"Manifest-model desync: manifest={manifest_feature_count}, PCA model={pca_features}",
-                            component="MODEL-LOAD",
-                            equip=equip,
-                            hint="Cache corrupted - delete models and retrain"
-                        )
-                        return None, None
+            # v11.7.1 FIX: PCA and GMM have internal feature filtering (keep_cols, _var_mask)
+            # so their n_features_in_ will be LESS than the manifest's train_sensors count.
+            # This is expected behavior, not cache corruption. Only IForest operates on the
+            # full feature set, so it's the correct one to validate against manifest count.
 
-            # Check IForest model feature count (if exists)
+            # Check IForest model feature count (if exists) - IForest uses full feature set
             if "iforest_model" in cached_models:
                 iforest_model = cached_models["iforest_model"]
-                if hasattr(iforest_model, 'model') and hasattr(iforest_model.model, 'n_features_in_'):
-                    iforest_features = iforest_model.model.n_features_in_
+                if hasattr(iforest_model, 'n_features_in_'):
+                    iforest_features = iforest_model.n_features_in_
                     if manifest_feature_count != iforest_features:
                         Console.error(
                             f"Manifest-model desync: manifest={manifest_feature_count}, IForest model={iforest_features}",
@@ -1575,9 +1574,33 @@ def save_trained_models(
         # RegimeModel contains feature_columns, scaler, etc. which are needed for scoring
         models_to_save = {
             "ar1_params": {"phimap": ar1_detector.phimap, "sdmap": ar1_detector.sdmap} if hasattr(ar1_detector, 'phimap') else None,
-            "pca_model": pca_detector.pca if hasattr(pca_detector, 'pca') else None,
+            # v11.7.1 FIX: Save full PCA detector state (includes keep_cols, scaler, col_medians)
+            # so that scoring batches can properly filter to the same columns PCA was trained on.
+            # Previously only pca_detector.pca was saved, losing keep_cols and causing
+            # n_features_in_ vs current_columns mismatch on reload.
+            "pca_model": {
+                "pca": pca_detector.pca,
+                "keep_cols": getattr(pca_detector, 'keep_cols', []),
+                "scaler": getattr(pca_detector, 'scaler', None),
+                "col_medians": getattr(pca_detector, 'col_medians', None),
+            } if hasattr(pca_detector, 'pca') and pca_detector.pca is not None else (
+                pca_detector.pca if hasattr(pca_detector, 'pca') else None
+            ),
             "iforest_model": iforest_detector.model if hasattr(iforest_detector, 'model') else None,
-            "gmm_model": gmm_detector.model if hasattr(gmm_detector, 'model') else None,
+            # v11.7.1 FIX: Save full GMM detector state (includes _var_mask, _columns_, scaler)
+            # so that scoring batches can properly apply the same variance mask.
+            # Previously only gmm_detector.model was saved, losing _var_mask and causing
+            # score() to return all zeros on reload.
+            "gmm_model": {
+                "model": gmm_detector.model,
+                "_var_mask": getattr(gmm_detector, '_var_mask', None),
+                "_columns_": getattr(gmm_detector, '_columns_', None),
+                "scaler": getattr(gmm_detector, 'scaler', None),
+                "_score_mu_": getattr(gmm_detector, '_score_mu_', None),
+                "_score_sd_": getattr(gmm_detector, '_score_sd_', None),
+            } if hasattr(gmm_detector, 'model') and gmm_detector.model is not None else (
+                gmm_detector.model if hasattr(gmm_detector, 'model') else None
+            ),
             "omr_model": omr_detector.to_dict() if omr_detector and omr_detector._is_fitted else None,
             "regime_model": regime_model,  # Full RegimeModel object, not just .model
             "feature_medians": col_meds,
