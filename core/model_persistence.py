@@ -1854,11 +1854,11 @@ def run_model_adaptation_and_persistence_stage(
 
 
 def persist_calibration_params_safe(
+    saved_model_version: Optional[int],
+    calibrators_dict: Optional[Dict[str, Any]],
     equip: str,
     sql_client: Optional[Any],
     equip_id: int,
-    saved_model_version: Optional[int],
-    calibrators_dict: Optional[Dict[str, Any]],
     logger: Any = Console,
 ) -> bool:
     """

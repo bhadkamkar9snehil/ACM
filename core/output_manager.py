@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 import pandas as pd
 import numpy as np
 import warnings 
+import polars as pl
 from datetime import datetime
 
 # FOR-DQ-02: Use centralized timestamp normalization
@@ -54,6 +55,12 @@ from core.output_contracts import (
     get_table_write_contract,
     audit_replace_policy_contract as _audit_replace_policy_contract,
     audit_table_write_contracts as _audit_table_write_contracts,
+)
+from core.output_sql_core import (
+    SqlWriteEngine,
+    _table_exists,
+    _get_table_columns,
+    _get_insertable_columns,
 )
 from core.output_manager_services import (
     load_omr_drift_context_service,
@@ -115,51 +122,8 @@ except ImportError:
     record_sql_op = None
     Span = None
 
-def _table_exists(cursor_factory: Callable[[], Any], name: str) -> bool:
-    cur = None
-    try:
-        cur = cursor_factory()
-        cur.execute(f"SELECT TOP 0 * FROM dbo.[{name}]")
-        return True
-    except Exception:
-        return False
-    finally:
-        try:
-            if cur is not None:
-                cur.close()
-        except Exception:
-            pass
-
-def _get_table_columns(cursor_factory: Callable[[], Any], name: str) -> List[str]:
-    """Return the list of column names for a table by probing TOP 0."""
-    cur = cursor_factory()
-    try:
-        cur.execute(f"SELECT TOP 0 * FROM dbo.[{name}]")
-        return [d[0] for d in (cur.description or [])]
-    finally:
-        try:
-            cur.close()
-        except Exception:
-            pass
-
-def _get_insertable_columns(cursor_factory: Callable[[], Any], name: str) -> List[str]:
-    """Return columns excluding identity columns for safe INSERT.
-    Uses sys.columns joined via OBJECT_ID('schema.table') without square brackets.
-    """
-    cur = cursor_factory()
-    try:
-        # OBJECT_ID expects a schema-qualified name without brackets
-        cur.execute(
-            "SELECT c.name, c.is_identity FROM sys.columns c WHERE c.object_id = OBJECT_ID(?)",
-            (f"dbo.{name}",)
-        )
-        rows = cur.fetchall() or []
-        return [r[0] for r in rows if not getattr(r, 'is_identity', r[1])]
-    finally:
-        try:
-            cur.close()
-        except Exception:
-            pass
+# Module-level SQL helpers now live in core.output_sql_core
+# (imported above for backward compatibility)
 
 # ==================== MAIN OUTPUT MANAGER CLASS ====================
 
@@ -269,7 +233,8 @@ class OutputManager:
                 f"Received equip_id={equip_id}. This prevents catastrophic "
                 f"data corruption in multi-asset deployments."
             )
-        self.equip_id = equip_id
+        # CRITICAL: convert numpy.int64 to native int to prevent HY000 error
+        self.equip_id = int(equip_id) if equip_id is not None else None
         self.equipment = ""  # Will be set by set_equipment() or inferred from equip_id
         self.maturity_state = maturity_state or 'COLDSTART'  # V11: Cached maturity
         self.batch_size = batch_size
@@ -300,14 +265,19 @@ class OutputManager:
         self._in_flight_futures: List[Any] = []  # List of active futures
         self._futures_lock = threading.Lock()
 
-        # lightweight caches for table probes
-        self._table_exists_cache: Dict[str, bool] = {}
-        self._table_columns_cache: Dict[str, set] = {}
-        self._table_insertable_cache: Dict[str, set] = {}
-        self._table_datetime_cache: Dict[str, set] = {}
-        
-        # PERF-OPT: Track tables that have been bulk pre-deleted (skip individual DELETE)
-        self._bulk_predeleted_tables: set = set()
+        # Phase A extraction: SQL write engine holds all SQL plumbing and caches
+        self._sql_engine = SqlWriteEngine(
+            sql_client=sql_client,
+            run_id=run_id,
+            equip_id=equip_id,
+            batch_size=batch_size,
+        )
+        # Expose engine caches for backward compatibility
+        self._table_exists_cache = self._sql_engine._table_exists_cache
+        self._table_columns_cache = self._sql_engine._table_columns_cache
+        self._table_insertable_cache = self._sql_engine._table_insertable_cache
+        self._table_datetime_cache = self._sql_engine._table_datetime_cache
+        self._bulk_predeleted_tables = self._sql_engine._bulk_predeleted_tables
         
         # FCST-15: Artifact cache for SQL-only mode
         # Stores DataFrames written to files/SQL so they can be consumed by downstream modules
@@ -355,6 +325,7 @@ class OutputManager:
             raise RuntimeError("SQL unhealthy at transaction start")
         
         self._batched_transaction_active = True
+        self._sql_engine._batched_transaction_active = True
         start_time = time.time()
         
         try:
@@ -373,6 +344,7 @@ class OutputManager:
             raise
         finally:
             self._batched_transaction_active = False
+            self._sql_engine._batched_transaction_active = False
     
     def _load_data_from_sql(self, cfg: Dict[str, Any], equipment_name: str, start_utc: Optional[pd.Timestamp], end_utc: Optional[pd.Timestamp], is_coldstart: bool = False):
         """
@@ -461,68 +433,13 @@ class OutputManager:
         return bool(payload)
 
     def _get_datetime_columns_for_table(self, table_name: Optional[str]) -> set[str]:
-        """
-        Return datetime-typed columns from SQL schema for a table.
-
-        Uses INFORMATION_SCHEMA and caches results. Falls back to empty set if
-        SQL metadata is unavailable.
-        """
-        if not table_name or self.sql_client is None:
-            return set()
-        if table_name in self._table_datetime_cache:
-            return set(self._table_datetime_cache[table_name])
-        try:
-            cur = cast(Any, self.sql_client).cursor()
-            try:
-                cur.execute(
-                    """
-                    SELECT COLUMN_NAME
-                    FROM INFORMATION_SCHEMA.COLUMNS
-                    WHERE TABLE_SCHEMA = 'dbo'
-                      AND TABLE_NAME = ?
-                      AND DATA_TYPE IN ('datetime', 'datetime2', 'smalldatetime', 'date', 'time', 'datetimeoffset')
-                    """,
-                    (table_name,),
-                )
-                cols = {str(r[0]) for r in (cur.fetchall() or []) if r and r[0]}
-                self._table_datetime_cache[table_name] = set(cols)
-                return cols
-            finally:
-                try:
-                    cur.close()
-                except Exception:
-                    pass
-        except Exception:
-            return set()
+        """Return datetime-typed columns from SQL schema for a table."""
+        return self._sql_engine.get_datetime_columns_for_table(table_name)
 
     @staticmethod
     def _looks_like_datetime_column(col_name: str) -> bool:
         """Name-based fallback for datetime-like columns when schema metadata is unavailable."""
-        c = (col_name or "").lower()
-        if c in {"timestamp", "time", "ts", "datetime", "date"}:
-            return True
-        if "timestamp" in c or "datetime" in c:
-            return True
-        if c.endswith("_ts") or c.startswith("ts_"):
-            return True
-        if c.endswith("_time") or c.endswith("_date"):
-            return True
-        if c.startswith("start_") or c.startswith("end_"):
-            return True
-        if c.startswith("windowstart") or c.startswith("windowend"):
-            return True
-        return (
-            c.endswith("createdat")
-            or c.endswith("updatedat")
-            or c.endswith("modifiedat")
-            or c.endswith("completedat")
-            or c.endswith("startedat")
-            or c.endswith("loggedat")
-            or c.endswith("detectedat")
-            or c.endswith("lastupdate")
-            or c.endswith("validfrom")
-            or c.endswith("validto")
-        )
+        return SqlWriteEngine.looks_like_datetime_column(col_name)
 
     def _prepare_dataframe_for_sql(
         self,
@@ -531,93 +448,7 @@ class OutputManager:
         sql_table: Optional[str] = None,
     ) -> pd.DataFrame:
         """Prepare DataFrame for SQL insertion with robust type coercion (SQL Server safe)."""
-        if df.empty:
-            return df
-
-        out = df.copy()
-        non_numeric_cols = set(non_numeric_cols or set())
-        schema_dt_cols = self._get_datetime_columns_for_table(sql_table)
-
-        # 1) Normalize datetime columns:
-        # - schema-derived datetime columns (primary)
-        # - dtype-based datetime
-        # - fallback name-based timestamp-like object columns
-        for col in out.columns:
-            is_dt = pd.api.types.is_datetime64_any_dtype(out[col])
-            is_schema_dt = col in schema_dt_cols
-            is_obj_ts = (
-                (not is_dt)
-                and (not is_schema_dt)
-                and self._looks_like_datetime_column(col)
-                and out[col].dtype == object
-            )
-
-            if is_dt or is_schema_dt or is_obj_ts:
-                ts_series = pd.to_datetime(out[col], errors="coerce")
-                # drop timezone if present, keep UTC-naive convention
-                try:
-                    ts_series = ts_series.dt.tz_localize(None)
-                except Exception:
-                    pass
-                ts_series = ts_series.dt.floor("s")
-
-                with warnings.catch_warnings():
-                    warnings.filterwarnings("ignore", message=".*to_pydatetime.*", category=FutureWarning)
-                    out[col] = np.array(ts_series.dt.to_pydatetime())
-
-        # 2) Replace Inf/-Inf and NaNs to None (SQL-friendly)
-        # Use float types only for isinf check - nullable integers (Int64) don't support isinf
-        float_only = out.select_dtypes(include=[np.floating])
-        inf_count = 0
-        if not float_only.empty:
-            try:
-                inf_count = int(np.isinf(float_only.values).sum())
-            except TypeError:
-                # Fallback: check column-by-column for mixed types
-                for col in float_only.columns:
-                    col_vals = float_only[col].dropna()
-                    if len(col_vals) > 0:
-                        try:
-                            inf_count += int(np.isinf(col_vals.values).sum())
-                        except TypeError:
-                            pass
-        if inf_count > 0:
-            Console.warn(
-                f"Replaced {inf_count} Inf/-Inf values with None for SQL compatibility",
-                component="OUTPUT",
-                inf_count=inf_count,
-                columns=len(float_only.columns),
-            )
-
-        out = out.replace({np.inf: None, -np.inf: None})
-        # Note: do NOT blanket-coerce everything to object early; keep types until after numeric handling
-
-        # 3) Preserve integer types for known ID-like columns (case-insensitive)
-        integer_columns_ci = {c.lower() for c in {"EquipID", "equip_id", "episode_id", "EpisodeID", "RegimeLabel", "regime_label"}}
-
-        for col in out.columns:
-            col_l = col.lower()
-
-            # Skip caller-marked non-numeric columns for numeric coercion only
-            # (but do NOT skip boolean normalization; booleans must become int for SQL)
-            if pd.api.types.is_bool_dtype(out[col]):
-                out[col] = out[col].astype(object).where(pd.isna(out[col]), out[col].astype(int))
-                continue
-
-            if col_l in integer_columns_ci and pd.api.types.is_numeric_dtype(out[col]):
-                out[col] = out[col].astype("Int64")  # nullable integer
-                continue
-
-            if col in non_numeric_cols:
-                continue
-
-            if pd.api.types.is_numeric_dtype(out[col]):
-                out[col] = out[col].astype(float)
-
-        # 4) Finally, normalize NaN/NaT to None for pyodbc binding
-        out = out.where(pd.notnull(out), None)
-
-        return out
+        return self._sql_engine.prepare_dataframe_for_sql(df, non_numeric_cols, sql_table)
     
     
     def _should_auto_flush(self) -> bool:
@@ -896,55 +727,12 @@ class OutputManager:
         return int(self._bulk_insert_sql(sql_table, sql_df))
 
     def _get_table_columns_for_contract(self, table_name: str) -> set[str]:
-        """
-        Resolve and cache table columns for schema-contract enforcement.
-
-        Prefers insertable columns (identity excluded), then falls back to full
-        table columns if needed.
-        """
-        cursor_factory = lambda: cast(Any, self.sql_client).cursor()
-        if table_name in self._table_insertable_cache:
-            return set(self._table_insertable_cache[table_name])
-        try:
-            cols = set(_get_insertable_columns(cursor_factory, table_name))
-            if not cols:
-                cols = set(_get_table_columns(cursor_factory, table_name))
-            self._table_insertable_cache[table_name] = set(cols)
-            return cols
-        except Exception:
-            if table_name in self._table_columns_cache:
-                return set(self._table_columns_cache[table_name])
-            cols_all = set(_get_table_columns(cursor_factory, table_name))
-            self._table_columns_cache[table_name] = set(cols_all)
-            return cols_all
+        """Resolve and cache table columns for schema-contract enforcement."""
+        return self._sql_engine.get_table_columns_for_contract(table_name)
 
     def _populate_standard_metadata(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Populate standard metadata during payload generation.
-
-        This prepares rows before SQL insert so write tightening happens in data
-        generation, not by table-schema checks in the write path.
-        """
-        out = df.copy()
-        run_fallback = self.run_id if self.run_id else "00000000-0000-0000-0000-000000000000"
-        equip_fallback = int(self.equip_id) if self.equip_id is not None and int(self.equip_id) > 0 else 0
-        now_utc_naive = pd.Timestamp.utcnow().tz_localize(None)
-
-        if "RunID" not in out.columns:
-            out["RunID"] = run_fallback
-        else:
-            out["RunID"] = out["RunID"].where(pd.notna(out["RunID"]), run_fallback)
-
-        if "EquipID" not in out.columns:
-            out["EquipID"] = equip_fallback
-        else:
-            out["EquipID"] = out["EquipID"].where(pd.notna(out["EquipID"]), equip_fallback)
-
-        if "CreatedAt" not in out.columns:
-            out["CreatedAt"] = now_utc_naive
-        else:
-            out["CreatedAt"] = out["CreatedAt"].where(pd.notna(out["CreatedAt"]), now_utc_naive)
-        return out
+        """Populate standard metadata (RunID, EquipID, CreatedAt) during payload generation."""
+        return self._sql_engine.populate_standard_metadata(df)
 
     def audit_allowed_tables_write_integrity(
         self,
@@ -1166,183 +954,50 @@ class OutputManager:
 
     def _ensure_table_exists(self, table_name: str, cursor_factory: Callable[[], Any]) -> None:
         """Ensure target table exists (cached) before insert attempts."""
-        exists = self._table_exists_cache.get(table_name)
-        if exists is None:
-            exists = _table_exists(cursor_factory, table_name)
-            self._table_exists_cache[table_name] = bool(exists)
-        if not exists:
-            raise RuntimeError(f"Target table dbo.[{table_name}] not found")
+        self._sql_engine.ensure_table_exists(table_name, cursor_factory)
 
     def _apply_standard_predelete(self, cur: Any, table_name: str, table_cols: set[str]) -> None:
         """Delete existing rows for the current run when table supports RunID keys."""
-        if table_name in self._bulk_predeleted_tables:
-            return
-        try:
-            if "RunID" in table_cols and self.run_id:
-                if "EquipID" in table_cols and self.equip_id is not None:
-                    rows_deleted = cur.execute(
-                        f"DELETE FROM dbo.[{table_name}] WHERE RunID = ? AND EquipID = ?",
-                        (self.run_id, int(self.equip_id or 0)),
-                    ).rowcount
-                else:
-                    rows_deleted = cur.execute(
-                        f"DELETE FROM dbo.[{table_name}] WHERE RunID = ?",
-                        (self.run_id,),
-                    ).rowcount
-                if rows_deleted and rows_deleted > 0:
-                    Console.info(f"SQL delete from {table_name}: {rows_deleted} rows", component="OUTPUT")
-        except Exception as del_ex:
-            raise RuntimeError(f"Standard pre-delete for {table_name} failed: {del_ex}") from del_ex
+        self._sql_engine.apply_standard_predelete(cur, table_name, table_cols)
 
     def _project_insert_columns(self, table_name: str, df: pd.DataFrame, table_cols: set[str]) -> List[str]:
         """Project payload columns to target table insertable columns."""
-        columns = [c for c in df.columns if c in table_cols]
-        if not columns:
-            Console.warn(
-                f"No matching insertable columns for {table_name}; skipping insert",
-                component="OUTPUT",
-                table=table_name,
-                rows=len(df),
-                equip_id=self.equip_id,
-                run_id=self.run_id,
-            )
-        return columns
+        return self._sql_engine.project_insert_columns(table_name, df, table_cols)
 
-    def _sanitize_for_sql_insert(self, table_name: str, df: pd.DataFrame, columns: List[str]) -> pd.DataFrame:
-        """Sanitize payload values for robust SQL binding."""
-        df_clean = df[columns].copy()
+    # Start Here
 
-        # Replace common NA-like strings in object columns.
-        na_strings = {"N/A", "n/a", "NA", "na", "#N/A"}
-        for col in df_clean.select_dtypes(include="object").columns:
-            mask = df_clean[col].isin(na_strings)
-            if mask.any():
-                df_clean.loc[mask, col] = None
+    def _sanitize_for_sql_insert(
+        self,
+        table_name: str,
+        df: pd.DataFrame,
+        columns: List[str],
+    ) -> pd.DataFrame:
+        """Sanitize payload values for robust SQL binding (pyodbc-safe)."""
+        return self._sql_engine.sanitize_for_sql_insert(table_name, df, columns)
 
-        # Convert schema datetime columns (fallback: dynamic name detector).
-        schema_dt_cols = self._get_datetime_columns_for_table(table_name)
-        if schema_dt_cols:
-            ts_cols = [c for c in df_clean.columns if c in schema_dt_cols]
-        else:
-            ts_cols = [c for c in df_clean.columns if self._looks_like_datetime_column(c)]
-        for col in ts_cols:
-            try:
-                df_clean[col] = pd.to_datetime(df_clean[col], format="mixed", errors="coerce")
-                try:
-                    df_clean[col] = df_clean[col].dt.tz_localize(None)
-                except Exception:
-                    pass
-                null_count = int(df_clean[col].isna().sum())
-                if null_count > 0:
-                    Console.warn(
-                        f"{null_count} timestamps failed to parse in column {col}",
-                        component="OUTPUT",
-                        table=table_name,
-                        column=col,
-                        failed_count=null_count,
-                    )
-            except Exception as ex:
-                Console.warn(
-                    f"Timestamp conversion failed for {col}: {ex}",
-                    component="OUTPUT",
-                    table=table_name,
-                    column=col,
-                    error_type=type(ex).__name__,
-                )
-
-        # Float sanitization: clamp extremes and convert inf/nan to None.
-        float_cols = df_clean.select_dtypes(include=[np.float64, np.float32]).columns
-        if len(float_cols):
-            float_arr = df_clean[float_cols].to_numpy(dtype=float)
-            extreme = np.abs(float_arr) > 1e38
-            if extreme.any():
-                n_extreme = int(extreme.sum())
-                Console.warn(
-                    f"Clamping {n_extreme} extreme float values in {table_name}",
-                    component="OUTPUT",
-                    table=table_name,
-                    extreme_count=n_extreme,
-                )
-                float_arr[extreme] = np.nan
-            np.copyto(float_arr, np.nan, where=~np.isfinite(float_arr))
-            df_clean[float_cols] = float_arr
-
-        # Final: convert to object dtype and normalize pandas nulls to Python None.
-        return df_clean.astype(object).where(pd.notnull(df_clean), None)
-
+    # End Here
     @staticmethod
     def _build_insert_sql(table_name: str, columns: List[str]) -> str:
         """Build parameterized INSERT statement for target table/columns."""
-        cols_str = ", ".join(f"[{c}]" for c in columns)
-        placeholders = ", ".join(["?"] * len(columns))
-        return f"INSERT INTO dbo.[{table_name}] ({cols_str}) VALUES ({placeholders})"
+        return SqlWriteEngine.build_insert_sql(table_name, columns)
 
     def _execute_insert_batches(self, cur: Any, insert_sql: str, records: List[Tuple[Any, ...]], table_name: str) -> int:
         """Execute batched inserts with batch-level diagnostics."""
-        inserted = 0
-        for i in range(0, len(records), self.batch_size):
-            batch = records[i:i + self.batch_size]
-            try:
-                cur.executemany(insert_sql, batch)
-                inserted += len(batch)
-            except Exception as batch_error:
-                sample = batch[:3] if len(batch) > 3 else batch
-                Console.error(
-                    f"Batch insert failed for {table_name} (sample: {sample}): {batch_error}",
-                    component="OUTPUT",
-                    table=table_name,
-                    batch_size=len(batch),
-                    equip_id=self.equip_id,
-                    run_id=self.run_id,
-                    error_type=type(batch_error).__name__,
-                    error=str(batch_error)[:200],
-                )
-                raise
-        return inserted
+        return self._sql_engine.execute_insert_batches(cur, insert_sql, records, table_name)
 
     def _commit_if_needed(self, table_name: str) -> None:
         """Commit write if not already in an outer batched transaction."""
-        if self._batched_transaction_active:
-            return
-        try:
-            if hasattr(self.sql_client, "commit"):
-                self.sql_client.commit()
-            elif hasattr(self.sql_client, "conn") and hasattr(self.sql_client.conn, "commit"):
-                if not getattr(self.sql_client.conn, "autocommit", True):
-                    self.sql_client.conn.commit()
-        except Exception as e:
-            Console.error(
-                f"SQL commit failed for {table_name}: {e}",
-                component="OUTPUT",
-                table=table_name,
-                equip_id=self.equip_id,
-                run_id=self.run_id,
-                error_type=type(e).__name__,
-                error=str(e)[:200],
-            )
-            raise
+        self._sql_engine.commit_if_needed(table_name)
 
     def _rollback_if_needed(self, table_name: str) -> None:
         """Rollback current transaction when supported by the SQL client wrapper."""
-        try:
-            if hasattr(self.sql_client, "rollback"):
-                self.sql_client.rollback()
-            elif hasattr(self.sql_client, "conn") and hasattr(self.sql_client.conn, "rollback"):
-                self.sql_client.conn.rollback()
-        except Exception as e:
-            Console.warn(
-                f"SQL rollback failed for {table_name}: {e}",
-                component="OUTPUT",
-                table=table_name,
-                equip_id=self.equip_id,
-                run_id=self.run_id,
-                error_type=type(e).__name__,
-                error=str(e)[:200],
-            )
+        self._sql_engine.rollback_if_needed(table_name)
+
 
     def _replace_by_keys(self, table_name: str, df: pd.DataFrame, key_columns: List[str]) -> int:
         """
         Replace rows by key set: delete matching key tuples then bulk insert payload.
+        Ensures delete key tuples are converted to pure Python scalars (pyodbc-safe).
         """
         if not self._can_write_dataframe(df, require_healthy_sql=False):
             return 0
@@ -1358,17 +1013,57 @@ class OutputManager:
         if missing_keys:
             raise ValueError(f"{table_name} replace policy missing key columns: {missing_keys}")
 
+        def _pyodbc_safe_scalar(v: Any) -> Any:
+            # Null-like
+            if v is None:
+                return None
+            try:
+                if pd.isna(v):
+                    return None
+            except Exception:
+                pass
+
+            # pandas Timestamp / datetime-like
+            if isinstance(v, pd.Timestamp):
+                try:
+                    if v.tzinfo is not None:
+                        v = v.tz_convert(None)
+                except Exception:
+                    try:
+                        v = v.tz_localize(None)
+                    except Exception:
+                        pass
+                return v.to_pydatetime()
+
+            # numpy / pandas scalar -> python scalar
+            if hasattr(v, "item"):
+                try:
+                    return v.item()
+                except Exception:
+                    pass
+
+            return v
+
         key_frame = sql_df[key_columns].dropna().drop_duplicates()
+
         if len(key_frame) > 0:
+            # Normalize delete keys BEFORE executemany (this is the actual failing path)
+            delete_rows = [
+                tuple(_pyodbc_safe_scalar(val) for val in row)
+                for row in key_frame.itertuples(index=False, name=None)
+            ]
+
             with self.sql_client.cursor() as cur:
                 try:
                     cur.fast_executemany = True
                 except Exception:
                     pass
+
                 where_sql = " AND ".join(f"[{k}] = ?" for k in key_columns)
                 delete_sql = f"DELETE FROM dbo.[{table_name}] WHERE {where_sql}"
-                delete_rows = [tuple(row) for row in key_frame.itertuples(index=False, name=None)]
+
                 cur.executemany(delete_sql, delete_rows)
+
             self._commit_if_needed(table_name)
 
         self._bulk_predeleted_tables.add(table_name)
@@ -1376,6 +1071,7 @@ class OutputManager:
             return self._bulk_insert_sql(table_name, sql_df)
         finally:
             self._bulk_predeleted_tables.discard(table_name)
+
 
     def build_replace_policy(
         self,
@@ -1416,10 +1112,11 @@ class OutputManager:
         """Validate canonical table write contracts."""
         return _audit_table_write_contracts()
 
+    # Bulk Insert Starts Here
     def _bulk_insert_sql(self, table_name: str, df: pd.DataFrame) -> int:
-        """Perform bulk SQL insert with optimized batching and robust commit."""
-        _sql_start_time = time.perf_counter()  # Track for observability
-        
+        """Perform bulk SQL insert with optimized batching and robust commit (pyodbc-safe scalars)."""
+        _sql_start_time = time.perf_counter()
+
         if df.empty:
             return 0
         if table_name not in ALLOWED_TABLES:
@@ -1428,8 +1125,46 @@ class OutputManager:
             raise RuntimeError(f"SQL client is not available for table write: {table_name}")
 
         cursor_factory = lambda: cast(Any, self.sql_client).cursor()
-
         self._ensure_table_exists(table_name, cursor_factory)
+
+        def _pyodbc_safe_scalar(v: Any) -> Any:
+            # Null-like
+            if v is None:
+                return None
+            try:
+                if pd.isna(v):
+                    return None
+            except Exception:
+                pass
+
+            # pandas Timestamp -> python datetime (timezone-naive)
+            if isinstance(v, pd.Timestamp):
+                try:
+                    if v.tzinfo is not None:
+                        v = v.tz_convert(None)
+                except Exception:
+                    try:
+                        v = v.tz_localize(None)
+                    except Exception:
+                        pass
+                return v.to_pydatetime()
+
+            # numpy / pandas scalar -> python scalar
+            if hasattr(v, "item"):
+                try:
+                    return v.item()
+                except Exception:
+                    pass
+
+            # recursive safety (rare, but keeps pyodbc happy)
+            if isinstance(v, dict):
+                return {k: _pyodbc_safe_scalar(val) for k, val in v.items()}
+            if isinstance(v, list):
+                return [_pyodbc_safe_scalar(val) for val in v]
+            if isinstance(v, tuple):
+                return tuple(_pyodbc_safe_scalar(val) for val in v)
+
+            return v
 
         cur = cursor_factory()
         try:
@@ -1444,12 +1179,39 @@ class OutputManager:
             columns = self._project_insert_columns(table_name, df, table_cols)
             if not columns:
                 return 0
+
             df_clean = self._sanitize_for_sql_insert(table_name, df, columns)
             insert_sql = self._build_insert_sql(table_name, columns)
-            records = [tuple(row) for row in df_clean.itertuples(index=False, name=None)]
+
+            # Prefer polars for row extraction, but ALWAYS normalize scalars before executemany
+            try:
+                pl_df = pl.from_pandas(df_clean)
+                # to_dicts() generally yields python-native values more reliably than rows()
+                dict_rows = pl_df.to_dicts()
+                records = [
+                    tuple(_pyodbc_safe_scalar(row.get(col)) for col in columns)
+                    for row in dict_rows
+                ]
+            except Exception:
+                # Fallback: pandas tuples + normalization
+                records = [
+                    tuple(_pyodbc_safe_scalar(val) for val in row)
+                    for row in df_clean.itertuples(index=False, name=None)
+                ]
+
             inserted = self._execute_insert_batches(cur, insert_sql, records, table_name)
+
         except Exception as e:
-            Console.error(f"SQL insert failed for {table_name}: {e}", component="OUTPUT", table=table_name, rows=len(df), equip_id=self.equip_id, run_id=self.run_id, error_type=type(e).__name__, error=str(e)[:200])
+            Console.error(
+                f"SQL insert failed for {table_name}: {e}",
+                component="OUTPUT",
+                table=table_name,
+                rows=len(df),
+                equip_id=self.equip_id,
+                run_id=self.run_id,
+                error_type=type(e).__name__,
+                error=str(e)[:200],
+            )
             raise
         finally:
             try:
@@ -1460,8 +1222,7 @@ class OutputManager:
         self._commit_if_needed(table_name)
 
         Console.info(f"SQL insert to {table_name}: {inserted} rows", component="OUTPUT")
-        
-        # P1: Track SQL ops for observability metrics
+
         if _OBSERVABILITY_AVAILABLE and record_sql_op:
             try:
                 duration_ms = (time.perf_counter() - _sql_start_time) * 1000
@@ -1473,11 +1234,9 @@ class OutputManager:
                     duration_ms=duration_ms,
                 )
             except Exception:
-                pass  # Non-critical tracking
-        
-        return inserted
+                pass
 
-    
+        return inserted
     # ==================== ARTIFACT CACHE METHODS (FCST-15) ====================
     
     def get_cached_table(self, table_name: str) -> Optional[pd.DataFrame]:
@@ -2386,29 +2145,50 @@ class OutputManager:
         except Exception as e:
             Console.warn(f"write_active_models failed: {e}", component="OUTPUT", error=str(e)[:200])
             return 0
-    
+    # Start Write Data Contract Validation Here    
     def write_data_contract_validation(self, validation_result: Dict[str, Any]) -> int:
-        """Write data contract validation result to ACM_DataContractValidation (v11).
+        """Write data contract validation result to ACM_DataContractValidation (v11)."""
         
-        Args:
-            validation_result: Dict with Passed, RowsValidated, ColumnsValidated, IssuesJSON, etc.
-        """
         if not self._can_write_payload(validation_result):
             return 0
+
+        # 🔥 Normalize numpy scalars recursively BEFORE DataFrame creation
+        def _normalize(val):
+            if isinstance(val, np.generic):
+                return val.item()
+            if isinstance(val, dict):
+                return {k: _normalize(v) for k, v in val.items()}
+            if isinstance(val, list):
+                return [_normalize(v) for v in val]
+            if isinstance(val, tuple):
+                return tuple(_normalize(v) for v in val)
+            return val
+
         try:
-            row = dict(validation_result)
+            row = _normalize(dict(validation_result))
+
             row["RunID"] = self.run_id
             row["EquipID"] = self.equip_id or 0
             row["ValidatedAt"] = datetime.now()
+
+            df = pd.DataFrame([row])
+
             result = self.write_sql_table(
                 table_name="ACM_DataContractValidation",
-                df=pd.DataFrame([row]),
+                df=df,
                 artifact_name="data_contract_validation",
                 required=False,
             )
+
             return int(result.get("inserted", 0))
+
         except Exception as e:
-            Console.warn(f"write_data_contract_validation failed: {e}", component="OUTPUT", error=str(e)[:200])
+            Console.warn(
+                f"Data contract validation write failed: {e}",
+                component="OUTPUT",
+                equip_id=self.equip_id,
+                run_id=self.run_id,
+            )
             return 0
     
     def write_seasonal_patterns(self, patterns: List[Dict[str, Any]]) -> int:

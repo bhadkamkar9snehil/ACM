@@ -936,10 +936,12 @@ def write_contribution_timeline_from_frame_service(
 ) -> int:
     """Build and persist detector contribution timeline from score frame."""
     if not fusion_weights:
+        Console.warn("ContributionTimeline skipped: fusion_weights is empty/None", component="CONTRIB")
         return 0
     try:
         contrib_df = build_contribution_timeline(frame, fusion_weights)
         if not output_manager._is_non_empty_dataframe(contrib_df):
+            Console.warn("ContributionTimeline skipped: build returned empty/None DataFrame", component="CONTRIB")
             return 0
         return write_contribution_timeline_service(output_manager, contrib_df)
     except Exception as e:
@@ -1099,6 +1101,16 @@ def persist_pipeline_outputs_service(
     )
     if core.episode_count > 0 and record_episode_fn is not None and equip:
         record_episode_fn(equip, count=core.episode_count, severity="info")
+
+    # Persist anomaly events to ACM_Anomaly_Events
+    if episodes_df is not None and len(episodes_df) > 0:
+        try:
+            output_manager.write_anomaly_events(
+                df_events=episodes_df,
+                run_id=output_manager.run_id,
+            )
+        except Exception as e:
+            Console.warn(f"Anomaly events write failed: {e}", component="OUTPUT", error=str(e)[:200])
 
     output_manager.write_contribution_timeline_from_frame(
         frame=scores_df,

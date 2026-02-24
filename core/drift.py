@@ -193,6 +193,8 @@ def compute(score_df: pd.DataFrame, score_out: Dict[str, Any], cfg: Dict[str, An
     # Calibrate the smoothed CUSUM score to a z-score for fusion/reporting
     cal_cusum = fuse.ScoreCalibrator(q=0.98).fit(cusum_smooth)
     frame["cusum_z"] = cal_cusum.transform(cusum_smooth)
+    # Alias cusum_z → drift_z for persistence (ACM_Scores_Wide.drift_z column)
+    frame["drift_z"] = frame["cusum_z"]
 
     score_out["frame"] = frame
     return score_out
@@ -445,6 +447,16 @@ def run_drift_pipeline(
         logger=logger,
         equip=equip,
     )
+
+    # Persist drift time series to ACM_DriftSeries
+    if output_manager is not None and "drift_z" in frame.columns:
+        try:
+            drift_df = frame[["Timestamp", "drift_z"]].copy() if "Timestamp" in frame.columns else None
+            if drift_df is not None and len(drift_df) > 0:
+                drift_df.rename(columns={"drift_z": "DriftZ"}, inplace=True)
+                output_manager.write_drift_series(drift_df)
+        except Exception as e:
+            logger.warn(f"DriftSeries write failed: {e}", component="DRIFT", equip=equip)
 
     return {
         "frame": frame,
