@@ -580,13 +580,53 @@ core/sensor_attribution.py
 cd install/observability; docker compose up -d
 
 # Expected containers:
-# acm-grafana      (port 3000) - Dashboard UI, admin/admin
+# acm-grafana      (port 3000) - Dashboard UI, admin/admin  [grafana/grafana:12.4.0]
 # acm-alloy        (port 4317, 4318) - OTLP collector
 # acm-tempo        (port 3200) - Traces
 # acm-loki         (port 3100) - Logs
 # acm-prometheus   (port 9090) - Metrics
 # acm-pyroscope    (port 4040) - Profiling
 ```
+
+### Grafana Version & Feature Toggles (VERIFIED 2026-02-26)
+
+**Pinned image:** `grafana/grafana:12.4.0` (released 2026-02-25)
+- Do NOT use `:latest` — always pin to exact version for reproducibility
+- Verify running version: `curl -s http://admin:admin@localhost:3000/api/health`
+
+**All 25 Public Preview feature toggles are enabled** via `GF_FEATURE_TOGGLES_ENABLE` in `docker-compose.yaml`:
+
+| Toggle | What it unlocks |
+|--------|----------------|
+| `dashboardNewLayouts` | Flexible tabs, auto grid, side toolbar |
+| `newGauge` | Circular gauge with sparkline + gradient |
+| `newVizSuggestions` | Full-sized previews in visualization picker |
+| `vizPresets` | Visualization presets |
+| `sqlExpressions` | SQL queries against datasource results |
+| `queryLibrary` | Saved/reusable query library |
+| `savedQueriesRBAC` | RBAC permissions for query library |
+| `dashboardTemplates` | Start dashboards from a template |
+| `logsPanelControls` | Control component for logs panel in Explore |
+| `canvasPanelPanZoom` | Pan and zoom in canvas panels |
+| `alertingSaveStateCompressed` | Compressed protobuf alert state storage |
+| `alertRuleRestore` | Alert rule restore |
+| `grpcServer` | gRPC server |
+| `renderAuthJWT` | JWT-based rendering auth |
+| `externalServiceAccounts` | Auto service accounts for plugins |
+| `pdfTables` | Table data in PDF reports |
+| `azureMonitorLogsBuilderEditor` | Azure Monitor logs builder mode |
+| `interactiveLearning` | Interactive learning app |
+| `panelTitleSearch` | Dashboard search by panel title |
+| `refactorVariablesTimeRange` | Fewer API calls for chained query variables |
+| `faroDatasourceSelector` | Datasource selector in Frontend Observability |
+| `enableDatagridEditing` | Edit functionality in datagrid panels |
+| `preventPanelChromeOverflow` | Restrict panel contents with overflow:hidden |
+| `newPanelPadding` | Increased panel padding globally |
+| `transformationsEmptyPlaceholder` | Quick-start cards in empty transformations |
+
+Source: https://grafana.com/docs/grafana/v12.4/setup-grafana/configure-grafana/feature-toggles/
+
+**To add/remove toggles:** Edit `GF_FEATURE_TOGGLES_ENABLE` in `install/observability/docker-compose.yaml`, then `docker compose up -d grafana`.
 
 ### Console API (core/observability.py)
 
