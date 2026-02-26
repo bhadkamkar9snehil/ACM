@@ -775,9 +775,20 @@ class SQLBatchRunner:
 
                                 primary_detector = max(detector_scores, key=detector_scores.get)
                                 
-                                if primary_detector == 'omr_z' and (not culprits or not culprits.startswith('OMR')):
+                                # Culprits are stored as human-readable labels via format_culprit_label().
+                                # OMR episodes become "Baseline Consistency (OMR)" or
+                                # "Baseline Consistency (OMR) -> <sensor>".
+                                omr_culprit_ok = (
+                                    culprits
+                                    and (
+                                        culprits.startswith('OMR')
+                                        or 'Baseline Consistency (OMR)' in culprits
+                                    )
+                                )
+                                if primary_detector == 'omr_z' and not omr_culprit_ok:
                                     Console.warn(
-                                        f"QA check failed: OMR episode has incorrect culprit. Expected 'OMR(...)', got '{culprits}'",
+                                        f"QA check failed: OMR episode has incorrect culprit. "
+                                        f"Expected 'Baseline Consistency (OMR)...', got '{culprits}'",
                                         component="QA", table="ACM_EpisodeDiagnostics", equip_id=equip_id, run_id=str(run_id)
                                     )
                 except Exception as e:

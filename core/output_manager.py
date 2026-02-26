@@ -27,8 +27,7 @@ from dataclasses import dataclass, field
 
 import pandas as pd
 import numpy as np
-import warnings 
-import polars as pl
+import warnings
 from datetime import datetime
 
 # FOR-DQ-02: Use centralized timestamp normalization
@@ -1127,45 +1126,6 @@ class OutputManager:
         cursor_factory = lambda: cast(Any, self.sql_client).cursor()
         self._ensure_table_exists(table_name, cursor_factory)
 
-        def _pyodbc_safe_scalar(v: Any) -> Any:
-            # Null-like
-            if v is None:
-                return None
-            try:
-                if pd.isna(v):
-                    return None
-            except Exception:
-                pass
-
-            # pandas Timestamp -> python datetime (timezone-naive)
-            if isinstance(v, pd.Timestamp):
-                try:
-                    if v.tzinfo is not None:
-                        v = v.tz_convert(None)
-                except Exception:
-                    try:
-                        v = v.tz_localize(None)
-                    except Exception:
-                        pass
-                return v.to_pydatetime()
-
-            # numpy / pandas scalar -> python scalar
-            if hasattr(v, "item"):
-                try:
-                    return v.item()
-                except Exception:
-                    pass
-
-            # recursive safety (rare, but keeps pyodbc happy)
-            if isinstance(v, dict):
-                return {k: _pyodbc_safe_scalar(val) for k, val in v.items()}
-            if isinstance(v, list):
-                return [_pyodbc_safe_scalar(val) for val in v]
-            if isinstance(v, tuple):
-                return tuple(_pyodbc_safe_scalar(val) for val in v)
-
-            return v
-
         cur = cursor_factory()
         try:
             try:
@@ -1180,24 +1140,11 @@ class OutputManager:
             if not columns:
                 return 0
 
+            # sanitize_for_sql_insert handles NaN→None, tz-strip, and extreme-float clamp.
+            # _to_python_records then uses Polars .rows() for vectorized numpy→Python conversion.
             df_clean = self._sanitize_for_sql_insert(table_name, df, columns)
             insert_sql = self._build_insert_sql(table_name, columns)
-
-            # Prefer polars for row extraction, but ALWAYS normalize scalars before executemany
-            try:
-                pl_df = pl.from_pandas(df_clean)
-                # to_dicts() generally yields python-native values more reliably than rows()
-                dict_rows = pl_df.to_dicts()
-                records = [
-                    tuple(_pyodbc_safe_scalar(row.get(col)) for col in columns)
-                    for row in dict_rows
-                ]
-            except Exception:
-                # Fallback: pandas tuples + normalization
-                records = [
-                    tuple(_pyodbc_safe_scalar(val) for val in row)
-                    for row in df_clean.itertuples(index=False, name=None)
-                ]
+            records = self._sql_engine._to_python_records(df_clean, columns)
 
             inserted = self._execute_insert_batches(cur, insert_sql, records, table_name)
 

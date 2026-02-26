@@ -530,21 +530,29 @@ _init_lock = threading.Lock()
 # HELPER FUNCTIONS
 # =============================================================================
 
-def _check_endpoint_reachable(endpoint: str, timeout: float = 1.0) -> bool:
-    """Check if an HTTP endpoint is reachable (quick connectivity test)."""
-    import socket
-    from urllib.parse import urlparse
+def _check_endpoint_reachable(endpoint: str, timeout: float = 2.0) -> bool:
+    """Check if an OTLP HTTP endpoint is truly reachable via a real HTTP probe.
     
+    A TCP-only check (connect_ex) is not sufficient: Grafana Alloy's port 4318
+    can be open at the TCP level while the HTTP layer is broken or slow, which
+    causes the OTEL SDK's background PeriodicExportingMetricReader to spam
+    "Exception while exporting metrics" on every export interval.
+    
+    We probe the actual /v1/metrics URL so we can distinguish between
+    "port open but HTTP broken" (returns False) and "truly responsive" (True).
+    Any HTTP response (even 4xx/5xx) means the HTTP stack is alive.
+    """
     try:
-        parsed = urlparse(endpoint)
-        host = parsed.hostname or "localhost"
-        port = parsed.port or (443 if parsed.scheme == "https" else 80)
-        
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(timeout)
-        result = sock.connect_ex((host, port))
-        sock.close()
-        return result == 0
+        import requests as _requests
+        probe_url = endpoint.rstrip("/") + "/v1/metrics"
+        resp = _requests.post(
+            probe_url,
+            data=b"",
+            headers={"Content-Type": "application/x-protobuf"},
+            timeout=timeout,
+        )
+        # Any HTTP response means the HTTP stack is alive; 4xx is fine.
+        return True
     except Exception:
         return False
 
@@ -730,7 +738,7 @@ def init(
             # Create the single tracer provider with consistent service identity
             trace_provider = TracerProvider(resource=resource)
             span_processor = BatchSpanProcessor(
-                OTLPSpanExporter(endpoint=f"{otlp_endpoint}/v1/traces")
+                OTLPSpanExporter(endpoint=f"{otlp_endpoint}/v1/traces", timeout=5)
             )
             trace_provider.add_span_processor(span_processor)
             otel_trace.set_tracer_provider(trace_provider)
@@ -758,6 +766,7 @@ def init(
                 metric_exporter = OTLPMetricExporter(
                     endpoint=f"{otlp_endpoint}/v1/metrics",
                     preferred_temporality=cumulative_temporality,
+                    timeout=5,  # Fail fast — don't hang for 30s+ per export
                 )
                 metric_reader = PeriodicExportingMetricReader(
                     metric_exporter,

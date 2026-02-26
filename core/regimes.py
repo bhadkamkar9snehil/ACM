@@ -1492,11 +1492,26 @@ def fit_regime_model(
     # v11.1.6 FIX #3: Compute and store calibrated training distance threshold
     # This threshold is used for UNKNOWN detection in predict_regime_with_confidence
     unknown_cfg = _cfg_get(cfg, "regimes.unknown", {}) or {}
-    distance_percentile = float(unknown_cfg.get("distance_percentile", 95.0))
+    distance_percentile = float(unknown_cfg.get("distance_percentile", 99.0))
+    floor_ratio = float(unknown_cfg.get("distance_threshold_floor_ratio", 1.5))
     try:
         threshold, train_distances = _compute_training_distances(
             regime_model, train_basis, distance_percentile
         )
+        # Apply a floor so the threshold is never tighter than floor_ratio × median
+        # training distance. P99 on a short coldstart window can still be very tight
+        # when training data doesn't cover the full operating envelope, causing 100%
+        # of scoring points to be misclassified as novel.
+        if len(train_distances) > 0 and floor_ratio > 0:
+            median_dist = float(np.median(train_distances))
+            floor = median_dist * floor_ratio
+            if threshold < floor:
+                Console.info(
+                    f"Distance threshold P{distance_percentile:.0f}={threshold:.4f} "
+                    f"below floor ({floor_ratio:.1f}× median={floor:.4f}); clamping up.",
+                    component="REGIME",
+                )
+                threshold = floor
         regime_model.training_distance_threshold_ = threshold
         regime_model.training_distance_distribution_ = train_distances
         meta["training_distance_threshold"] = float(threshold)
@@ -1641,8 +1656,8 @@ def predict_regime_with_confidence(
     from sklearn.metrics import pairwise_distances
     
     unknown_cfg = _cfg_get(cfg, "regimes.unknown", {}) or {}
-    distance_percentile = float(unknown_cfg.get("distance_percentile", 95.0))
-    
+    distance_percentile = float(unknown_cfg.get("distance_percentile", 99.0))
+
     # Align features
     aligned = basis_df.reindex(columns=model.feature_columns, fill_value=0.0)
     aligned_arr = aligned.to_numpy(dtype=np.float64, copy=False, na_value=0.0)

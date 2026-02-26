@@ -939,6 +939,9 @@ def write_contribution_timeline_from_frame_service(
         Console.warn("ContributionTimeline skipped: fusion_weights is empty/None", component="CONTRIB")
         return 0
     try:
+        # Normalize: ensure Timestamp is a column (frame index is a DatetimeIndex throughout the pipeline)
+        if "Timestamp" not in frame.columns and isinstance(frame.index, pd.DatetimeIndex):
+            frame = frame.reset_index().rename(columns={frame.index.name or "index": "Timestamp"})
         contrib_df = build_contribution_timeline(frame, fusion_weights)
         if not output_manager._is_non_empty_dataframe(contrib_df):
             Console.warn("ContributionTimeline skipped: build returned empty/None DataFrame", component="CONTRIB")

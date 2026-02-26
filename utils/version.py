@@ -17,10 +17,97 @@ Release Management:
 - Production deployments use specific tags (never merge commits)
 """
 
-__version__ = "11.15.5"
-__version_date__ = "2026-02-20"
+__version__ = "11.15.9"
+__version_date__ = "2026-02-25"
 __version_author__ = "ACM Development Team"
 
+# v11.15.9: AUTO-TUNE PERSISTENCE + OMR QA CHECK FIXES
+#
+# Bug 1 — config_history_writer.py: h_sigma missing from _AUTO_TUNE_PATH_MAP
+#   Symptom: CUSUM h_sigma auto-tune changes (12.0→3.0) logged to ACM_ConfigHistory
+#     but never persisted to ACM_Config; reverted every batch.
+#   Fix: Added "h_sigma": "episodes.cpd.h_sigma" to _AUTO_TUNE_PATH_MAP.
+#
+# Bug 2 — config_history_writer.py: refit request fires even when upsert succeeds
+#   Symptom: ACM_RefitRequests grows one row per batch for every auto-tune event,
+#     resetting consecutive_runs to 2 every batch → lifecycle permanently stuck at
+#     LEARNING, never advancing to CONVERGED.
+#   Root cause: trigger_refit=True created a refit request unconditionally after any
+#     auto-tune, even when _upsert_acm_config() had already persisted the value to
+#     ACM_Config. A refit is only needed when the upsert fails (value not persisted).
+#   Fix: Gate refit request creation on `not upsert_ok` — only write to
+#     ACM_RefitRequests when the ACM_Config upsert failed for at least one parameter.
+#
+# Bug 3 — scripts/sql_batch_runner.py: OMR culprit QA check uses raw detector code
+#   Symptom: QA WARN every batch: "OMR episode has incorrect culprit. Expected 'OMR(...)',
+#     got 'Baseline Consistency (OMR) -> sensor_37_avg_med'".
+#   Root cause: Episodes store human-readable labels via format_culprit_label(), so OMR
+#     culprits become "Baseline Consistency (OMR) -> <sensor>", not "OMR(...)". The QA
+#     check tested for culprits.startswith('OMR') which never matches the formatted form.
+#   Fix: QA check now accepts both the raw "OMR" prefix (legacy) and the formatted
+#     "Baseline Consistency (OMR)" substring.
+#
+# v11.15.8: AUTO-TUNE ACM_CONFIG VALUETYPE FIX
+#
+# Bug — config_history_writer.py: _upsert_acm_config() MERGE INSERT missing ValueType
+#   Symptom: [WARN] [AUTO-TUNE] Failed to upsert auto-tune param regimes.auto_k.k_max=8.0:
+#     Cannot insert the value NULL into column 'ValueType', table 'dbo.ACM_Config'.
+#   Root cause: ACM_Config.ValueType is NOT NULL with no default. The MERGE INSERT
+#     branch did not supply ValueType, causing a constraint violation on new rows.
+#     Existing rows (MATCHED path) had UPDATE which also omitted ValueType.
+#   Fix: Added _infer_value_type(value_str) helper that infers 'int'/'float'/'bool'/'string'
+#     from the value string. Updated MERGE to pass ValueType as 4th parameter in both
+#     the UPDATE and INSERT branches.
+#
+# v11.15.7: CONTRIBUTION TIMELINE FIX — ACM_ContributionTimeline always empty
+#
+# Bug — output_manager_services.py: ContributionTimeline skipped: build returned empty/None DataFrame
+#   Symptom: "ContributionTimeline skipped" every batch; ACM_ContributionTimeline has 0 rows.
+#   Root cause: build_contribution_timeline() checks `'Timestamp' not in frame.columns` and returns
+#     None if Timestamp is absent. Throughout the pipeline, Timestamp is the DataFrame index
+#     (DatetimeIndex, named "EntryDateTime"), not a column. The write service passed frame
+#     directly without materializing Timestamp as a column.
+#   Fix: In write_contribution_timeline_from_frame_service(), reset_index() + rename the index
+#     column to "Timestamp" before calling build_contribution_timeline() when Timestamp is not
+#     already a column and the index is a DatetimeIndex.
+#
+# v11.15.6: REGIME NOVELTY, OUTPUT PERF, AUTO-TUNE PERSISTENCE, DEBUG PRINT CLEANUP
+#
+# Four fixes from continuous-learning audit (WFA_TURBINE_10, 14-batch replay):
+#
+# Bug 1 — regimes.py: P95 distance threshold too tight → 100% novel on every scoring batch
+#   Symptom: "Identified N/N novel points" every batch; regime_quality_ok=False forever;
+#     lifecycle stuck at LEARNING because regime criterion never passes.
+#   Root cause: Training on a short coldstart window (~25 days) computes a P95 threshold
+#     that is too tight for scoring data from later months with different operating envelope.
+#   Fix:
+#     - Default distance_percentile 95 → 99 in regimes.py (both training and scoring paths).
+#     - Added distance_threshold_floor_ratio (default 1.5): threshold clamped to ≥ 1.5×
+#       median training distance so it stays permissive when P99 is still tight.
+#     - Two new config params in config_table.csv: regimes.unknown.distance_percentile=99
+#       and regimes.unknown.distance_threshold_floor_ratio=1.5.
+#
+# Bug 2 — output_manager.py / output_sql_core.py: ~37s/batch in listcomp scalar norm
+#   Symptom: profiler showed output_manager.<listcomp>=39s, <genexpr>=36s (32M calls).
+#   Root cause: _bulk_insert_sql() called _pyodbc_safe_scalar() once per cell via nested
+#     listcomp over pl.to_dicts(). _sanitize_for_sql_insert() had already done the work.
+#   Fix:
+#     - Removed _pyodbc_safe_scalar and the to_dicts() listcomp entirely from output_manager.py.
+#     - Replaced with self._sql_engine._to_python_records() which uses Polars .rows() for
+#       vectorized numpy→Python conversion (strip tz-aware datetime, cast dtypes vectorially).
+#     - Same Polars path applied to output_sql_core._to_python_records() with pandas fallback.
+#     - Removed three debug print statements ([INIT_DEBUG], [BULK_DEBUG], [SQL_CORE_DEBUG]).
+#     - Removed unused `import polars as pl` from output_manager.py.
+#
+# Bug 3 — config_history_writer.py: auto-tune k_max silently reverts every batch
+#   Symptom: "k_max: 6->8" logged every batch; ACM_Config never updated; k_max resets to 6.
+#   Root cause: log_auto_tune_changes() wrote to ACM_ConfigHistory (audit log) only.
+#     ConfigDict.from_sql() reads ACM_Config exclusively — never ConfigHistory.
+#   Fix:
+#     - Added _upsert_acm_config() helper: MERGE into ACM_Config for equip_id + param_path.
+#     - Added _AUTO_TUNE_PATH_MAP in log_auto_tune_changes() mapping short names (k_max,
+#       k_sigma, clip_z) to their full config paths. Upsert runs after history write.
+#
 # v11.15.5: DRIFT HYSTERESIS STATE CONTINUITY + CONTROLLER CORRECTNESS
 #
 # Root cause: drift hysteresis in compute_drift_alert_mode() accepts prev_alert_mode,

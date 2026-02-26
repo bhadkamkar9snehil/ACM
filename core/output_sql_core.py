@@ -108,7 +108,6 @@ class SqlWriteEngine:
         # CRITICAL: convert numpy.int64 to native int to prevent HY000 error
         self.equip_id = int(equip_id) if equip_id is not None else None
         self.batch_size = batch_size
-        import sys; print(f"[INIT_DEBUG] SqlWriteEngine equip_id={self.equip_id} type={type(self.equip_id).__name__}", file=sys.stderr, flush=True)
         self.equipment: str = ""
 
         # Lightweight caches for table probes
@@ -511,14 +510,33 @@ class SqlWriteEngine:
     def _to_python_records(df_clean: pd.DataFrame, columns: List[str]) -> List[Tuple[Any, ...]]:
         """Convert DataFrame rows to pyodbc-safe Python-native tuples.
 
-        Uses explicit per-value normalization to guarantee no numpy scalars
-        survive into pyodbc's fast_executemany describe phase (HY000 fix).
+        Uses Polars for vectorized type conversion — strips timezone info from
+        datetime columns and lets Polars .rows() return Python-native values
+        directly. sanitize_for_sql_insert() has already done NaN→None and
+        extreme-float clamping, so no per-cell scalar callback is needed.
         """
+        if _POLARS_AVAILABLE:
+            try:
+                pl_df = pl.from_pandas(df_clean[columns])
+                # Strip timezone from any Datetime columns so pyodbc receives
+                # tz-naive Python datetime objects (SQL Server doesn't accept tz-aware).
+                cast_exprs = []
+                for col_name, dtype in zip(pl_df.columns, pl_df.dtypes):
+                    if isinstance(dtype, pl.Datetime) and dtype.time_zone is not None:
+                        cast_exprs.append(
+                            pl.col(col_name).dt.replace_time_zone(None).alias(col_name)
+                        )
+                if cast_exprs:
+                    pl_df = pl_df.with_columns(cast_exprs)
+                return pl_df.rows()
+            except Exception:
+                pass  # Fall through to pandas path
+
+        # Pandas fallback (no Polars or conversion failed)
         def _normalize(val: Any) -> Any:
             if val is None:
                 return None
             if isinstance(val, np.generic):
-                # CRITICAL: numpy.int64, numpy.float64, numpy.bool_ etc.
                 return val.item()
             if isinstance(val, pd.Timestamp):
                 if pd.isna(val):
@@ -537,8 +555,6 @@ class SqlWriteEngine:
                     return json.dumps(val, default=str)
                 except Exception:
                     return str(val)
-            if isinstance(val, (str, bytes)):
-                return val
             try:
                 if pd.isna(val):
                     return None
@@ -555,7 +571,6 @@ class SqlWriteEngine:
 
     def bulk_insert_sql(self, table_name: str, df: pd.DataFrame) -> int:
         """Perform bulk SQL insert with optimized batching and robust commit."""
-        import sys; print(f"[BULK_DEBUG] bulk_insert_sql called for {table_name}, equip_id={self.equip_id} type={type(self.equip_id).__name__}", file=sys.stderr, flush=True)
         _sql_start_time = time.perf_counter()
 
         if df.empty:
@@ -589,16 +604,6 @@ class SqlWriteEngine:
             records = self._to_python_records(df_clean, columns)
             if not records:
                 return 0
-
-            # TEMP DEBUG: verify no numpy types survived _to_python_records
-            if records:
-                sample_types = [type(v).__name__ for v in records[0]]
-                has_numpy = any(isinstance(v, np.generic) for v in records[0] if v is not None)
-                Console.info(
-                    f"[SQL_CORE_DEBUG] {table_name}: {len(records)} records, "
-                    f"first_row_types={sample_types}, numpy_survived={has_numpy}",
-                    component="OUTPUT",
-                )
 
             inserted = self.execute_insert_batches(cur, insert_sql, records, table_name)
 

@@ -303,9 +303,33 @@ def log_auto_tune_changes(
         changed_by="AUTO_TUNE",
         run_id=run_id
     )
-    
-    # Task 9: If trigger_refit=True, create refit request to apply config changes
-    if success and trigger_refit:
+
+    # Persist tuned values to ACM_Config so the next batch picks them up.
+    # ACM_ConfigHistory is audit-only; without this upsert the tuned value
+    # resets to the original CSV default on every run.
+    _AUTO_TUNE_PATH_MAP = {
+        "k_max": "regimes.auto_k.k_max",
+        "k_sigma": "episodes.cpd.k_sigma",
+        "h_sigma": "episodes.cpd.h_sigma",
+        "clip_z": "thresholds.self_tune.clip_z",
+    }
+    upsert_ok = True
+    for change in changes:
+        short_name = change.get("parameter_path", "")
+        full_path = _AUTO_TUNE_PATH_MAP.get(short_name)
+        if full_path:
+            try:
+                _upsert_acm_config(sql_client, equip_id, full_path, str(change["new_value"]))
+            except Exception:
+                upsert_ok = False
+
+    # Only create a refit request if explicitly requested AND the ACM_Config
+    # upsert failed for at least one parameter (value not persisted — refit
+    # is needed so the pipeline picks up the changed value by re-reading config).
+    # When upsert succeeded, the value is already live in ACM_Config and no
+    # refit request is needed; creating one would reset consecutive_runs every
+    # batch and permanently prevent lifecycle promotion to CONVERGED.
+    if success and trigger_refit and not upsert_ok:
         try:
             with sql_client.cursor() as cur:
                 cur.execute(
@@ -315,11 +339,57 @@ def log_auto_tune_changes(
                     VALUES
                         (?, ?, 0)
                     """,
-                    (equip_id, f"Auto-tune config changes: {', '.join([c['parameter_path'] for c in changes])}")
+                    (equip_id, f"Auto-tune config changes (upsert failed): {', '.join([c['parameter_path'] for c in changes])}")
                 )
-            Console.info("Refit request created to apply config changes next run", component="AUTO-TUNE")
+            Console.info("Refit request created (upsert failed — value not persisted to ACM_Config)", component="AUTO-TUNE")
         except Exception as e:
             Console.warn(f"Failed to create refit request: {e}", component="AUTO-TUNE")
-    
+
     return success
 
+
+def _infer_value_type(value_str: str) -> str:
+    """Infer ACM_Config ValueType from a string value ('int', 'float', 'bool', 'string')."""
+    if value_str.lower() in ("true", "false"):
+        return "bool"
+    try:
+        int(value_str)
+        return "int"
+    except ValueError:
+        pass
+    try:
+        float(value_str)
+        return "float"
+    except ValueError:
+        pass
+    return "string"
+
+
+def _upsert_acm_config(sql_client, equip_id: int, param_path: str, new_value: str) -> None:
+    """Upsert a single parameter into ACM_Config so the next batch picks it up.
+
+    Auto-tune writes to ACM_ConfigHistory (audit log) but ConfigDict loads
+    from ACM_Config only. Without this upsert the tuned value silently reverts
+    to the CSV default on every run.
+    """
+    value_type = _infer_value_type(new_value)
+    try:
+        with sql_client.cursor() as cur:
+            cur.execute(
+                """
+                MERGE [dbo].[ACM_Config] AS target
+                USING (VALUES (?, ?, ?, ?)) AS src (EquipID, ParamPath, ParamValue, ValueType)
+                ON target.EquipID = src.EquipID AND target.ParamPath = src.ParamPath
+                WHEN MATCHED THEN
+                    UPDATE SET ParamValue = src.ParamValue, ValueType = src.ValueType, UpdatedAt = GETUTCDATE(), UpdatedBy = 'AUTO_TUNE'
+                WHEN NOT MATCHED THEN
+                    INSERT (EquipID, ParamPath, ParamValue, ValueType, UpdatedBy)
+                    VALUES (src.EquipID, src.ParamPath, src.ParamValue, src.ValueType, 'AUTO_TUNE');
+                """,
+                (equip_id, param_path, new_value, value_type),
+            )
+    except Exception as e:
+        Console.warn(
+            f"Failed to upsert auto-tune param {param_path}={new_value}: {e}",
+            component="AUTO-TUNE",
+        )
