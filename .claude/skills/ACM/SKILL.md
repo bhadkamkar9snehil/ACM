@@ -579,14 +579,66 @@ core/sensor_attribution.py
 ```powershell
 cd install/observability; docker compose up -d
 
-# Expected containers:
-# acm-grafana      (port 3000) - Dashboard UI, admin/admin  [grafana/grafana:12.4.0]
-# acm-alloy        (port 4317, 4318) - OTLP collector
-# acm-tempo        (port 3200) - Traces
-# acm-loki         (port 3100) - Logs
-# acm-prometheus   (port 9090) - Metrics
-# acm-pyroscope    (port 4040) - Profiling
+# Expected containers (all pinned — NEVER use :latest):
+# acm-grafana      (port 3000) - grafana/grafana:12.4.0
+# acm-alloy        (port 4317, 4318) - grafana/alloy:v1.13.2
+# acm-tempo        (port 3200) - grafana/tempo:2.10.1
+# acm-loki         (port 3100) - grafana/loki:3.6.7
+# acm-prometheus   (port 9090) - prom/prometheus:v3.5.1 (LTS)
+# acm-pyroscope    (port 4040) - grafana/pyroscope:1.18.1
 ```
+
+### IMPORTANT: Why We Pin Versions (NOT :latest)
+
+`:latest` does NOT auto-update a running container. Docker only pulls `:latest` when the
+image is **not present locally**. Once cached, `docker compose up -d` reuses the old build
+forever — you could run a 6-month-old version while `:latest` silently moves on.
+
+**Correct upgrade workflow:**
+1. Change the version tag in `docker-compose.yaml`
+2. `docker compose pull <service>` — download the new image
+3. `docker compose up -d <service>` — recreate the container
+
+### Stack Component Versions (VERIFIED 2026-02-26)
+
+| Component | Version | Key new capabilities |
+|-----------|---------|----------------------|
+| `grafana/grafana` | **12.4.0** | 25 Public Preview toggles; Git Sync (experimental) |
+| `grafana/alloy` | **v1.13.2** | OTel Collector v0.142.0; `loki.write` sharding; Prometheus v3 dep |
+| `grafana/tempo` | **2.10.1** | vParquet5 format; TraceQL `= nil` operator; child span count queries |
+| `grafana/loki` | **3.6.7** | Health CLI; distributor dry-run; improved OTLP attribute handling |
+| `prom/prometheus` | **v3.5.1** (LTS) | Native histograms enabled; OTLP-native; new UI; UTF-8 metric names |
+| `grafana/pyroscope` | **1.18.1** | Python source → flame graph links; profile size limits |
+
+**Alloy v1.13 compatibility:** `prometheus.remote_write` endpoint now defaults `enable_http2 = false`
+(Prometheus v3 dep change in Alloy v1.11). Set `enable_http2 = true` explicitly in
+`config-docker.alloy` — already applied.
+
+**Prometheus v3 note:** PromQL regex `.` now matches `\n`. Review alert rules and dashboard
+queries that use `.*` or `.+` against label values if they might contain newlines.
+
+### Grafana Git Sync (Experimental — v12.x)
+
+**What it is:** Bidirectional sync between Grafana and a Git repository. Dashboards stored
+as JSON in GitHub/GitLab/Bitbucket stay in sync with running Grafana automatically.
+
+**How it works:**
+- Grafana polls the repo every 60 seconds (or webhook for real-time)
+- UI edits are committed back to the repo automatically
+- PR workflow supported — changes require review before applying to Grafana
+
+**Status as of Feb 2026:**
+- Public Preview on Grafana Cloud (announced 2026-02-09)
+- Experimental in Grafana OSS/Enterprise v12.x — not yet GA
+- Not recommended for critical production use yet
+
+**Are we using it?** No — we currently use volume-mount provisioning (`./dashboards:/etc/grafana/dashboards:ro`
+and `./provisioning`). This is reliable and GA. Git Sync would replace/complement it.
+
+**Gap vs current setup:** Our dashboards are already in git (`grafana_dashboards/`, `install/observability/dashboards/`).
+Git Sync would let you edit a dashboard in the UI and have it auto-commit back to the repo — instead of
+manually exporting JSON. Worth enabling once it goes GA. Track at:
+https://grafana.com/docs/grafana/latest/as-code/observability-as-code/git-sync/
 
 ### Grafana Version & Feature Toggles (VERIFIED 2026-02-26)
 
