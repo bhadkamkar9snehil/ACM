@@ -243,7 +243,12 @@ def save_regime_state(state: RegimeState, equip: str, sql_client=None) -> None:
         sql_client: SQL client (REQUIRED)
     """
     if sql_client is None:
-        Console.error("SQL client required for SQL-only mode", component="REGIME_STATE", equipment=equip)
+        Console.error(
+            f"Cannot persist regime state for {equip}: sql_client is None. "
+            "Regime state will not survive across batches.",
+            component="REGIME_STATE",
+            equipment=equip,
+        )
         return
     
     try:

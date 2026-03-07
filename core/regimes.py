@@ -655,7 +655,13 @@ def build_feature_basis(
             train_parts.append(train_raw)
             score_parts.append(score_raw)
         else:
-            Console.warn(f"No operational columns found matching OPERATING_TAG_KEYWORDS. Falling back to PCA features.", component="REGIME", available_cols=len(raw_train.columns) if raw_train is not None else 0)
+            Console.warn(
+            "No operational sensor columns matched OPERATING_TAG_KEYWORDS for regime basis. "
+            "Falling back to PCA features for regime clustering. "
+            "Add custom keywords via regimes.feature_basis.custom_operating_keywords in ACM_Config.",
+            component="REGIME",
+            available_cols=len(raw_train.columns) if raw_train is not None else 0,
+        )
 
     # Only use PCA features if raw sensors not available or insufficient
     if not train_parts and pca_detector is not None and getattr(pca_detector, "pca", None) is not None:
@@ -1289,17 +1295,25 @@ def fit_regime_model(
                 
                 # If HDBSCAN produced low quality AND we have GMM fallback, try GMM
                 if low_quality and use_gmm_fallback:
-                    Console.warn("HDBSCAN produced low-quality clustering, trying GMM fallback", component="REGIME")
+                    Console.warn(
+            "HDBSCAN produced low-quality clustering (silhouette/BIC below threshold). "
+            "Switching to GMM fallback for regime detection.",
+            component="REGIME",
+        )
                     model = None
                     exemplars = None
                     fallback_gmm = None  # Clear ensemble if switching to pure GMM
                     
         except Exception as e:
-            Console.warn(f"HDBSCAN failed: {e}. Trying fallback.", component="REGIME")
+            Console.warn(f"HDBSCAN clustering failed: {e}. Falling back to GMM.", component="REGIME")
             model = None
             fallback_gmm = None
     elif clustering_method == "hdbscan" and not HDBSCAN_AVAILABLE:
-        Console.warn("HDBSCAN requested but not installed. Falling back to GMM.", component="REGIME")
+        Console.warn(
+            "HDBSCAN requested (regimes.clustering.method=hdbscan) but hdbscan package is not installed. "
+            "Install with: pip install hdbscan. Falling back to GMM.",
+            component="REGIME",
+        )
     elif clustering_method == "hdbscan" and len(train_basis) < 10:
         Console.warn(f"Too few samples ({len(train_basis)}) for HDBSCAN. Falling back to GMM.", component="REGIME")
     
@@ -1331,7 +1345,10 @@ def fit_regime_model(
                 except Exception:
                     pass
         except Exception as e:
-            Console.warn(f"GMM also failed: {e}. Trying KMeans fallback.", component="REGIME")
+            Console.warn(
+            f"GMM clustering failed: {e}. Falling back to KMeans as last resort.",
+            component="REGIME",
+        )
     
     # ========== TRY KMEANS AS FINAL FALLBACK (v11.1.7) ==========
     # KMeans is fast, reliable, and always produces clusters
@@ -1517,7 +1534,11 @@ def fit_regime_model(
         meta["training_distance_threshold"] = float(threshold)
         meta["training_distance_percentile"] = distance_percentile
     except Exception as e:
-        Console.warn(f"Could not compute training distance threshold: {e}", component="REGIME")
+        Console.warn(
+            f"Could not compute training distance threshold for novel point detection: {e}. "
+            "All scoring points will be treated as known (no UNKNOWN regime assignments).",
+            component="REGIME",
+        )
         regime_model.training_distance_threshold_ = None
     
     return regime_model
@@ -1724,8 +1745,10 @@ def predict_regime_with_confidence(
                 
                 n_novel = int(np.sum(is_novel))
                 Console.info(
-                    f"Identified {n_novel}/{n_samples} novel points (assigned to nearest cluster)",
-                    component="REGIME"
+                    f"HDBSCAN: {n_novel}/{n_samples} points classified as novel (sparse/outlier region). "
+                    "Assigned to nearest cluster. High novel counts may indicate the training window "
+                    "did not cover the full operating envelope.",
+                    component="REGIME",
                 )
             
             return labels, confidence, is_novel
@@ -1778,8 +1801,10 @@ def predict_regime_with_confidence(
             
             if np.any(is_novel):
                 Console.info(
-                    f"Identified {np.sum(is_novel)}/{n_samples} novel points",
-                    component="REGIME"
+                    f"GMM: {int(np.sum(is_novel))}/{n_samples} points classified as novel "
+                    "(low assignment probability). High novel counts may indicate regime drift "
+                    "or a training window that is too short.",
+                    component="REGIME",
                 )
     
     return labels, confidence, is_novel
@@ -2837,7 +2862,12 @@ def label(score_df, ctx: Dict[str, Any], score_out: Dict[str, Any], cfg: Dict[st
         return out
 
     if bool(_cfg_get(cfg, "regimes.allow_legacy_label", False)):
-        Console.warn("Falling back to legacy labeling path (allow_legacy_label=True)", component="REGIME", n_samples=len(score_df) if hasattr(score_df, '__len__') else 0)
+        Console.warn(
+            "Using legacy regime labeling path (regimes.allow_legacy_label=True). "
+            "This path is deprecated and will be removed. Ensure regime model is valid before scoring.",
+            component="REGIME",
+            n_samples=len(score_df) if hasattr(score_df, "__len__") else 0,
+        )
         return _legacy_label(score_df, ctx, out, cfg)
     raise RuntimeError("Regime model unavailable and legacy path disabled (regimes.allow_legacy_label=False)")
 

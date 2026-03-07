@@ -299,7 +299,8 @@ class SmartColdstart:
                 return int(row[0] or 0), int(row[1] or 0)
         except Exception as e:
             Console.warn(
-                f"_load_progress failed: {e}",
+                f"Could not read coldstart progress from ACM_ColdstartState: {e}. "
+                "Progress counters will reset to zero for this batch.",
                 component="COLDSTART",
                 equip_id=self.equip_id,
                 stage=self.stage,
@@ -413,7 +414,16 @@ class SmartColdstart:
             if data_cadence_seconds is None:
                 # Fallback: assume 1 minute cadence
                 data_cadence_seconds = 60
-                Console.warn(f"Could not detect cadence, assuming {data_cadence_seconds}s", component="COLDSTART", equip_id=self.equip_id, equip_name=self.equip_name, table=table_name, default_cadence_s=data_cadence_seconds)
+                Console.warn(
+                    f"Data cadence could not be auto-detected from {table_name}. "
+                    f"Assuming {data_cadence_seconds}s ({data_cadence_seconds/60:.0f} min) per reading. "
+                    "If this is wrong, the coldstart window will be incorrectly sized.",
+                    component="COLDSTART",
+                    equip_id=self.equip_id,
+                    equip_name=self.equip_name,
+                    table=table_name,
+                    default_cadence_s=data_cadence_seconds,
+                )
         
         # Calculate how many minutes needed to get required_rows
         cadence_minutes = data_cadence_seconds / 60
@@ -441,20 +451,42 @@ class SmartColdstart:
                 # Add required minutes to get end time
                 end_time = start_time + timedelta(minutes=required_minutes)
                 
-                Console.info(f"Loading from EARLIEST data: {start_time}", component="COLDSTART")
-                Console.info(f"Calculated optimal window: {required_minutes} minutes ({required_minutes/60:.1f} hours)", component="COLDSTART")
-                Console.info(f"Expected rows: ~{int(required_minutes / cadence_minutes)} (target: {required_rows})", component="COLDSTART")
+                Console.info(
+                    f"Coldstart window: {start_time} → +{required_minutes} min ({required_minutes/60:.1f} h). "
+                    f"Expected ~{int(required_minutes / cadence_minutes)} rows at {cadence_minutes:.1f} min/row (target: {required_rows}).",
+                    component="COLDSTART",
+                )
                 
                 return start_time, end_time
             else:
                 # Fallback: use lookback from current time if no data found
-                Console.warn(f"No data found in {table_name}, using lookback from current batch", component="COLDSTART", equip_id=self.equip_id, equip_name=self.equip_name, table=table_name, required_rows=required_rows, lookback_minutes=required_minutes)
+                Console.warn(
+                    f"No data found in {table_name}. Falling back to lookback from current batch end "
+                    f"({required_minutes} min / {required_minutes/60:.1f} h). "
+                    "Coldstart may fail if the historian table is empty.",
+                    component="COLDSTART",
+                    equip_id=self.equip_id,
+                    equip_name=self.equip_name,
+                    table=table_name,
+                    required_rows=required_rows,
+                    lookback_minutes=required_minutes,
+                )
                 end_time = current_window_end
                 start_time = end_time - timedelta(minutes=required_minutes)
                 return start_time, end_time
                 
         except Exception as e:
-            Console.error(f"Error querying earliest timestamp: {e}", component="COLDSTART", equip_id=self.equip_id, equip_name=self.equip_name, table=table_name, required_rows=required_rows, error_type=type(e).__name__, error=str(e)[:200])
+            Console.error(
+                f"Failed to query earliest timestamp from {table_name}: {e}. "
+                "Falling back to lookback window from current batch end.",
+                component="COLDSTART",
+                equip_id=self.equip_id,
+                equip_name=self.equip_name,
+                table=table_name,
+                required_rows=required_rows,
+                error_type=type(e).__name__,
+                error=str(e)[:200],
+            )
             # Fallback: lookback from current time
             end_time = current_window_end
             start_time = end_time - timedelta(minutes=required_minutes)
@@ -691,7 +723,16 @@ class SmartColdstart:
                 )
                 self.sql_client.conn.commit()
             except Exception as e:
-                Console.error(f"Failed to update progress: {e}", component="COLDSTART", equip_id=self.equip_id, stage=self.stage, rows_received=rows_received, error_type=type(e).__name__, error=str(e)[:200])
+                Console.error(
+                    f"Failed to persist coldstart progress to ACM_ColdstartState: {e}. "
+                    "Row accumulation count will not be saved; next batch will re-count from scratch.",
+                    component="COLDSTART",
+                    equip_id=self.equip_id,
+                    stage=self.stage,
+                    rows_received=rows_received,
+                    error_type=type(e).__name__,
+                    error=str(e)[:200],
+                )
             finally:
                 try:
                     cur.close()

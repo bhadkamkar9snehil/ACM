@@ -115,8 +115,12 @@ def _configure_logging(logging_cfg, args):
     """Apply CLI/config logging overrides and return effective flags."""
     log_file = args.log_file or (logging_cfg or {}).get("file")
     if log_file:
-        Console.warn(f"File logging disabled in SQL-only mode (ignoring --log-file={log_file})", component="CONFIG",
-                     log_file=str(log_file))
+        Console.warn(
+            f"--log-file={log_file} ignored: ACM writes all logs to SQL (ACM_RunLogs) and the "
+            f"observability stack (Loki). File-based logging is not supported.",
+            component="CONFIG",
+            log_file=str(log_file),
+        )
 
 
 # Backwards-compat breadcrumbs for helpers extracted from this module.
@@ -625,7 +629,12 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
         # FORECASTING_DISABLED:
         # Forecast and RUL pipeline is intentionally disabled in current runtime.
         # Re-enable by restoring ForecastEngine import/stub wiring and forecasting stage.
-        Console.info("Forecasting/RUL is disabled (FORECASTING_DISABLED).", component="FORECAST")
+        Console.info(
+            "Forecasting and RUL estimation are disabled for this run "
+            "(runtime.phases.forecast=False in ACM_Config). "
+            "Set runtime.phases.forecast=True to enable.",
+            component="FORECAST",
+        )
 
         # Determine outcome based on degradations.
         outcome, degraded_err_json = resolve_run_outcome_from_degradations(degradations)
@@ -644,8 +653,15 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
         err_json = serialize_run_exception(e)
         
         # ACM_Runs metadata is written in finally block (includes error_message).
-        Console.error(f"Exception: {e}", component="RUN",
-                      equip=equip, run_id=run_id, error_type=type(e).__name__, error=str(e)[:500])
+        Console.error(
+            f"Pipeline failed with unhandled exception ({type(e).__name__}): {e}. "
+            f"This run will be marked FAIL in ACM_Runs. Check ACM_RunLogs for full trace.",
+            component="RUN",
+            equip=equip,
+            run_id=run_id,
+            error_type=type(e).__name__,
+            error=str(e)[:500],
+        )
         # Re-raise to keep stderr useful for orchestrators.
         raise
 

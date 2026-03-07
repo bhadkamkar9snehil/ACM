@@ -1120,7 +1120,11 @@ def rebuild_detectors_from_cache(
             
             # AUDIT FIX: Validate regime model is not None
             if regime_model is None:
-                Console.warn("Cached regime model is None; discarding.", component="REGIME", equip=equip)
+                Console.warn(
+                    "Cached regime model is None. Regime clustering will be re-fit this batch.",
+                    component="REGIME",
+                    equip=equip,
+                )
             
             # AUDIT FIX: Validate regime model feature compatibility
             # Regime models use cluster centers which have n_features dimensions
@@ -1135,8 +1139,11 @@ def rebuild_detectors_from_cache(
                         f"Regime model corruption: manifest says {regime_n_features} features but model has {n_features_cached}"
                     )
                     Console.warn(
-                        f"Regime model feature mismatch with manifest - discarding",
-                        component="REGIME", equip=equip
+                        f"Regime model discarded: manifest expects {regime_n_features} features "
+                        f"but cached model has {n_features_cached}. "
+                        "Regime clustering will be re-fit this batch.",
+                        component="REGIME",
+                        equip=equip,
                     )
                     regime_model = None
             
@@ -1168,7 +1175,8 @@ def rebuild_detectors_from_cache(
             result["success"] = True
             if result["validation_warnings"]:
                 Console.info(
-                    f"Model cache loaded with {len(result['validation_warnings'])} warnings",
+                    f"Model cache loaded with {len(result['validation_warnings'])} validation warning(s): "
+                    f"{result['validation_warnings']}",
                     component="MODEL", equip=equip, warning_count=len(result["validation_warnings"])
                 )
         else:
@@ -1176,8 +1184,13 @@ def rebuild_detectors_from_cache(
             if not result["ar1_detector"]: missing.append("ar1")
             if not result["pca_detector"]: missing.append("pca")
             if not result["iforest_detector"]: missing.append("iforest")
-            Console.warn(f"Incomplete model cache, missing: {missing}, retraining required", component="MODEL",
-                         equip=equip, missing_models=missing)
+            Console.warn(
+                f"Cached model cache is incomplete (missing: {missing}). "
+                "All detectors will be retrained from scratch this batch.",
+                component="MODEL",
+                equip=equip,
+                missing_models=missing,
+            )
             # Clear all on failure to ensure consistent state
             result["ar1_detector"] = None
             result["pca_detector"] = None
@@ -1187,8 +1200,14 @@ def rebuild_detectors_from_cache(
             
     except Exception as e:
         import traceback
-        Console.warn(f"Failed to reconstruct detectors: {e} | trace={traceback.format_exc()[:300]}", component="MODEL",
-                     equip=equip, error_type=type(e).__name__)
+        Console.warn(
+            f"Failed to reconstruct detectors from cache: {e}. "
+            "All detectors will be retrained from scratch this batch.",
+            component="MODEL",
+            equip=equip,
+            error_type=type(e).__name__,
+            trace=traceback.format_exc()[:300],
+        )
         # Clear all on exception
         result["ar1_detector"] = None
         result["pca_detector"] = None

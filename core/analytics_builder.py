@@ -128,7 +128,7 @@ class AnalyticsBuilder:
         sensor_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, int]:
         """
-        Generate essential analytics tables (v11 - SQL-only).
+        Generate essential analytics tables for this run.
 
         Writes:
           - ACM_HealthTimeline: Health % over time (required for RUL forecasting)
@@ -136,11 +136,15 @@ class AnalyticsBuilder:
           - ACM_SensorDefects: Sensor-level anomaly flags
           - ACM_SensorHotspots: Top anomalous sensors (RUL attribution)
           - ACM_DataQuality: Data quality per sensor
-          
+
         Returns:
             Dict with 'sql_tables' count
         """
-        Console.info("Generating analytics tables (v11 SQL-only)...", component="ANALYTICS")
+        Console.info(
+            "Building analytics tables: HealthTimeline, RegimeTimeline, "
+            "SensorDefects, SensorHotspots, DataQuality...",
+            component="ANALYTICS",
+        )
 
         sql_count = 0
 

@@ -17,9 +17,65 @@ Release Management:
 - Production deployments use specific tags (never merge commits)
 """
 
-__version__ = "11.15.10"
+__version__ = "11.15.11"
 __version_date__ = "2026-03-07"
 __version_author__ = "ACM Development Team"
+
+# v11.15.11: OBSERVABILITY — Improved log messages across all core modules
+#
+# Changes — 8 files updated, no functional changes:
+#
+# acm.py:
+#   - --log-file warning: replaced "SQL-only mode" with explanation that ACM logs to
+#     SQL (ACM_RunLogs) and the observability stack. File logging not supported.
+#   - Forecasting disabled info: now explains the config key (runtime.phases.forecast)
+#     and how to re-enable it.
+#   - Top-level exception error: now names the exception type, clarifies the run will
+#     be marked FAIL in ACM_Runs, and directs operators to ACM_RunLogs.
+#
+# analytics_builder.py:
+#   - Startup message: removed stale "v11 SQL-only" label. Now lists the 5 output
+#     tables being written (HealthTimeline, RegimeTimeline, SensorDefects, etc.).
+#   - Docstring updated to remove "v11 - SQL-only" from generate_all_analytics().
+#
+# model_persistence.py:
+#   - save_regime_state() error: removed "SQL-only mode" label. Now clearly says
+#     regime state won't survive across batches.
+#
+# output_manager_services.py:
+#   - check_refit_request_service(): refit request found demoted from Console.warn
+#     to Console.info (it is a normal operational event, not an anomaly).
+#   - ContributionTimeline skip: messages now explain what fusion_weights are and what
+#     detector z-score columns are required.
+#
+# smart_coldstart.py:
+#   - _load_progress warn: explains ACM_ColdstartState, impact (progress resets).
+#   - Cadence detection fallback: names the assumed cadence and explains the risk.
+#   - calculate_optimal_window: consolidated 3 separate info lines into one clear line.
+#   - No-data-found fallback: explains this is a fallback and why coldstart may fail.
+#   - _update_progress error: explains which table failed and the per-batch impact.
+#
+# model_lifecycle.py:
+#   - promote_model(): LEARNING→CONVERGED message now includes metric+score+stability.
+#   - create_new_model_state(): explains that consecutive runs must accumulate for promotion.
+#   - get_active_model_dict(): consolidated model state info into one detailed log line.
+#   - load_model_state_from_sql() error: identifies the source table, explains fallback.
+#
+# detector_orchestrator.py:
+#   - Incomplete cache warn: explains that all detectors will be retrained.
+#   - Reconstruction failure: separates trace into structured field.
+#   - Regime model None: explains re-fit will occur.
+#   - Regime feature mismatch: shows both expected and actual feature counts.
+#   - Validation warnings: now prints the actual warning strings.
+#
+# regimes.py:
+#   - Novel point detection (HDBSCAN + GMM): explains what novel points mean and
+#     what to investigate (short training window / regime drift).
+#   - HDBSCAN low quality: explains why switching to GMM.
+#   - Clustering method fallbacks: clearer failure messages with pip install hint.
+#   - No operational columns: directs operator to custom_operating_keywords config key.
+#   - Distance threshold failure: explains the impact (no UNKNOWN assignments).
+#   - Legacy labeling path: labels the config key and marks path as deprecated.
 
 # v11.15.10: COLDSTART + LIFECYCLE FIX — 6 structural bugs
 #

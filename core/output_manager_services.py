@@ -271,8 +271,9 @@ def check_refit_request_service(output_manager: Any) -> bool:
             )
             row = cur.fetchone()
             if row:
-                Console.warn(
-                    f"SQL refit request found: id={row[0]} at {row[1]}",
+                Console.info(
+                    f"Pending model refit request found (id={row[0]}, requested at {row[1]}). "
+                    "Acknowledging and triggering refit this batch.",
                     component="MODEL",
                     equip=output_manager.equipment,
                     refit_request_id=row[0],
@@ -936,7 +937,11 @@ def write_contribution_timeline_from_frame_service(
 ) -> int:
     """Build and persist detector contribution timeline from score frame."""
     if not fusion_weights:
-        Console.warn("ContributionTimeline skipped: fusion_weights is empty/None", component="CONTRIB")
+        Console.warn(
+            "ContributionTimeline skipped: detector fusion weights are empty. "
+            "This table requires at least one active detector with a non-zero weight.",
+            component="CONTRIB",
+        )
         return 0
     try:
         # Normalize: ensure Timestamp is a column (frame index is a DatetimeIndex throughout the pipeline)
@@ -944,7 +949,11 @@ def write_contribution_timeline_from_frame_service(
             frame = frame.reset_index().rename(columns={frame.index.name or "index": "Timestamp"})
         contrib_df = build_contribution_timeline(frame, fusion_weights)
         if not output_manager._is_non_empty_dataframe(contrib_df):
-            Console.warn("ContributionTimeline skipped: build returned empty/None DataFrame", component="CONTRIB")
+            Console.warn(
+                "ContributionTimeline skipped: build_contribution_timeline() returned no rows. "
+                "Check that the score frame contains valid detector z-score columns (ar1_z, pca_spe_z, etc.).",
+                component="CONTRIB",
+            )
             return 0
         return write_contribution_timeline_service(output_manager, contrib_df)
     except Exception as e:

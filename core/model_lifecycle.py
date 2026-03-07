@@ -309,7 +309,9 @@ def promote_model(state: ModelState) -> ModelState:
     state.promoted_at = datetime.now()
 
     Console.info(
-        f"Model v{state.version} promoted to CONVERGED",
+        f"Model v{state.version} promoted LEARNING → CONVERGED. "
+        f"Regime metric={state.regime_quality_metric} score={state.regime_quality_score}, "
+        f"stability={state.stability_ratio}, consecutive_runs={state.consecutive_runs}.",
         component="LIFECYCLE",
         equip_id=state.equip_id,
         version=state.version,
@@ -387,7 +389,9 @@ def create_new_model_state(
     )
 
     Console.info(
-        f"Created model v{version} in LEARNING state",
+        f"New model v{version} created in LEARNING state "
+        f"({training_rows} training rows, {training_days:.1f} training days). "
+        "Model will accumulate consecutive scoring runs before promotion to CONVERGED.",
         component="LIFECYCLE",
         equip_id=equip_id,
         version=version,
@@ -714,8 +718,16 @@ def get_active_model_dict(
     """
     Get dict suitable for write_active_models in output_manager.
     """
+    _regime_score_str = (
+        f"{state.regime_quality_score:.3f}" if state.regime_quality_score is not None else "N/A"
+    )
     Console.info(
-        f"Model state v{state.version}: {state.maturity.value}",
+        f"Active model v{state.version}: state={state.maturity.value} | "
+        f"runs={state.consecutive_runs} | "
+        f"regime_metric={state.regime_quality_metric} score={_regime_score_str} "
+        f"quality_ok={state.regime_quality_ok} | "
+        f"stability={state.stability_ratio} | "
+        f"training={state.training_rows} rows / {state.training_days:.1f} days",
         component="LIFECYCLE",
         regime_metric=state.regime_quality_metric,
         regime_score=(
@@ -815,5 +827,11 @@ def load_model_state_from_sql(
                 last_run_at=row[3],
             )
     except Exception as e:
-        Console.warn(f"Failed to load model state: {e}", component="LIFECYCLE", error=str(e)[:200])
+        Console.warn(
+            f"Failed to load model state from ACM_ActiveModels: {e}. "
+            "Lifecycle will be treated as a fresh start (no prior state).",
+            component="LIFECYCLE",
+            equip_id=equip_id,
+            error=str(e)[:200],
+        )
         return None
