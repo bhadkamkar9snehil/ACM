@@ -1,6 +1,6 @@
 ---
 type: index
-generated_at: 2026-02-22T16:36:43+00:00
+generated_at: 2026-03-07T06:11:34+00:00
 ---
 
 # Module Index
@@ -35,6 +35,7 @@ generated_at: 2026-02-22T16:36:43+00:00
 - [[modules/core.output_dataframe_builders]] (core/output_dataframe_builders.py)
 - [[modules/core.output_manager]] (core/output_manager.py)
 - [[modules/core.output_manager_services]] (core/output_manager_services.py)
+- [[modules/core.output_sql_core]] (core/output_sql_core.py)
 - [[modules/core.pipeline_types]] (core/pipeline_types.py)
 - [[modules/core.regimes]] (core/regimes.py)
 - [[modules/core.resource_monitor]] (core/resource_monitor.py)

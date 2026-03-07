@@ -485,7 +485,7 @@ def cfg_get(cfg: Dict[str, Any], path: str, default: Any) -> Any:
     keys = path.split(".")
     current: Any = cfg or {}
     for key in keys:
-        if isinstance(current, dict) and key in current:
+        if hasattr(current, "get") and key in current:
             current = current[key]
         else:
             return default

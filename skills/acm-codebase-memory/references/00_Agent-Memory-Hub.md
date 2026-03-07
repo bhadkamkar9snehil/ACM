@@ -1,6 +1,6 @@
 ---
 type: agent-memory
-generated_at: 2026-02-22T16:36:43+00:00
+generated_at: 2026-03-07T06:11:34+00:00
 ---
 
 # ACM Agent Memory Hub
@@ -16,7 +16,7 @@ This note is generated for agent-first ACM context loading.
 
 ## Highest Symbol Density Modules
 - [[modules/core.observability|core.observability]] symbols=110
-- [[modules/core.output_manager|core.output_manager]] symbols=109
+- [[modules/core.output_manager|core.output_manager]] symbols=104
 - [[modules/core.regimes|core.regimes]] symbols=55
 - [[modules/core.fuse|core.fuse]] symbols=48
 - [[modules/core.model_persistence|core.model_persistence]] symbols=41

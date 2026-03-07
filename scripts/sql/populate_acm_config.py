@@ -10,8 +10,8 @@ Usage:
 """
 
 import sys
+import csv
 from pathlib import Path
-import pandas as pd
 
 # Add project root to path
 project_root = Path(__file__).resolve().parents[2]
@@ -19,9 +19,6 @@ sys.path.insert(0, str(project_root))
 
 from core.sql_client import SQLClient
 from core.observability import Console
-from utils.config_dict import ConfigDict
-
-
 def parse_value_type(value: str) -> tuple[str, str]:
     """
     Parse value string and determine its type.
@@ -106,12 +103,15 @@ def populate_config(csv_path: Path):
     if not csv_path.exists():
         raise FileNotFoundError(f"Config file not found: {csv_path}")
     
-    df = pd.read_csv(csv_path)
-    Console.info(f"Loaded {len(df)} rows from CSV", component="CFG-MIGRATE")
+    with csv_path.open("r", encoding="utf-8-sig", newline="") as handle:
+        reader = csv.DictReader(handle)
+        rows = list(reader)
+        fieldnames = reader.fieldnames or []
+    Console.info(f"Loaded {len(rows)} rows from CSV", component="CFG-MIGRATE")
     
     # Validate required columns
     required_cols = ['EquipID', 'Category', 'ParamPath', 'ParamValue', 'ValueType']
-    missing_cols = [col for col in required_cols if col not in df.columns]
+    missing_cols = [col for col in required_cols if col not in fieldnames]
     if missing_cols:
         raise ValueError(f"Missing required columns: {missing_cols}")
     
@@ -127,12 +127,18 @@ def populate_config(csv_path: Path):
     
     cursor = client.cursor()
     try:
-        for _, row in df.iterrows():
-            equip_id = int(row['EquipID']) if pd.notna(row['EquipID']) else 0
-            category = str(row['Category']).strip() if pd.notna(row['Category']) else ''
-            param_path = str(row['ParamPath']).strip()
-            param_value = str(row['ParamValue']).strip() if pd.notna(row['ParamValue']) else ''
-            value_type = str(row['ValueType']).strip() if pd.notna(row['ValueType']) else 'string'
+        for row in rows:
+            equip_id_raw = row.get('EquipID')
+            category_raw = row.get('Category')
+            param_path_raw = row.get('ParamPath')
+            param_value_raw = row.get('ParamValue')
+            value_type_raw = row.get('ValueType')
+
+            equip_id = int(str(equip_id_raw).strip()) if equip_id_raw not in (None, "") else 0
+            category = str(category_raw).strip() if category_raw not in (None, "") else ''
+            param_path = str(param_path_raw).strip() if param_path_raw not in (None, "") else ""
+            param_value = str(param_value_raw).strip() if param_value_raw not in (None, "") else ''
+            value_type = str(value_type_raw).strip() if value_type_raw not in (None, "") else 'string'
             
             if not param_path:
                 Console.warn(f"Skipping empty ParamPath for EquipID={equip_id}", component="CFG-MIGRATE")

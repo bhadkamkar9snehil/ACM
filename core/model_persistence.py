@@ -182,6 +182,7 @@ class RegimeState:
     last_trained_time: str  # ISO format datetime string
     config_hash: str
     regime_basis_hash: str
+    training_distance_threshold: Optional[float] = None
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -272,26 +273,30 @@ def save_regime_state(state: RegimeState, equip: str, sql_client=None) -> None:
                     QualityOk = ?,
                     LastTrainedTime = ?,
                     ConfigHash = ?,
-                    RegimeBasisHash = ?
+                    RegimeBasisHash = ?,
+                    TrainingDistanceThreshold = ?
             WHEN NOT MATCHED THEN
                 INSERT (EquipID, StateVersion, NumClusters, ClusterCentersJson,
                         ScalerMeanJson, ScalerScaleJson, PCAComponentsJson,
                         PCAExplainedVarianceJson, NumPCAComponents, SilhouetteScore,
-                        QualityOk, LastTrainedTime, ConfigHash, RegimeBasisHash)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                        QualityOk, LastTrainedTime, ConfigHash, RegimeBasisHash,
+                        TrainingDistanceThreshold)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
         """, (
             state.equip_id, state.state_version,  # MERGE match
             state.n_clusters, state.cluster_centers_json,
             state.scaler_mean_json, state.scaler_scale_json,
             state.pca_components_json, state.pca_explained_variance_json,
             state.n_pca_components, state.silhouette_score, state.quality_ok,
-            state.last_trained_time, state.config_hash, state.regime_basis_hash,  # UPDATE values
+            state.last_trained_time, state.config_hash, state.regime_basis_hash,
+            state.training_distance_threshold,  # UPDATE values
             state.equip_id, state.state_version, state.n_clusters,
             state.cluster_centers_json, state.scaler_mean_json,
             state.scaler_scale_json, state.pca_components_json,
             state.pca_explained_variance_json, state.n_pca_components,
             state.silhouette_score, state.quality_ok,
-            state.last_trained_time, state.config_hash, state.regime_basis_hash  # INSERT values
+            state.last_trained_time, state.config_hash, state.regime_basis_hash,
+            state.training_distance_threshold  # INSERT values
         ))
         
         if not sql_client.conn.autocommit:
@@ -325,7 +330,8 @@ def load_regime_state(equip: str, equip_id: Optional[int] = None, sql_client=Non
                 EquipID, StateVersion, NumClusters, ClusterCentersJson,
                 ScalerMeanJson, ScalerScaleJson, PCAComponentsJson,
                 PCAExplainedVarianceJson, NumPCAComponents, SilhouetteScore,
-                QualityOk, LastTrainedTime, ConfigHash, RegimeBasisHash
+                QualityOk, LastTrainedTime, ConfigHash, RegimeBasisHash,
+                TrainingDistanceThreshold
             FROM dbo.ACM_RegimeState
             WHERE EquipID = ?
             ORDER BY StateVersion DESC
@@ -349,7 +355,8 @@ def load_regime_state(equip: str, equip_id: Optional[int] = None, sql_client=Non
                 quality_ok=bool(row[10]) if row[10] is not None else False,
                 last_trained_time=row[11].isoformat() if row[11] else datetime.now(timezone.utc).isoformat(),
                 config_hash=row[12] or "",
-                regime_basis_hash=row[13] or ""
+                regime_basis_hash=row[13] or "",
+                training_distance_threshold=float(row[14]) if row[14] is not None else None,
             )
             Console.info(f"Loaded state v{state.state_version} from SQL (EquipID={equip_id})", component="REGIME_STATE")
             return state
@@ -1203,8 +1210,13 @@ def create_model_metadata(
         # Compute BIC and AIC if possible
         if hasattr(train_data, 'values'):
             try:
-                gmm_meta["bic"] = round(float(gmm.bic(train_data.values)), 2)
-                gmm_meta["aic"] = round(float(gmm.aic(train_data.values)), 2)
+                gmm_n_features = getattr(gmm, "n_features_in_", None)
+                if gmm_n_features is not None and train_data.shape[1] != gmm_n_features:
+                    X_eval = train_data.values[:, :gmm_n_features]
+                else:
+                    X_eval = train_data.values
+                gmm_meta["bic"] = round(float(gmm.bic(X_eval)), 2)
+                gmm_meta["aic"] = round(float(gmm.aic(X_eval)), 2)
                 gmm_meta["lower_bound"] = round(float(gmm.lower_bound_), 2)
             except Exception as e:
                 Console.warn(f"Failed to compute GMM quality metrics: {e}", component="META", n_components=gmm.n_components, error_type=type(e).__name__)

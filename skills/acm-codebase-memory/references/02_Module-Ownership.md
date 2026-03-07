@@ -11,7 +11,7 @@ type: agent-memory
 | `[core.analytics_builder]` | 15 | 1 |
 | `[core.ar1_detector]` | 6 | 1 |
 | `[core.confidence]` | 11 | 1 |
-| `[core.config_history_writer]` | 4 | 1 |
+| `[core.config_history_writer]` | 6 | 1 |
 | `[core.correlation]` | 7 | 0 |
 | `[core.data_loader]` | 10 | 1 |
 | `[core.degradation_model]` | 36 | 1 |
@@ -34,8 +34,9 @@ type: agent-memory
 | `[core.output_artifacts]` | 2 | 1 |
 | `[core.output_contracts]` | 5 | 0 |
 | `[core.output_dataframe_builders]` | 1 | 0 |
-| `[core.output_manager]` | 109 | 7 |
+| `[core.output_manager]` | 104 | 8 |
 | `[core.output_manager_services]` | 31 | 2 |
+| `[core.output_sql_core]` | 22 | 2 |
 | `[core.pipeline_types]` | 23 | 0 |
 | `[core.regimes]` | 55 | 1 |
 | `[core.resource_monitor]` | 27 | 0 |
@@ -43,6 +44,6 @@ type: agent-memory
 | `[core.run_metadata_writer]` | 12 | 1 |
 | `[core.seasonality]` | 20 | 0 |
 | `[core.sensor_attribution]` | 30 | 1 |
-| `[core.smart_coldstart]` | 17 | 1 |
+| `[core.smart_coldstart]` | 18 | 1 |
 | `[core.sql_client]` | 29 | 0 |
 | `[core.state_manager]` | 14 | 1 |

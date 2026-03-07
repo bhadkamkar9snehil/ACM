@@ -130,7 +130,7 @@ _REGIME_CONFIG_SCHEMA = {
     "regimes.health.fused_warn_z": (float, 0.0, 10.0, "Fused Z warn threshold"),
     "regimes.health.fused_alert_z": (float, 0.0, 10.0, "Fused Z alert threshold"),
     # V11: UNKNOWN regime support
-    "regimes.unknown.enabled": (bool, True, True, "Enable UNKNOWN regime for low-confidence assignments"),
+    "regimes.unknown.enabled": (bool, False, True, "Enable UNKNOWN regime for low-confidence assignments"),
     "regimes.unknown.distance_percentile": (float, 0.0, 100.0, "Distance percentile threshold for UNKNOWN"),
 }
 
@@ -301,7 +301,13 @@ def _validate_regime_config(cfg: Dict[str, Any]) -> List[str]:
             issues.append(f"Missing config value for {path} ({description})")
             continue
         if not isinstance(value, expected_type):
-            issues.append(f"Config {path} expected {expected_type.__name__}, got {type(value).__name__}")
+            # Allow float-stored ints (e.g. auto-tune writes k_max=12.0 as float)
+            if expected_type is int and isinstance(value, float) and value == int(value):
+                value = int(value)
+            else:
+                issues.append(f"Config {path} expected {expected_type.__name__}, got {type(value).__name__}")
+                continue
+        if expected_type is bool:
             continue
         if isinstance(value, (int, float)) and not (low <= value <= high):
             issues.append(f"Config {path}={value} outside expected range [{low}, {high}]")
@@ -1433,6 +1439,15 @@ def fit_regime_model(
     quality_notes.extend(config_issues)
     if np.isnan(best_score):
         quality_notes.append("auto_k_unscored")
+    if not quality_ok and quality_notes:
+        Console.warn(
+            f"Regime quality failed: {', '.join(quality_notes)} "
+            f"(metric={best_metric}, score={best_score:.3f})",
+            component="REGIME",
+            metric=best_metric,
+            score=float(best_score) if np.isfinite(best_score) else None,
+            quality_notes=quality_notes,
+        )
     meta = {
         "best_k": int(best_k),
         "fit_score": float(best_score),
@@ -1708,20 +1723,20 @@ def predict_regime_with_confidence(
             # Confidence = prediction strength (0-1)
             confidence = np.clip(strengths, 0.0, 1.0)
             
-            # v11.3.1: Identify novel points (low strength = sparse region)
-            strength_threshold = float(unknown_cfg.get("hdbscan_strength_min", 0.1))
-            low_strength_mask = strengths < strength_threshold
-            
-            # Also check distance threshold for novelty
+            # v11.3.1: Identify novel points (sparse/out-of-envelope region)
+            # Distance gate is the primary signal when a calibrated threshold exists —
+            # HDBSCAN strength from approximate_predict returns near-zero for ALL
+            # out-of-sample points (cross-window scoring), making the strength gate
+            # unreliable as a primary novelty detector.
             if centers.size > 0 and distance_threshold < float("inf"):
-                # Compute distances to assigned centroids
-                # Handle invalid labels by clamping to valid range
+                # Primary: distance to assigned centroid exceeds training P99
                 valid_labels = np.clip(labels, 0, len(centers) - 1)
                 point_distances = np.linalg.norm(X_scaled - centers[valid_labels], axis=1)
-                distance_novel_mask = point_distances > distance_threshold
-                is_novel = low_strength_mask | distance_novel_mask
+                is_novel = point_distances > distance_threshold
             else:
-                is_novel = low_strength_mask.copy()
+                # Fallback when no calibrated threshold: use prediction strength
+                strength_threshold = float(unknown_cfg.get("hdbscan_strength_min", 0.1))
+                is_novel = strengths < strength_threshold
             
             # v11.3.1: Always assign - use GMM or nearest centroid for novel points
             if np.any(is_novel):
@@ -2633,6 +2648,7 @@ def regime_model_to_state(
         last_trained_time=datetime.now(timezone.utc).isoformat(),
         config_hash=config_hash,
         regime_basis_hash=regime_basis_hash,
+        training_distance_threshold=model.training_distance_threshold_,
     )
     
     return state
@@ -2715,7 +2731,9 @@ def regime_state_to_model(
     
     if pca_obj is not None:
         model.pca = pca_obj
-    
+
+    model.training_distance_threshold_ = state.training_distance_threshold
+
     return model
 
 # TO-DO See if this is still needed like this
@@ -3583,8 +3601,10 @@ def run_regime_postprocess_stage(
     )
 
     state_counts = frame["regime_state"].value_counts().to_dict() if "regime_state" in frame.columns else {}
+    quality_notes = list(regime_model.meta.get("quality_notes", [])) if regime_model is not None else []
+    notes_str = f" | notes={quality_notes}" if (not regime_quality_ok and quality_notes) else ""
     logger.info(
-        f"Regime: quality_ok={regime_quality_ok} | states={state_counts} | transient={transient_counts}",
+        f"Regime: quality_ok={regime_quality_ok}{notes_str} | states={state_counts} | transient={transient_counts}",
         component="REGIME",
     )
 

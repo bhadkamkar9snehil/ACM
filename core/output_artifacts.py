@@ -64,9 +64,16 @@ def write_pca_artifacts(
 
         comps = getattr(pca_model, "components_", None)
         if comps is not None and hasattr(train, "columns"):
+            # PCA may have been fitted on fewer features than current train columns
+            # (feature set grew after refit). Use only the columns the PCA knows about.
+            pca_feature_names = getattr(pca_model, "feature_names_in_", None)
+            if pca_feature_names is not None:
+                fit_columns = list(pca_feature_names)
+            else:
+                fit_columns = list(train.columns[: comps.shape[1]])
             load_rows = []
             for k in range(comps.shape[0]):
-                for j, sensor in enumerate(train.columns):
+                for j, sensor in enumerate(fit_columns):
                     load_rows.append(
                         {
                             "RunID": run_id or "",

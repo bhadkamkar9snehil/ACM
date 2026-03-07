@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-02-22T16:36:43+00:00",
-  "module_count": 40,
+  "generated_at": "2026-03-07T06:11:34+00:00",
+  "module_count": 41,
   "modules": [
     {
       "module_name": "core.acm",
@@ -65,7 +65,7 @@
     {
       "module_name": "core.config_history_writer",
       "source_path": "core/config_history_writer.py",
-      "symbol_count": 4,
+      "symbol_count": 6,
       "core_import_count": 1,
       "core_imports": [
         "core.observability"
@@ -274,8 +274,8 @@
     {
       "module_name": "core.output_manager",
       "source_path": "core/output_manager.py",
-      "symbol_count": 109,
-      "core_import_count": 7,
+      "symbol_count": 104,
+      "core_import_count": 8,
       "core_imports": [
         "core.analytics_builder",
         "core.data_loader",
@@ -283,7 +283,8 @@
         "core.output_artifacts",
         "core.output_contracts",
         "core.output_dataframe_builders",
-        "core.output_manager_services"
+        "core.output_manager_services",
+        "core.output_sql_core"
       ]
     },
     {
@@ -294,6 +295,16 @@
       "core_imports": [
         "core.observability",
         "core.sensor_attribution"
+      ]
+    },
+    {
+      "module_name": "core.output_sql_core",
+      "source_path": "core/output_sql_core.py",
+      "symbol_count": 22,
+      "core_import_count": 2,
+      "core_imports": [
+        "core.observability",
+        "core.output_contracts"
       ]
     },
     {
@@ -358,7 +369,7 @@
     {
       "module_name": "core.smart_coldstart",
       "source_path": "core/smart_coldstart.py",
-      "symbol_count": 17,
+      "symbol_count": 18,
       "core_import_count": 1,
       "core_imports": [
         "core.observability"

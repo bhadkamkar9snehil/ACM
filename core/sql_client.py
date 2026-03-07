@@ -32,8 +32,11 @@ from typing import Any, Callable, Dict, Optional, Tuple
 from contextlib import contextmanager
 import configparser
 from pathlib import Path
-import pandas as pd
 from dataclasses import dataclass
+try:
+    import pandas as pd
+except Exception:  # pragma: no cover - optional for SQL-only utility paths
+    pd = None  # type: ignore
 
 try:
     import pyodbc

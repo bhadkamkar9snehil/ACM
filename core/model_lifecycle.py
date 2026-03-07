@@ -309,7 +309,7 @@ def promote_model(state: ModelState) -> ModelState:
     state.promoted_at = datetime.now()
 
     Console.info(
-        f"Model v{state.version} promoted LEARNING → CONVERGED. "
+        f"Model v{state.version} promoted LEARNING to CONVERGED. "
         f"Regime metric={state.regime_quality_metric} score={state.regime_quality_score}, "
         f"stability={state.stability_ratio}, consecutive_runs={state.consecutive_runs}.",
         component="LIFECYCLE",

@@ -17,10 +17,73 @@ Release Management:
 - Production deployments use specific tags (never merge commits)
 """
 
-__version__ = "11.15.11"
+__version__ = "11.15.14"
 __version_date__ = "2026-03-07"
 __version_author__ = "ACM Development Team"
 
+# v11.15.14: REGIME QUALITY GATE + HDBSCAN NOVEL SATURATION FIXES
+#
+# Fixes:
+#   1. utils/config_dict.py cfg_get(): isinstance(current, dict) failed on ConfigDict,
+#      so every dotted-path lookup returned the default. Replaced with hasattr(current, "get")
+#      so ConfigDict and plain dict are both traversable. This was the root cause of 14
+#      config_issues per batch forcing regime_quality_ok=False on all equipment.
+#   2. core/regimes.py _validate_regime_config(): float-stored ints (e.g. auto-tune
+#      writes k_max=12.0 as float) no longer flagged as type errors. Coerced to int
+#      when value == int(value).
+#   3. core/regimes.py fit_regime_model(): quality_notes now logged as WARN when
+#      quality_ok=False so operators can see the deciding reason.
+#   4. core/regimes.py run_regime_postprocess_stage(): per-batch regime log line now
+#      includes quality_notes when quality_ok=False.
+#   5. core/output_artifacts.py write_pca_artifacts(): PCA loadings loop now uses
+#      comps.shape[1] (fit features) not len(train.columns) (current features).
+#      Fixes "index N is out of bounds for axis 1 with size N" after feature growth.
+#   6. core/model_persistence.py create_model_metadata(): GMM BIC/AIC now slices
+#      train_data to gmm.n_features_in_ when feature count grew since fitting.
+#      Fixes "X has N features, but GaussianMixture is expecting M features".
+#   7. core/model_persistence.py RegimeState + save/load: TrainingDistanceThreshold
+#      persisted to ACM_RegimeState and restored on load. Fixes 100% novel-point
+#      saturation on CONVERGED scoring batches (loaded model had threshold=None->inf).
+#   8. core/regimes.py predict_regime_with_confidence(): Distance gate is now the
+#      primary novelty detector when a calibrated threshold exists. HDBSCAN strength
+#      from approximate_predict returns ~0 for all cross-window points, making it
+#      unreliable as primary. Strength gate retained as fallback when no threshold.
+#   SQL: ALTER TABLE ACM_RegimeState ADD TrainingDistanceThreshold float NULL
+#
+# v11.15.13: BATCH RUNNER FINAL SUMMARY RELIABILITY
+#
+# Fixes:
+#   - scripts/sql_batch_runner.py now emits a single final per-equipment summary
+#     line on all exit paths, including SQL precheck failure, historian-empty,
+#     coldstart failure, batch success, and unexpected exceptions.
+#   - main() now emits a guaranteed top-level final summary banner with
+#     succeeded/failed counts and total execution time before observability
+#     shutdown, even when errors occur during processing.
+#   - Added regression tests for final summary emission on both failure and
+#     success paths.
+#
+# v11.15.12: REGIME QUALITY + COLDSTART GATE FIX
+#
+# Fixes:
+#   - Added missing config row `regimes.unknown.enabled=True` to config_table.csv.
+#     Without this key, regime config validation failed on every run and forced
+#     regime_quality_ok=False, which caused all scoring rows to be labeled
+#     regime_state='unknown'.
+#   - Fixed _REGIME_CONFIG_SCHEMA boolean validation for `regimes.unknown.enabled`.
+#     Booleans no longer flow through numeric range validation, so both True and
+#     False are accepted when explicitly configured.
+#   - Updated scripts/sql_batch_runner.py coldstart detection to use
+#     ACM_ActiveModels.RegimeMaturityState as the authoritative lifecycle source,
+#     aligned with SmartColdstart.check_status(). This removes the stale
+#     ModelRegistry>=3 gate that could disagree with the actual lifecycle state.
+#   - Added targeted regression tests for regime config validation and the batch
+#     runner coldstart-status logic.
+#   - Refactored scripts/sql/populate_acm_config.py to use the standard-library
+#     CSV reader so config pushes do not require pandas in lean environments.
+#   - Made core/sql_client.py tolerate missing pandas for SQL utility paths that
+#     do not use DataFrame/timestamp helpers, allowing config migration to import
+#     SQLClient in lean environments.
+#
 # v11.15.11: OBSERVABILITY — Improved log messages across all core modules
 #
 # Changes — 8 files updated, no functional changes:
