@@ -94,11 +94,11 @@ class PromotionCriteria:
         RMSE < 12 on 0-100 health scale = good prediction accuracy
     """
     min_training_days: int = 7
-    min_silhouette_score: float = 0.40   # For silhouette-scale metrics only
+    min_silhouette_score: float = 0.15   # For silhouette-scale metrics only. Matches config_table.csv.
     min_dbcv_score: float = 0.0          # For HDBSCAN DBCV/persistence metrics
-    min_stability_ratio: float = 0.75
-    min_consecutive_runs: int = 5
-    min_training_rows: int = 400
+    min_stability_ratio: float = 0.60   # Matches config_table.csv.
+    min_consecutive_runs: int = 3        # Matches config_table.csv.
+    min_training_rows: int = 200         # Matches config_table.csv.
     max_forecast_mape: float = 35.0
     max_forecast_rmse: float = 12.0
 
@@ -737,6 +737,7 @@ def get_active_model_dict(
         'RegimePromotedAt': state.promoted_at,
         'ActiveThresholdVersion': threshold_version or effective_regime_version,
         'ActiveForecastVersion': forecast_version or effective_regime_version,
+        'RegimeQualityMetric': state.regime_quality_metric,
         'SilhouetteScore': state.regime_quality_score,
         'StabilityRatio': state.stability_ratio,
         'TrainingRows': state.training_rows,
@@ -756,10 +757,9 @@ def load_model_state_from_sql(
     """
     Load current model state from ACM_ActiveModels.
 
-    Note: SilhouetteScore column stores whatever metric was last used (BIC,
-    DBCV, or silhouette). regime_quality_metric is not persisted to SQL and
-    defaults to "silhouette" on load - it will be overwritten with the correct
-    metric from the current run's score_out before the promotion check runs.
+    SilhouetteScore stores the raw regime quality score regardless of which
+    metric was used (BIC, DBCV, silhouette). RegimeQualityMetric records
+    which metric it is so the promotion check can evaluate it correctly.
     """
     try:
         with sql_client.cursor() as cur:
@@ -778,7 +778,8 @@ def load_model_state_from_sql(
                     TotalRuns,
                     ForecastMAPE,
                     ForecastRMSE,
-                    CreatedAt
+                    CreatedAt,
+                    ISNULL(RegimeQualityMetric, 'silhouette') AS RegimeQualityMetric
                 FROM dbo.[ACM_ActiveModels]
                 WHERE EquipID = ?
             """, (equip_id,))
@@ -802,9 +803,7 @@ def load_model_state_from_sql(
                 created_at=row[13] or row[3] or datetime.now(),
                 promoted_at=row[2],
                 regime_quality_score=row[5],
-                # regime_quality_metric is NOT persisted; it will be set from
-                # score_out in the current run before any promotion check.
-                regime_quality_metric="silhouette",
+                regime_quality_metric=row[14] or "silhouette",
                 stability_ratio=row[6],
                 training_rows=row[7] or 0,
                 training_days=row[8] or 0.0,

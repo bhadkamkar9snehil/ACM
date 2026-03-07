@@ -17,9 +17,57 @@ Release Management:
 - Production deployments use specific tags (never merge commits)
 """
 
-__version__ = "11.15.9"
-__version_date__ = "2026-02-25"
+__version__ = "11.15.10"
+__version_date__ = "2026-03-07"
 __version_author__ = "ACM Development Team"
+
+# v11.15.10: COLDSTART + LIFECYCLE FIX — 6 structural bugs
+#
+# Bug 1 (B1) — acm.py: coldstart_complete passed as is_coldstart to seed_baseline_safe
+#   Symptom: scoring batches treated as coldstart → seed_baseline ran unconditionally
+#     on all runs, overwriting valid train/score splits on scoring batches.
+#   Root cause: coldstart_complete = DataLoadStageResult.should_continue, which is True
+#     on both coldstart and scoring runs. meta.is_coldstart_run is the correct flag.
+#   Fix: Extract is_coldstart_run from meta before seed_baseline_safe call.
+#
+# Bug 2 (B2) — smart_coldstart.py check_status(): SP gate used ModelRegistry >= 3
+#   Symptom: stale/corrupt models with 3+ model types in ModelRegistry bypassed coldstart
+#     indefinitely → scoring path ran → cache validation failed → silent infinite loop.
+#   Root cause: usp_ACM_CheckColdstartStatus used COUNT(ModelType) >= 3 as sole criterion.
+#     Python's load_cached_models_with_validation() already handles cache validity.
+#   Fix: Replace SP call with direct ACM_ActiveModels.RegimeMaturityState query.
+#     Coldstart needed only when no row exists or state is None/'INITIALIZING'.
+#     Added _load_progress() helper to read AccumulatedRows/AttemptCount separately.
+#
+# Bug 3 (B3) — smart_coldstart.py load_with_retry(): for-loop always returned on iter 1
+#   Symptom: max_attempts=3 had no effect; every coldstart batch was single-attempt only.
+#   Root cause: every branch inside for attempt in range(1, max_attempts+1) executed return.
+#   Fix: Removed the for-loop entirely. Coldstart is inherently single-attempt per batch;
+#     the batch runner drives retry cadence across batches.
+#
+# Bug 4 (B4) — smart_coldstart.py seed_baseline(): guard `is_coldstart and train_rows > 300`
+#   Symptom: coldstart batches with 300-499 train rows fell through to score-head seeding,
+#     overwriting DataLoader's correct 60/40 coldstart split.
+#   Root cause: min coldstart requirement is 500 rows, but guard used 300 as threshold.
+#   Fix: Unconditional early return when is_coldstart=True — DataLoader's split is authoritative.
+#
+# Bug 5 (B5) — model_lifecycle.py PromotionCriteria: defaults stricter than config_table.csv
+#   Symptom: SQL outage → config fallback to code defaults → promotion permanently blocked.
+#   Root cause: min_silhouette_score=0.40 (csv=0.15), min_stability_ratio=0.75 (csv=0.60),
+#     min_consecutive_runs=5 (csv=3), min_training_rows=400 (csv=200).
+#   Fix: Aligned dataclass defaults to exactly match config_table.csv values.
+#
+# Bug 6 (B6) — model_lifecycle.py + SQL: regime_quality_metric never persisted/loaded
+#   Symptom: BIC-regime equipment always evaluated against silhouette threshold (0.15) →
+#     raw BIC score (~-1200) always < 0.15 → quality always FAIL → stuck at LEARNING.
+#   Root cause: RegimeQualityMetric column missing from ACM_ActiveModels; even after SQL
+#     migration adds it, get_active_model_dict() never wrote it and load_model_state_from_sql()
+#     always defaulted to "silhouette".
+#   Fix (6a): Migration 013_acm_active_models_quality_metric.sql adds all missing lifecycle
+#     metric columns (SilhouetteScore, StabilityRatio, TrainingRows, TrainingDays,
+#     ConsecutiveRuns, TotalRuns, ForecastMAPE, ForecastRMSE, CreatedAt, RegimeQualityMetric).
+#   Fix (6b): get_active_model_dict() now writes RegimeQualityMetric.
+#   Fix (6c): load_model_state_from_sql() now reads RegimeQualityMetric from SQL.
 
 # v11.15.9: AUTO-TUNE PERSISTENCE + OMR QA CHECK FIXES
 #

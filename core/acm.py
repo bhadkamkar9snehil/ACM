@@ -350,6 +350,13 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
         T.log("data_split_complete", train_rows=train.shape[0], train_cols=train.shape[1], score_rows=score.shape[0], score_cols=score.shape[1])
         
         # ===== Adaptive rolling baseline (cold-start helper) =====
+        # B1 fix: coldstart_complete means "can_proceed" (True on scoring batches too).
+        # is_coldstart_run is True only when this batch IS the coldstart training run.
+        is_coldstart_run = (
+            meta.get("is_coldstart_run", False)
+            if isinstance(meta, dict)
+            else getattr(meta, "is_coldstart_run", False)
+        )
         with T.section("baseline.seed"):
             train, score, _ = seed_baseline_safe(
                 train=train.copy(),
@@ -358,7 +365,7 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
                 equip_id=equip_id,
                 cfg=cfg,
                 equip=equip,
-                is_coldstart=coldstart_complete,
+                is_coldstart=is_coldstart_run,
                 ensure_local_index_fn=ensure_local_index,
                 logger=Console,
             )
