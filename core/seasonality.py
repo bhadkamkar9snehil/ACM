@@ -557,3 +557,29 @@ def detect_and_adjust(
     score_out = score_out.drop(columns=['_ts'])
     
     return train_out, score_out, patterns, True
+
+
+def detect_and_adjust_safe(
+    train: pd.DataFrame,
+    score: pd.DataFrame,
+    cfg: Dict[str, Any],
+    logger: Any,
+    equip: str = "",
+) -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, List[SeasonalPattern]], bool]:
+    """
+    Safe wrapper for detect_and_adjust().
+
+    Returns original data with empty pattern output if seasonality processing fails.
+    """
+    try:
+        train_out, score_out, patterns, adjusted = detect_and_adjust(train, score, cfg)
+        if patterns:
+            pattern_count = sum(len(ps) for ps in patterns.values())
+            logger.info(
+                f"Seasonal: {pattern_count} patterns in {len(patterns)} sensors | adjusted={adjusted}",
+                component="SEASON",
+            )
+        return train_out, score_out, patterns, adjusted
+    except Exception as e:
+        logger.warn(f"Seasonality detection skipped: {e}", component="SEASON", equip=equip)
+        return train, score, {}, False

@@ -34,9 +34,8 @@ Orchestrates the complete forecasting workflow:
 v11.3.0 Updates:
 - Regime-conditioned forecasting with per-regime degradation rates
 - OMR/drift context integration for forecast confidence adjustment
-- Per-regime RUL estimates and hazard rates
-- Unified ACM_ForecastContext table for complete diagnostic context
- - Regime-conditioned degradation is now the default forecasting path
+- Per-regime RUL estimates for diagnostics
+- Regime-conditioned degradation is now the default forecasting path
 
 References:
 - All module-specific references in respective files
@@ -420,10 +419,9 @@ class ForecastEngine:
                     forecast_results, sensor_attributions, diagnostics, data_summary
                 )
                 
-                # Step 9b (v11.3.0): Regime-conditioned forecasting outputs
+                # Step 9b (v11.3.0): Supplementary regime-conditioned diagnostics
                 try:
                     regime_tables = self._run_regime_conditioned_forecasting(
-                        health_df=health_df,
                         degradation_model=degradation_model,
                         forecast_config=forecast_config,
                         forecast_results=forecast_results
@@ -1048,13 +1046,13 @@ class ForecastEngine:
                 'CreatedAt': datetime.now()
             })
             
-            self.output_manager.write_dataframe(
-                df_health_forecast,
+            health_write = self.output_manager.write_sql_table(
+                table_name='ACM_HealthForecast',
+                df=df_health_forecast,
                 artifact_name='acm_health_forecast',
-                sql_table='ACM_HealthForecast',
-                add_created_at=False
             )
-            tables_written.append('ACM_HealthForecast')
+            if health_write.get('sql_written'):
+                tables_written.append('ACM_HealthForecast')
             
             # ACM_FailureForecast: Failure probability time series
             df_failure_forecast = pd.DataFrame({
@@ -1069,13 +1067,13 @@ class ForecastEngine:
                 'CreatedAt': datetime.now()
             })
             
-            self.output_manager.write_dataframe(
-                df_failure_forecast,
+            failure_write = self.output_manager.write_sql_table(
+                table_name='ACM_FailureForecast',
+                df=df_failure_forecast,
                 artifact_name='acm_failure_forecast',
-                sql_table='ACM_FailureForecast',
-                add_created_at=False
             )
-            tables_written.append('ACM_FailureForecast')
+            if failure_write.get('sql_written'):
+                tables_written.append('ACM_FailureForecast')
             
             # ACM_RUL: RUL summary with sensor attributions
             top3_sensors = sensor_attributions[:3] if len(sensor_attributions) >= 3 else sensor_attributions
@@ -1208,13 +1206,13 @@ class ForecastEngine:
                 validation_reason = f"RUL={rul_value} is invalid (negative, inf, or NaN)"
             
             if rul_is_valid:
-                self.output_manager.write_dataframe(
-                    df_rul,
+                rul_write = self.output_manager.write_sql_table(
+                    table_name='ACM_RUL',
+                    df=df_rul,
                     artifact_name='acm_rul_summary',
-                    sql_table='ACM_RUL',
-                    add_created_at=False
                 )
-                tables_written.append('ACM_RUL')
+                if rul_write.get('sql_written'):
+                    tables_written.append('ACM_RUL')
             else:
                 Console.warn(f"RUL prediction REJECTED: {validation_reason}",
                              component="FORECAST", equip_id=self.equip_id, run_id=self.run_id,
@@ -1229,13 +1227,13 @@ class ForecastEngine:
             has_sensor_data = sensor_forecast_df is not None and not sensor_forecast_df.empty
             
             if has_sensor_data and sensor_forecast_df is not None:
-                self.output_manager.write_dataframe(
-                    sensor_forecast_df,
+                sensor_write = self.output_manager.write_sql_table(
+                    table_name='ACM_SensorForecast',
+                    df=sensor_forecast_df,
                     artifact_name='acm_sensor_forecast',
-                    sql_table='ACM_SensorForecast',
-                    add_created_at=False
                 )
-                tables_written.append('ACM_SensorForecast')
+                if sensor_write.get('sql_written'):
+                    tables_written.append('ACM_SensorForecast')
                 Console.info(f"Wrote sensor forecasts for {len(sensor_attributions)} sensors",
                              component="FORECAST", equip_id=self.equip_id, sensors=len(sensor_attributions))
             
@@ -1269,13 +1267,13 @@ class ForecastEngine:
                     )
                     if mvar_result is not None and not mvar_result.forecast_df.empty:
                         # Write multivariate forecasts to SQL
-                        self.output_manager.write_dataframe(
-                            mvar_result.forecast_df,
+                        mvar_write = self.output_manager.write_sql_table(
+                            table_name='ACM_MultivariateForecast',
+                            df=mvar_result.forecast_df,
                             artifact_name='acm_multivariate_forecast',
-                            sql_table='ACM_MultivariateForecast',
-                            add_created_at=True
                         )
-                        tables_written.append('ACM_MultivariateForecast')
+                        if mvar_write.get('sql_written'):
+                            tables_written.append('ACM_MultivariateForecast')
                         Console.info(
                             f"Multivariate (VAR) forecast complete: {len(sensor_names)} sensors, method={mvar_result.method}",
                             component="FORECAST", equip_id=self.equip_id, sensors=len(sensor_names),
@@ -1297,23 +1295,21 @@ class ForecastEngine:
     
     def _run_regime_conditioned_forecasting(
         self,
-        health_df: pd.DataFrame,
         degradation_model: RegimeConditionedTrendModel,
         forecast_config: Dict[str, Any],
         forecast_results: Dict[str, Any]
     ) -> List[str]:
         """
         Run regime-conditioned forecasting extension (v11.3.0).
-        
+
         This method:
         1. Creates RegimeConditionedForecaster instance
         2. Loads forecast context (OMR, drift, regime state)
         3. Computes per-regime statistics
         4. Estimates RUL per regime with adjusted thresholds
-        5. Writes outputs to ACM_RUL_ByRegime, ACM_RegimeHazard, ACM_ForecastContext
+        5. Logs supplementary diagnostics only (no SQL writes)
         
         Args:
-            health_df: Health timeline DataFrame
             degradation_model: Fitted degradation model
             forecast_config: Configuration dictionary
             forecast_results: Results from standard forecasting
@@ -1380,10 +1376,12 @@ class ForecastEngine:
                     regime=context.current_regime
                 )
             
-            # Write outputs to SQL
-            tables_written = conditioned.write_regime_conditioned_outputs(
-                rul_results=rul_results,
-                forecast_context=context
+            Console.info(
+                "Regime-conditioned diagnostics computed (no legacy table writes)",
+                component="FORECAST",
+                equip_id=self.equip_id,
+                run_id=self.run_id,
+                regimes=len(regime_stats),
             )
             
         except Exception as e:
@@ -2006,7 +2004,6 @@ class RegimeConditionedForecaster:
             - 'rul_global': RULEstimate (standard, non-regime)
             - 'rul_by_regime': Dict[int, Dict] per-regime RUL estimates
             - 'rul_conditioned': RULEstimate using current regime
-            - 'regime_hazards': DataFrame for ACM_RegimeHazard
         """
         config = forecast_config or self.config
         regime_stats = self.compute_regime_stats()
@@ -2087,129 +2084,13 @@ class RegimeConditionedForecaster:
                 max_horizon_hours=max_horizon
             )
         
-        # Compute regime hazards for time series output
-        context = self.load_forecast_context()
-        regime_hazards = self._compute_regime_hazards(
-            current_health=current_health,
-            degradation_model=degradation_model,
-            regime_stats=regime_stats,
-            max_horizon=max_horizon,
-            dt_hours=dt_hours,
-            current_drift_z=context.current_drift_z,
-            current_omr_z=context.current_omr_z
-        )
-        
         return {
             'rul_global': rul_global,
             'rul_by_regime': rul_by_regime,
             'rul_conditioned': rul_conditioned,
-            'regime_hazards': regime_hazards,
             'current_regime': current_regime,
             'current_health': current_health
         }
-    
-    def write_regime_conditioned_outputs(
-        self,
-        rul_results: Dict[str, Any],
-        forecast_context: Optional[ForecastContext] = None
-    ) -> List[str]:
-        """
-        Write regime-conditioned forecast outputs to SQL.
-        
-        Args:
-            rul_results: Output from estimate_rul_by_regime()
-            forecast_context: ForecastContext (loads if None)
-            
-        Returns:
-            List of tables written
-        """
-        tables_written = []
-        
-        try:
-            # ACM_RUL_ByRegime
-            rul_by_regime = rul_results.get('rul_by_regime', {})
-            if rul_by_regime:
-                now_ts = datetime.now()
-                df_rul = pd.DataFrame([
-                    {
-                        'EquipID': self.equip_id,
-                        'RunID': self.run_id,
-                        'RegimeLabel': regime,
-                        **stats,
-                        'CreatedAt': now_ts
-                    }
-                    for regime, stats in rul_by_regime.items()
-                ])
-                self.output_manager.write_dataframe(
-                    df_rul,
-                    artifact_name='acm_rul_by_regime',
-                    sql_table='ACM_RUL_ByRegime',
-                    add_created_at=False
-                )
-                tables_written.append('ACM_RUL_ByRegime')
-            
-            # ACM_RegimeHazard
-            regime_hazards = rul_results.get('regime_hazards')
-            if regime_hazards is not None and not regime_hazards.empty:
-                hazards_df = regime_hazards.copy()
-                hazards_df['EquipID'] = self.equip_id
-                hazards_df['RunID'] = self.run_id
-                if 'DriftAtTime' not in hazards_df.columns:
-                    hazards_df['DriftAtTime'] = None
-                if 'OMR_Z_AtTime' not in hazards_df.columns:
-                    hazards_df['OMR_Z_AtTime'] = None
-                hazards_df['CreatedAt'] = datetime.now()
-                self.output_manager.write_dataframe(
-                    hazards_df,
-                    artifact_name='acm_regime_hazard',
-                    sql_table='ACM_RegimeHazard',
-                    add_created_at=False
-                )
-                tables_written.append('ACM_RegimeHazard')
-            
-            # ACM_ForecastContext
-            if forecast_context is None:
-                forecast_context = self.load_forecast_context()
-            
-            context_df = pd.DataFrame([{
-                'EquipID': self.equip_id,
-                'RunID': self.run_id,
-                'Timestamp': datetime.now(),
-                'ForecastHorizon_Hours': float(self.config.get('max_forecast_hours', 720.0)),
-                'CurrentHealth': float(rul_results.get('current_health', 0.0)),
-                'CurrentRegime': forecast_context.current_regime,
-                'RegimeConfidence': forecast_context.regime_confidence,
-                'CurrentOMR_Z': forecast_context.current_omr_z,
-                'OMR_Contribution': forecast_context.omr_top_contributors[0]['contribution'] if forecast_context.omr_top_contributors else None,
-                'CurrentDrift_Z': forecast_context.current_drift_z,
-                'DriftTrend': forecast_context.drift_trend,
-                'FusedZ': None,  # Would need to load from health timeline
-                'HealthTrend': forecast_context.health_trend,
-                'DataQuality': forecast_context.data_quality,
-                'ModelConfidence': forecast_context.regime_confidence,
-                'ActiveDefects': forecast_context.active_defects,
-                'TopContributor': forecast_context.omr_top_contributors[0]['sensor'] if forecast_context.omr_top_contributors else None,
-                'Notes': forecast_context.retraining_reason,
-                'CreatedAt': datetime.now()
-            }])
-
-            self.output_manager.write_dataframe(
-                context_df,
-                artifact_name='acm_forecast_context',
-                sql_table='ACM_ForecastContext',
-                add_created_at=False
-            )
-            tables_written.append('ACM_ForecastContext')
-            
-            Console.info(f"Wrote {len(tables_written)} regime-conditioned tables",
-                         component="FORECAST", equip_id=self.equip_id, tables=tables_written)
-        
-        except Exception as e:
-            Console.error(f"Failed to write regime outputs: {e}",
-                          component="FORECAST", equip_id=self.equip_id, run_id=self.run_id,
-                          error_type=type(e).__name__, error_msg=str(e)[:500])
-        
-        return tables_written
     
     # ========================================================================
     # Helper Methods
@@ -2425,89 +2306,3 @@ class RegimeConditionedForecaster:
         except Exception:
             return 0.5
     
-    def _compute_regime_hazards(
-        self,
-        current_health: float,
-        degradation_model: RegimeConditionedTrendModel,
-        regime_stats: Dict[int, RegimeStats],
-        max_horizon: float,
-        dt_hours: float,
-        current_drift_z: Optional[float] = None,
-        current_omr_z: Optional[float] = None
-    ) -> pd.DataFrame:
-        """
-        Compute hazard rates per regime over forecast horizon.
-        
-        Uses empirical survival from health trajectory when Weibull fit is unreliable.
-        Drift/OMR are point-in-time metrics and only included for the first timestep.
-        
-        Returns DataFrame for ACM_RegimeHazard with columns:
-        - RegimeLabel, Timestamp, HazardRate, SurvivalProb, CumulativeHazard,
-          FailureProb, HealthAtTime, DriftAtTime, OMR_Z_AtTime
-        """
-        records = []
-        base_time = datetime.now()
-        
-        # Generate forecasts per regime
-        max_steps = int(max_horizon / dt_hours)
-        prior_regime = degradation_model.current_regime
-        
-        for regime_label, stats in regime_stats.items():
-            degradation_model.set_current_regime(regime_label)
-            forecast = degradation_model.predict(steps=max_steps, dt_hours=dt_hours)
-            
-            # Use empirical survival from health trajectory
-            # This is more reliable than fitting Weibull with limited data
-            # Survival = P(health > threshold at time t)
-            health_forecast = forecast.point_forecast
-            std_error = max(forecast.std_error, 1e-6)
-            failure_threshold = stats.failure_threshold
-            
-            for step_idx, i in enumerate(range(0, max_steps, max(1, max_steps // 50))):  # Sample 50 points
-                forecast_time = base_time + timedelta(hours=i * dt_hours)
-                health_at_time = health_forecast[i] if i < len(health_forecast) else stats.health_mean
-                
-                # Empirical survival: P(health > threshold) using normal CDF
-                # Uncertainty grows with horizon
-                horizon_factor = np.sqrt(1.0 + i * 0.01)  # Uncertainty growth
-                effective_std = std_error * horizon_factor
-                
-                # Z-score: how many std above threshold
-                z_score = (health_at_time - failure_threshold) / effective_std
-                
-                # Survival probability from standard normal CDF
-                from scipy.stats import norm
-                survival_prob = float(norm.cdf(z_score))
-                failure_prob = 1.0 - survival_prob
-                
-                # Hazard rate: instantaneous failure rate = f(t) / S(t)
-                # Approximate: delta_failure_prob / (delta_t * survival_prob)
-                if survival_prob > 0.001:
-                    # Use slope of failure probability
-                    hazard_rate = failure_prob / (max(1.0, i * dt_hours) * survival_prob)
-                else:
-                    hazard_rate = 1.0  # Cap at 1.0 for near-certain failure
-                
-                # Cumulative hazard: -ln(S(t))
-                cumulative_hazard = -np.log(max(survival_prob, 1e-10))
-                
-                # Drift/OMR are point-in-time metrics, not projectable
-                # Only include for first timestep; NULL for future steps
-                drift_at_time = float(current_drift_z) if (step_idx == 0 and current_drift_z is not None) else None
-                omr_at_time = float(current_omr_z) if (step_idx == 0 and current_omr_z is not None) else None
-                
-                records.append({
-                    'RegimeLabel': regime_label,
-                    'Timestamp': forecast_time,
-                    'HazardRate': float(np.clip(hazard_rate, 0.0, 10.0)),  # Clamp to reasonable range
-                    'SurvivalProb': float(survival_prob),
-                    'CumulativeHazard': float(cumulative_hazard),
-                    'FailureProb': float(failure_prob),
-                    'HealthAtTime': float(health_at_time),
-                    'DriftAtTime': drift_at_time,
-                    'OMR_Z_AtTime': omr_at_time
-                })
-
-        degradation_model.set_current_regime(prior_regime)
-        
-        return pd.DataFrame(records) if records else pd.DataFrame()

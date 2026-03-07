@@ -13,9 +13,175 @@ Date: November 13, 2025
 """
 
 from datetime import datetime, timedelta
-from typing import Optional, Tuple, Dict, Any
+from typing import Optional, Tuple, Dict, Any, Callable
+from dataclasses import dataclass
 import pandas as pd
 from core.observability import Console
+
+
+def classify_noop_reason(
+    train: Optional[pd.DataFrame],
+    score: Optional[pd.DataFrame],
+    meta: Optional[Any] = None,
+    coldstart_complete: Optional[bool] = None,
+) -> str:
+    """
+    Deterministic NOOP classification used by the ACM pipeline.
+
+    Priority:
+    1) Explicit reason from meta.noop_reason / meta['noop_reason']
+    2) Fallback inference from train/score and coldstart_complete
+    """
+    if meta is not None:
+        try:
+            if isinstance(meta, dict):
+                reason = str(meta.get("noop_reason", "")).strip()
+            else:
+                reason = str(getattr(meta, "noop_reason", "")).strip()
+            if reason:
+                return reason
+        except Exception:
+            pass
+
+    if train is None or score is None:
+        if coldstart_complete is False:
+            return "COLDSTART_DEFERRED"
+        return "SCORING_NO_DATA"
+
+    if hasattr(score, "__len__") and len(score) == 0:
+        return "SCORING_NO_DATA"
+
+    return "UNKNOWN_NOOP"
+
+
+@dataclass
+class DataLoadStageResult:
+    """Result bundle for load-data stage orchestration."""
+    train: Optional[pd.DataFrame]
+    score: Optional[pd.DataFrame]
+    meta: Optional[Any]
+    coldstart_complete: bool
+    should_continue: bool
+
+
+def load_and_validate_data_stage(
+    *,
+    sql_client: Any,
+    equip: str,
+    equip_id: int,
+    cfg: Dict[str, Any],
+    args: Any,
+    output_manager: Any,
+    win_start: Optional[pd.Timestamp],
+    win_end: Optional[pd.Timestamp],
+    ensure_local_index_fn: Callable[[pd.DataFrame], pd.DataFrame],
+    deduplicate_index_fn: Callable[[pd.DataFrame, str, str], Tuple[pd.DataFrame, int]],
+    validate_data_contract_fn: Callable[..., Any],
+    finalize_noop_run_fn: Callable[..., None],
+    record_coldstart_fn: Callable[[str], None],
+    refit_requested: bool,
+    run_id: Optional[str],
+    logger: Any = Console,
+) -> DataLoadStageResult:
+    """
+    Load data window, handle coldstart/NOOP, normalize index, deduplicate, and validate contract.
+    """
+    coldstart_manager = SmartColdstart(
+        sql_client=sql_client,
+        equip_id=equip_id,
+        equip_name=equip,
+        stage="score",
+    )
+    historical_replay = bool(getattr(args, "start_time", None))
+    coldstart_cfg = cfg.get("coldstart", {})
+    max_attempts = int(coldstart_cfg.get("max_attempts", 3))
+    train, score, meta, coldstart_complete = coldstart_manager.load_with_retry(
+        cfg=cfg,
+        output_manager=output_manager,
+        start_time=win_start,
+        end_time=win_end,
+        max_attempts=max_attempts,
+        historical_replay=historical_replay,
+        equipment=equip,
+    )
+
+    if not coldstart_complete:
+        reason = classify_noop_reason(
+            train,
+            score,
+            meta=meta,
+            coldstart_complete=coldstart_complete,
+        )
+        if reason == "SCORING_NO_DATA":
+            logger.info("NOOP - no new data in historian window (models exist)", component="COLDSTART")
+        else:
+            logger.info(
+                "Coldstart deferred - insufficient history for training, will retry next run",
+                component="COLDSTART",
+            )
+        finalize_noop_run_fn(sql_client=sql_client, run_id=run_id, logger=logger)
+        return DataLoadStageResult(
+            train=train,
+            score=score,
+            meta=meta,
+            coldstart_complete=coldstart_complete,
+            should_continue=False,
+        )
+
+    record_coldstart_fn(equip)
+    train = ensure_local_index_fn(train)
+    score = ensure_local_index_fn(score)
+
+    train, train_dups = deduplicate_index_fn(train, "TRAIN", equip)
+    score, score_dups = deduplicate_index_fn(score, "SCORE", equip)
+    if isinstance(meta, dict):
+        meta["dup_timestamps_removed"] = int(train_dups + score_dups)
+    else:
+        setattr(meta, "dup_timestamps_removed", int(train_dups + score_dups))
+
+    validate_data_contract_fn(
+        train=train,
+        score=score,
+        meta=meta,
+        refit_requested=refit_requested,
+        cfg=cfg,
+        output_manager=output_manager,
+        equip_id=equip_id,
+        equip=equip,
+        run_id=run_id,
+        logger=logger,
+    )
+
+    if len(score) == 0:
+        logger.warn(
+            "SCORE window empty after cleaning; marking run as NOOP",
+            component="DATA",
+            equip=equip,
+            run_id=run_id,
+        )
+        finalize_noop_run_fn(sql_client=sql_client, run_id=run_id, logger=logger)
+        return DataLoadStageResult(
+            train=train,
+            score=score,
+            meta=meta,
+            coldstart_complete=coldstart_complete,
+            should_continue=False,
+        )
+
+    logger.info(
+        f"[DATA] timestamp={meta.timestamp_col} cadence_ok={meta.cadence_ok} "
+        f"kept={len(meta.kept_cols)} drop={len(meta.dropped_cols)} "
+        f"tz_stripped={getattr(meta, 'tz_stripped', 0)} "
+        f"future_drop={getattr(meta, 'future_rows_dropped', 0)} "
+        f"dup_removed={getattr(meta, 'dup_timestamps_removed', 0)}"
+    )
+    return DataLoadStageResult(
+        train=train,
+        score=score,
+        meta=meta,
+        coldstart_complete=coldstart_complete,
+        should_continue=True,
+    )
 
 
 class ColdstartState:
@@ -63,65 +229,84 @@ class SmartColdstart:
     def check_status(self, required_rows: int = 500, tick_minutes: Optional[int] = None) -> ColdstartState:
         """
         Check current coldstart status from database.
-        
+
+        Uses ACM_ActiveModels.RegimeMaturityState as the authoritative source:
+        - No row, or state is None/'INITIALIZING' → needs coldstart
+        - Any other state (LEARNING, CONVERGED, DEPRECATED) → scoring path
+
+        The old SP-based gate (ModelRegistry >= 3) was wrong: stale/corrupt models
+        with 3+ model types in ModelRegistry would bypass coldstart indefinitely.
+
         Args:
             required_rows: Minimum rows needed to complete coldstart
-            tick_minutes: Current job frequency in minutes (auto-detected if None)
-            
+            tick_minutes: Unused (kept for call-site compatibility)
+
         Returns:
             ColdstartState with current status
         """
+        state = ColdstartState(self.equip_id, self.stage)
+        state.required_rows = required_rows
         try:
-            # Auto-detect tick_minutes from data cadence if not provided
-            if tick_minutes is None:
-                table_name = f"{self.equip_name}_Data"
-                data_cadence_seconds = self.detect_data_cadence(table_name)
-                if data_cadence_seconds:
-                    tick_minutes = int(data_cadence_seconds / 60)
-                    Console.info(f"Auto-detected tick_minutes from data cadence: {tick_minutes} minutes", component="COLDSTART")
-                else:
-                    tick_minutes = 30  # Default fallback
-                    Console.warn(f"Could not detect cadence, using default tick_minutes: {tick_minutes}", component="COLDSTART", equip_id=self.equip_id, equip_name=self.equip_name, default_tick_minutes=tick_minutes)
-            
-            cur = self.sql_client.cursor()
-            
-            # Call stored procedure to check status
-            needs_coldstart = cur.execute(
-                "DECLARE @NeedsColdstart BIT, @AccumulatedRows INT, @AttemptCount INT; "
-                "EXEC dbo.usp_ACM_CheckColdstartStatus @EquipID=?, @Stage=?, @RequiredRows=?, @TickMinutes=?, "
-                "@NeedsColdstart=@NeedsColdstart OUTPUT, @AccumulatedRows=@AccumulatedRows OUTPUT, @AttemptCount=@AttemptCount OUTPUT; "
-                "SELECT @NeedsColdstart, @AccumulatedRows, @AttemptCount",
-                (self.equip_id, self.stage, required_rows, tick_minutes)
-            ).fetchone()
-            
-            self.sql_client.conn.commit()
-            
-            if needs_coldstart:
-                needs, accumulated, attempts = needs_coldstart
-                self.state = ColdstartState(self.equip_id, self.stage)
-                self.state.needs_coldstart = bool(needs)
-                self.state.accumulated_rows = accumulated or 0
-                self.state.attempt_count = attempts or 0
-                self.state.required_rows = required_rows
+            with self.sql_client.cursor() as cur:
+                cur.execute(
+                    "SELECT RegimeMaturityState FROM dbo.ACM_ActiveModels WHERE EquipID = ?",
+                    (self.equip_id,)
+                )
+                row = cur.fetchone()
+
+            if row is None or row[0] in (None, "INITIALIZING"):
+                state.needs_coldstart = True
+                accumulated, attempts = self._load_progress()
+                state.accumulated_rows = accumulated
+                state.attempt_count = attempts
             else:
-                # Coldstart complete
-                self.state = ColdstartState(self.equip_id, self.stage)
-                self.state.needs_coldstart = False
-                self.state.accumulated_rows = required_rows  # Mark as complete
-                
-            return self.state
-            
+                state.needs_coldstart = False
+
         except Exception as e:
-            Console.error(f"Failed to check status: {e}", component="COLDSTART", equip_id=self.equip_id, equip_name=self.equip_name, stage=self.stage, error_type=type(e).__name__, error=str(e)[:200])
-            # Default to needing coldstart on error
-            self.state = ColdstartState(self.equip_id, self.stage)
-            self.state.required_rows = required_rows
-            return self.state
-        finally:
-            try:
-                cur.close()
-            except:
-                pass
+            Console.warn(
+                f"check_status failed, defaulting to coldstart: {e}",
+                component="COLDSTART",
+                equip_id=self.equip_id,
+                equip_name=self.equip_name,
+                stage=self.stage,
+                error_type=type(e).__name__,
+                error=str(e)[:200],
+            )
+            state.needs_coldstart = True  # safe default
+
+        self.state = state
+        return state
+
+    def _load_progress(self) -> Tuple[int, int]:
+        """
+        Load accumulated_rows and attempt_count from ACM_ColdstartState.
+
+        Separated from the needs-coldstart gate so that progress tracking is
+        independent of the model-existence check.
+
+        Returns:
+            (accumulated_rows, attempt_count) — both default to 0 on error or no row.
+        """
+        try:
+            with self.sql_client.cursor() as cur:
+                cur.execute(
+                    "SELECT AccumulatedRows, AttemptCount FROM dbo.ACM_ColdstartState "
+                    "WHERE EquipID = ? AND Stage = ?",
+                    (self.equip_id, self.stage)
+                )
+                row = cur.fetchone()
+            if row:
+                return int(row[0] or 0), int(row[1] or 0)
+        except Exception as e:
+            Console.warn(
+                f"Could not read coldstart progress from ACM_ColdstartState: {e}. "
+                "Progress counters will reset to zero for this batch.",
+                component="COLDSTART",
+                equip_id=self.equip_id,
+                stage=self.stage,
+                error_type=type(e).__name__,
+            )
+        return 0, 0
     
     def detect_data_cadence(self, table_name: str, sample_hours: int = 24) -> Optional[int]:
         """
@@ -229,7 +414,16 @@ class SmartColdstart:
             if data_cadence_seconds is None:
                 # Fallback: assume 1 minute cadence
                 data_cadence_seconds = 60
-                Console.warn(f"Could not detect cadence, assuming {data_cadence_seconds}s", component="COLDSTART", equip_id=self.equip_id, equip_name=self.equip_name, table=table_name, default_cadence_s=data_cadence_seconds)
+                Console.warn(
+                    f"Data cadence could not be auto-detected from {table_name}. "
+                    f"Assuming {data_cadence_seconds}s ({data_cadence_seconds/60:.0f} min) per reading. "
+                    "If this is wrong, the coldstart window will be incorrectly sized.",
+                    component="COLDSTART",
+                    equip_id=self.equip_id,
+                    equip_name=self.equip_name,
+                    table=table_name,
+                    default_cadence_s=data_cadence_seconds,
+                )
         
         # Calculate how many minutes needed to get required_rows
         cadence_minutes = data_cadence_seconds / 60
@@ -257,20 +451,42 @@ class SmartColdstart:
                 # Add required minutes to get end time
                 end_time = start_time + timedelta(minutes=required_minutes)
                 
-                Console.info(f"Loading from EARLIEST data: {start_time}", component="COLDSTART")
-                Console.info(f"Calculated optimal window: {required_minutes} minutes ({required_minutes/60:.1f} hours)", component="COLDSTART")
-                Console.info(f"Expected rows: ~{int(required_minutes / cadence_minutes)} (target: {required_rows})", component="COLDSTART")
+                Console.info(
+                    f"Coldstart window: {start_time} → +{required_minutes} min ({required_minutes/60:.1f} h). "
+                    f"Expected ~{int(required_minutes / cadence_minutes)} rows at {cadence_minutes:.1f} min/row (target: {required_rows}).",
+                    component="COLDSTART",
+                )
                 
                 return start_time, end_time
             else:
                 # Fallback: use lookback from current time if no data found
-                Console.warn(f"No data found in {table_name}, using lookback from current batch", component="COLDSTART", equip_id=self.equip_id, equip_name=self.equip_name, table=table_name, required_rows=required_rows, lookback_minutes=required_minutes)
+                Console.warn(
+                    f"No data found in {table_name}. Falling back to lookback from current batch end "
+                    f"({required_minutes} min / {required_minutes/60:.1f} h). "
+                    "Coldstart may fail if the historian table is empty.",
+                    component="COLDSTART",
+                    equip_id=self.equip_id,
+                    equip_name=self.equip_name,
+                    table=table_name,
+                    required_rows=required_rows,
+                    lookback_minutes=required_minutes,
+                )
                 end_time = current_window_end
                 start_time = end_time - timedelta(minutes=required_minutes)
                 return start_time, end_time
                 
         except Exception as e:
-            Console.error(f"Error querying earliest timestamp: {e}", component="COLDSTART", equip_id=self.equip_id, equip_name=self.equip_name, table=table_name, required_rows=required_rows, error_type=type(e).__name__, error=str(e)[:200])
+            Console.error(
+                f"Failed to query earliest timestamp from {table_name}: {e}. "
+                "Falling back to lookback window from current batch end.",
+                component="COLDSTART",
+                equip_id=self.equip_id,
+                equip_name=self.equip_name,
+                table=table_name,
+                required_rows=required_rows,
+                error_type=type(e).__name__,
+                error=str(e)[:200],
+            )
             # Fallback: lookback from current time
             end_time = current_window_end
             start_time = end_time - timedelta(minutes=required_minutes)
@@ -372,75 +588,65 @@ class SmartColdstart:
             cs_start_dt = cs_start.to_pydatetime() if isinstance(cs_start, pd.Timestamp) else cs_start
             cs_end_dt = cs_end.to_pydatetime() if isinstance(cs_end, pd.Timestamp) else cs_end
 
-        for attempt in range(1, max_attempts + 1):
-            # On retry within same batch window, use progressively looser matching
-            # But stay within the batch window bounds
-            cs_start = start_time
-            cs_end = end_time
+        # COLDSTART path — single attempt for this batch window.
+        # The batch runner drives retry cadence across batches, not within a single run.
+        # The old for-loop (range(1, max_attempts+1)) returned on every branch of its
+        # first iteration, making max_attempts dead code. Removed.
+        train, score, meta, ok = self._load_data_window(
+            output_manager=output_manager,
+            cfg=cfg,
+            start=cs_start,
+            end=cs_end,
+            is_coldstart=True,
+        )
 
-            train, score, meta, ok = self._load_data_window(
-                output_manager=output_manager,
-                cfg=cfg,
-                start=cs_start,
-                end=cs_end,
-                is_coldstart=True,
-            )
-
-            # If load failed (expected NOOP or unexpected failure), record and defer
-            if not ok or train is None or score is None:
-                # We cannot reliably know rows if loader raised; treat as 0 for this attempt
-                self._update_progress(
-                    rows_received=0,
-                    data_start=cs_start_dt,
-                    data_end=cs_end_dt,
-                    error_message="COLDSTART_WINDOW_NOT_USABLE",
-                    success=False,
-                )
-                meta_out = {"noop_reason": "COLDSTART_DEFERRED", "is_coldstart_run": True}
-                return None, None, meta_out, False
-
-            # Rows observed in the current horizon
-            rows_in_window = int(len(train) + len(score))
-
-            # Update progress with DELTA to avoid double counting if horizon overlaps
-            delta_rows = max(0, rows_in_window - int(state.accumulated_rows or 0))
+        if not ok or train is None or score is None:
             self._update_progress(
-                rows_received=delta_rows,
+                rows_received=0,
                 data_start=cs_start_dt,
                 data_end=cs_end_dt,
-                error_message=None if rows_in_window >= required_rows else "INSUFFICIENT_ROWS",
-                success=(rows_in_window >= required_rows),
+                error_message="COLDSTART_WINDOW_NOT_USABLE",
+                success=False,
             )
-
-            if rows_in_window >= required_rows:
-                # Coldstart ready
-                if meta is None:
-                    meta = {}
-                if isinstance(meta, dict):
-                    meta["noop_reason"] = ""
-                    meta["is_coldstart_run"] = True
-                    meta["coldstart_rows"] = rows_in_window
-                    meta["coldstart_required_rows"] = required_rows
-                    meta["coldstart_window_start"] = str(cs_start)
-                    meta["coldstart_window_end"] = str(cs_end)
-                else:
-                    setattr(meta, "noop_reason", "")
-                    setattr(meta, "is_coldstart_run", True)
-                return train, score, meta, True
-
-            # Not enough yet -> defer
-            meta_out = {
-                "noop_reason": "COLDSTART_DEFERRED",
-                "is_coldstart_run": True,
-                "coldstart_rows": rows_in_window,
-                "coldstart_required_rows": required_rows,
-                "coldstart_window_start": str(cs_start),
-                "coldstart_window_end": str(cs_end),
-            }
+            meta_out = {"noop_reason": "COLDSTART_DEFERRED", "is_coldstart_run": True}
             return None, None, meta_out, False
 
-        # Fallback (should not usually hit because we return inside loop)
-        meta_out = {"noop_reason": "COLDSTART_DEFERRED", "is_coldstart_run": True}
+        rows_in_window = int(len(train) + len(score))
+
+        # Delta to avoid double-counting if the batch window overlaps prior progress
+        delta_rows = max(0, rows_in_window - int(state.accumulated_rows or 0))
+        self._update_progress(
+            rows_received=delta_rows,
+            data_start=cs_start_dt,
+            data_end=cs_end_dt,
+            error_message=None if rows_in_window >= required_rows else "INSUFFICIENT_ROWS",
+            success=(rows_in_window >= required_rows),
+        )
+
+        if rows_in_window >= required_rows:
+            if meta is None:
+                meta = {}
+            if isinstance(meta, dict):
+                meta["noop_reason"] = ""
+                meta["is_coldstart_run"] = True
+                meta["coldstart_rows"] = rows_in_window
+                meta["coldstart_required_rows"] = required_rows
+                meta["coldstart_window_start"] = str(cs_start)
+                meta["coldstart_window_end"] = str(cs_end)
+            else:
+                setattr(meta, "noop_reason", "")
+                setattr(meta, "is_coldstart_run", True)
+            return train, score, meta, True
+
+        # Insufficient rows in this batch window — defer to next batch
+        meta_out = {
+            "noop_reason": "COLDSTART_DEFERRED",
+            "is_coldstart_run": True,
+            "coldstart_rows": rows_in_window,
+            "coldstart_required_rows": required_rows,
+            "coldstart_window_start": str(cs_start),
+            "coldstart_window_end": str(cs_end),
+        }
         return None, None, meta_out, False
 
     # End Load with retry here
@@ -517,7 +723,16 @@ class SmartColdstart:
                 )
                 self.sql_client.conn.commit()
             except Exception as e:
-                Console.error(f"Failed to update progress: {e}", component="COLDSTART", equip_id=self.equip_id, stage=self.stage, rows_received=rows_received, error_type=type(e).__name__, error=str(e)[:200])
+                Console.error(
+                    f"Failed to persist coldstart progress to ACM_ColdstartState: {e}. "
+                    "Row accumulation count will not be saved; next batch will re-count from scratch.",
+                    component="COLDSTART",
+                    equip_id=self.equip_id,
+                    stage=self.stage,
+                    rows_received=rows_received,
+                    error_type=type(e).__name__,
+                    error=str(e)[:200],
+                )
             finally:
                 try:
                     cur.close()
@@ -567,14 +782,13 @@ def seed_baseline(
     min_points = int(baseline_cfg.get("min_points", 300))
     train_rows = len(train)
     
-    # CRITICAL FIX v11.2.3: In coldstart mode with sufficient training data,
-    # SKIP the slow baseline buffer loading entirely.
-    # The coldstart split already provides 60% of data as training - that's plenty.
-    # Baseline buffer loading causes deadlocks/hangs due to long-to-wide pivoting.
-    # This is just an optimization for marginal quality gain - not worth the speed hit.
-    if is_coldstart and train_rows > 300:
-        # Coldstart data is high quality and abundant; don't risk hanging on baseline
-        return train, score, f"coldstart_split ({train_rows} rows, skipped slow baseline pivot)"
+    # On coldstart, DataLoader.load_from_sql() has already split data using
+    # cold_start_split_ratio (default 0.6). Trust that split unconditionally.
+    # The old guard `is_coldstart and train_rows > 300` was wrong: valid coldstart
+    # batches with 300-499 train rows fell through to the score-head seeding path,
+    # overwriting the DataLoader split. Any is_coldstart=True run returns here.
+    if is_coldstart:
+        return train, score, f"coldstart_split ({train_rows} rows)"
     
     # Fallback: If train still needs data (non-coldstart or too few rows)
     if train_rows >= min_points:
@@ -668,3 +882,41 @@ def seed_baseline(
         Console.info(f"Baseline: {used} | extended={extended}", component="BASELINE")
     
     return train, score, used
+
+
+def seed_baseline_safe(
+    train: pd.DataFrame,
+    score: pd.DataFrame,
+    sql_client: Optional[Any],
+    equip_id: int,
+    cfg: Dict[str, Any],
+    equip: str = "",
+    is_coldstart: bool = False,
+    ensure_local_index_fn: Optional[Any] = None,
+    logger: Any = Console,
+) -> Tuple[pd.DataFrame, pd.DataFrame, Optional[str]]:
+    """
+    Safe wrapper for baseline seeding.
+
+    Returns original train/score on failure and logs a warning.
+    """
+    try:
+        return seed_baseline(
+            train=train,
+            score=score,
+            sql_client=sql_client,
+            equip_id=equip_id,
+            cfg=cfg,
+            equip=equip,
+            is_coldstart=is_coldstart,
+            ensure_local_index_fn=ensure_local_index_fn,
+        )
+    except Exception as e:
+        logger.warn(
+            f"Cold-start baseline setup failed: {e}",
+            component="BASELINE",
+            equip=equip,
+            train_rows=len(train) if train is not None else 0,
+            error=str(e)[:200],
+        )
+        return train, score, None

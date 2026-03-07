@@ -534,13 +534,12 @@ class ResourceMonitor:
             if df.empty:
                 return False
             
-            output_manager.write_dataframe(
-                df,
-                path=None,  # SQL only
-                sql_table="ACM_ResourceMetrics",
-                add_created_at=False  # Already added
+            result = output_manager.write_sql_table(
+                table_name="ACM_ResourceMetrics",
+                df=df,
+                artifact_name="resource_metrics",
             )
-            return True
+            return bool(result.get("sql_written", False))
         except Exception as e:
             from core.observability import Console
             Console.warn(f"Failed to write metrics to SQL: {e}", component="RESOURCE", equip_id=equip_id, run_id=run_id, error_type=type(e).__name__, error=str(e)[:200])

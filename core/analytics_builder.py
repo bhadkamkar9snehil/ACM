@@ -128,7 +128,7 @@ class AnalyticsBuilder:
         sensor_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, int]:
         """
-        Generate essential analytics tables (v11 - SQL-only).
+        Generate essential analytics tables for this run.
 
         Writes:
           - ACM_HealthTimeline: Health % over time (required for RUL forecasting)
@@ -136,11 +136,15 @@ class AnalyticsBuilder:
           - ACM_SensorDefects: Sensor-level anomaly flags
           - ACM_SensorHotspots: Top anomalous sensors (RUL attribution)
           - ACM_DataQuality: Data quality per sensor
-          
+
         Returns:
             Dict with 'sql_tables' count
         """
-        Console.info("Generating analytics tables (v11 SQL-only)...", component="ANALYTICS")
+        Console.info(
+            "Building analytics tables: HealthTimeline, RegimeTimeline, "
+            "SensorDefects, SensorHotspots, DataQuality...",
+            component="ANALYTICS",
+        )
 
         sql_count = 0
 
@@ -213,11 +217,10 @@ class AnalyticsBuilder:
                 # 1) ACM_HealthTimeline
                 if has_fused:
                     health_df = self.generate_health_timeline(scores_df, cfg)
-                    result = self.output_manager.write_dataframe(
-                        health_df,
-                        "health_timeline",
-                        sql_table="ACM_HealthTimeline",
-                        add_created_at=True,
+                    result = self.output_manager.write_sql_table(
+                        table_name="ACM_HealthTimeline",
+                        df=health_df,
+                        artifact_name="health_timeline",
                     )
                     if result.get("sql_written"):
                         sql_count += 1
@@ -225,11 +228,10 @@ class AnalyticsBuilder:
                 # 2) ACM_RegimeTimeline
                 if has_regimes:
                     regime_df = self.generate_regime_timeline(scores_df)
-                    result = self.output_manager.write_dataframe(
-                        regime_df,
-                        "regime_timeline",
-                        sql_table="ACM_RegimeTimeline",
-                        add_created_at=True,
+                    result = self.output_manager.write_sql_table(
+                        table_name="ACM_RegimeTimeline",
+                        df=regime_df,
+                        artifact_name="regime_timeline",
                     )
                     if result.get("sql_written"):
                         sql_count += 1
@@ -237,11 +239,10 @@ class AnalyticsBuilder:
                 # 3) ACM_SensorDefects
                 if has_fused:
                     sensor_defects_df = self.generate_sensor_defects(scores_df)
-                    result = self.output_manager.write_dataframe(
-                        sensor_defects_df,
-                        "sensor_defects",
-                        sql_table="ACM_SensorDefects",
-                        add_created_at=True,
+                    result = self.output_manager.write_sql_table(
+                        table_name="ACM_SensorDefects",
+                        df=sensor_defects_df,
+                        artifact_name="sensor_defects",
                     )
                     if result.get("sql_written"):
                         sql_count += 1
@@ -268,12 +269,11 @@ class AnalyticsBuilder:
                         omr_contributions=omr_contributions
                     )
 
-                    result = self.output_manager.write_dataframe(
-                        sensor_hotspots_df,
-                        "sensor_hotspots",
-                        sql_table="ACM_SensorHotspots",
+                    result = self.output_manager.write_sql_table(
+                        table_name="ACM_SensorHotspots",
+                        df=sensor_hotspots_df,
+                        artifact_name="sensor_hotspots",
                         non_numeric_cols={"SensorName"},
-                        add_created_at=True,
                     )
                     if result.get("sql_written"):
                         sql_count += 1
@@ -281,11 +281,10 @@ class AnalyticsBuilder:
                 # 5) ACM_DataQuality
                 if isinstance(data_quality_df, pd.DataFrame) and len(data_quality_df.columns):
                     dq_df = self._prepare_data_quality(data_quality_df)
-                    result = self.output_manager.write_dataframe(
-                        dq_df,
-                        "data_quality",
-                        sql_table="ACM_DataQuality",
-                        add_created_at=True,
+                    result = self.output_manager.write_sql_table(
+                        table_name="ACM_DataQuality",
+                        df=dq_df,
+                        artifact_name="data_quality",
                     )
                     if result.get("sql_written"):
                         sql_count += 1
@@ -652,9 +651,11 @@ class AnalyticsBuilder:
             dq_df["RunID"] = self.run_id
         if "EquipID" not in dq_df.columns:
             dq_df["EquipID"] = self.equip_id
+        if "Sensor" in dq_df.columns and "sensor" not in dq_df.columns:
+            dq_df = dq_df.rename(columns={"Sensor": "sensor"})
 
         col_mapping = {
-            "sensor": "Sensor",
+            "sensor": "sensor",
             "train_count": "TrainCount",
             "train_nulls": "TrainNulls",
             "train_null_pct": "TrainNullPct",
@@ -678,7 +679,7 @@ class AnalyticsBuilder:
         dq_df = dq_df.rename(columns={k: v for k, v in col_mapping.items() if k in dq_df.columns})
 
         expected_cols = [
-            "Sensor", "TrainCount", "TrainNulls", "TrainNullPct", "TrainStd",
+            "sensor", "TrainCount", "TrainNulls", "TrainNullPct", "TrainStd",
             "TrainLongestGap", "TrainFlatlineSpan", "TrainMinTs", "TrainMaxTs",
             "ScoreCount", "ScoreNulls", "ScoreNullPct", "ScoreStd",
             "ScoreLongestGap", "ScoreFlatlineSpan", "ScoreMinTs", "ScoreMaxTs",

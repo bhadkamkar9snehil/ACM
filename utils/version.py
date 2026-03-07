@@ -17,10 +17,264 @@ Release Management:
 - Production deployments use specific tags (never merge commits)
 """
 
-__version__ = "11.15.5"
-__version_date__ = "2026-02-20"
+__version__ = "11.15.14"
+__version_date__ = "2026-03-07"
 __version_author__ = "ACM Development Team"
 
+# v11.15.14: REGIME QUALITY GATE + HDBSCAN NOVEL SATURATION FIXES
+#
+# Fixes:
+#   1. utils/config_dict.py cfg_get(): isinstance(current, dict) failed on ConfigDict,
+#      so every dotted-path lookup returned the default. Replaced with hasattr(current, "get")
+#      so ConfigDict and plain dict are both traversable. This was the root cause of 14
+#      config_issues per batch forcing regime_quality_ok=False on all equipment.
+#   2. core/regimes.py _validate_regime_config(): float-stored ints (e.g. auto-tune
+#      writes k_max=12.0 as float) no longer flagged as type errors. Coerced to int
+#      when value == int(value).
+#   3. core/regimes.py fit_regime_model(): quality_notes now logged as WARN when
+#      quality_ok=False so operators can see the deciding reason.
+#   4. core/regimes.py run_regime_postprocess_stage(): per-batch regime log line now
+#      includes quality_notes when quality_ok=False.
+#   5. core/output_artifacts.py write_pca_artifacts(): PCA loadings loop now uses
+#      comps.shape[1] (fit features) not len(train.columns) (current features).
+#      Fixes "index N is out of bounds for axis 1 with size N" after feature growth.
+#   6. core/model_persistence.py create_model_metadata(): GMM BIC/AIC now slices
+#      train_data to gmm.n_features_in_ when feature count grew since fitting.
+#      Fixes "X has N features, but GaussianMixture is expecting M features".
+#   7. core/model_persistence.py RegimeState + save/load: TrainingDistanceThreshold
+#      persisted to ACM_RegimeState and restored on load. Fixes 100% novel-point
+#      saturation on CONVERGED scoring batches (loaded model had threshold=None->inf).
+#   8. core/regimes.py predict_regime_with_confidence(): Distance gate is now the
+#      primary novelty detector when a calibrated threshold exists. HDBSCAN strength
+#      from approximate_predict returns ~0 for all cross-window points, making it
+#      unreliable as primary. Strength gate retained as fallback when no threshold.
+#   SQL: ALTER TABLE ACM_RegimeState ADD TrainingDistanceThreshold float NULL
+#
+# v11.15.13: BATCH RUNNER FINAL SUMMARY RELIABILITY
+#
+# Fixes:
+#   - scripts/sql_batch_runner.py now emits a single final per-equipment summary
+#     line on all exit paths, including SQL precheck failure, historian-empty,
+#     coldstart failure, batch success, and unexpected exceptions.
+#   - main() now emits a guaranteed top-level final summary banner with
+#     succeeded/failed counts and total execution time before observability
+#     shutdown, even when errors occur during processing.
+#   - Added regression tests for final summary emission on both failure and
+#     success paths.
+#
+# v11.15.12: REGIME QUALITY + COLDSTART GATE FIX
+#
+# Fixes:
+#   - Added missing config row `regimes.unknown.enabled=True` to config_table.csv.
+#     Without this key, regime config validation failed on every run and forced
+#     regime_quality_ok=False, which caused all scoring rows to be labeled
+#     regime_state='unknown'.
+#   - Fixed _REGIME_CONFIG_SCHEMA boolean validation for `regimes.unknown.enabled`.
+#     Booleans no longer flow through numeric range validation, so both True and
+#     False are accepted when explicitly configured.
+#   - Updated scripts/sql_batch_runner.py coldstart detection to use
+#     ACM_ActiveModels.RegimeMaturityState as the authoritative lifecycle source,
+#     aligned with SmartColdstart.check_status(). This removes the stale
+#     ModelRegistry>=3 gate that could disagree with the actual lifecycle state.
+#   - Added targeted regression tests for regime config validation and the batch
+#     runner coldstart-status logic.
+#   - Refactored scripts/sql/populate_acm_config.py to use the standard-library
+#     CSV reader so config pushes do not require pandas in lean environments.
+#   - Made core/sql_client.py tolerate missing pandas for SQL utility paths that
+#     do not use DataFrame/timestamp helpers, allowing config migration to import
+#     SQLClient in lean environments.
+#
+# v11.15.11: OBSERVABILITY — Improved log messages across all core modules
+#
+# Changes — 8 files updated, no functional changes:
+#
+# acm.py:
+#   - --log-file warning: replaced "SQL-only mode" with explanation that ACM logs to
+#     SQL (ACM_RunLogs) and the observability stack. File logging not supported.
+#   - Forecasting disabled info: now explains the config key (runtime.phases.forecast)
+#     and how to re-enable it.
+#   - Top-level exception error: now names the exception type, clarifies the run will
+#     be marked FAIL in ACM_Runs, and directs operators to ACM_RunLogs.
+#
+# analytics_builder.py:
+#   - Startup message: removed stale "v11 SQL-only" label. Now lists the 5 output
+#     tables being written (HealthTimeline, RegimeTimeline, SensorDefects, etc.).
+#   - Docstring updated to remove "v11 - SQL-only" from generate_all_analytics().
+#
+# model_persistence.py:
+#   - save_regime_state() error: removed "SQL-only mode" label. Now clearly says
+#     regime state won't survive across batches.
+#
+# output_manager_services.py:
+#   - check_refit_request_service(): refit request found demoted from Console.warn
+#     to Console.info (it is a normal operational event, not an anomaly).
+#   - ContributionTimeline skip: messages now explain what fusion_weights are and what
+#     detector z-score columns are required.
+#
+# smart_coldstart.py:
+#   - _load_progress warn: explains ACM_ColdstartState, impact (progress resets).
+#   - Cadence detection fallback: names the assumed cadence and explains the risk.
+#   - calculate_optimal_window: consolidated 3 separate info lines into one clear line.
+#   - No-data-found fallback: explains this is a fallback and why coldstart may fail.
+#   - _update_progress error: explains which table failed and the per-batch impact.
+#
+# model_lifecycle.py:
+#   - promote_model(): LEARNING→CONVERGED message now includes metric+score+stability.
+#   - create_new_model_state(): explains that consecutive runs must accumulate for promotion.
+#   - get_active_model_dict(): consolidated model state info into one detailed log line.
+#   - load_model_state_from_sql() error: identifies the source table, explains fallback.
+#
+# detector_orchestrator.py:
+#   - Incomplete cache warn: explains that all detectors will be retrained.
+#   - Reconstruction failure: separates trace into structured field.
+#   - Regime model None: explains re-fit will occur.
+#   - Regime feature mismatch: shows both expected and actual feature counts.
+#   - Validation warnings: now prints the actual warning strings.
+#
+# regimes.py:
+#   - Novel point detection (HDBSCAN + GMM): explains what novel points mean and
+#     what to investigate (short training window / regime drift).
+#   - HDBSCAN low quality: explains why switching to GMM.
+#   - Clustering method fallbacks: clearer failure messages with pip install hint.
+#   - No operational columns: directs operator to custom_operating_keywords config key.
+#   - Distance threshold failure: explains the impact (no UNKNOWN assignments).
+#   - Legacy labeling path: labels the config key and marks path as deprecated.
+
+# v11.15.10: COLDSTART + LIFECYCLE FIX — 6 structural bugs
+#
+# Bug 1 (B1) — acm.py: coldstart_complete passed as is_coldstart to seed_baseline_safe
+#   Symptom: scoring batches treated as coldstart → seed_baseline ran unconditionally
+#     on all runs, overwriting valid train/score splits on scoring batches.
+#   Root cause: coldstart_complete = DataLoadStageResult.should_continue, which is True
+#     on both coldstart and scoring runs. meta.is_coldstart_run is the correct flag.
+#   Fix: Extract is_coldstart_run from meta before seed_baseline_safe call.
+#
+# Bug 2 (B2) — smart_coldstart.py check_status(): SP gate used ModelRegistry >= 3
+#   Symptom: stale/corrupt models with 3+ model types in ModelRegistry bypassed coldstart
+#     indefinitely → scoring path ran → cache validation failed → silent infinite loop.
+#   Root cause: usp_ACM_CheckColdstartStatus used COUNT(ModelType) >= 3 as sole criterion.
+#     Python's load_cached_models_with_validation() already handles cache validity.
+#   Fix: Replace SP call with direct ACM_ActiveModels.RegimeMaturityState query.
+#     Coldstart needed only when no row exists or state is None/'INITIALIZING'.
+#     Added _load_progress() helper to read AccumulatedRows/AttemptCount separately.
+#
+# Bug 3 (B3) — smart_coldstart.py load_with_retry(): for-loop always returned on iter 1
+#   Symptom: max_attempts=3 had no effect; every coldstart batch was single-attempt only.
+#   Root cause: every branch inside for attempt in range(1, max_attempts+1) executed return.
+#   Fix: Removed the for-loop entirely. Coldstart is inherently single-attempt per batch;
+#     the batch runner drives retry cadence across batches.
+#
+# Bug 4 (B4) — smart_coldstart.py seed_baseline(): guard `is_coldstart and train_rows > 300`
+#   Symptom: coldstart batches with 300-499 train rows fell through to score-head seeding,
+#     overwriting DataLoader's correct 60/40 coldstart split.
+#   Root cause: min coldstart requirement is 500 rows, but guard used 300 as threshold.
+#   Fix: Unconditional early return when is_coldstart=True — DataLoader's split is authoritative.
+#
+# Bug 5 (B5) — model_lifecycle.py PromotionCriteria: defaults stricter than config_table.csv
+#   Symptom: SQL outage → config fallback to code defaults → promotion permanently blocked.
+#   Root cause: min_silhouette_score=0.40 (csv=0.15), min_stability_ratio=0.75 (csv=0.60),
+#     min_consecutive_runs=5 (csv=3), min_training_rows=400 (csv=200).
+#   Fix: Aligned dataclass defaults to exactly match config_table.csv values.
+#
+# Bug 6 (B6) — model_lifecycle.py + SQL: regime_quality_metric never persisted/loaded
+#   Symptom: BIC-regime equipment always evaluated against silhouette threshold (0.15) →
+#     raw BIC score (~-1200) always < 0.15 → quality always FAIL → stuck at LEARNING.
+#   Root cause: RegimeQualityMetric column missing from ACM_ActiveModels; even after SQL
+#     migration adds it, get_active_model_dict() never wrote it and load_model_state_from_sql()
+#     always defaulted to "silhouette".
+#   Fix (6a): Migration 013_acm_active_models_quality_metric.sql adds all missing lifecycle
+#     metric columns (SilhouetteScore, StabilityRatio, TrainingRows, TrainingDays,
+#     ConsecutiveRuns, TotalRuns, ForecastMAPE, ForecastRMSE, CreatedAt, RegimeQualityMetric).
+#   Fix (6b): get_active_model_dict() now writes RegimeQualityMetric.
+#   Fix (6c): load_model_state_from_sql() now reads RegimeQualityMetric from SQL.
+
+# v11.15.9: AUTO-TUNE PERSISTENCE + OMR QA CHECK FIXES
+#
+# Bug 1 — config_history_writer.py: h_sigma missing from _AUTO_TUNE_PATH_MAP
+#   Symptom: CUSUM h_sigma auto-tune changes (12.0→3.0) logged to ACM_ConfigHistory
+#     but never persisted to ACM_Config; reverted every batch.
+#   Fix: Added "h_sigma": "episodes.cpd.h_sigma" to _AUTO_TUNE_PATH_MAP.
+#
+# Bug 2 — config_history_writer.py: refit request fires even when upsert succeeds
+#   Symptom: ACM_RefitRequests grows one row per batch for every auto-tune event,
+#     resetting consecutive_runs to 2 every batch → lifecycle permanently stuck at
+#     LEARNING, never advancing to CONVERGED.
+#   Root cause: trigger_refit=True created a refit request unconditionally after any
+#     auto-tune, even when _upsert_acm_config() had already persisted the value to
+#     ACM_Config. A refit is only needed when the upsert fails (value not persisted).
+#   Fix: Gate refit request creation on `not upsert_ok` — only write to
+#     ACM_RefitRequests when the ACM_Config upsert failed for at least one parameter.
+#
+# Bug 3 — scripts/sql_batch_runner.py: OMR culprit QA check uses raw detector code
+#   Symptom: QA WARN every batch: "OMR episode has incorrect culprit. Expected 'OMR(...)',
+#     got 'Baseline Consistency (OMR) -> sensor_37_avg_med'".
+#   Root cause: Episodes store human-readable labels via format_culprit_label(), so OMR
+#     culprits become "Baseline Consistency (OMR) -> <sensor>", not "OMR(...)". The QA
+#     check tested for culprits.startswith('OMR') which never matches the formatted form.
+#   Fix: QA check now accepts both the raw "OMR" prefix (legacy) and the formatted
+#     "Baseline Consistency (OMR)" substring.
+#
+# v11.15.8: AUTO-TUNE ACM_CONFIG VALUETYPE FIX
+#
+# Bug — config_history_writer.py: _upsert_acm_config() MERGE INSERT missing ValueType
+#   Symptom: [WARN] [AUTO-TUNE] Failed to upsert auto-tune param regimes.auto_k.k_max=8.0:
+#     Cannot insert the value NULL into column 'ValueType', table 'dbo.ACM_Config'.
+#   Root cause: ACM_Config.ValueType is NOT NULL with no default. The MERGE INSERT
+#     branch did not supply ValueType, causing a constraint violation on new rows.
+#     Existing rows (MATCHED path) had UPDATE which also omitted ValueType.
+#   Fix: Added _infer_value_type(value_str) helper that infers 'int'/'float'/'bool'/'string'
+#     from the value string. Updated MERGE to pass ValueType as 4th parameter in both
+#     the UPDATE and INSERT branches.
+#
+# v11.15.7: CONTRIBUTION TIMELINE FIX — ACM_ContributionTimeline always empty
+#
+# Bug — output_manager_services.py: ContributionTimeline skipped: build returned empty/None DataFrame
+#   Symptom: "ContributionTimeline skipped" every batch; ACM_ContributionTimeline has 0 rows.
+#   Root cause: build_contribution_timeline() checks `'Timestamp' not in frame.columns` and returns
+#     None if Timestamp is absent. Throughout the pipeline, Timestamp is the DataFrame index
+#     (DatetimeIndex, named "EntryDateTime"), not a column. The write service passed frame
+#     directly without materializing Timestamp as a column.
+#   Fix: In write_contribution_timeline_from_frame_service(), reset_index() + rename the index
+#     column to "Timestamp" before calling build_contribution_timeline() when Timestamp is not
+#     already a column and the index is a DatetimeIndex.
+#
+# v11.15.6: REGIME NOVELTY, OUTPUT PERF, AUTO-TUNE PERSISTENCE, DEBUG PRINT CLEANUP
+#
+# Four fixes from continuous-learning audit (WFA_TURBINE_10, 14-batch replay):
+#
+# Bug 1 — regimes.py: P95 distance threshold too tight → 100% novel on every scoring batch
+#   Symptom: "Identified N/N novel points" every batch; regime_quality_ok=False forever;
+#     lifecycle stuck at LEARNING because regime criterion never passes.
+#   Root cause: Training on a short coldstart window (~25 days) computes a P95 threshold
+#     that is too tight for scoring data from later months with different operating envelope.
+#   Fix:
+#     - Default distance_percentile 95 → 99 in regimes.py (both training and scoring paths).
+#     - Added distance_threshold_floor_ratio (default 1.5): threshold clamped to ≥ 1.5×
+#       median training distance so it stays permissive when P99 is still tight.
+#     - Two new config params in config_table.csv: regimes.unknown.distance_percentile=99
+#       and regimes.unknown.distance_threshold_floor_ratio=1.5.
+#
+# Bug 2 — output_manager.py / output_sql_core.py: ~37s/batch in listcomp scalar norm
+#   Symptom: profiler showed output_manager.<listcomp>=39s, <genexpr>=36s (32M calls).
+#   Root cause: _bulk_insert_sql() called _pyodbc_safe_scalar() once per cell via nested
+#     listcomp over pl.to_dicts(). _sanitize_for_sql_insert() had already done the work.
+#   Fix:
+#     - Removed _pyodbc_safe_scalar and the to_dicts() listcomp entirely from output_manager.py.
+#     - Replaced with self._sql_engine._to_python_records() which uses Polars .rows() for
+#       vectorized numpy→Python conversion (strip tz-aware datetime, cast dtypes vectorially).
+#     - Same Polars path applied to output_sql_core._to_python_records() with pandas fallback.
+#     - Removed three debug print statements ([INIT_DEBUG], [BULK_DEBUG], [SQL_CORE_DEBUG]).
+#     - Removed unused `import polars as pl` from output_manager.py.
+#
+# Bug 3 — config_history_writer.py: auto-tune k_max silently reverts every batch
+#   Symptom: "k_max: 6->8" logged every batch; ACM_Config never updated; k_max resets to 6.
+#   Root cause: log_auto_tune_changes() wrote to ACM_ConfigHistory (audit log) only.
+#     ConfigDict.from_sql() reads ACM_Config exclusively — never ConfigHistory.
+#   Fix:
+#     - Added _upsert_acm_config() helper: MERGE into ACM_Config for equip_id + param_path.
+#     - Added _AUTO_TUNE_PATH_MAP in log_auto_tune_changes() mapping short names (k_max,
+#       k_sigma, clip_z) to their full config paths. Upsert runs after history write.
+#
 # v11.15.5: DRIFT HYSTERESIS STATE CONTINUITY + CONTROLLER CORRECTNESS
 #
 # Root cause: drift hysteresis in compute_drift_alert_mode() accepts prev_alert_mode,

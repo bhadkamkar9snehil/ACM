@@ -43,16 +43,16 @@ Manifest structure:
 
 import joblib
 import json
-import os
-import tempfile
-from pathlib import Path
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Dict, Any, Optional, List, Tuple, TYPE_CHECKING
 from datetime import datetime, timezone
 from io import BytesIO
 from dataclasses import dataclass, asdict
 import pandas as pd
 import numpy as np
 from core.observability import Console
+
+if TYPE_CHECKING:
+    from core.fuse import ScoreCalibrator
 
 # Import tracing support (optional)
 try:
@@ -142,127 +142,6 @@ class ForecastState:
             return "[]"
 
 
-def save_forecast_state(state: ForecastState, equip: str, sql_client) -> None:
-    """
-    Save ForecastState to SQL (SQL-ONLY MODE).
-    
-    Args:
-        state: ForecastState object to persist
-        equip: Equipment name (for logging)
-        sql_client: SQL client for persistence
-    """
-    if sql_client is None:
-        Console.error("SQL client required for SQL-only mode", component="FORECAST_STATE", equipment=equip, equip_id=state.equip_id)
-        return
-    
-    try:
-        cur = sql_client.cursor()
-        
-        # Convert dicts to JSON strings for SQL storage
-        model_params_json = json.dumps(state.model_params)
-        forecast_quality_json = json.dumps(state.forecast_quality)
-        
-        # Upsert into ACM_ForecastState
-        cur.execute("""
-            MERGE INTO dbo.ACM_ForecastState AS target
-            USING (SELECT ? AS EquipID, ? AS StateVersion) AS source
-            ON target.EquipID = source.EquipID AND target.StateVersion = source.StateVersion
-            WHEN MATCHED THEN
-                UPDATE SET
-                    ModelType = ?,
-                    ModelParamsJson = ?,
-                    ResidualVariance = ?,
-                    LastForecastHorizonJson = ?,
-                    HazardBaseline = ?,
-                    LastRetrainTime = ?,
-                    TrainingDataHash = ?,
-                    TrainingWindowHours = ?,
-                    ForecastQualityJson = ?
-            WHEN NOT MATCHED THEN
-                INSERT (EquipID, StateVersion, ModelType, ModelParamsJson, ResidualVariance,
-                        LastForecastHorizonJson, HazardBaseline, LastRetrainTime,
-                        TrainingDataHash, TrainingWindowHours, ForecastQualityJson)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-        """, (
-            state.equip_id, state.state_version,  # MERGE match
-            state.model_type, model_params_json, state.residual_variance,
-            state.last_forecast_horizon_json, state.hazard_baseline,
-            state.last_retrain_time, state.training_data_hash,
-            state.training_window_hours, forecast_quality_json,  # UPDATE values
-            state.equip_id, state.state_version, state.model_type,
-            model_params_json, state.residual_variance,
-            state.last_forecast_horizon_json, state.hazard_baseline,
-            state.last_retrain_time, state.training_data_hash,
-            state.training_window_hours, forecast_quality_json  # INSERT values
-        ))
-        
-        if not sql_client.conn.autocommit:
-            sql_client.conn.commit()
-        
-        Console.info(f"Saved state v{state.state_version} to ACM_ForecastState (EquipID={state.equip_id})", component="FORECAST_STATE")
-    except Exception as e:
-        Console.error(f"Failed to save state to SQL: {e}", component="FORECAST_STATE", equip_id=state.equip_id, state_version=state.state_version, error_type=type(e).__name__, error=str(e)[:200])
-
-
-def load_forecast_state(equip: str, equip_id: int, sql_client) -> Optional[ForecastState]:
-    """
-    Load latest ForecastState from SQL (SQL-ONLY MODE).
-    
-    Args:
-        equip: Equipment name (for logging)
-        equip_id: Equipment ID (required)
-        sql_client: SQL client to load from database
-    
-    Returns:
-        ForecastState object or None if not found
-    """
-    if sql_client is None:
-        Console.error("SQL client required for SQL-only mode", component="FORECAST_STATE", equipment=equip, equip_id=equip_id)
-        return None
-    
-    if equip_id is None:
-        Console.error("equip_id required for SQL-only mode", component="FORECAST_STATE", equipment=equip)
-        return None
-    
-    try:
-        cur = sql_client.cursor()
-        cur.execute("""
-            SELECT TOP 1
-                EquipID, StateVersion, ModelType, ModelParamsJson, ResidualVariance,
-                LastForecastHorizonJson, HazardBaseline, LastRetrainTime,
-                TrainingDataHash, TrainingWindowHours, ForecastQualityJson
-            FROM dbo.ACM_ForecastState
-            WHERE EquipID = ?
-            ORDER BY StateVersion DESC
-        """, (equip_id,))
-        
-        row = cur.fetchone()
-        cur.close()
-        
-        if row:
-            state = ForecastState(
-                equip_id=row[0],
-                state_version=row[1],
-                model_type=row[2],
-                model_params=json.loads(row[3]) if row[3] else {},
-                residual_variance=float(row[4]) if row[4] is not None else 0.0,
-                last_forecast_horizon_json=row[5] or "[]",
-                hazard_baseline=float(row[6]) if row[6] is not None else 0.0,
-                last_retrain_time=row[7].isoformat() if row[7] else datetime.now(timezone.utc).isoformat(),
-                training_data_hash=row[8] or "",
-                training_window_hours=int(row[9]) if row[9] is not None else 72,
-                forecast_quality=json.loads(row[10]) if row[10] else {}
-            )
-            Console.info(f"Loaded state v{state.state_version} from SQL (EquipID={equip_id})", component="FORECAST_STATE")
-            return state
-        else:
-            Console.info(f"No prior forecast state found for EquipID={equip_id}", component="FORECAST_STATE")
-            return None
-    except Exception as e:
-        Console.error(f"Failed to load state from SQL: {e}", component="FORECAST_STATE", equip_id=equip_id, equipment=equip, error_type=type(e).__name__, error=str(e)[:200])
-        return None
-
-
 # ============================================================================
 # Regime State Persistence (REGIME-STATE-01)
 # ============================================================================
@@ -303,6 +182,7 @@ class RegimeState:
     last_trained_time: str  # ISO format datetime string
     config_hash: str
     regime_basis_hash: str
+    training_distance_threshold: Optional[float] = None
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -364,7 +244,12 @@ def save_regime_state(state: RegimeState, equip: str, sql_client=None) -> None:
         sql_client: SQL client (REQUIRED)
     """
     if sql_client is None:
-        Console.error("SQL client required for SQL-only mode", component="REGIME_STATE", equipment=equip)
+        Console.error(
+            f"Cannot persist regime state for {equip}: sql_client is None. "
+            "Regime state will not survive across batches.",
+            component="REGIME_STATE",
+            equipment=equip,
+        )
         return
     
     try:
@@ -388,26 +273,30 @@ def save_regime_state(state: RegimeState, equip: str, sql_client=None) -> None:
                     QualityOk = ?,
                     LastTrainedTime = ?,
                     ConfigHash = ?,
-                    RegimeBasisHash = ?
+                    RegimeBasisHash = ?,
+                    TrainingDistanceThreshold = ?
             WHEN NOT MATCHED THEN
                 INSERT (EquipID, StateVersion, NumClusters, ClusterCentersJson,
                         ScalerMeanJson, ScalerScaleJson, PCAComponentsJson,
                         PCAExplainedVarianceJson, NumPCAComponents, SilhouetteScore,
-                        QualityOk, LastTrainedTime, ConfigHash, RegimeBasisHash)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                        QualityOk, LastTrainedTime, ConfigHash, RegimeBasisHash,
+                        TrainingDistanceThreshold)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
         """, (
             state.equip_id, state.state_version,  # MERGE match
             state.n_clusters, state.cluster_centers_json,
             state.scaler_mean_json, state.scaler_scale_json,
             state.pca_components_json, state.pca_explained_variance_json,
             state.n_pca_components, state.silhouette_score, state.quality_ok,
-            state.last_trained_time, state.config_hash, state.regime_basis_hash,  # UPDATE values
+            state.last_trained_time, state.config_hash, state.regime_basis_hash,
+            state.training_distance_threshold,  # UPDATE values
             state.equip_id, state.state_version, state.n_clusters,
             state.cluster_centers_json, state.scaler_mean_json,
             state.scaler_scale_json, state.pca_components_json,
             state.pca_explained_variance_json, state.n_pca_components,
             state.silhouette_score, state.quality_ok,
-            state.last_trained_time, state.config_hash, state.regime_basis_hash  # INSERT values
+            state.last_trained_time, state.config_hash, state.regime_basis_hash,
+            state.training_distance_threshold  # INSERT values
         ))
         
         if not sql_client.conn.autocommit:
@@ -441,7 +330,8 @@ def load_regime_state(equip: str, equip_id: Optional[int] = None, sql_client=Non
                 EquipID, StateVersion, NumClusters, ClusterCentersJson,
                 ScalerMeanJson, ScalerScaleJson, PCAComponentsJson,
                 PCAExplainedVarianceJson, NumPCAComponents, SilhouetteScore,
-                QualityOk, LastTrainedTime, ConfigHash, RegimeBasisHash
+                QualityOk, LastTrainedTime, ConfigHash, RegimeBasisHash,
+                TrainingDistanceThreshold
             FROM dbo.ACM_RegimeState
             WHERE EquipID = ?
             ORDER BY StateVersion DESC
@@ -465,7 +355,8 @@ def load_regime_state(equip: str, equip_id: Optional[int] = None, sql_client=Non
                 quality_ok=bool(row[10]) if row[10] is not None else False,
                 last_trained_time=row[11].isoformat() if row[11] else datetime.now(timezone.utc).isoformat(),
                 config_hash=row[12] or "",
-                regime_basis_hash=row[13] or ""
+                regime_basis_hash=row[13] or "",
+                training_distance_threshold=float(row[14]) if row[14] is not None else None,
             )
             Console.info(f"Loaded state v{state.state_version} from SQL (EquipID={equip_id})", component="REGIME_STATE")
             return state
@@ -496,16 +387,20 @@ class ModelVersionManager:
         self.equip = equip
         self.sql_client = sql_client
         self.equip_id = equip_id
-        
-        if not sql_client or equip_id is None:
-            Console.error("SQL client and equip_id required", component="MODEL", equipment=equip, equip_id=equip_id)
+
+        if sql_client is None or equip_id is None:
+            raise ValueError(
+                f"ModelVersionManager requires sql_client and equip_id. "
+                f"Received sql_client={type(sql_client).__name__}, equip_id={equip_id}."
+            )
+        if getattr(sql_client, "conn", None) is None:
+            raise ValueError(
+                "ModelVersionManager requires an active SQL connection (sql_client.conn is None). "
+                "Connect SQL before constructing manager."
+            )
     
     def get_latest_version(self) -> Optional[int]:
         """Get the latest model version number from SQL ModelRegistry."""
-        if not self.sql_client or self.equip_id is None:
-            Console.warn("Cannot get latest version - SQL client/equip_id missing", component="MODEL", equipment=self.equip, equip_id=self.equip_id)
-            return None
-        
         return self._get_latest_version_from_sql()
     
     def get_next_version(self) -> int:
@@ -541,12 +436,6 @@ class ModelVersionManager:
             span_context.__enter__()
         
         try:
-            if not self.sql_client or self.equip_id is None:
-                Console.error("Cannot save models - SQL client/equip_id missing", component="MODEL", equipment=self.equip, equip_id=self.equip_id)
-                if span_context and hasattr(span_context, '_span') and span_context._span:
-                    span_context._span.set_attribute("acm.error", True)
-                raise ValueError("SQL client and equip_id required for model persistence")
-            
             # Determine version
             if version is None:
                 version = self.get_next_version()
@@ -595,11 +484,7 @@ class ModelVersionManager:
         - Note: mhal_params removed v9.1.0 (MHAL deprecated)
         """
         Console.info(f"Saving models to SQL ModelRegistry v{version}...", component="MODEL-SQL")
-        
-        if not self.sql_client.conn:
-            Console.warn("SQL connection not available", component="MODEL-SQL", equipment=self.equip, equip_id=self.equip_id)
-            return 0
-        
+
         cursor = self.sql_client.conn.cursor()
         saved_count = 0
         errors = []
@@ -697,13 +582,12 @@ class ModelVersionManager:
         persist calibration as a separate INSERT to the same version.
         This ensures scoring batches reuse training-time normalization.
         """
-        if not calibrators_dict or not self.sql_client or not self.sql_client.conn:
+        if not calibrators_dict:
             return
         try:
-            from core.fuse import ScoreCalibrator
             cal_dict = {}
             for name, cal in calibrators_dict.items():
-                if isinstance(cal, ScoreCalibrator):
+                if hasattr(cal, "to_dict") and callable(getattr(cal, "to_dict")):
                     cal_dict[name] = cal.to_dict()
                 elif isinstance(cal, dict):
                     cal_dict[name] = cal
@@ -757,9 +641,6 @@ class ModelVersionManager:
         Returns:
             Number of rows deleted
         """
-        if not self.sql_client or not self.sql_client.conn:
-            return 0
-        
         try:
             cur = self.sql_client.cursor()
             
@@ -826,8 +707,6 @@ class ModelVersionManager:
             manifest dict with at least ``train_sensors`` list, or None if no
             models exist for this equipment.
         """
-        if not self.sql_client or self.equip_id is None:
-            return None
         try:
             version = self._get_latest_version_from_sql()
             if version is None:
@@ -870,11 +749,7 @@ class ModelVersionManager:
             Tuple of (models_dict, manifest_dict) or None if not found
         """
         Console.info(f"Loading models from SQL ModelRegistry v{version}...", component="MODEL-SQL")
-        
-        if not self.sql_client or not self.sql_client.conn:
-            Console.warn("SQL connection not available", component="MODEL-SQL", equipment=self.equip, equip_id=self.equip_id, version=version)
-            return None
-        
+
         try:
             cursor = self.sql_client.conn.cursor()
             
@@ -999,14 +874,7 @@ class ModelVersionManager:
             
             if span_context and hasattr(span_context, '_span') and span_context._span:
                 span_context._span.set_attribute("acm.model_version", version)
-            
-            # SQL-ONLY MODE: Load from SQL ModelRegistry only
-            if not self.sql_client or self.equip_id is None:
-                Console.warn("Cannot load models - SQL client/equip_id missing", component="MODEL", equipment=self.equip, equip_id=self.equip_id)
-                if span_context and hasattr(span_context, '_span') and span_context._span:
-                    span_context._span.set_attribute("acm.error", True)
-                return None, None
-            
+
             result = self._load_models_from_sql(version)
             if result:
                 sql_models, sql_manifest = result
@@ -1187,11 +1055,7 @@ class ModelVersionManager:
             List of version metadata dicts
         """
         versions = []
-        
-        if not self.sql_client or self.equip_id is None:
-            Console.warn("Cannot list versions - SQL client/equip_id missing", component="MODEL", equipment=self.equip, equip_id=self.equip_id)
-            return versions
-        
+
         try:
             cur = self.sql_client.cursor()
             cur.execute("""
@@ -1306,7 +1170,11 @@ def create_model_metadata(
     
     # PCA metadata with enhanced quality metrics
     if "pca_model" in models_dict and models_dict["pca_model"]:
-        pca = models_dict["pca_model"]
+        pca_data = models_dict["pca_model"]
+        # v11.7.1: Handle new dict format and legacy raw PCA object
+        pca = pca_data.get("pca") if isinstance(pca_data, dict) else pca_data
+        if pca is None:
+            pca = pca_data  # Fallback
         explained_var_ratio = pca.explained_variance_ratio_
         metadata["models"]["pca"] = {
             "n_components": pca.n_components_,
@@ -1329,7 +1197,11 @@ def create_model_metadata(
     
     # GMM metadata with BIC and AIC
     if "gmm_model" in models_dict and models_dict["gmm_model"]:
-        gmm = models_dict["gmm_model"]
+        gmm_data = models_dict["gmm_model"]
+        # v11.7.1: Handle new dict format and legacy raw GMM object
+        gmm = gmm_data.get("model") if isinstance(gmm_data, dict) else gmm_data
+        if gmm is None:
+            gmm = gmm_data  # Fallback
         gmm_meta = {
             "n_components": gmm.n_components,
             "covariance_type": gmm.covariance_type
@@ -1338,8 +1210,13 @@ def create_model_metadata(
         # Compute BIC and AIC if possible
         if hasattr(train_data, 'values'):
             try:
-                gmm_meta["bic"] = round(float(gmm.bic(train_data.values)), 2)
-                gmm_meta["aic"] = round(float(gmm.aic(train_data.values)), 2)
+                gmm_n_features = getattr(gmm, "n_features_in_", None)
+                if gmm_n_features is not None and train_data.shape[1] != gmm_n_features:
+                    X_eval = train_data.values[:, :gmm_n_features]
+                else:
+                    X_eval = train_data.values
+                gmm_meta["bic"] = round(float(gmm.bic(X_eval)), 2)
+                gmm_meta["aic"] = round(float(gmm.aic(X_eval)), 2)
                 gmm_meta["lower_bound"] = round(float(gmm.lower_bound_), 2)
             except Exception as e:
                 Console.warn(f"Failed to compute GMM quality metrics: {e}", component="META", n_components=gmm.n_components, error_type=type(e).__name__)
@@ -1438,6 +1315,9 @@ def load_cached_models_with_validation(
     Returns:
         Tuple of (cached_models dict, cached_manifest dict) or (None, None) if invalid
     """
+    if sql_client is None:
+        return None, None
+
     try:
         Console.info(f"Loading cached models for equip={equip}, equip_id={equip_id}", component="MODEL-LOAD")
         model_manager = ModelVersionManager(
@@ -1454,25 +1334,16 @@ def load_cached_models_with_validation(
             # This prevents using corrupted cache where manifest and models are desynchronized
             manifest_feature_count = len(cached_manifest.get("train_sensors", []))
 
-            # Check PCA model feature count (if exists)
-            if "pca_model" in cached_models:
-                pca_model = cached_models["pca_model"]
-                if hasattr(pca_model, 'pca') and hasattr(pca_model.pca, 'n_features_in_'):
-                    pca_features = pca_model.pca.n_features_in_
-                    if manifest_feature_count != pca_features:
-                        Console.error(
-                            f"Manifest-model desync: manifest={manifest_feature_count}, PCA model={pca_features}",
-                            component="MODEL-LOAD",
-                            equip=equip,
-                            hint="Cache corrupted - delete models and retrain"
-                        )
-                        return None, None
+            # v11.7.1 FIX: PCA and GMM have internal feature filtering (keep_cols, _var_mask)
+            # so their n_features_in_ will be LESS than the manifest's train_sensors count.
+            # This is expected behavior, not cache corruption. Only IForest operates on the
+            # full feature set, so it's the correct one to validate against manifest count.
 
-            # Check IForest model feature count (if exists)
+            # Check IForest model feature count (if exists) - IForest uses full feature set
             if "iforest_model" in cached_models:
                 iforest_model = cached_models["iforest_model"]
-                if hasattr(iforest_model, 'model') and hasattr(iforest_model.model, 'n_features_in_'):
-                    iforest_features = iforest_model.model.n_features_in_
+                if hasattr(iforest_model, 'n_features_in_'):
+                    iforest_features = iforest_model.n_features_in_
                     if manifest_feature_count != iforest_features:
                         Console.error(
                             f"Manifest-model desync: manifest={manifest_feature_count}, IForest model={iforest_features}",
@@ -1520,6 +1391,146 @@ def load_cached_models_with_validation(
         Console.warn(f"Failed to load cached models: {e}", component="MODEL",
                      equip=equip, error_type=type(e).__name__, error=str(e)[:200])
         return None, None
+
+
+def align_current_features_to_cached_manifest(
+    train: pd.DataFrame,
+    score: pd.DataFrame,
+    cached_manifest: Optional[Dict[str, Any]],
+    equip: str = "",
+    logger: Any = Console,
+) -> Tuple[pd.DataFrame, pd.DataFrame, List[str], bool]:
+    """
+    Align current feature matrices to cached manifest feature schema.
+
+    Returns:
+        (train_aligned, score_aligned, current_sensors, cache_compatible)
+    """
+    current_sensors = list(train.columns) if hasattr(train, "columns") else []
+    cached_sensors = list((cached_manifest or {}).get("train_sensors", []) or [])
+
+    if not cached_sensors:
+        return train, score, current_sensors, True
+
+    if set(cached_sensors) != set(current_sensors):
+        common_cols = sorted(set(cached_sensors) & set(current_sensors))
+        missing_in_current = set(cached_sensors) - set(current_sensors)
+        extra_in_current = set(current_sensors) - set(cached_sensors)
+        overlap_ratio = len(common_cols) / len(current_sensors) if current_sensors else 0.0
+
+        logger.info(
+            f"Aligning features: cached={len(cached_sensors)}, current={len(current_sensors)}, "
+            f"common={len(common_cols)}, missing_in_current={len(missing_in_current)}, "
+            f"extra_in_current={len(extra_in_current)}, overlap={overlap_ratio:.1%}",
+            component="MODEL",
+        )
+
+        # Preserve current acm.py behavior: reject cache when current has any
+        # feature that is not in cached schema.
+        if overlap_ratio < 1.0:
+            logger.warn(
+                f"Current data has {len(extra_in_current)} features not in cache - cannot use cached models",
+                component="MODEL",
+                extra_features=list(extra_in_current)[:5],
+            )
+            return train, score, current_sensors, False
+
+        if len(missing_in_current) > 0:
+            logger.warn(
+                f"Using feature subset: {len(missing_in_current)} cached features missing in current data",
+                component="MODEL",
+                missing_features=list(missing_in_current)[:5],
+            )
+            aligned_sensors = common_cols
+            train = train[[c for c in aligned_sensors if c in train.columns]]
+            score = score[[c for c in aligned_sensors if c in score.columns]]
+            current_sensors = aligned_sensors
+            logger.info(
+                f"Features aligned to intersection: train={train.shape}, score={score.shape}",
+                component="MODEL",
+            )
+            return train, score, current_sensors, True
+
+        # Fallback path for set-mismatch with full overlap.
+        aligned_sensors = common_cols
+        train = train[aligned_sensors]
+        score = score[aligned_sensors]
+        current_sensors = aligned_sensors
+        return train, score, current_sensors, True
+
+    # No mismatch, but enforce cached feature ordering.
+    train = train[cached_sensors]
+    score = score[cached_sensors]
+    return train, score, cached_sensors, True
+
+
+def restore_detectors_from_runtime_cache(
+    detector_cache: Optional[Dict[str, Any]],
+    logger: Any = Console,
+) -> Dict[str, Any]:
+    """
+    Restore detector instances from in-memory runtime cache payload.
+    """
+    result: Dict[str, Any] = {
+        "ar1_detector": None,
+        "pca_detector": None,
+        "iforest_detector": None,
+        "gmm_detector": None,
+        "omr_detector": None,
+        "regime_model": None,
+        "cache_complete": False,
+    }
+
+    if not detector_cache:
+        return result
+
+    ar1_detector = detector_cache.get("ar1")
+    pca_detector = detector_cache.get("pca")
+    iforest_detector = detector_cache.get("iforest")
+    gmm_detector = detector_cache.get("gmm")
+    regime_model = detector_cache.get("regime_model")
+
+    if regime_model is not None and detector_cache.get("regime_basis_hash"):
+        # Preserve fit-time quality flags in model metadata; only attach basis hash.
+        regime_model.train_hash = detector_cache["regime_basis_hash"]
+
+    cache_complete = all([ar1_detector, pca_detector, iforest_detector])
+    if not cache_complete:
+        logger.warn("Cached detectors incomplete; will re-fit", component="MODEL")
+        return result
+
+    result["ar1_detector"] = ar1_detector
+    result["pca_detector"] = pca_detector
+    result["iforest_detector"] = iforest_detector
+    result["gmm_detector"] = gmm_detector
+    result["regime_model"] = regime_model
+    result["cache_complete"] = True
+    return result
+
+
+def load_quality_regime_state_if_needed(
+    regime_model: Optional[Any],
+    equip: str,
+    equip_id: int,
+    sql_client: Any,
+    logger: Any = Console,
+) -> Tuple[Optional[RegimeState], int, bool]:
+    """
+    Load regime state from SQL when no regime model is currently available.
+    """
+    if regime_model is not None:
+        return None, 0, False
+
+    regime_state = load_regime_state(equip=equip, equip_id=equip_id, sql_client=sql_client)
+    if regime_state is not None and regime_state.quality_ok:
+        regime_state_version = regime_state.state_version
+        logger.info(
+            f"Regime loaded from state_v{regime_state_version} | K={regime_state.n_clusters}",
+            component="REGIME",
+        )
+        return regime_state, regime_state_version, True
+
+    return regime_state, 0, False
 
 
 def save_trained_models(
@@ -1580,9 +1591,33 @@ def save_trained_models(
         # RegimeModel contains feature_columns, scaler, etc. which are needed for scoring
         models_to_save = {
             "ar1_params": {"phimap": ar1_detector.phimap, "sdmap": ar1_detector.sdmap} if hasattr(ar1_detector, 'phimap') else None,
-            "pca_model": pca_detector.pca if hasattr(pca_detector, 'pca') else None,
+            # v11.7.1 FIX: Save full PCA detector state (includes keep_cols, scaler, col_medians)
+            # so that scoring batches can properly filter to the same columns PCA was trained on.
+            # Previously only pca_detector.pca was saved, losing keep_cols and causing
+            # n_features_in_ vs current_columns mismatch on reload.
+            "pca_model": {
+                "pca": pca_detector.pca,
+                "keep_cols": getattr(pca_detector, 'keep_cols', []),
+                "scaler": getattr(pca_detector, 'scaler', None),
+                "col_medians": getattr(pca_detector, 'col_medians', None),
+            } if hasattr(pca_detector, 'pca') and pca_detector.pca is not None else (
+                pca_detector.pca if hasattr(pca_detector, 'pca') else None
+            ),
             "iforest_model": iforest_detector.model if hasattr(iforest_detector, 'model') else None,
-            "gmm_model": gmm_detector.model if hasattr(gmm_detector, 'model') else None,
+            # v11.7.1 FIX: Save full GMM detector state (includes _var_mask, _columns_, scaler)
+            # so that scoring batches can properly apply the same variance mask.
+            # Previously only gmm_detector.model was saved, losing _var_mask and causing
+            # score() to return all zeros on reload.
+            "gmm_model": {
+                "model": gmm_detector.model,
+                "_var_mask": getattr(gmm_detector, '_var_mask', None),
+                "_columns_": getattr(gmm_detector, '_columns_', None),
+                "scaler": getattr(gmm_detector, 'scaler', None),
+                "_score_mu_": getattr(gmm_detector, '_score_mu_', None),
+                "_score_sd_": getattr(gmm_detector, '_score_sd_', None),
+            } if hasattr(gmm_detector, 'model') and gmm_detector.model is not None else (
+                gmm_detector.model if hasattr(gmm_detector, 'model') else None
+            ),
             "omr_model": omr_detector.to_dict() if omr_detector and omr_detector._is_fitted else None,
             "regime_model": regime_model,  # Full RegimeModel object, not just .model
             "feature_medians": col_meds,
@@ -1631,4 +1666,301 @@ def save_trained_models(
         Console.warn(f"Failed to save models: {e}", component="MODEL",
                      equip=equip, run_id=run_id, error_type=type(e).__name__, error=str(e)[:500])
         traceback.print_exc()
+        return None
+
+
+def run_model_persistence_and_lifecycle_stage(
+    *,
+    cached_models: Optional[Dict[str, Any]],
+    detector_cache: Optional[Dict[str, Any]],
+    force_retrain: bool,
+    equip: str,
+    sql_client: Optional[Any],
+    equip_id: int,
+    cfg: Dict[str, Any],
+    train: "pd.DataFrame",
+    ar1_detector: Any,
+    pca_detector: Any,
+    iforest_detector: Any,
+    gmm_detector: Any,
+    omr_detector: Any,
+    regime_model: Any,
+    col_meds: Optional[Dict[str, float]],
+    regime_quality_ok: bool,
+    timing_sections: Optional[Dict[str, Any]],
+    run_id: Optional[str],
+    model_state: Optional[Any],
+    output_manager: Any,
+    regime_state_version: int,
+    score_out: Dict[str, Any],
+    update_and_persist_model_lifecycle_fn: Optional[Any] = None,
+    load_model_state_safe_fn: Optional[Any] = None,
+    logger: Any = Console,
+    save_trained_models_fn: Any = save_trained_models,
+) -> "ModelPersistenceStageResult":
+    """
+    Persist trained models and update lifecycle state for the current run.
+    """
+    update_lifecycle_fn = update_and_persist_model_lifecycle_fn
+    if update_lifecycle_fn is None:
+        from core.model_lifecycle import update_and_persist_model_lifecycle_safe as update_lifecycle_fn
+
+    load_state_fn = load_model_state_safe_fn
+    if load_state_fn is None:
+        from core.model_lifecycle import load_model_state_safe as load_state_fn
+
+    detectors_fitted_this_run = (not cached_models and detector_cache is None) or force_retrain
+    models_were_trained = bool(detectors_fitted_this_run)
+    saved_model_version = None
+    model_state_out = model_state
+
+    if models_were_trained:
+        saved_model_version = save_trained_models_fn(
+            equip=equip,
+            sql_client=sql_client,
+            equip_id=equip_id,
+            cfg=cfg,
+            train=train,
+            ar1_detector=ar1_detector,
+            pca_detector=pca_detector,
+            iforest_detector=iforest_detector,
+            gmm_detector=gmm_detector,
+            omr_detector=omr_detector,
+            regime_model=regime_model,
+            col_meds=col_meds,
+            regime_quality_ok=regime_quality_ok,
+            timing_sections=timing_sections,
+            run_id=run_id or "",
+        )
+        model_state_out = update_lifecycle_fn(
+            sql_client=sql_client,
+            output_manager=output_manager,
+            equip_id=int(equip_id),
+            regime_state_version=regime_state_version,
+            cfg=cfg,
+            train_data=train,
+            run_id=run_id,
+            regime_model=regime_model,
+            score_out=score_out,
+            regime_quality_ok=regime_quality_ok,
+            logger=logger,
+        )
+
+    if model_state_out is None:
+        model_state_out = load_state_fn(
+            sql_client=sql_client,
+            equip_id=int(equip_id),
+            logger=logger,
+        )
+
+    return ModelPersistenceStageResult(
+        detectors_fitted_this_run=detectors_fitted_this_run,
+        models_were_trained=models_were_trained,
+        saved_model_version=saved_model_version,
+        model_state=model_state_out,
+    )
+
+
+@dataclass
+class ModelPersistenceStageResult:
+    """Typed result payload for model persistence stage."""
+    detectors_fitted_this_run: bool
+    models_were_trained: bool
+    saved_model_version: Optional[int]
+    model_state: Optional[Any]
+
+
+@dataclass
+class ModelAdaptationPersistenceResult:
+    """Typed result payload for combined auto-retrain and persistence stages."""
+    force_retrain: bool
+    cached_models: Optional[Dict[str, Any]]
+    regime_model: Any
+    detectors: Dict[str, Any]
+    saved_model_version: Optional[int]
+    model_state: Optional[Any]
+
+
+def run_model_adaptation_and_persistence_stage(
+    *,
+    section_fn: Any,
+    cfg: Dict[str, Any],
+    cached_models: Optional[Dict[str, Any]],
+    cached_manifest: Optional[Dict[str, Any]],
+    detectors_just_trained: bool,
+    score_out: Dict[str, Any],
+    regime_quality_ok: bool,
+    current_model_maturity: Optional[str],
+    boolean_only_metrics: List[str],
+    equip: str,
+    logger: Any,
+    record_model_refit_fn: Any,
+    fit_all_detectors_fn: Any,
+    train: "pd.DataFrame",
+    det_flags: Dict[str, bool],
+    output_manager: Any,
+    sql_client: Any,
+    run_id: Optional[str],
+    equip_id: int,
+    regime_model: Any,
+    detectors: Dict[str, Any],
+    detector_cache: Optional[Dict[str, Any]],
+    col_meds: Optional[Dict[str, float]],
+    timing_sections: Optional[Dict[str, Any]],
+    model_state: Optional[Any],
+    regime_state_version: int,
+    run_auto_retrain_stage_fn: Optional[Any] = None,
+    run_model_persistence_and_lifecycle_stage_fn: Optional[Any] = None,
+    update_and_persist_model_lifecycle_fn: Optional[Any] = None,
+    load_model_state_safe_fn: Optional[Any] = None,
+    force_retrain_requested: bool = False,
+) -> ModelAdaptationPersistenceResult:
+    """
+    Execute auto-retrain decision and model persistence/lifecycle stages.
+    """
+    auto_retrain_stage_fn = run_auto_retrain_stage_fn
+    if auto_retrain_stage_fn is None:
+        from core.model_evaluation import run_auto_retrain_stage as auto_retrain_stage_fn
+
+    persistence_stage_fn = run_model_persistence_and_lifecycle_stage_fn or run_model_persistence_and_lifecycle_stage
+
+    with section_fn("models.auto_retrain"):
+        retrain_out = auto_retrain_stage_fn(
+            cfg=cfg,
+            cached_models=cached_models,
+            cached_manifest=cached_manifest,
+            detectors_just_trained=detectors_just_trained,
+            score_out=score_out,
+            regime_quality_ok=regime_quality_ok,
+            current_model_maturity=current_model_maturity,
+            boolean_only_metrics=list(boolean_only_metrics),
+            equip=equip,
+            logger=logger,
+            record_model_refit_fn=record_model_refit_fn,
+            fit_all_detectors_fn=fit_all_detectors_fn,
+            train=train,
+            det_flags=det_flags,
+            output_manager=output_manager,
+            sql_client=sql_client,
+            run_id=run_id,
+            equip_id=equip_id,
+            regime_model=regime_model,
+            detectors=detectors,
+            force_retrain_requested=force_retrain_requested,
+        )
+
+    force_retrain = bool(retrain_out.force_retrain)
+    cached_models_out = retrain_out.cached_models
+    regime_model_out = retrain_out.regime_model
+    detectors_out = retrain_out.detectors
+
+    with section_fn("models.persistence.save"):
+        persistence_out = persistence_stage_fn(
+            cached_models=cached_models_out,
+            detector_cache=detector_cache,
+            force_retrain=force_retrain,
+            equip=equip,
+            sql_client=sql_client,
+            equip_id=equip_id,
+            cfg=cfg,
+            train=train,
+            ar1_detector=detectors_out["ar1_detector"],
+            pca_detector=detectors_out["pca_detector"],
+            iforest_detector=detectors_out["iforest_detector"],
+            gmm_detector=detectors_out["gmm_detector"],
+            omr_detector=detectors_out["omr_detector"],
+            regime_model=regime_model_out,
+            col_meds=col_meds,
+            regime_quality_ok=regime_quality_ok,
+            timing_sections=timing_sections,
+            run_id=run_id,
+            model_state=model_state,
+            output_manager=output_manager,
+            regime_state_version=regime_state_version,
+            score_out=score_out,
+            update_and_persist_model_lifecycle_fn=update_and_persist_model_lifecycle_fn,
+            load_model_state_safe_fn=load_model_state_safe_fn,
+            logger=logger,
+        )
+
+    return ModelAdaptationPersistenceResult(
+        force_retrain=force_retrain,
+        cached_models=cached_models_out,
+        regime_model=regime_model_out,
+        detectors=detectors_out,
+        saved_model_version=persistence_out.saved_model_version,
+        model_state=persistence_out.model_state,
+    )
+
+
+def persist_calibration_params_safe(
+    saved_model_version: Optional[int],
+    calibrators_dict: Optional[Dict[str, Any]],
+    equip: str,
+    sql_client: Optional[Any],
+    equip_id: int,
+    logger: Any = Console,
+) -> bool:
+    """
+    Persist calibration parameters for cross-batch consistency.
+
+    Returns:
+        True when persistence succeeds, otherwise False.
+    """
+    if saved_model_version is None or not calibrators_dict:
+        return False
+
+    try:
+        cal_manager = ModelVersionManager(equip=equip, sql_client=sql_client, equip_id=equip_id)
+        cal_manager.save_calibration_params(calibrators_dict, version=saved_model_version)
+        return True
+    except Exception as e:
+        logger.warn(
+            f"Failed to persist calibration params: {e}",
+            component="CAL",
+            equip=equip,
+            error=str(e)[:200],
+        )
+        return False
+
+
+def load_manifest_protected_columns(
+    *,
+    sql_client: Any,
+    equip: str,
+    equip_id: int,
+    cfg: Dict[str, Any],
+    is_coldstart_run: bool,
+    logger: Any = Console,
+) -> Optional[List[str]]:
+    """
+    Load protected feature columns from latest cached model manifest when cache is enabled.
+    """
+    use_cache = bool(cfg.get("models", {}).get("use_cache", True))
+    if not use_cache or is_coldstart_run or sql_client is None:
+        return None
+
+    try:
+        manager = ModelVersionManager(
+            equip=equip,
+            sql_client=sql_client,
+            equip_id=equip_id,
+        )
+        manifest = manager.load_manifest_only()
+        if not manifest:
+            return None
+        protected = manifest.get("train_sensors") or None
+        if protected:
+            logger.info(
+                f"Feature protection: {len(protected)} columns from cached model manifest will not be dropped by low-var filter",
+                component="FEAT",
+                equip=equip,
+            )
+        return protected
+    except Exception as e:
+        logger.warn(
+            f"Early manifest load failed (non-fatal): {e}",
+            component="FEAT",
+            equip=equip,
+        )
         return None

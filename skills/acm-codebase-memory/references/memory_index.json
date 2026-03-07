@@ -1,0 +1,395 @@
+{
+  "generated_at": "2026-03-07T06:11:34+00:00",
+  "module_count": 41,
+  "modules": [
+    {
+      "module_name": "core.acm",
+      "source_path": "core/acm.py",
+      "symbol_count": 4,
+      "core_import_count": 16,
+      "core_imports": [
+        "core",
+        "core.adaptive_thresholds",
+        "core.detector_orchestrator",
+        "core.episode_culprits_writer",
+        "core.fast_features",
+        "core.model_lifecycle",
+        "core.model_persistence",
+        "core.observability",
+        "core.output_manager",
+        "core.pipeline_types",
+        "core.resource_monitor",
+        "core.run_metadata_writer",
+        "core.seasonality",
+        "core.sensor_attribution",
+        "core.smart_coldstart",
+        "core.sql_client"
+      ]
+    },
+    {
+      "module_name": "core.adaptive_thresholds",
+      "source_path": "core/adaptive_thresholds.py",
+      "symbol_count": 12,
+      "core_import_count": 1,
+      "core_imports": [
+        "core.fuse"
+      ]
+    },
+    {
+      "module_name": "core.analytics_builder",
+      "source_path": "core/analytics_builder.py",
+      "symbol_count": 15,
+      "core_import_count": 1,
+      "core_imports": [
+        "core.observability"
+      ]
+    },
+    {
+      "module_name": "core.ar1_detector",
+      "source_path": "core/ar1_detector.py",
+      "symbol_count": 6,
+      "core_import_count": 1,
+      "core_imports": [
+        "core.observability"
+      ]
+    },
+    {
+      "module_name": "core.confidence",
+      "source_path": "core/confidence.py",
+      "symbol_count": 11,
+      "core_import_count": 1,
+      "core_imports": [
+        "core.observability"
+      ]
+    },
+    {
+      "module_name": "core.config_history_writer",
+      "source_path": "core/config_history_writer.py",
+      "symbol_count": 6,
+      "core_import_count": 1,
+      "core_imports": [
+        "core.observability"
+      ]
+    },
+    {
+      "module_name": "core.correlation",
+      "source_path": "core/correlation.py",
+      "symbol_count": 7,
+      "core_import_count": 0,
+      "core_imports": []
+    },
+    {
+      "module_name": "core.data_loader",
+      "source_path": "core/data_loader.py",
+      "symbol_count": 10,
+      "core_import_count": 1,
+      "core_imports": [
+        "core.observability"
+      ]
+    },
+    {
+      "module_name": "core.degradation_model",
+      "source_path": "core/degradation_model.py",
+      "symbol_count": 36,
+      "core_import_count": 1,
+      "core_imports": [
+        "core.observability"
+      ]
+    },
+    {
+      "module_name": "core.detector_orchestrator",
+      "source_path": "core/detector_orchestrator.py",
+      "symbol_count": 13,
+      "core_import_count": 5,
+      "core_imports": [
+        "core",
+        "core.ar1_detector",
+        "core.model_persistence",
+        "core.observability",
+        "core.omr"
+      ]
+    },
+    {
+      "module_name": "core.drift",
+      "source_path": "core/drift.py",
+      "symbol_count": 14,
+      "core_import_count": 1,
+      "core_imports": [
+        "core.fuse"
+      ]
+    },
+    {
+      "module_name": "core.episode_culprits_writer",
+      "source_path": "core/episode_culprits_writer.py",
+      "symbol_count": 4,
+      "core_import_count": 1,
+      "core_imports": [
+        "core.observability"
+      ]
+    },
+    {
+      "module_name": "core.failure_probability",
+      "source_path": "core/failure_probability.py",
+      "symbol_count": 18,
+      "core_import_count": 0,
+      "core_imports": []
+    },
+    {
+      "module_name": "core.fast_features",
+      "source_path": "core/fast_features.py",
+      "symbol_count": 36,
+      "core_import_count": 1,
+      "core_imports": [
+        "core.observability"
+      ]
+    },
+    {
+      "module_name": "core.forecast_engine",
+      "source_path": "core/forecast_engine.py",
+      "symbol_count": 29,
+      "core_import_count": 11,
+      "core_imports": [
+        "core.confidence",
+        "core.degradation_model",
+        "core.failure_probability",
+        "core.health_tracker",
+        "core.metrics",
+        "core.model_lifecycle",
+        "core.observability",
+        "core.output_manager",
+        "core.rul_estimator",
+        "core.sensor_attribution",
+        "core.state_manager"
+      ]
+    },
+    {
+      "module_name": "core.fuse",
+      "source_path": "core/fuse.py",
+      "symbol_count": 48,
+      "core_import_count": 1,
+      "core_imports": [
+        "core.observability"
+      ]
+    },
+    {
+      "module_name": "core.health_tracker",
+      "source_path": "core/health_tracker.py",
+      "symbol_count": 13,
+      "core_import_count": 1,
+      "core_imports": [
+        "core.observability"
+      ]
+    },
+    {
+      "module_name": "core.metrics",
+      "source_path": "core/metrics.py",
+      "symbol_count": 14,
+      "core_import_count": 1,
+      "core_imports": [
+        "core.observability"
+      ]
+    },
+    {
+      "module_name": "core.model_evaluation",
+      "source_path": "core/model_evaluation.py",
+      "symbol_count": 15,
+      "core_import_count": 1,
+      "core_imports": [
+        "core.observability"
+      ]
+    },
+    {
+      "module_name": "core.model_lifecycle",
+      "source_path": "core/model_lifecycle.py",
+      "symbol_count": 21,
+      "core_import_count": 1,
+      "core_imports": [
+        "core.observability"
+      ]
+    },
+    {
+      "module_name": "core.model_persistence",
+      "source_path": "core/model_persistence.py",
+      "symbol_count": 41,
+      "core_import_count": 1,
+      "core_imports": [
+        "core.observability"
+      ]
+    },
+    {
+      "module_name": "core.multivariate_forecast",
+      "source_path": "core/multivariate_forecast.py",
+      "symbol_count": 11,
+      "core_import_count": 1,
+      "core_imports": [
+        "core.observability"
+      ]
+    },
+    {
+      "module_name": "core.observability",
+      "source_path": "core/observability.py",
+      "symbol_count": 110,
+      "core_import_count": 0,
+      "core_imports": []
+    },
+    {
+      "module_name": "core.omr",
+      "source_path": "core/omr.py",
+      "symbol_count": 19,
+      "core_import_count": 0,
+      "core_imports": []
+    },
+    {
+      "module_name": "core.outliers",
+      "source_path": "core/outliers.py",
+      "symbol_count": 12,
+      "core_import_count": 1,
+      "core_imports": [
+        "core.observability"
+      ]
+    },
+    {
+      "module_name": "core.output_artifacts",
+      "source_path": "core/output_artifacts.py",
+      "symbol_count": 2,
+      "core_import_count": 1,
+      "core_imports": [
+        "core.observability"
+      ]
+    },
+    {
+      "module_name": "core.output_contracts",
+      "source_path": "core/output_contracts.py",
+      "symbol_count": 5,
+      "core_import_count": 0,
+      "core_imports": []
+    },
+    {
+      "module_name": "core.output_dataframe_builders",
+      "source_path": "core/output_dataframe_builders.py",
+      "symbol_count": 1,
+      "core_import_count": 0,
+      "core_imports": []
+    },
+    {
+      "module_name": "core.output_manager",
+      "source_path": "core/output_manager.py",
+      "symbol_count": 104,
+      "core_import_count": 8,
+      "core_imports": [
+        "core.analytics_builder",
+        "core.data_loader",
+        "core.observability",
+        "core.output_artifacts",
+        "core.output_contracts",
+        "core.output_dataframe_builders",
+        "core.output_manager_services",
+        "core.output_sql_core"
+      ]
+    },
+    {
+      "module_name": "core.output_manager_services",
+      "source_path": "core/output_manager_services.py",
+      "symbol_count": 31,
+      "core_import_count": 2,
+      "core_imports": [
+        "core.observability",
+        "core.sensor_attribution"
+      ]
+    },
+    {
+      "module_name": "core.output_sql_core",
+      "source_path": "core/output_sql_core.py",
+      "symbol_count": 22,
+      "core_import_count": 2,
+      "core_imports": [
+        "core.observability",
+        "core.output_contracts"
+      ]
+    },
+    {
+      "module_name": "core.pipeline_types",
+      "source_path": "core/pipeline_types.py",
+      "symbol_count": 23,
+      "core_import_count": 0,
+      "core_imports": []
+    },
+    {
+      "module_name": "core.regimes",
+      "source_path": "core/regimes.py",
+      "symbol_count": 55,
+      "core_import_count": 1,
+      "core_imports": [
+        "core.observability"
+      ]
+    },
+    {
+      "module_name": "core.resource_monitor",
+      "source_path": "core/resource_monitor.py",
+      "symbol_count": 27,
+      "core_import_count": 0,
+      "core_imports": []
+    },
+    {
+      "module_name": "core.rul_estimator",
+      "source_path": "core/rul_estimator.py",
+      "symbol_count": 9,
+      "core_import_count": 3,
+      "core_imports": [
+        "core.degradation_model",
+        "core.failure_probability",
+        "core.observability"
+      ]
+    },
+    {
+      "module_name": "core.run_metadata_writer",
+      "source_path": "core/run_metadata_writer.py",
+      "symbol_count": 12,
+      "core_import_count": 1,
+      "core_imports": [
+        "core.observability"
+      ]
+    },
+    {
+      "module_name": "core.seasonality",
+      "source_path": "core/seasonality.py",
+      "symbol_count": 20,
+      "core_import_count": 0,
+      "core_imports": []
+    },
+    {
+      "module_name": "core.sensor_attribution",
+      "source_path": "core/sensor_attribution.py",
+      "symbol_count": 30,
+      "core_import_count": 1,
+      "core_imports": [
+        "core.observability"
+      ]
+    },
+    {
+      "module_name": "core.smart_coldstart",
+      "source_path": "core/smart_coldstart.py",
+      "symbol_count": 18,
+      "core_import_count": 1,
+      "core_imports": [
+        "core.observability"
+      ]
+    },
+    {
+      "module_name": "core.sql_client",
+      "source_path": "core/sql_client.py",
+      "symbol_count": 29,
+      "core_import_count": 0,
+      "core_imports": []
+    },
+    {
+      "module_name": "core.state_manager",
+      "source_path": "core/state_manager.py",
+      "symbol_count": 14,
+      "core_import_count": 1,
+      "core_imports": [
+        "core.observability"
+      ]
+    }
+  ]
+}

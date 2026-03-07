@@ -1,0 +1,4 @@
+interface:
+  display_name: "Grafana Dashboard Ops"
+  short_description: "Audit and repair ACM Grafana dashboard runtime issues"
+  default_prompt: "Use $grafana-dashboard-ops to audit Grafana API state, validate dashboard SQL against ACM schema, fix dashboard JSON, and verify active dashboards load cleanly."

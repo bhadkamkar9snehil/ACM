@@ -586,7 +586,11 @@ def run_data_guardrails(
             dq['EquipID'] = int(equip_id)
             dq['CheckName'] = 'data_quality'
             dq['CheckResult'] = 'OK'
-            output_manager.write_dataframe(dq, "data_quality", sql_table="ACM_DataQuality", add_created_at=True)
+            output_manager.write_sql_table(
+                table_name="ACM_DataQuality",
+                df=dq,
+                artifact_name="data_quality",
+            )
             result.data_quality_written = True
     except Exception as dq_e:
         Console.warn(f"Data quality summary skipped: {dq_e}", component="DATA",
@@ -597,6 +601,133 @@ def run_data_guardrails(
         result.dropped_sensors = list(meta.dropped_cols)
     
     return result
+
+
+def run_data_guardrails_safe(
+    train: pd.DataFrame,
+    score: pd.DataFrame,
+    meta: Any,
+    cfg: Dict[str, Any],
+    output_manager: Any,
+    run_id: int,
+    equip_id: int,
+    equip: str,
+    logger: Any,
+) -> GuardrailResult:
+    """
+    Safe wrapper around run_data_guardrails().
+
+    Returns a default GuardrailResult when guardrail execution fails.
+    """
+    try:
+        return run_data_guardrails(
+            train=train,
+            score=score,
+            meta=meta,
+            cfg=cfg,
+            output_manager=output_manager,
+            run_id=run_id,
+            equip_id=equip_id,
+            equip=equip,
+        )
+    except Exception as e:
+        logger.warn(
+            f"Guardrail checks skipped: {e}",
+            component="DATA",
+            equip=equip,
+            error_type=type(e).__name__,
+            error=str(e)[:200],
+        )
+        return GuardrailResult(low_var_threshold=1e-4)
+
+
+def validate_data_contract_at_entry(
+    train: pd.DataFrame,
+    score: pd.DataFrame,
+    meta: Any,
+    refit_requested: bool,
+    cfg: Dict[str, Any],
+    output_manager: Any,
+    equip_id: int,
+    equip: str,
+    run_id: Optional[str],
+    logger: Any,
+) -> ValidationResult:
+    """
+    Validate pipeline entry data against DataContract and persist validation output.
+
+    Behavior is equivalent to the former inline block in core.acm:
+    - training phase validates TRAIN with min_train_samples
+    - scoring phase validates SCORE with min_score_samples
+    - validation record write is best-effort
+    """
+    data_cfg = cfg.get("data", {}) or {}
+    try:
+        min_score_samples = int(data_cfg.get("min_score_samples", 1))
+        min_score_samples = max(1, min_score_samples)
+    except (TypeError, ValueError):
+        min_score_samples = 1
+
+    try:
+        min_train_samples = int(data_cfg.get("min_train_samples", 500))
+        min_train_samples = max(10, min_train_samples)
+    except (TypeError, ValueError):
+        min_train_samples = 500
+
+    is_initial_coldstart = bool(
+        meta.get("is_coldstart_run", False) if isinstance(meta, dict)
+        else getattr(meta, "is_coldstart_run", False)
+    )
+    is_training_phase = is_initial_coldstart or bool(refit_requested)
+    min_rows_threshold = int(min_train_samples if is_training_phase else min_score_samples)
+
+    if is_training_phase:
+        validation_df = train
+    else:
+        validation_df = score if (score is not None and len(score) > 0) else train
+
+    contract = DataContract(
+        required_sensors=[],
+        optional_sensors=list(meta.kept_cols) if hasattr(meta, "kept_cols") else [],
+        timestamp_col=meta.timestamp_col if hasattr(meta, "timestamp_col") else "Timestamp",
+        min_rows=min_rows_threshold,
+        max_null_fraction=0.5,
+        equip_id=equip_id,
+        equip_code=equip,
+    )
+
+    validation = contract.validate(validation_df)
+
+    if output_manager:
+        try:
+            sig = contract.signature() if hasattr(contract, "signature") and callable(contract.signature) else None
+            output_manager.write_data_contract_validation(
+                {
+                    "Passed": validation.passed,
+                    "RowsValidated": len(validation_df) if validation_df is not None else 0,
+                    "ColumnsValidated": len(validation_df.columns) if validation_df is not None else 0,
+                    "IssuesJSON": json.dumps(validation.issues) if validation.issues else None,
+                    "WarningsJSON": json.dumps(validation.warnings) if validation.warnings else None,
+                    "ContractSignature": sig,
+                }
+            )
+        except Exception as e:
+            if validation.passed:
+                logger.warn(f"Failed to write DataContract validation: {e}", component="DATA")
+
+    if not validation.passed:
+        error_msg = f"DataContract validation FAILED: {validation.issues}"
+        logger.error(error_msg, component="DATA", equip=equip, run_id=run_id, issues=validation.issues)
+        raise ValueError(error_msg)
+
+    if validation.warnings:
+        logger.warn(
+            f"DataContract: {len(validation.warnings)} warnings | "
+            f"{validation.warnings[0] if validation.warnings else ''}",
+            component="DATA",
+        )
+
+    return validation
 
 
 # =============================================================================
@@ -611,4 +742,6 @@ __all__ = [
     "FeatureMatrix",
     "GuardrailResult",
     "run_data_guardrails",
+    "run_data_guardrails_safe",
+    "validate_data_contract_at_entry",
 ]

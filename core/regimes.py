@@ -4,7 +4,7 @@
 from __future__ import annotations
 from collections import deque, Counter
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Literal, Optional, Tuple, Union, TYPE_CHECKING
+from typing import Any, Dict, List, Literal, Optional, Tuple, Union, TYPE_CHECKING, Callable
 import json
 try:
     import orjson  # type: ignore
@@ -12,9 +12,7 @@ except Exception:
     orjson = None  # type: ignore
 import numpy as np
 import pandas as pd
-from pathlib import Path
 
-import joblib
 # v11.1.0: Removed MiniBatchKMeans - using HDBSCAN (primary) and GMM (fallback) only
 from sklearn.mixture import GaussianMixture  # v11.0.1: Probabilistic clustering
 from sklearn.metrics import silhouette_score, calinski_harabasz_score, pairwise_distances_argmin
@@ -32,14 +30,11 @@ except ImportError:
 
 import matplotlib
 matplotlib.use("Agg")
-try:
-    from core.output_manager import OutputManager
-except Exception:
-    OutputManager = None  # type: ignore
 import matplotlib.pyplot as plt
 
 from core.observability import Console, Span
 import hashlib
+from utils.config_dict import cfg_get as _cfg_get
 
 try:
     from scipy.ndimage import median_filter as _median_filter
@@ -98,9 +93,9 @@ CONDITION_TAG_KEYWORDS = [
 # RATIONALE (v11.4.0 Architectural Fix):
 # Using detector z-scores (health indicators) in regime clustering creates
 # a CIRCULAR DEPENDENCY that masks degradation:
-#   1. Equipment degrades → detector z-scores rise
+#   1. Equipment degrades -> detector z-scores rise
 #   2. Health-state features cause point to cluster into "new regime"
-#   3. New regime gets fresh baseline → degradation masked
+#   3. New regime gets fresh baseline -> degradation masked
 #   4. Equipment appears "healthy in its current regime"
 #
 # CORRECT ARCHITECTURE:
@@ -112,50 +107,6 @@ CONDITION_TAG_KEYWORDS = [
 # not INPUTS to regime clustering.
 
 
-class ModelVersionMismatch(Exception):
-    """Raised when a cached regime model version differs from the expected version."""
-
-
-def _parse_semver(version: str) -> Tuple[int, int, int]:
-    """
-    Parse semantic version string into (major, minor, patch) tuple.
-    
-    FIX #10: Supports version strings like "2.0", "2.1.0", "2"
-    """
-    parts = version.split(".")
-    major = int(parts[0]) if len(parts) > 0 else 0
-    minor = int(parts[1]) if len(parts) > 1 else 0
-    patch = int(parts[2]) if len(parts) > 2 else 0
-    return (major, minor, patch)
-
-# To-DO Is this required? What is the basis for versioning. Need clarity on this.
-def _is_version_compatible(cached_version: str, expected_version: str) -> bool:
-    """
-    Check if cached model version is compatible with expected version.
-    
-    FIX #10: Implements semantic versioning compatibility:
-    - Major version must match (breaking changes)
-    - Minor version can be <= expected (backward compatible features)
-    - Patch version is ignored (bug fixes)
-    
-    Examples:
-    - cached="2.0", expected="2.1" -> True (minor upgrade)
-    - cached="2.1", expected="2.0" -> True (can use newer model)
-    - cached="1.9", expected="2.0" -> False (major mismatch)
-    """
-    try:
-        cached_semver = _parse_semver(cached_version)
-        expected_semver = _parse_semver(expected_version)
-        
-        # Major version must match
-        if cached_semver[0] != expected_semver[0]:
-            return False
-        
-        # Same major version = compatible
-        return True
-    except Exception:
-        # If parsing fails, fall back to exact match
-        return cached_version == expected_version
 # TO-DO This is not needed. Need to remove this properly.
 _HEALTH_PRIORITY = {
     "healthy": 0,
@@ -179,36 +130,13 @@ _REGIME_CONFIG_SCHEMA = {
     "regimes.health.fused_warn_z": (float, 0.0, 10.0, "Fused Z warn threshold"),
     "regimes.health.fused_alert_z": (float, 0.0, 10.0, "Fused Z alert threshold"),
     # V11: UNKNOWN regime support
-    "regimes.unknown.enabled": (bool, True, True, "Enable UNKNOWN regime for low-confidence assignments"),
+    "regimes.unknown.enabled": (bool, False, True, "Enable UNKNOWN regime for low-confidence assignments"),
     "regimes.unknown.distance_percentile": (float, 0.0, 100.0, "Distance percentile threshold for UNKNOWN"),
 }
 
 # ----------------------------
 # Small helpers / sane defaults
 # ----------------------------
-def _cfg_get(cfg: Dict[str, Any], path: str, default: Any) -> Any:
-    cur = cfg or {}
-    for part in path.split("."):
-        if not isinstance(cur, dict) or part not in cur:
-            return default
-        cur = cur[part]
-    val = cur
-    if default is not None:
-        expected_type = type(default)
-        if expected_type in (int, float, bool, str) and not isinstance(val, expected_type):
-            try:
-                # Cast val to the expected type (only for scalar types)
-                if expected_type is int:
-                    val = int(val)  # type: ignore[arg-type]
-                elif expected_type is float:
-                    val = float(val)  # type: ignore[arg-type]
-                elif expected_type is bool:
-                    val = bool(val)
-                elif expected_type is str:
-                    val = str(val)
-            except Exception:
-                return default
-    return val
 
 def _as_f32(X) -> np.ndarray:
     arr = np.asarray(X)
@@ -373,7 +301,13 @@ def _validate_regime_config(cfg: Dict[str, Any]) -> List[str]:
             issues.append(f"Missing config value for {path} ({description})")
             continue
         if not isinstance(value, expected_type):
-            issues.append(f"Config {path} expected {expected_type.__name__}, got {type(value).__name__}")
+            # Allow float-stored ints (e.g. auto-tune writes k_max=12.0 as float)
+            if expected_type is int and isinstance(value, float) and value == int(value):
+                value = int(value)
+            else:
+                issues.append(f"Config {path} expected {expected_type.__name__}, got {type(value).__name__}")
+                continue
+        if expected_type is bool:
             continue
         if isinstance(value, (int, float)) and not (low <= value <= high):
             issues.append(f"Config {path}={value} outside expected range [{low}, {high}]")
@@ -727,7 +661,13 @@ def build_feature_basis(
             train_parts.append(train_raw)
             score_parts.append(score_raw)
         else:
-            Console.warn(f"No operational columns found matching OPERATING_TAG_KEYWORDS. Falling back to PCA features.", component="REGIME", available_cols=len(raw_train.columns) if raw_train is not None else 0)
+            Console.warn(
+            "No operational sensor columns matched OPERATING_TAG_KEYWORDS for regime basis. "
+            "Falling back to PCA features for regime clustering. "
+            "Add custom keywords via regimes.feature_basis.custom_operating_keywords in ACM_Config.",
+            component="REGIME",
+            available_cols=len(raw_train.columns) if raw_train is not None else 0,
+        )
 
     # Only use PCA features if raw sensors not available or insufficient
     if not train_parts and pca_detector is not None and getattr(pca_detector, "pca", None) is not None:
@@ -1014,7 +954,7 @@ def _fit_hdbscan_scaled(
     4. Robust to outliers - won't distort regime boundaries
     5. Hierarchical - provides cluster stability/persistence metrics
     
-    v11.1.7: Added subsampling for large datasets to prevent O(n²) memory issues
+    v11.1.7: Added subsampling for large datasets to prevent O(n^2) memory issues
     
     Args:
         X: Feature matrix (n_samples, n_features)
@@ -1042,7 +982,7 @@ def _fit_hdbscan_scaled(
     n_samples, n_features = X_scaled.shape
     
     # v11.1.7: PERFORMANCE FIX - Subsample for large datasets
-    # HDBSCAN has O(n²) memory/time complexity, becomes very slow >10k samples
+    # HDBSCAN has O(n^2) memory/time complexity, becomes very slow >10k samples
     hdb_cfg = _cfg_get(cfg, "regimes.hdbscan", {}) or {}
     max_fit_samples = int(hdb_cfg.get("max_fit_samples", 8000))  # Cap at 8k for reasonable performance
     
@@ -1361,17 +1301,25 @@ def fit_regime_model(
                 
                 # If HDBSCAN produced low quality AND we have GMM fallback, try GMM
                 if low_quality and use_gmm_fallback:
-                    Console.warn("HDBSCAN produced low-quality clustering, trying GMM fallback", component="REGIME")
+                    Console.warn(
+            "HDBSCAN produced low-quality clustering (silhouette/BIC below threshold). "
+            "Switching to GMM fallback for regime detection.",
+            component="REGIME",
+        )
                     model = None
                     exemplars = None
                     fallback_gmm = None  # Clear ensemble if switching to pure GMM
                     
         except Exception as e:
-            Console.warn(f"HDBSCAN failed: {e}. Trying fallback.", component="REGIME")
+            Console.warn(f"HDBSCAN clustering failed: {e}. Falling back to GMM.", component="REGIME")
             model = None
             fallback_gmm = None
     elif clustering_method == "hdbscan" and not HDBSCAN_AVAILABLE:
-        Console.warn("HDBSCAN requested but not installed. Falling back to GMM.", component="REGIME")
+        Console.warn(
+            "HDBSCAN requested (regimes.clustering.method=hdbscan) but hdbscan package is not installed. "
+            "Install with: pip install hdbscan. Falling back to GMM.",
+            component="REGIME",
+        )
     elif clustering_method == "hdbscan" and len(train_basis) < 10:
         Console.warn(f"Too few samples ({len(train_basis)}) for HDBSCAN. Falling back to GMM.", component="REGIME")
     
@@ -1403,7 +1351,10 @@ def fit_regime_model(
                 except Exception:
                     pass
         except Exception as e:
-            Console.warn(f"GMM also failed: {e}. Trying KMeans fallback.", component="REGIME")
+            Console.warn(
+            f"GMM clustering failed: {e}. Falling back to KMeans as last resort.",
+            component="REGIME",
+        )
     
     # ========== TRY KMEANS AS FINAL FALLBACK (v11.1.7) ==========
     # KMeans is fast, reliable, and always produces clusters
@@ -1488,6 +1439,15 @@ def fit_regime_model(
     quality_notes.extend(config_issues)
     if np.isnan(best_score):
         quality_notes.append("auto_k_unscored")
+    if not quality_ok and quality_notes:
+        Console.warn(
+            f"Regime quality failed: {', '.join(quality_notes)} "
+            f"(metric={best_metric}, score={best_score:.3f})",
+            component="REGIME",
+            metric=best_metric,
+            score=float(best_score) if np.isfinite(best_score) else None,
+            quality_notes=quality_notes,
+        )
     meta = {
         "best_k": int(best_k),
         "fit_score": float(best_score),
@@ -1564,17 +1524,36 @@ def fit_regime_model(
     # v11.1.6 FIX #3: Compute and store calibrated training distance threshold
     # This threshold is used for UNKNOWN detection in predict_regime_with_confidence
     unknown_cfg = _cfg_get(cfg, "regimes.unknown", {}) or {}
-    distance_percentile = float(unknown_cfg.get("distance_percentile", 95.0))
+    distance_percentile = float(unknown_cfg.get("distance_percentile", 99.0))
+    floor_ratio = float(unknown_cfg.get("distance_threshold_floor_ratio", 1.5))
     try:
         threshold, train_distances = _compute_training_distances(
             regime_model, train_basis, distance_percentile
         )
+        # Apply a floor so the threshold is never tighter than floor_ratio × median
+        # training distance. P99 on a short coldstart window can still be very tight
+        # when training data doesn't cover the full operating envelope, causing 100%
+        # of scoring points to be misclassified as novel.
+        if len(train_distances) > 0 and floor_ratio > 0:
+            median_dist = float(np.median(train_distances))
+            floor = median_dist * floor_ratio
+            if threshold < floor:
+                Console.info(
+                    f"Distance threshold P{distance_percentile:.0f}={threshold:.4f} "
+                    f"below floor ({floor_ratio:.1f}× median={floor:.4f}); clamping up.",
+                    component="REGIME",
+                )
+                threshold = floor
         regime_model.training_distance_threshold_ = threshold
         regime_model.training_distance_distribution_ = train_distances
         meta["training_distance_threshold"] = float(threshold)
         meta["training_distance_percentile"] = distance_percentile
     except Exception as e:
-        Console.warn(f"Could not compute training distance threshold: {e}", component="REGIME")
+        Console.warn(
+            f"Could not compute training distance threshold for novel point detection: {e}. "
+            "All scoring points will be treated as known (no UNKNOWN regime assignments).",
+            component="REGIME",
+        )
         regime_model.training_distance_threshold_ = None
     
     return regime_model
@@ -1713,8 +1692,8 @@ def predict_regime_with_confidence(
     from sklearn.metrics import pairwise_distances
     
     unknown_cfg = _cfg_get(cfg, "regimes.unknown", {}) or {}
-    distance_percentile = float(unknown_cfg.get("distance_percentile", 95.0))
-    
+    distance_percentile = float(unknown_cfg.get("distance_percentile", 99.0))
+
     # Align features
     aligned = basis_df.reindex(columns=model.feature_columns, fill_value=0.0)
     aligned_arr = aligned.to_numpy(dtype=np.float64, copy=False, na_value=0.0)
@@ -1744,20 +1723,20 @@ def predict_regime_with_confidence(
             # Confidence = prediction strength (0-1)
             confidence = np.clip(strengths, 0.0, 1.0)
             
-            # v11.3.1: Identify novel points (low strength = sparse region)
-            strength_threshold = float(unknown_cfg.get("hdbscan_strength_min", 0.1))
-            low_strength_mask = strengths < strength_threshold
-            
-            # Also check distance threshold for novelty
+            # v11.3.1: Identify novel points (sparse/out-of-envelope region)
+            # Distance gate is the primary signal when a calibrated threshold exists —
+            # HDBSCAN strength from approximate_predict returns near-zero for ALL
+            # out-of-sample points (cross-window scoring), making the strength gate
+            # unreliable as a primary novelty detector.
             if centers.size > 0 and distance_threshold < float("inf"):
-                # Compute distances to assigned centroids
-                # Handle invalid labels by clamping to valid range
+                # Primary: distance to assigned centroid exceeds training P99
                 valid_labels = np.clip(labels, 0, len(centers) - 1)
                 point_distances = np.linalg.norm(X_scaled - centers[valid_labels], axis=1)
-                distance_novel_mask = point_distances > distance_threshold
-                is_novel = low_strength_mask | distance_novel_mask
+                is_novel = point_distances > distance_threshold
             else:
-                is_novel = low_strength_mask.copy()
+                # Fallback when no calibrated threshold: use prediction strength
+                strength_threshold = float(unknown_cfg.get("hdbscan_strength_min", 0.1))
+                is_novel = strengths < strength_threshold
             
             # v11.3.1: Always assign - use GMM or nearest centroid for novel points
             if np.any(is_novel):
@@ -1781,8 +1760,10 @@ def predict_regime_with_confidence(
                 
                 n_novel = int(np.sum(is_novel))
                 Console.info(
-                    f"Identified {n_novel}/{n_samples} novel points (assigned to nearest cluster)",
-                    component="REGIME"
+                    f"HDBSCAN: {n_novel}/{n_samples} points classified as novel (sparse/outlier region). "
+                    "Assigned to nearest cluster. High novel counts may indicate the training window "
+                    "did not cover the full operating envelope.",
+                    component="REGIME",
                 )
             
             return labels, confidence, is_novel
@@ -1835,8 +1816,10 @@ def predict_regime_with_confidence(
             
             if np.any(is_novel):
                 Console.info(
-                    f"Identified {np.sum(is_novel)}/{n_samples} novel points",
-                    component="REGIME"
+                    f"GMM: {int(np.sum(is_novel))}/{n_samples} points classified as novel "
+                    "(low assignment probability). High novel counts may indicate regime drift "
+                    "or a training window that is too short.",
+                    component="REGIME",
                 )
     
     return labels, confidence, is_novel
@@ -1945,14 +1928,9 @@ def update_health_labels(
     
     # v11.4.0: Identify the "Normal" operating regime using config parameters
     normal_cfg = _cfg_get(cfg, "regimes.normal_identification", {})
-    normal_enabled = bool(normal_cfg.get("enabled", True))
     min_dwell = float(normal_cfg.get("min_dwell_fraction", 0.15))
     max_fused = float(normal_cfg.get("max_median_fused", 2.0))
-    
-    if normal_enabled:
-        normal_label = identify_normal_regime(stats, min_dwell_fraction=min_dwell, max_median_fused=max_fused)
-    else:
-        normal_label = None
+    normal_label = identify_normal_regime(stats, min_dwell_fraction=min_dwell, max_median_fused=max_fused)
     model.normal_regime_label_ = normal_label
     
     # v11.4.0: Generate semantic labels for all regimes
@@ -2102,14 +2080,6 @@ def _generate_regime_semantic_labels(
             labels[label] = f"Regime_{label}"
     
     return labels
-
-
-def _persist_regime_error(e: Exception, models_dir: Path):
-    """Helper to write error details to a file."""
-    err_file = models_dir / "regime_persist.errors.txt"
-    import traceback
-    with err_file.open("w", encoding="utf-8") as f:
-        f.write(f"Error type: {type(e).__name__}\n\n{traceback.format_exc()}")
 
 
 def build_summary_dataframe(model: RegimeModel) -> pd.DataFrame:
@@ -2509,210 +2479,6 @@ def smooth_transitions(
 
     return result
 
-# Timestamp parsing (fast, consistent, UTC)
-def _to_datetime_mixed(s):
-    try:
-        return pd.to_datetime(s, format="mixed", errors="coerce")
-    except TypeError:
-        return pd.to_datetime(s, errors="coerce")
-# TO-DO Rewrite and rename this function to completely remove and forget about csv loading altogether.
-def _read_episodes_csv(p: Path, sql_client=None, equip_id: Optional[int] = None, run_id: Optional[str] = None) -> pd.DataFrame:
-    """
-    Read episodes from SQL (preferred) or CSV fallback.
-    
-    REG-CSV-01: SQL-backed episode reader for regime analysis.
-    Queries ACM_Episodes by EquipID and RunID when sql_client provided.
-    Falls back to CSV for file-mode/dev.
-    
-    Args:
-        p: Path to episodes.csv (used only if SQL unavailable)
-        sql_client: SQL client for querying ACM_Episodes (optional)
-        equip_id: Equipment ID for SQL query (optional)
-        run_id: Run ID for SQL query (optional)
-        
-    Returns:
-        DataFrame with columns: start_ts, end_ts (and other episode fields from SQL)
-    """
-    # REG-CSV-01: Try SQL first if client provided
-    if sql_client is not None and equip_id is not None and run_id is not None:
-        try:
-            query = """
-                SELECT StartTs, EndTs, DurationSeconds, DurationHours, 
-                       PeakFusedZ, AvgFusedZ, MinHealthIndex, PeakTimestamp,
-                       MaxRegimeLabel, Culprits, AlertMode, Severity, Status
-                FROM dbo.ACM_Episodes
-                WHERE EquipID = ? AND RunID = ?
-                ORDER BY StartTs ASC
-            """
-            cursor = sql_client.cursor()
-            cursor.execute(query, (int(equip_id), run_id))
-            rows = cursor.fetchall()
-            cursor.close()
-            
-            if rows:
-                # Build DataFrame from SQL results
-                df = pd.DataFrame([{
-                    'start_ts': _to_datetime_mixed(row[0]),
-                    'end_ts': _to_datetime_mixed(row[1]),
-                    'duration_s': row[2],
-                    'duration_hours': row[3],
-                    'peak_fused_z': row[4],
-                    'avg_fused_z': row[5],
-                    'min_health_index': row[6],
-                    'peak_timestamp': _to_datetime_mixed(row[7]),
-                    'regime': row[8],  # MaxRegimeLabel
-                    'culprits': row[9],
-                    'alert_mode': row[10],
-                    'severity': row[11],
-                    'status': row[12]
-                } for row in rows])
-                return df
-            else:
-                # No episodes found in SQL, return empty with correct schema
-                return pd.DataFrame(columns=["start_ts", "end_ts"])
-        except Exception as e:
-            # SQL query failed, fall back to CSV
-            from core.observability import Console
-            Console.warn(f"SQL episode read failed, falling back to CSV: {e}", component="REGIME", equip_id=equip_id, run_id=run_id, error_type=type(e).__name__)
-    
-    # REG-CSV-01: Fallback to CSV for file-mode/dev or if SQL unavailable
-    safe_base = Path.cwd()
-    try:
-        resolved = p.resolve()
-        if not resolved.is_relative_to(safe_base):
-            from core.observability import Console
-            Console.warn(f"Episode path outside workspace: {resolved}", component="REGIME", resolved_path=str(resolved), safe_base=str(safe_base))
-            return pd.DataFrame(columns=["start_ts", "end_ts"])
-    except Exception:
-        pass
-    if not p.exists():
-        return pd.DataFrame(columns=["start_ts", "end_ts"])
-    df = pd.read_csv(p, dtype={"start_ts": "string", "end_ts": "string"})
-    df["start_ts"] = _to_datetime_mixed(df["start_ts"])
-    df["end_ts"]   = _to_datetime_mixed(df["end_ts"])
-    
-    # FIX #9: Filter invalid timestamps immediately after parsing
-    initial_count = len(df)
-    
-    # Remove rows with NaT timestamps
-    valid_mask = df["start_ts"].notna() & df["end_ts"].notna()
-    nat_count = (~valid_mask).sum()
-    if nat_count > 0:
-        Console.warn(f"Filtering {nat_count} episodes with invalid timestamps (NaT)", component="REGIME", nat_count=nat_count, initial_count=initial_count)
-        df = df[valid_mask]
-    
-    # FIX #9: Validate end_ts > start_ts
-    if len(df) > 0:
-        invalid_range_mask = df["end_ts"] < df["start_ts"]
-        invalid_range_count = invalid_range_mask.sum()
-        if invalid_range_count > 0:
-            Console.warn(
-                f"Filtering {invalid_range_count} episodes where end_ts < start_ts (invalid time range)",
-                component="REGIME", invalid_count=invalid_range_count, valid_count=len(df) - invalid_range_count
-            )
-            df = df[~invalid_range_mask]
-    
-    final_count = len(df)
-    if final_count < initial_count:
-        Console.info(f"Episodes after validation: {final_count}/{initial_count}", component="REGIME")
-    
-    return df
-
-# TO-DO Rewrite and rename this function to completely remove and forget about csv loading altogether.
-def _read_scores_csv(p: Path, sql_client=None, equip_id: Optional[int] = None, run_id: Optional[str] = None, 
-                    start_ts: Optional[pd.Timestamp] = None, end_ts: Optional[pd.Timestamp] = None) -> pd.DataFrame:
-    """
-    Read scores from SQL (preferred) or CSV fallback.
-    
-    REG-CSV-01: SQL-backed scores reader for regime analysis.
-    Queries ACM_Scores_Wide by EquipID, RunID, and optional time range when sql_client provided.
-    Falls back to CSV for file-mode/dev.
-    
-    Args:
-        p: Path to scores.csv (used only if SQL unavailable)
-        sql_client: SQL client for querying ACM_Scores_Wide (optional)
-        equip_id: Equipment ID for SQL query (optional)
-        run_id: Run ID for SQL query (optional)
-        start_ts: Start timestamp for SQL query (optional, filters >= start_ts)
-        end_ts: End timestamp for SQL query (optional, filters <= end_ts)
-        
-    Returns:
-        DataFrame with timestamp index and score columns
-    """
-    # REG-CSV-01: Try SQL first if client provided
-    if sql_client is not None and equip_id is not None and run_id is not None:
-        try:
-            # Build query with optional time range filtering
-            query_parts = [
-                "SELECT * FROM dbo.ACM_Scores_Wide",
-                "WHERE EquipID = ? AND RunID = ?"
-            ]
-            params = [int(equip_id), run_id]
-            
-            if start_ts is not None:
-                query_parts.append("AND Timestamp >= ?")
-                params.append(start_ts)
-            if end_ts is not None:
-                query_parts.append("AND Timestamp <= ?")
-                params.append(end_ts)
-            
-            query_parts.append("ORDER BY Timestamp ASC")
-            query = " ".join(query_parts)
-            
-            cursor = sql_client.cursor()
-            cursor.execute(query, tuple(params))
-            rows = cursor.fetchall()
-            cols = [desc[0] for desc in cursor.description]
-            cursor.close()
-            
-            if rows:
-                # Build DataFrame from SQL results
-                df = pd.DataFrame(rows, columns=cols)
-                
-                # Set timestamp as index
-                if 'Timestamp' in df.columns:
-                    df['Timestamp'] = _to_datetime_mixed(df['Timestamp'])
-                    df = df.set_index('Timestamp')
-                    
-                    # Drop RunID, EquipID columns (not needed for analysis)
-                    df = df.drop(columns=['RunID', 'EquipID'], errors='ignore')
-                    
-                    # Clean NaN timestamps
-                    df_clean = df[~df.index.isna()]
-                    dropped = len(df) - len(df_clean)
-                    if dropped > 0:
-                        Console.warn(f"Dropped {dropped} rows with invalid timestamps from SQL scores", component="REGIME", dropped_rows=dropped, total_rows=len(df), equip_id=equip_id, run_id=run_id)
-                    return df_clean
-                else:
-                    Console.warn("SQL scores missing Timestamp column", component="REGIME", equip_id=equip_id, run_id=run_id, columns=cols[:5])
-                    return pd.DataFrame()
-            else:
-                # No scores found in SQL, return empty
-                return pd.DataFrame()
-        except Exception as e:
-            # SQL query failed, fall back to CSV
-            Console.warn(f"SQL scores read failed, falling back to CSV: {e}", component="REGIME", equip_id=equip_id, run_id=run_id, error_type=type(e).__name__)
-    
-    # REG-CSV-01: Fallback to CSV for file-mode/dev or if SQL unavailable
-    safe_base = Path.cwd()
-    try:
-        resolved = p.resolve()
-        if not resolved.is_relative_to(safe_base):
-            Console.warn(f"Scores path outside workspace: {resolved}", component="REGIME", resolved_path=str(resolved), safe_base=str(safe_base))
-            return pd.DataFrame()
-    except Exception:
-        pass
-    if not p.exists():
-        return pd.DataFrame()
-    df = pd.read_csv(p, dtype={"timestamp": "string"})
-    df["timestamp"] = _to_datetime_mixed(df["timestamp"])
-    df = df.set_index("timestamp")
-    df_clean = df[~df.index.isna()]
-    dropped = len(df) - len(df_clean)
-    if dropped > 0:
-        Console.warn(f"Dropped {dropped} rows with invalid timestamps from scores.csv", component="REGIME", dropped_rows=dropped, total_rows=len(df), file_path=str(p))
-    return df_clean
-
 # -----------------------------------
 # Core: fit auto-k with safe heuristics (v11.1.0: Uses GMM, not K-Means)
 # DEPRECATED: Legacy path - use fit_regime_model() instead
@@ -2882,6 +2648,7 @@ def regime_model_to_state(
         last_trained_time=datetime.now(timezone.utc).isoformat(),
         config_hash=config_hash,
         regime_basis_hash=regime_basis_hash,
+        training_distance_threshold=model.training_distance_threshold_,
     )
     
     return state
@@ -2964,132 +2731,10 @@ def regime_state_to_model(
     
     if pca_obj is not None:
         model.pca = pca_obj
-    
+
+    model.training_distance_threshold_ = state.training_distance_threshold
+
     return model
-
-# TO-DO Probably is causing issues
-def align_regime_labels(
-    new_model: RegimeModel,
-    prev_model: RegimeModel
-) -> RegimeModel:
-    """
-    Align new regime cluster labels to match previous regime labels for continuity.
-    
-    v11.1.6 FIX #4: Now creates and stores a label_map_ that is applied to all
-    predicted labels via apply_label_map(). This ensures stable label semantics
-    across refits.
-    
-    Uses nearest cluster center matching to ensure consistent regime IDs when
-    operating conditions recur across batches.
-    
-    Args:
-        new_model: Newly fitted RegimeModel
-        prev_model: Previously fitted RegimeModel for reference
-    
-    Returns:
-        RegimeModel with label_map_ set for stable predictions
-    """
-    if prev_model is None or new_model is None:
-        return new_model
-    
-    # Extract cluster centers (v11.1.0: Property works for HDBSCAN and GMM)
-    new_centers = new_model.cluster_centers_
-    prev_centers = prev_model.cluster_centers_
-
-    # Handle dimension mismatch (different k or feature space)
-    if new_centers.shape[1] != prev_centers.shape[1]:
-        if new_model.meta.get("alignment_skip_reason") != "feature_dim_mismatch":
-            Console.warn(
-                f"[REGIME_ALIGN] Feature dimension mismatch: new={new_centers.shape[1]}, prev={prev_centers.shape[1]}. Skipping alignment.",
-                component="REGIME_ALIGN", new_dim=new_centers.shape[1], prev_dim=prev_centers.shape[1]
-            )
-        new_model.meta["alignment_skip_reason"] = "feature_dim_mismatch"
-        new_model.meta["alignment_skip_dims"] = {
-            "new_dim": int(new_centers.shape[1]),
-            "prev_dim": int(prev_centers.shape[1]),
-        }
-        return new_model
-    
-    # Use Hungarian algorithm for optimal 1:1 assignment
-    from scipy.optimize import linear_sum_assignment
-    from scipy.spatial.distance import cdist
-    
-    cost_matrix = cdist(new_centers, prev_centers, metric='euclidean')
-    new_k = new_centers.shape[0]
-    prev_k = prev_centers.shape[0]
-    
-    # v11.1.6 FIX #4: Create explicit label_map: raw_label -> stable_label
-    # This map is applied in apply_label_map() to all predictions
-    label_map: Dict[int, int] = {}
-    
-    if new_k == prev_k:
-        # Same cluster count: 1:1 optimal assignment
-        row_ind, col_ind = linear_sum_assignment(cost_matrix)
-        # row_ind[i] = new cluster index, col_ind[i] = prev cluster index it maps to
-        for new_idx, prev_idx in zip(row_ind, col_ind):
-            label_map[int(new_idx)] = int(prev_idx)
-        
-        # Also reorder centroids for centroid-based fallback prediction
-        reorder_idx = np.argsort(col_ind)  # Sort by target position
-        reordered_centers = new_centers[row_ind[reorder_idx]]
-        new_model.set_cluster_centers_(reordered_centers)
-        
-    elif new_k < prev_k:
-        # Fewer new clusters: each maps to closest previous
-        row_ind, col_ind = linear_sum_assignment(cost_matrix)
-        for new_idx, prev_idx in zip(row_ind, col_ind):
-            label_map[int(new_idx)] = int(prev_idx)
-        
-        # Reorder centroids
-        reordered = np.zeros_like(new_centers)
-        used_positions = set()
-        for new_idx in range(new_k):
-            prev_idx = label_map.get(new_idx, new_idx)
-            if prev_idx < new_k:
-                reordered[prev_idx] = new_centers[new_idx]
-                used_positions.add(prev_idx)
-        # Fill gaps
-        free_positions = [i for i in range(new_k) if i not in used_positions]
-        unmapped = [i for i in range(new_k) if label_map.get(i, -1) >= new_k]
-        for pos, new_idx in zip(free_positions, unmapped):
-            reordered[pos] = new_centers[new_idx]
-        new_model.set_cluster_centers_(reordered)
-        
-    else:
-        # More new clusters: map previous to closest new, extras get new indices
-        row_ind, col_ind = linear_sum_assignment(cost_matrix.T)
-        # col_ind[prev_idx] = new_idx that maps to it
-        for prev_idx, new_idx in zip(row_ind, col_ind):
-            label_map[int(new_idx)] = int(prev_idx)
-        
-        # Assign new indices to unmatched new clusters
-        used_prev = set(label_map.values())
-        next_label = max(used_prev) + 1 if used_prev else prev_k
-        for new_idx in range(new_k):
-            if new_idx not in label_map:
-                label_map[new_idx] = next_label
-                next_label += 1
-        
-        # Reorder centroids for matched clusters
-        reordered = np.zeros_like(new_centers)
-        for new_idx in range(new_k):
-            target_pos = label_map.get(new_idx, new_idx)
-            if target_pos < new_k:
-                reordered[target_pos] = new_centers[new_idx]
-        new_model.set_cluster_centers_(reordered)
-    
-    # v11.1.6 FIX #4: Store the label map in the model
-    new_model.label_map_ = label_map
-    new_model.meta["label_map"] = {str(k): v for k, v in label_map.items()}
-    new_model.meta["alignment_applied"] = True
-    
-    Console.info(
-        f"Aligned {new_k} clusters to {prev_k} previous clusters. "
-        f"Label map: {dict(list(label_map.items())[:5])}{'...' if len(label_map) > 5 else ''}",
-        component="REGIME_ALIGN"
-    )
-    
-    return new_model
 
 # TO-DO See if this is still needed like this
 # ------------------------------------------------
@@ -3235,7 +2880,12 @@ def label(score_df, ctx: Dict[str, Any], score_out: Dict[str, Any], cfg: Dict[st
         return out
 
     if bool(_cfg_get(cfg, "regimes.allow_legacy_label", False)):
-        Console.warn("Falling back to legacy labeling path (allow_legacy_label=True)", component="REGIME", n_samples=len(score_df) if hasattr(score_df, '__len__') else 0)
+        Console.warn(
+            "Using legacy regime labeling path (regimes.allow_legacy_label=True). "
+            "This path is deprecated and will be removed. Ensure regime model is valid before scoring.",
+            component="REGIME",
+            n_samples=len(score_df) if hasattr(score_df, "__len__") else 0,
+        )
         return _legacy_label(score_df, ctx, out, cfg)
     raise RuntimeError("Regime model unavailable and legacy path disabled (regimes.allow_legacy_label=False)")
 
@@ -3334,362 +2984,9 @@ def _legacy_label(score_df, ctx: Dict[str, Any], out: Dict[str, Any], cfg: Dict[
         out["frame"] = frame
     return out
 
-# ------------------------------------------------
-# Reporting hook: run(ctx)
-# ------------------------------------------------
-def run(ctx: Any) -> Dict[str, Any]:
-    """
-    Reporting function for the regime module.
-    Generates a plot overlaying episodes on the fused score.
-    """
-    ep_path = ctx.run_dir / "episodes.csv"
-    sc_path = ctx.run_dir / "scores.csv"
-    
-    # REG-CSV-01: Extract SQL parameters from ctx if available
-    sql_client = getattr(ctx, "sql_client", None)
-    run_id = getattr(ctx, "run_id", None)
-    equip_id = getattr(ctx, "equip_id", None)
-    
-    # REG-CSV-01: Try SQL first, fall back to CSV
-    eps = _read_episodes_csv(ep_path, sql_client=sql_client, equip_id=equip_id, run_id=run_id)
-    
-    if eps.empty and not ep_path.exists():
-        return {"module":"regime","tables":[], "plots":[], "metrics":{},
-                "error":{"type":"MissingFile","message":"episodes not found in SQL or CSV"}}
-    tables: List[Dict[str, Any]] = []
-
-    summary_df: Optional[pd.DataFrame] = None
-    feature_importance_df: Optional[pd.DataFrame] = None
-    transitions_df: Optional[pd.DataFrame] = None
-    regime_metrics: Dict[str, Any] = {}
-    pca_warning: Optional[str] = None
-    pca_coverage_ok: Optional[bool] = None
-
-    models_dir: Optional[Path] = None
-    if getattr(ctx, "models_dir", None):
-        models_dir = Path(ctx.models_dir)
-    elif getattr(ctx, "run_dir", None):
-        models_dir = Path(ctx.run_dir) / "models"
-
-    regime_model: Optional[RegimeModel] = None
-    if models_dir and models_dir.exists():
-        try:
-            regime_model = load_regime_model(models_dir)
-        except Exception as load_exc:
-            Console.warn(f"Failed to load regime model for reporting: {load_exc}", component="REGIME", models_dir=str(models_dir), error_type=type(load_exc).__name__)
-
-    if regime_model is not None:
-        summary_df = build_summary_dataframe(regime_model)
-        if not summary_df.empty:
-            # Write to ACM_RegimeStats SQL table (SQL-only mode)
-            if OutputManager is not None:
-                om = OutputManager(sql_client=sql_client, run_id=run_id, equip_id=equip_id)
-                # Convert dwell_fraction to OccupancyPct (percentage) and prepare correct columns
-                if 'dwell_fraction' in summary_df.columns:
-                    summary_df['OccupancyPct'] = summary_df['dwell_fraction'] * 100.0
-                if 'median_fused' in summary_df.columns:
-                    summary_df['FusedMean'] = summary_df['median_fused']
-                if 'p95_abs_fused' in summary_df.columns:
-                    summary_df['FusedP90'] = summary_df['p95_abs_fused']  # Use p95 for p90 column
-                sql_cols = {
-                    "regime": "RegimeLabel",
-                    "avg_dwell_seconds": "AvgDwellSeconds",
-                    "OccupancyPct": "OccupancyPct",
-                    "FusedMean": "FusedMean",
-                    "FusedP90": "FusedP90"
-                }
-                om.write_dataframe(summary_df, "regime_summary", sql_table="ACM_RegimeStats", sql_columns=sql_cols)
-
-        feature_map = regime_model.meta.get("feature_importance") or {}
-        if feature_map:
-            feature_importance_df = (
-                pd.DataFrame(
-                    [{"feature": str(k), "importance": float(v)} for k, v in feature_map.items()]
-                )
-                .sort_values("importance", ascending=False)
-                .reset_index(drop=True)
-            )
-            # Write to ACM_RegimeOccupancy SQL table (SQL-only mode)
-            if OutputManager is not None:
-                om = OutputManager(sql_client=sql_client, run_id=run_id, equip_id=equip_id)
-                sql_cols = {"feature": "Feature", "importance": "Importance"}
-                om.write_dataframe(feature_importance_df, "regime_feature_importance", sql_table="ACM_RegimeOccupancy", sql_columns=sql_cols)
-
-        transitions_map = regime_model.meta.get("transition_counts") or {}
-        if transitions_map:
-            transition_rows: List[Dict[str, Any]] = []
-            for key, count in transitions_map.items():
-                if "->" in key:
-                    src_str, dst_str = key.split("->", 1)
-                else:
-                    src_str, dst_str = key, ""
-                try:
-                    src = int(src_str)
-                except ValueError:
-                    src = src_str
-                try:
-                    dst = int(dst_str) if dst_str != "" else dst_str
-                except ValueError:
-                    dst = dst_str
-                transition_rows.append({"from_regime": src, "to_regime": dst, "count": int(count)})
-            transitions_df = pd.DataFrame(transition_rows)
-            # Write to ACM_RegimeTransitions SQL table (SQL-only mode)
-            if OutputManager is not None:
-                om = OutputManager(sql_client=sql_client, run_id=run_id, equip_id=equip_id)
-                sql_cols = {"from_regime": "FromRegime", "to_regime": "ToRegime", "count": "Count"}
-                om.write_dataframe(transitions_df, "regime_transitions", sql_table="ACM_RegimeTransitions", sql_columns=sql_cols)
-
-        meta = regime_model.meta or {}
-        best_k = meta.get("best_k")
-        fit_score = meta.get("fit_score")
-        fit_metric = meta.get("fit_metric")
-        quality_ok = meta.get("quality_ok")
-        quality_notes = meta.get("quality_notes", [])
-        if best_k is not None:
-            regime_metrics["regime_best_k"] = float(best_k)
-        if fit_score is not None:
-            regime_metrics["regime_score"] = float(fit_score)
-            if fit_metric == "silhouette":
-                regime_metrics["regime_silhouette"] = float(fit_score)
-        if quality_ok is not None:
-            regime_metrics["regime_quality_ok"] = float(bool(quality_ok))
-
-        pca_ratio = meta.get("pca_variance_ratio")
-        if pca_ratio is not None:
-            pca_ratio = float(pca_ratio)
-            pca_min = meta.get("pca_variance_min")
-            coverage_ok = True
-            if pca_min is not None:
-                pca_min = float(pca_min)
-                coverage_ok = pca_ratio >= pca_min
-                regime_metrics["pca_variance_target"] = pca_min
-            regime_metrics["pca_variance_ratio"] = pca_ratio
-            regime_metrics["pca_coverage_ok"] = float(bool(coverage_ok))
-            if not coverage_ok:
-                regime_metrics["pca_coverage_warning"] = 1.0
-                pca_warning = "variance_below_target"
-            pca_coverage_ok = bool(coverage_ok)
-
-        if transitions_df is not None and not transitions_df.empty:
-            regime_metrics["transition_total"] = int(transitions_df["count"].sum())
-
-        # Consolidated report JSON (DISABLED: reporting now handled via SQL tables)
-        # report_payload = {
-        #     "generated_at": pd.Timestamp.utcnow().isoformat(),
-        #     "quality": {
-        #         "best_k": best_k,
-        #         "score": fit_score,
-        #         "metric": fit_metric,
-        #         "quality_ok": bool(quality_ok) if quality_ok is not None else False,
-        #         "quality_notes": quality_notes,
-        #         "pca_variance_ratio": pca_ratio,
-        #         "pca_variance_min": meta.get("pca_variance_min"),
-        #         "pca_coverage_ok": pca_coverage_ok,
-        #         "pca_warning": pca_warning,
-        #     },
-        #     "summary": summary_df.to_dict(orient="records") if summary_df is not None else [],
-        #     "feature_importance": feature_importance_df.to_dict(orient="records") if feature_importance_df is not None else [],
-        #     "transitions": transitions_df.to_dict(orient="records") if transitions_df is not None else [],
-        # }
-        #
-        # def _json_default(obj: Any) -> Any:
-        #     if isinstance(obj, np.generic):
-        #         if np.issubdtype(obj.dtype, np.floating):
-        #             return float(obj)
-        #         if np.issubdtype(obj.dtype, np.integer):
-        #             return int(obj)
-        #         if np.issubdtype(obj.dtype, np.bool_):
-        #             return bool(obj)
-        #     return obj
-        #
-        # report_path = ctx.tables_dir / "regime_report.json"
-        # with report_path.open("w", encoding="utf-8") as f:
-        #     json.dump(report_payload, f, indent=2, default=_json_default)
-        # tables.append({"name":"regime_report","path":str(report_path)})
-    else:
-        # Fallback: preserve existing summary file if already generated elsewhere
-        summary_path = ctx.tables_dir / "regime_summary.csv"
-        if summary_path.exists() and summary_path.stat().st_size > 0:
-            summary_df = pd.read_csv(summary_path)
-            tables.append({"name":"regime_summary","path":str(summary_path)})
-
-    # plots = []
-    # Plot generation is now handled in Grafana. The following code is obsolete and has been disabled.
-    # To visualize fused score with episode overlays, use Grafana with the following SQL queries:
-    #
-    # -- Fused Score Time Series --
-    # SELECT Timestamp AS time, fused_z AS value
-    # FROM ACM_Scores_Wide
-    # WHERE EquipID = $equipment
-    #   AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()
-    # ORDER BY time ASC
-    #
-    # -- Episode Windows (for annotation/overlay) --
-    # SELECT StartTime AS time, EndTime, 1 AS value, 'Episode' AS metric
-    # FROM ACM_Anomaly_Events
-    # WHERE EquipID = $equipment
-    #   AND StartTime BETWEEN $__timeFrom() AND $__timeTo()
-    # ORDER BY StartTime ASC
-    plots = []
-
-    # simple regime stability via episode durations
-    eps = eps.sort_values(["start_ts","end_ts"])
-    if not eps.empty:
-        # Convert datetime columns to ensure proper Timedelta arithmetic
-        duration_td = pd.to_datetime(eps["end_ts"]) - pd.to_datetime(eps["start_ts"])
-        durations = duration_td.dt.total_seconds().clip(lower=0)
-    else:
-        durations = pd.Series([], dtype="float64")
-    metrics: Dict[str, float] = {"episode_count": float(len(eps))}
-    if summary_df is not None and not summary_df.empty:
-        metrics["regime_count"] = float(summary_df["regime"].nunique())
-        if "state" in summary_df.columns:
-            metrics["critical_regimes"] = float((summary_df["state"] == "critical").sum())
-    metrics.update({k: v for k, v in regime_metrics.items() if v is not None})
-    if len(durations) >= 4:
-        metrics["major_minor_ratio"] = float(
-            (durations.quantile(0.75)+1e-9)/(durations.quantile(0.25)+1e-9)
-        )
-
-    return {"module":"regime","tables":tables,
-            "plots":plots,"metrics":metrics}
-
-
 # ----------------------------
 # Model Persistence Functions
 # ----------------------------
-
-def save_regime_model(model: RegimeModel, models_dir: Path) -> None:  
-    """
-    Save regime model with joblib persistence for sklearn objects.
-    
-    Saves:
-    - regime_model.joblib: HDBSCAN/GMM clustering model and StandardScaler
-    - regime_model.json: Metadata (feature columns, health labels, stats)
-    
-    Args:
-        model: RegimeModel to persist
-        models_dir: Directory for model storage (typically artifacts/{EQUIP}/models)
-    """
-    models_dir = Path(models_dir)
-    models_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Save sklearn objects with joblib
-    joblib_path = models_dir / "regime_model.joblib"
-    try:
-        joblib.dump({
-            'scaler': model.scaler,
-            'clustering_model': model.clustering_model,
-            'exemplars_': model.exemplars_,  # v11.1.0: Needed for HDBSCAN prediction
-            'train_hash': model.train_hash,
-        }, joblib_path)
-        model_type = "HDBSCAN" if model.is_hdbscan else "GMM"
-        Console.info(f"Saved regime models ({model_type}+Scaler) -> {joblib_path}", component="REGIME")
-    except Exception as e:
-        Console.warn(f"Failed to save regime joblib: {e}", component="REGIME", models_dir=str(models_dir), error_type=type(e).__name__)
-        _persist_regime_error(e, models_dir)
-        raise
-    
-    # Save metadata as JSON
-    json_path = models_dir / "regime_model.json"
-    model.meta.setdefault("model_version", REGIME_MODEL_VERSION)
-    model.meta.setdefault("sklearn_version", sklearn.__version__)
-
-    metadata = _regime_metadata_dict(model)
-    try:
-        if orjson:
-            json_path.write_bytes(orjson.dumps(metadata, option=orjson.OPT_INDENT_2))
-        else:
-            with json_path.open("w", encoding="utf-8") as f:
-                json.dump(metadata, f, indent=2, ensure_ascii=False)
-        Console.info(f"Saved regime metadata -> {json_path}", component="REGIME")
-    except Exception as e:
-        Console.warn(f"Failed to save regime metadata: {e}", component="REGIME", models_dir=str(models_dir), json_path=str(json_path), error_type=type(e).__name__)
-        _persist_regime_error(e, models_dir)
-        raise
-
-
-def load_regime_model(models_dir: Path) -> Optional[RegimeModel]:
-    """
-    Load regime model from disk.
-    
-    Loads:
-    - regime_model.joblib: HDBSCAN/GMM clustering model and StandardScaler
-    - regime_model.json: Metadata
-    
-    Args:
-        models_dir: Directory containing model files
-        
-    Returns:
-        RegimeModel if found and valid, None otherwise
-    """
-    models_dir = Path(models_dir)
-    joblib_path = models_dir / "regime_model.joblib"
-    json_path = models_dir / "regime_model.json"
-    
-    # Check if both files exist
-    if not joblib_path.exists():
-        Console.info(f"No cached regime model found at {joblib_path}", component="REGIME")
-        return None
-    
-    if not json_path.exists():
-        Console.warn(f"Regime joblib exists but metadata missing: {json_path}", component="REGIME", joblib_path=str(joblib_path), json_path=str(json_path))
-        return None
-    
-    try:
-        # Load sklearn objects
-        joblib_data = joblib.load(joblib_path)
-        scaler = joblib_data['scaler']
-        clustering_model = joblib_data['clustering_model']
-        exemplars = joblib_data.get('exemplars_')
-        train_hash = joblib_data.get('train_hash')
-        
-        # Load metadata
-        with json_path.open("r", encoding="utf-8") as f:
-            metadata = json.load(f)
-        
-        # Reconstruct RegimeModel
-        meta = metadata.get("meta", {})
-        version = meta.get("model_version")
-        
-        # FIX #10: Use semantic versioning compatibility check
-        if version and not _is_version_compatible(version, REGIME_MODEL_VERSION):
-            raise ModelVersionMismatch(
-                f"Cached model version {version} incompatible with expected {REGIME_MODEL_VERSION} "
-                f"(major version mismatch)"
-            )
-        elif version and version != REGIME_MODEL_VERSION:
-            Console.info(
-                f"Cached model version {version} compatible with {REGIME_MODEL_VERSION} (same major)",
-                component="REGIME"
-            )
-            
-        model = RegimeModel(
-            scaler=scaler,
-            clustering_model=clustering_model,
-            feature_columns=metadata.get("feature_columns", []),
-            raw_tags=metadata.get("raw_tags", []),
-            n_pca_components=metadata.get("n_pca_components", 0),
-            train_hash=train_hash,
-            health_labels={int(k): v for k, v in metadata.get("health_labels", {}).items()},
-            stats={int(k): v for k, v in metadata.get("stats", {}).items()},
-            meta=meta,
-            exemplars_=exemplars,  # v11.1.0: HDBSCAN centroids
-        )
-        
-        Console.info(f"Loaded cached regime model from {joblib_path}", component="REGIME")
-        cluster_count = model.n_clusters  # Use property
-        model_type = "HDBSCAN" if model.is_hdbscan else "GMM"
-        Console.info(
-            f"  - K={cluster_count}, type={model_type}, features={len(model.feature_columns)}, train_hash={train_hash}",
-            component="REGIME"
-        )
-        return model
-        
-    except Exception as e:
-        Console.warn(f"Failed to load regime model: {e}", component="REGIME", models_dir=str(models_dir), error_type=type(e).__name__)
-        return None
-
 
 def detect_transient_states(
     data: pd.DataFrame,
@@ -3699,14 +2996,9 @@ def detect_transient_states(
     """Classify transient regimes using weighted ROC and a state machine."""
 
     transient_cfg = (cfg or {}).get("regimes", {}).get("transient_detection", {})
-    enabled = transient_cfg.get("enabled", True)
 
     n_samples = len(data)
     default_states = np.array(["steady"] * n_samples, dtype=object)
-
-    if not enabled:
-        Console.info("Detection disabled in config", component="TRANSIENT")
-        return default_states
 
     if n_samples == 0:
         return default_states
@@ -3850,6 +3142,602 @@ def detect_transient_states(
     Console.info(f"State distribution: {state_counts}", component="TRANSIENT")
 
     return states
+
+
+def apply_regime_health_labels(
+    frame: pd.DataFrame,
+    regime_model: Optional[RegimeModel],
+    regime_quality_ok: bool,
+    cfg: Dict[str, Any],
+    output_manager: Optional[Any] = None,
+    logger: Any = Console,
+) -> Tuple[pd.DataFrame, Dict[int, Dict[str, float]]]:
+    """
+    Apply regime health labels to the scoring frame and persist regime summary.
+    """
+    regime_stats: Dict[int, Dict[str, float]] = {}
+
+    if not regime_quality_ok and "regime_label" in frame.columns:
+        frame["regime_state"] = "unknown"
+
+    if (
+        regime_model is not None
+        and regime_quality_ok
+        and "regime_label" in frame.columns
+        and "fused" in frame.columns
+    ):
+        regime_stats = update_health_labels(
+            regime_model,
+            frame["regime_label"].to_numpy(copy=False),
+            frame["fused"],
+            cfg,
+        )
+        frame["regime_state"] = frame["regime_label"].map(
+            lambda x: regime_model.health_labels.get(int(x), "unknown")
+        )
+        summary_df = build_summary_dataframe(regime_model)
+        if output_manager is not None and not summary_df.empty:
+            output_manager.write_dataframe(summary_df, "regime_summary")
+
+    if "regime_label" in frame.columns and "regime_state" not in frame.columns:
+        frame["regime_state"] = frame["regime_label"].map(
+            lambda lbl: "unknown" if lbl == -1 else f"regime_{lbl}"
+        )
+
+    return frame, regime_stats
+
+
+@dataclass
+class RegimeBasisBuildResult:
+    """Result bundle for regime basis build and cached-model compatibility check."""
+    regime_basis_train: Optional[pd.DataFrame]
+    regime_basis_score: Optional[pd.DataFrame]
+    regime_basis_meta: Dict[str, Any]
+    regime_basis_hash: Optional[int]
+    regime_model: Optional[RegimeModel]
+    degraded: bool
+
+
+def build_regime_feature_basis_stage(
+    *,
+    train_features: pd.DataFrame,
+    score_features: pd.DataFrame,
+    raw_train: Optional[pd.DataFrame],
+    raw_score: Optional[pd.DataFrame],
+    pca_detector: Optional[Any],
+    cfg: Dict[str, Any],
+    regime_model: Optional[RegimeModel],
+    equip: str,
+    logger: Any = Console,
+) -> RegimeBasisBuildResult:
+    """
+    Build regime feature basis and ensure cached regime model compatibility.
+    """
+    regime_basis_train: Optional[pd.DataFrame] = None
+    regime_basis_score: Optional[pd.DataFrame] = None
+    regime_basis_meta: Dict[str, Any] = {}
+    regime_basis_hash: Optional[int] = None
+    degraded = False
+
+    try:
+        basis_train, basis_score, basis_meta = build_feature_basis(
+            train_features=train_features,
+            score_features=score_features,
+            raw_train=raw_train,
+            raw_score=raw_score,
+            pca_detector=pca_detector,
+            cfg=cfg,
+        )
+
+        regime_cfg_str = str(cfg.get("regimes", {}))
+        schema_str = ",".join(sorted(basis_train.columns)) + "|" + regime_cfg_str
+        regime_basis_hash = int(hashlib.sha256(schema_str.encode()).hexdigest()[:15], 16)
+        regime_basis_train = basis_train
+        regime_basis_score = basis_score
+        regime_basis_meta = basis_meta
+    except Exception as e:
+        logger.warn(
+            f"Regime basis build failed (regimes will be unavailable): {e}",
+            component="REGIME",
+            equip=equip,
+            error=str(e)[:200],
+        )
+        degraded = True
+
+    if regime_model is not None and (
+        regime_basis_train is None
+        or regime_model.feature_columns != list(regime_basis_train.columns)
+    ):
+        logger.warn(
+            "Cached regime model has different feature columns; will refit.",
+            component="REGIME",
+            equip=equip,
+            cached_cols=regime_model.feature_columns[:5] if regime_model.feature_columns else [],
+            current_cols=list(regime_basis_train.columns)[:5] if regime_basis_train is not None else [],
+        )
+        regime_model = None
+
+    return RegimeBasisBuildResult(
+        regime_basis_train=regime_basis_train,
+        regime_basis_score=regime_basis_score,
+        regime_basis_meta=regime_basis_meta,
+        regime_basis_hash=regime_basis_hash,
+        regime_model=regime_model,
+        degraded=degraded,
+    )
+
+
+@dataclass
+class RegimeLabelingStageResult:
+    """Result bundle for regime labeling orchestration."""
+    frame: pd.DataFrame
+    score_out: Dict[str, Any]
+    regime_model: Optional[RegimeModel]
+    train_regime_labels: Optional[np.ndarray]
+    score_regime_labels: Optional[np.ndarray]
+    regime_quality_ok: bool
+    regime_state_version: int
+    regime_loaded_from_state: bool
+
+
+def run_regime_labeling_stage(
+    score_df: pd.DataFrame,
+    frame: pd.DataFrame,
+    train_df: pd.DataFrame,
+    cfg: Dict[str, Any],
+    regime_basis_train: Optional[pd.DataFrame],
+    regime_basis_score: Optional[pd.DataFrame],
+    regime_basis_meta: Dict[str, Any],
+    regime_basis_hash: Optional[int],
+    regime_model: Optional[RegimeModel],
+    regime_loaded_from_state: bool,
+    regime_state: Optional[Any],
+    regime_state_version: int,
+    raw_train: Optional[pd.DataFrame],
+    output_manager: Optional[Any],
+    current_model_maturity: Optional[str],
+    equip: str,
+    equip_id: int,
+    sql_client: Optional[Any],
+    logger: Any = Console,
+    record_regime_fn: Optional[Callable[..., Any]] = None,
+) -> RegimeLabelingStageResult:
+    """
+    Run regime labeling stage including state reconstruction, labeling, and state persistence.
+    """
+    regime_model_was_trained = False
+
+    if regime_loaded_from_state and regime_state is not None and regime_basis_train is not None:
+        regime_model = regime_state_to_model(
+            state=regime_state,
+            feature_columns=list(regime_basis_train.columns),
+            raw_tags=list(raw_train.columns) if raw_train is not None else [],
+            train_hash=regime_basis_hash,
+        )
+
+    regime_ctx: Dict[str, Any] = {
+        "regime_basis_train": regime_basis_train,
+        "regime_basis_score": regime_basis_score,
+        "basis_meta": regime_basis_meta,
+        "regime_model": regime_model,
+        "regime_basis_hash": regime_basis_hash,
+        "X_train": train_df,
+        "model_maturity": current_model_maturity,
+    }
+    regime_out = label(score_df, regime_ctx, {"frame": frame}, cfg)
+    frame = regime_out.get("frame", frame)
+    new_regime_model = regime_out.get("regime_model", regime_model)
+
+    if new_regime_model is not regime_model and new_regime_model is not None:
+        regime_model_was_trained = True
+        regime_model = new_regime_model
+
+    score_regime_labels = regime_out.get("regime_labels")
+    train_regime_labels = regime_out.get("regime_labels_train")
+    regime_quality_ok = bool(regime_out.get("regime_quality_ok", True))
+
+    if train_regime_labels is None and regime_model is not None and regime_basis_train is not None:
+        train_regime_labels = predict_regime(regime_model, regime_basis_train)
+    if score_regime_labels is None and regime_model is not None and regime_basis_score is not None:
+        score_regime_labels = predict_regime(regime_model, regime_basis_score)
+
+    if (
+        record_regime_fn is not None
+        and score_regime_labels is not None
+        and len(score_regime_labels) > 0
+    ):
+        current_regime_id = int(score_regime_labels[-1]) if hasattr(score_regime_labels[-1], "__int__") else 0
+        regime_label = ""
+        if regime_model is not None and hasattr(regime_model, "cluster_labels_"):
+            regime_label = regime_model.cluster_labels_.get(current_regime_id, f"regime_{current_regime_id}")
+        record_regime_fn(equip, current_regime_id, regime_label)
+
+    if regime_model_was_trained and regime_model is not None:
+        from core.model_persistence import save_regime_state
+
+        regime_cfg_str = str(cfg.get("regimes", {}))
+        config_hash = hashlib.sha256(regime_cfg_str.encode()).hexdigest()[:16]
+        new_state = regime_model_to_state(
+            model=regime_model,
+            equip_id=equip_id,
+            state_version=regime_state_version + 1,
+            config_hash=config_hash,
+            regime_basis_hash=str(regime_basis_hash) if regime_basis_hash else "",
+        )
+        save_regime_state(
+            state=new_state,
+            equip=equip,
+            sql_client=sql_client,
+        )
+        regime_state_version = new_state.state_version
+        logger.info(
+            f"Regime state: saved_v{regime_state_version} | K={new_state.n_clusters}",
+            component="REGIME_STATE",
+        )
+
+    write_regime_definitions_for_audit(
+        output_manager=output_manager,
+        regime_model=regime_model,
+        regime_state_version=regime_state_version,
+        current_model_maturity=current_model_maturity,
+        logger=logger,
+        equip=equip,
+    )
+
+    return RegimeLabelingStageResult(
+        frame=frame,
+        score_out=regime_out,
+        regime_model=regime_model,
+        train_regime_labels=train_regime_labels,
+        score_regime_labels=score_regime_labels,
+        regime_quality_ok=regime_quality_ok,
+        regime_state_version=regime_state_version,
+        regime_loaded_from_state=regime_loaded_from_state,
+    )
+
+
+@dataclass
+class ScoringRegimeStageResult:
+    """Result bundle for detector scoring plus regime labeling stages."""
+    frame: pd.DataFrame
+    omr_contributions_data: Optional[pd.DataFrame]
+    score_out: Dict[str, Any]
+    regime_model: Optional[RegimeModel]
+    train_regime_labels: Optional[np.ndarray]
+    score_regime_labels: Optional[np.ndarray]
+    regime_quality_ok: bool
+    regime_state_version: int
+    regime_loaded_from_state: bool
+    degraded_regime_basis: bool
+    current_model_maturity: Optional[str]
+
+
+def run_scoring_regime_stage(
+    *,
+    train_df: pd.DataFrame,
+    score_df: pd.DataFrame,
+    raw_train: Optional[pd.DataFrame],
+    raw_score: Optional[pd.DataFrame],
+    cfg: Dict[str, Any],
+    pca_detector: Optional[Any],
+    regime_model: Optional[RegimeModel],
+    regime_state: Optional[Any],
+    regime_state_version: int,
+    regime_loaded_from_state: bool,
+    det_flags: Dict[str, bool],
+    detectors: Dict[str, Any],
+    equip: str,
+    equip_id: int,
+    sql_client: Any,
+    output_manager: Any,
+    refit_requested: bool,
+    section_fn: Any,
+    score_all_detectors_fn: Any,
+    resolve_maturity_for_regime_stage_fn: Any,
+    record_regime_fn: Optional[Callable[..., Any]] = None,
+    logger: Any = Console,
+) -> ScoringRegimeStageResult:
+    """
+    Execute scoring and regime stages.
+
+    Stage order:
+    1. Regime feature-basis build
+    2. Detector scoring
+    3. Regime maturity resolve
+    4. Regime labeling
+    5. Regime occupancy/transition persistence
+    """
+    basis_result = build_regime_feature_basis_stage(
+        train_features=train_df,
+        score_features=score_df,
+        raw_train=raw_train,
+        raw_score=raw_score,
+        pca_detector=pca_detector,
+        cfg=cfg,
+        regime_model=regime_model,
+        equip=equip,
+        logger=logger,
+    )
+    regime_basis_train = basis_result.regime_basis_train
+    regime_basis_score = basis_result.regime_basis_score
+    regime_basis_meta = basis_result.regime_basis_meta
+    regime_basis_hash = basis_result.regime_basis_hash
+    regime_model = basis_result.regime_model
+
+    with section_fn("score.detector_score"):
+        frame, omr_contributions_data = score_all_detectors_fn(
+            data=score_df,
+            ar1_detector=detectors.get("ar1_detector"),
+            pca_detector=detectors.get("pca_detector"),
+            iforest_detector=detectors.get("iforest_detector"),
+            gmm_detector=detectors.get("gmm_detector"),
+            omr_detector=detectors.get("omr_detector"),
+            **det_flags,
+        )
+
+    current_model_maturity = resolve_maturity_for_regime_stage_fn(
+        sql_client=sql_client,
+        equip_id=equip_id,
+        refit_requested=refit_requested,
+        logger=logger,
+    )
+
+    with section_fn("regimes.label"):
+        regime_labeling_result = run_regime_labeling_stage(
+            score_df=score_df,
+            frame=frame,
+            train_df=train_df,
+            cfg=cfg,
+            regime_basis_train=regime_basis_train,
+            regime_basis_score=regime_basis_score,
+            regime_basis_meta=regime_basis_meta,
+            regime_basis_hash=regime_basis_hash,
+            regime_model=regime_model,
+            regime_loaded_from_state=regime_loaded_from_state,
+            regime_state=regime_state,
+            regime_state_version=regime_state_version,
+            raw_train=raw_train,
+            output_manager=output_manager,
+            current_model_maturity=current_model_maturity,
+            equip=equip,
+            equip_id=equip_id,
+            sql_client=sql_client,
+            logger=logger,
+            record_regime_fn=record_regime_fn,
+        )
+
+    frame = regime_labeling_result.frame
+    score_out = regime_labeling_result.score_out
+    regime_model = regime_labeling_result.regime_model
+    train_regime_labels = regime_labeling_result.train_regime_labels
+    score_regime_labels = regime_labeling_result.score_regime_labels
+    regime_quality_ok = regime_labeling_result.regime_quality_ok
+    regime_state_version = regime_labeling_result.regime_state_version
+    regime_loaded_from_state = regime_labeling_result.regime_loaded_from_state
+
+    with section_fn("regimes.occupancy"):
+        write_regime_occupancy_and_transitions(
+            score_regime_labels=score_regime_labels,
+            frame=frame,
+            output_manager=output_manager,
+            logger=logger,
+            equip=equip,
+        )
+
+    return ScoringRegimeStageResult(
+        frame=frame,
+        omr_contributions_data=omr_contributions_data,
+        score_out=score_out,
+        regime_model=regime_model,
+        train_regime_labels=train_regime_labels,
+        score_regime_labels=score_regime_labels,
+        regime_quality_ok=bool(score_out.get("regime_quality_ok", True)),
+        regime_state_version=regime_state_version,
+        regime_loaded_from_state=regime_loaded_from_state,
+        degraded_regime_basis=basis_result.degraded,
+        current_model_maturity=current_model_maturity,
+    )
+
+
+def apply_transient_state_labels(
+    frame: pd.DataFrame,
+    score_data: pd.DataFrame,
+    cfg: Dict[str, Any],
+    logger: Any = Console,
+) -> Tuple[pd.DataFrame, Dict[str, int]]:
+    """
+    Detect transient operating states and attach them to the scoring frame.
+    """
+    transient_counts: Dict[str, int] = {}
+
+    if "regime_label" not in frame.columns:
+        return frame, transient_counts
+
+    transient_states = detect_transient_states(
+        data=score_data,
+        regime_labels=frame["regime_label"].to_numpy(copy=False),
+        cfg=cfg,
+    )
+    frame["transient_state"] = transient_states
+    transient_counts = frame["transient_state"].value_counts().to_dict()
+
+    return frame, transient_counts
+
+
+@dataclass
+class RegimePostprocessResult:
+    """Result bundle for regime health and transient post-processing."""
+    frame: pd.DataFrame
+    transient_counts: Dict[str, int]
+
+
+def run_regime_postprocess_stage(
+    *,
+    frame: pd.DataFrame,
+    score_data: pd.DataFrame,
+    regime_model: Optional[RegimeModel],
+    regime_quality_ok: bool,
+    cfg: Dict[str, Any],
+    output_manager: Optional[Any] = None,
+    logger: Any = Console,
+) -> RegimePostprocessResult:
+    """
+    Apply regime health labels, transient labels, and emit consolidated regime log.
+    """
+    frame, _ = apply_regime_health_labels(
+        frame=frame,
+        regime_model=regime_model,
+        regime_quality_ok=regime_quality_ok,
+        cfg=cfg,
+        output_manager=output_manager,
+        logger=logger,
+    )
+
+    frame, transient_counts = apply_transient_state_labels(
+        frame=frame,
+        score_data=score_data,
+        cfg=cfg,
+        logger=logger,
+    )
+
+    state_counts = frame["regime_state"].value_counts().to_dict() if "regime_state" in frame.columns else {}
+    quality_notes = list(regime_model.meta.get("quality_notes", [])) if regime_model is not None else []
+    notes_str = f" | notes={quality_notes}" if (not regime_quality_ok and quality_notes) else ""
+    logger.info(
+        f"Regime: quality_ok={regime_quality_ok}{notes_str} | states={state_counts} | transient={transient_counts}",
+        component="REGIME",
+    )
+
+    return RegimePostprocessResult(
+        frame=frame,
+        transient_counts=transient_counts,
+    )
+
+
+def write_regime_occupancy_and_transitions(
+    score_regime_labels: Optional[np.ndarray],
+    frame: pd.DataFrame,
+    output_manager: Optional[Any],
+    logger: Any = Console,
+    equip: str = "",
+) -> Tuple[int, int]:
+    """
+    Persist regime occupancy and transition aggregates for the current score window.
+    """
+    occupancy_count = 0
+    transition_count = 0
+
+    try:
+        if score_regime_labels is None or len(score_regime_labels) == 0 or output_manager is None:
+            return occupancy_count, transition_count
+
+        regime_series = pd.Series(score_regime_labels)
+        regime_counts = regime_series.value_counts()
+        total_points = len(score_regime_labels)
+
+        sampling_interval_h = 1.0
+        if "Timestamp" in frame.columns and len(frame) > 1:
+            try:
+                ts_diff = pd.to_datetime(frame["Timestamp"]).diff().dropna()
+                if len(ts_diff) > 0:
+                    sampling_interval_h = ts_diff.median().total_seconds() / 3600.0
+            except Exception:
+                pass
+
+        occupancy_data: List[Dict[str, Any]] = []
+        for regime_id, count in regime_counts.items():
+            occupancy_data.append(
+                {
+                    "RegimeLabel": str(regime_id),
+                    "DwellTimeHours": float(count * sampling_interval_h),
+                    "DwellFraction": float(count / total_points) if total_points > 0 else 0.0,
+                    "PointCount": int(count),
+                }
+            )
+        if occupancy_data:
+            occupancy_count = output_manager.write_regime_occupancy(occupancy_data)
+
+        if len(score_regime_labels) > 1:
+            transitions: Dict[str, Dict[str, int]] = {}
+            for i in range(1, len(score_regime_labels)):
+                from_r = str(score_regime_labels[i - 1])
+                to_r = str(score_regime_labels[i])
+                if from_r != to_r:
+                    if from_r not in transitions:
+                        transitions[from_r] = {}
+                    transitions[from_r][to_r] = transitions[from_r].get(to_r, 0) + 1
+            if transitions:
+                transition_count = output_manager.write_regime_transitions(transitions)
+
+        if occupancy_count > 0 or transition_count > 0:
+            logger.info(
+                f"Regime analysis: occupancy={occupancy_count} | transitions={transition_count}",
+                component="REGIME",
+            )
+    except Exception as e:
+        logger.warn(
+            f"Regime occupancy/transitions write failed: {e}",
+            component="REGIME",
+            equip=equip,
+            error=str(e)[:200],
+        )
+
+    return occupancy_count, transition_count
+
+
+def write_regime_definitions_for_audit(
+    output_manager: Optional[Any],
+    regime_model: Optional[Any],
+    regime_state_version: int,
+    current_model_maturity: Optional[str],
+    logger: Any = Console,
+    equip: str = "",
+) -> int:
+    """
+    Persist current run regime definitions for auditability.
+    """
+    if not output_manager or regime_model is None or not getattr(regime_model, "model", None):
+        return 0
+
+    try:
+        regime_defs: List[Dict[str, Any]] = []
+        centroids = regime_model.cluster_centers_
+        labels = getattr(regime_model.model, "labels_", [])
+        unique_labels = np.unique(labels)
+        valid_labels = unique_labels[unique_labels >= 0]
+        model_silhouette = regime_model.meta.get("fit_score")
+        model_silhouette = (
+            float(model_silhouette)
+            if model_silhouette is not None and not np.isnan(model_silhouette)
+            else None
+        )
+
+        for i, centroid in enumerate(centroids):
+            regime_id = int(valid_labels[i]) if i < len(valid_labels) else i
+            regime_defs.append(
+                {
+                    "RegimeID": regime_id,
+                    "RegimeName": f"Regime_{regime_id}",
+                    "CentroidJSON": json.dumps(centroid.tolist()),
+                    "FeatureColumns": json.dumps(getattr(regime_model, "feature_columns", [])),
+                    "DataPointCount": int(np.sum(np.array(labels) == regime_id)) if len(labels) > 0 else 0,
+                    "SilhouetteScore": model_silhouette,
+                    "MaturityState": current_model_maturity or "UNKNOWN",
+                }
+            )
+
+        regime_defs_count = output_manager.write_regime_definitions(regime_defs, version=regime_state_version)
+        if regime_defs_count > 0:
+            logger.info(f"Wrote {regime_defs_count} regime definitions for audit", component="REGIME")
+        return regime_defs_count
+    except Exception as e:
+        logger.warn(
+            f"Failed to write regime definitions: {e}",
+            component="REGIME",
+            equip=equip,
+            error=str(e)[:200],
+        )
+        return 0
 
 
 

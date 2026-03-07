@@ -17,7 +17,9 @@ Date: January 2026
 from __future__ import annotations
 
 import time
+from contextlib import nullcontext
 from typing import Any, Dict, Optional, Tuple
+from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
@@ -26,6 +28,120 @@ from core.observability import Console
 from core.ar1_detector import AR1Detector
 from core.omr import OMRDetector
 from core import correlation, outliers, fuse
+from core.model_persistence import (
+    align_current_features_to_cached_manifest,
+    load_cached_models_with_validation,
+    restore_detectors_from_runtime_cache,
+    load_quality_regime_state_if_needed,
+)
+
+
+@dataclass
+class DetectorInitState:
+    """Typed return payload for detector initialization stage."""
+    train: pd.DataFrame
+    score: pd.DataFrame
+    det_flags: Dict[str, bool]
+    ar1_enabled: bool
+    pca_enabled: bool
+    iforest_enabled: bool
+    gmm_enabled: bool
+    omr_enabled: bool
+    ar1_detector: Optional[Any]
+    pca_detector: Optional[Any]
+    iforest_detector: Optional[Any]
+    gmm_detector: Optional[Any]
+    omr_detector: Optional[Any]
+    pca_train_spe: Optional[np.ndarray]
+    pca_train_t2: Optional[np.ndarray]
+    regime_model: Optional[Any]
+    regime_state: Optional[Any]
+    regime_state_version: int
+    regime_loaded_from_state: bool
+    col_meds: Optional[Any]
+    cached_models: Optional[Dict[str, Any]]
+    cached_manifest: Optional[Dict[str, Any]]
+    cached_calibration_params: Optional[Dict[str, Any]]
+    detectors_just_trained: bool
+    use_cache: bool
+
+    def enabled_flags(self) -> Dict[str, bool]:
+        """Return detector enabled-flag mapping."""
+        return {
+            "ar1_enabled": self.ar1_enabled,
+            "pca_enabled": self.pca_enabled,
+            "iforest_enabled": self.iforest_enabled,
+            "gmm_enabled": self.gmm_enabled,
+            "omr_enabled": self.omr_enabled,
+        }
+
+    def detector_payload(self) -> Dict[str, Any]:
+        """Return detector objects plus cached PCA train outputs."""
+        return {
+            "ar1_detector": self.ar1_detector,
+            "pca_detector": self.pca_detector,
+            "iforest_detector": self.iforest_detector,
+            "gmm_detector": self.gmm_detector,
+            "omr_detector": self.omr_detector,
+            "pca_train_spe": self.pca_train_spe,
+            "pca_train_t2": self.pca_train_t2,
+        }
+
+
+def run_detector_initialization_stage(
+    *,
+    section_fn: Any,
+    train: pd.DataFrame,
+    score: pd.DataFrame,
+    cfg: Dict[str, Any],
+    meta: Any,
+    detector_cache: Optional[Dict[str, Any]],
+    output_manager: Any,
+    sql_client: Any,
+    run_id: Optional[str],
+    equip_id: int,
+    equip: str,
+    fit_all_detectors_fn: Optional[Any] = None,
+    load_and_rebuild_detectors_fn: Optional[Any] = None,
+    restore_detectors_from_runtime_cache_fn: Optional[Any] = None,
+    load_quality_regime_state_if_needed_fn: Optional[Any] = None,
+    reconcile_detector_flags_fn: Optional[Any] = None,
+    logger: Any = Console,
+) -> DetectorInitState:
+    """
+    Execute detector initialization with stage-aware timing sections.
+    """
+    fit_fn = fit_all_detectors_fn or fit_all_detectors
+    load_and_rebuild_fn = load_and_rebuild_detectors_fn or load_and_rebuild_detectors_from_sql_cache
+    restore_from_runtime_fn = restore_detectors_from_runtime_cache_fn or restore_detectors_from_runtime_cache
+    load_quality_regime_fn = load_quality_regime_state_if_needed_fn or load_quality_regime_state_if_needed
+    reconcile_flags_fn = reconcile_detector_flags_fn or reconcile_detector_flags_with_loaded_models
+
+    def _fit_with_section(**kwargs: Any) -> Dict[str, Any]:
+        fit_ctx = section_fn("train.detector_fit") if section_fn is not None else nullcontext()
+        with fit_ctx:
+            return fit_fn(**kwargs)
+
+    load_ctx = section_fn("models.load") if section_fn is not None else nullcontext()
+    with load_ctx:
+        return _initialize_detectors_for_run(
+            train=train,
+            score=score,
+            cfg=cfg,
+            meta=meta,
+            detector_cache=detector_cache,
+            output_manager=output_manager,
+            sql_client=sql_client,
+            run_id=run_id,
+            equip_id=equip_id,
+            equip=equip,
+            load_and_rebuild_detectors_fn=load_and_rebuild_fn,
+            restore_detectors_from_runtime_cache_fn=restore_from_runtime_fn,
+            load_quality_regime_state_if_needed_fn=load_quality_regime_fn,
+            fit_all_detectors_fn=_fit_with_section,
+            reconcile_detector_flags_fn=reconcile_flags_fn,
+            logger=logger,
+        )
 
 
 def score_all_detectors(
@@ -306,11 +422,10 @@ def fit_all_detectors(
                         "CalibrationStatus": "VALID",
                         "FitTimestamp": pd.Timestamp.now()
                     }])
-                    output_manager.write_dataframe(
-                        diag_df,
-                        "omr_diagnostics",
-                        sql_table="ACM_OMR_Diagnostics",
-                        add_created_at=True
+                    output_manager.write_sql_table(
+                        table_name="ACM_OMR_Diagnostics",
+                        df=diag_df,
+                        artifact_name="omr_diagnostics",
                     )
             except Exception as e:
                 Console.warn(f"OMR diagnostics write failed: {e}", component="OMR", equip=equip, error=str(e)[:200])
@@ -324,6 +439,288 @@ def fit_all_detectors(
                     component="FIT", samples=len(train), detectors=len(fitted_detectors), fit_time=result['fit_time_sec'])
     
     return result
+
+
+def _initialize_detectors_for_run(
+    *,
+    train: pd.DataFrame,
+    score: pd.DataFrame,
+    cfg: Dict[str, Any],
+    meta: Optional[Any],
+    detector_cache: Optional[Dict[str, Any]],
+    output_manager: Optional[Any],
+    sql_client: Optional[Any],
+    run_id: Optional[str],
+    equip_id: int,
+    equip: str,
+    load_and_rebuild_detectors_fn: Any,
+    restore_detectors_from_runtime_cache_fn: Any,
+    load_quality_regime_state_if_needed_fn: Any,
+    fit_all_detectors_fn: Any = fit_all_detectors,
+    reconcile_detector_flags_fn: Any = None,
+    logger: Any = Console,
+) -> DetectorInitState:
+    """
+    Initialize detector runtime state for the current run.
+
+    This helper centralizes the model phase decision flow:
+    1. Resolve config enable flags
+    2. Load from SQL cache or runtime cache when available
+    3. Load regime state when no regime model is loaded
+    4. Fit detectors when required detectors are missing
+    5. Reconcile enable flags with loaded detectors
+    6. Validate all enabled detectors exist
+    """
+    if reconcile_detector_flags_fn is None:
+        raise ValueError("reconcile_detector_flags_fn is required for detector initialization")
+
+    ar1_detector = pca_detector = iforest_detector = gmm_detector = omr_detector = None
+    pca_train_spe = pca_train_t2 = None
+    regime_model = None
+    regime_state = None
+    regime_state_version = 0
+    regime_loaded_from_state = False
+    col_meds = None
+    cached_models = None
+    cached_manifest = None
+    cached_calibration_params = None
+
+    det_flags = get_detector_enable_flags(cfg)
+    ar1_enabled = det_flags["ar1_enabled"]
+    pca_enabled = det_flags["pca_enabled"]
+    iforest_enabled = det_flags["iforest_enabled"]
+    gmm_enabled = det_flags["gmm_enabled"]
+    omr_enabled = det_flags["omr_enabled"]
+
+    is_coldstart_batch = (
+        meta.get("is_coldstart_run", False)
+        if isinstance(meta, dict)
+        else getattr(meta, "is_coldstart_run", False)
+    )
+    use_cache = cfg.get("models", {}).get("use_cache", True) and not is_coldstart_batch
+
+    if use_cache and detector_cache is None:
+        cache_restore = load_and_rebuild_detectors_fn(
+            train=train,
+            score=score,
+            equip=equip,
+            sql_client=sql_client,
+            equip_id=equip_id,
+            cfg=cfg,
+            logger=logger,
+        )
+        train = cache_restore["train"]
+        score = cache_restore["score"]
+        cached_models = cache_restore["cached_models"]
+        cached_manifest = cache_restore["cached_manifest"]
+        cached_calibration_params = cache_restore["cached_calibration_params"]
+        ar1_detector = cache_restore["ar1_detector"]
+        pca_detector = cache_restore["pca_detector"]
+        iforest_detector = cache_restore["iforest_detector"]
+        gmm_detector = cache_restore["gmm_detector"]
+        omr_detector = cache_restore["omr_detector"]
+        regime_model = cache_restore["regime_model"]
+        col_meds = cache_restore["col_meds"]
+    elif detector_cache:
+        restored = restore_detectors_from_runtime_cache_fn(
+            detector_cache=detector_cache,
+            logger=logger,
+        )
+        ar1_detector = restored["ar1_detector"]
+        pca_detector = restored["pca_detector"]
+        iforest_detector = restored["iforest_detector"]
+        gmm_detector = restored["gmm_detector"]
+        omr_detector = restored["omr_detector"]
+        regime_model = restored["regime_model"]
+
+    regime_state_loaded, loaded_state_version, loaded_from_state = load_quality_regime_state_if_needed_fn(
+        regime_model=regime_model,
+        equip=equip,
+        equip_id=equip_id,
+        sql_client=sql_client,
+        logger=logger,
+    )
+    if regime_state_loaded is not None:
+        regime_state = regime_state_loaded
+    if loaded_from_state:
+        regime_state_version = loaded_state_version
+        regime_loaded_from_state = True
+
+    detectors_missing = not all(
+        [
+            ar1_detector or not ar1_enabled,
+            pca_detector or not pca_enabled,
+            iforest_detector or not iforest_enabled,
+        ]
+    )
+
+    detectors_just_trained = False
+    if detectors_missing:
+        logger.info(
+            "Required models missing or invalid - training fresh models",
+            component="MODEL",
+            equip=equip,
+            reason="missing_detectors" if not cached_models else "validation_failed",
+        )
+        fit_result = fit_all_detectors_fn(
+            train=train,
+            cfg=cfg,
+            **det_flags,
+            output_manager=output_manager,
+            sql_client=sql_client,
+            run_id=run_id,
+            equip_id=equip_id,
+            equip=equip,
+        )
+        ar1_detector = fit_result["ar1_detector"]
+        pca_detector = fit_result["pca_detector"]
+        iforest_detector = fit_result["iforest_detector"]
+        gmm_detector = fit_result["gmm_detector"]
+        omr_detector = fit_result["omr_detector"]
+        pca_train_spe = fit_result["pca_train_spe"]
+        pca_train_t2 = fit_result["pca_train_t2"]
+        detectors_just_trained = True
+
+    reconciled_flags = reconcile_detector_flags_fn(
+        enable_flags=det_flags,
+        ar1_detector=ar1_detector,
+        pca_detector=pca_detector,
+        iforest_detector=iforest_detector,
+        gmm_detector=gmm_detector,
+        omr_detector=omr_detector,
+        equip=equip,
+    )
+    ar1_enabled = reconciled_flags["ar1_enabled"]
+    pca_enabled = reconciled_flags["pca_enabled"]
+    iforest_enabled = reconciled_flags["iforest_enabled"]
+    gmm_enabled = reconciled_flags["gmm_enabled"]
+    omr_enabled = reconciled_flags["omr_enabled"]
+
+    missing = []
+    if ar1_enabled and not ar1_detector:
+        missing.append("ar1")
+    if pca_enabled and not pca_detector:
+        missing.append("pca")
+    if iforest_enabled and not iforest_detector:
+        missing.append("iforest")
+    if gmm_enabled and not gmm_detector:
+        missing.append("gmm")
+    if omr_enabled and not omr_detector:
+        missing.append("omr")
+    if missing:
+        logger.error(f"Detector initialization failed: {missing}", component="MODEL", equip=equip)
+        raise RuntimeError(f"Required detector initialization failed: {missing}")
+
+    return DetectorInitState(
+        train=train,
+        score=score,
+        det_flags=det_flags,
+        ar1_enabled=ar1_enabled,
+        pca_enabled=pca_enabled,
+        iforest_enabled=iforest_enabled,
+        gmm_enabled=gmm_enabled,
+        omr_enabled=omr_enabled,
+        ar1_detector=ar1_detector,
+        pca_detector=pca_detector,
+        iforest_detector=iforest_detector,
+        gmm_detector=gmm_detector,
+        omr_detector=omr_detector,
+        pca_train_spe=pca_train_spe,
+        pca_train_t2=pca_train_t2,
+        regime_model=regime_model,
+        regime_state=regime_state,
+        regime_state_version=regime_state_version,
+        regime_loaded_from_state=regime_loaded_from_state,
+        col_meds=col_meds,
+        cached_models=cached_models,
+        cached_manifest=cached_manifest,
+        cached_calibration_params=cached_calibration_params,
+        detectors_just_trained=detectors_just_trained,
+        use_cache=use_cache,
+    )
+
+
+def load_and_rebuild_detectors_from_sql_cache(
+    *,
+    train: pd.DataFrame,
+    score: pd.DataFrame,
+    equip: str,
+    sql_client: Optional[Any],
+    equip_id: int,
+    cfg: Dict[str, Any],
+    logger: Any = Console,
+) -> Dict[str, Any]:
+    """
+    Load cached models from SQL, align features, and rebuild detector instances.
+    """
+    current_sensors = list(train.columns) if hasattr(train, "columns") else []
+    cached_models, cached_manifest = load_cached_models_with_validation(
+        equip=equip,
+        sql_client=sql_client,
+        equip_id=equip_id,
+        cfg=cfg,
+        train_columns=current_sensors,
+    )
+
+    if cached_models:
+        train, score, current_sensors, cache_compatible = align_current_features_to_cached_manifest(
+            train=train,
+            score=score,
+            cached_manifest=cached_manifest,
+            equip=equip,
+            logger=logger,
+        )
+        if not cache_compatible:
+            cached_models = None
+            cached_manifest = None
+
+    ar1_detector = pca_detector = iforest_detector = gmm_detector = omr_detector = None
+    regime_model = None
+    col_meds = None
+    cached_calibration_params = None
+
+    if cached_models:
+        rebuild_result = rebuild_detectors_from_cache(
+            cached_models=cached_models,
+            cached_manifest=cached_manifest,
+            cfg=cfg,
+            equip=equip,
+            current_columns=current_sensors,
+        )
+        ar1_detector = rebuild_result["ar1_detector"]
+        pca_detector = rebuild_result["pca_detector"]
+        iforest_detector = rebuild_result["iforest_detector"]
+        gmm_detector = rebuild_result["gmm_detector"]
+        omr_detector = rebuild_result["omr_detector"]
+        regime_model = rebuild_result.get("regime_model")
+        col_meds = rebuild_result.get("feature_medians")
+
+        cached_calibration_params = cached_models.get("calibration_params")
+        if cached_calibration_params:
+            logger.info(
+                f"Loaded cached calibration params ({len(cached_calibration_params)} detectors)",
+                component="CAL",
+            )
+
+        if rebuild_result.get("validation_warnings"):
+            for warn in rebuild_result["validation_warnings"]:
+                logger.info(f"Model validation: {warn}", component="MODEL", equip=equip)
+
+    return {
+        "train": train,
+        "score": score,
+        "current_sensors": current_sensors,
+        "cached_models": cached_models,
+        "cached_manifest": cached_manifest,
+        "cached_calibration_params": cached_calibration_params,
+        "ar1_detector": ar1_detector,
+        "pca_detector": pca_detector,
+        "iforest_detector": iforest_detector,
+        "gmm_detector": gmm_detector,
+        "omr_detector": omr_detector,
+        "regime_model": regime_model,
+        "col_meds": col_meds,
+    }
 
 
 def get_detector_enable_flags(cfg: Dict[str, Any]) -> Dict[str, bool]:
@@ -558,11 +955,41 @@ def rebuild_detectors_from_cache(
         # PCA detector
         if "pca_model" in cached_models and cached_models["pca_model"]:
             pca_detector = correlation.PCASubspaceDetector(pca_cfg={})
-            pca_detector.pca = cached_models["pca_model"]
+            pca_data = cached_models["pca_model"]
+            # v11.7.1 FIX: Handle new dict format (with keep_cols, scaler, col_medians)
+            # and legacy format (raw sklearn PCA object)
+            if isinstance(pca_data, dict):
+                pca_detector.pca = pca_data.get("pca")
+                pca_detector.keep_cols = pca_data.get("keep_cols", [])
+                if pca_data.get("scaler") is not None:
+                    pca_detector.scaler = pca_data["scaler"]
+                if pca_data.get("col_medians") is not None:
+                    pca_detector.col_medians = pca_data["col_medians"]
+            else:
+                # Legacy format: raw sklearn PCA object
+                pca_detector.pca = pca_data
             pca_detector._is_fitted = True
             
             # Validate PCA feature compatibility
-            if current_columns and hasattr(pca_detector.pca, 'n_features_in_'):
+            # v11.7.1 FIX: PCA internally filters constant/low-variance columns via keep_cols,
+            # so pca.n_features_in_ reflects the post-filtering count (e.g., 786) while
+            # current_columns has the pre-filtering count (e.g., 790). PCA.score() already
+            # handles column selection via keep_cols, so we validate against keep_cols
+            # membership rather than raw n_features_in_ count.
+            if current_columns and hasattr(pca_detector, 'keep_cols') and pca_detector.keep_cols:
+                missing_keep = set(pca_detector.keep_cols) - set(current_columns)
+                if missing_keep:
+                    result["validation_warnings"].append(
+                        f"PCA keep_cols missing from current features: {len(missing_keep)} columns"
+                    )
+                    Console.warn(
+                        f"PCA detector keep_cols not in current features - will retrain",
+                        component="MODEL", equip=equip,
+                        missing_count=len(missing_keep), missing_cols=list(missing_keep)[:5]
+                    )
+                    pca_detector = None
+            elif current_columns and hasattr(pca_detector.pca, 'n_features_in_'):
+                # Fallback: no keep_cols available (legacy cache), use n_features_in_
                 n_features_cached = pca_detector.pca.n_features_in_
                 n_features_current = len(current_columns)
                 if n_features_cached != n_features_current:
@@ -604,11 +1031,42 @@ def rebuild_detectors_from_cache(
         # GMM detector
         if "gmm_model" in cached_models and cached_models["gmm_model"]:
             gmm_detector = outliers.GMMDetector(gmm_cfg={})
-            gmm_detector.model = cached_models["gmm_model"]
+            gmm_data = cached_models["gmm_model"]
+            # v11.7.1 FIX: Handle new dict format (with _var_mask, _columns_, scaler)
+            # and legacy format (raw sklearn GaussianMixture object)
+            if isinstance(gmm_data, dict):
+                gmm_detector.model = gmm_data.get("model")
+                gmm_detector._var_mask = gmm_data.get("_var_mask")
+                gmm_detector._columns_ = gmm_data.get("_columns_")
+                if gmm_data.get("scaler") is not None:
+                    gmm_detector.scaler = gmm_data["scaler"]
+                gmm_detector._score_mu_ = gmm_data.get("_score_mu_")
+                gmm_detector._score_sd_ = gmm_data.get("_score_sd_")
+            else:
+                # Legacy format: raw sklearn GaussianMixture object
+                gmm_detector.model = gmm_data
             gmm_detector._is_fitted = True
             
             # Validate GMM feature compatibility
-            if current_columns and hasattr(gmm_detector.model, 'n_features_in_'):
+            # v11.7.1 FIX: GMM internally drops constant features via _var_mask during fit(),
+            # so model.n_features_in_ reflects the post-filtering count (e.g., 786) while
+            # current_columns has the pre-filtering count (e.g., 790). GMM.score() already
+            # handles column selection via _columns_ and _var_mask, so we validate against
+            # _columns_ membership rather than raw n_features_in_ count.
+            if current_columns and hasattr(gmm_detector, '_columns_') and gmm_detector._columns_:
+                missing_cols = set(gmm_detector._columns_) - set(current_columns)
+                if missing_cols:
+                    result["validation_warnings"].append(
+                        f"GMM _columns_ missing from current features: {len(missing_cols)} columns"
+                    )
+                    Console.warn(
+                        f"GMM detector columns not in current features - will retrain",
+                        component="MODEL", equip=equip,
+                        missing_count=len(missing_cols), missing_cols=list(missing_cols)[:5]
+                    )
+                    gmm_detector = None
+            elif current_columns and hasattr(gmm_detector.model, 'n_features_in_'):
+                # Fallback: no _columns_ available (legacy cache), use n_features_in_
                 n_features_cached = gmm_detector.model.n_features_in_
                 n_features_current = len(current_columns)
                 if n_features_cached != n_features_current:
@@ -662,7 +1120,11 @@ def rebuild_detectors_from_cache(
             
             # AUDIT FIX: Validate regime model is not None
             if regime_model is None:
-                Console.warn("Cached regime model is None; discarding.", component="REGIME", equip=equip)
+                Console.warn(
+                    "Cached regime model is None. Regime clustering will be re-fit this batch.",
+                    component="REGIME",
+                    equip=equip,
+                )
             
             # AUDIT FIX: Validate regime model feature compatibility
             # Regime models use cluster centers which have n_features dimensions
@@ -677,8 +1139,11 @@ def rebuild_detectors_from_cache(
                         f"Regime model corruption: manifest says {regime_n_features} features but model has {n_features_cached}"
                     )
                     Console.warn(
-                        f"Regime model feature mismatch with manifest - discarding",
-                        component="REGIME", equip=equip
+                        f"Regime model discarded: manifest expects {regime_n_features} features "
+                        f"but cached model has {n_features_cached}. "
+                        "Regime clustering will be re-fit this batch.",
+                        component="REGIME",
+                        equip=equip,
                     )
                     regime_model = None
             
@@ -710,7 +1175,8 @@ def rebuild_detectors_from_cache(
             result["success"] = True
             if result["validation_warnings"]:
                 Console.info(
-                    f"Model cache loaded with {len(result['validation_warnings'])} warnings",
+                    f"Model cache loaded with {len(result['validation_warnings'])} validation warning(s): "
+                    f"{result['validation_warnings']}",
                     component="MODEL", equip=equip, warning_count=len(result["validation_warnings"])
                 )
         else:
@@ -718,8 +1184,13 @@ def rebuild_detectors_from_cache(
             if not result["ar1_detector"]: missing.append("ar1")
             if not result["pca_detector"]: missing.append("pca")
             if not result["iforest_detector"]: missing.append("iforest")
-            Console.warn(f"Incomplete model cache, missing: {missing}, retraining required", component="MODEL",
-                         equip=equip, missing_models=missing)
+            Console.warn(
+                f"Cached model cache is incomplete (missing: {missing}). "
+                "All detectors will be retrained from scratch this batch.",
+                component="MODEL",
+                equip=equip,
+                missing_models=missing,
+            )
             # Clear all on failure to ensure consistent state
             result["ar1_detector"] = None
             result["pca_detector"] = None
@@ -729,8 +1200,14 @@ def rebuild_detectors_from_cache(
             
     except Exception as e:
         import traceback
-        Console.warn(f"Failed to reconstruct detectors: {e} | trace={traceback.format_exc()[:300]}", component="MODEL",
-                     equip=equip, error_type=type(e).__name__)
+        Console.warn(
+            f"Failed to reconstruct detectors from cache: {e}. "
+            "All detectors will be retrained from scratch this batch.",
+            component="MODEL",
+            equip=equip,
+            error_type=type(e).__name__,
+            trace=traceback.format_exc()[:300],
+        )
         # Clear all on exception
         result["ar1_detector"] = None
         result["pca_detector"] = None
@@ -739,37 +1216,3 @@ def rebuild_detectors_from_cache(
         result["omr_detector"] = None
     
     return result
-
-
-def compute_stable_feature_hash(train: pd.DataFrame, equip: str = "") -> Optional[str]:
-    """
-    Compute a stable schema-only hash for training features.
-
-    The hash captures ONLY the feature schema (column names + dtypes + count),
-    NOT the training data values. This ensures the hash is stable across batches
-    with different training windows, which would otherwise cause spurious cache
-    misses on every scoring batch when the window shifts forward in time.
-
-    Hash includes:
-    - Column count
-    - Sorted column names and their dtypes
-
-    Args:
-        train: Training DataFrame to hash
-        equip: Equipment name for logging
-
-    Returns:
-        16-character hex hash string, or None if computation fails
-    """
-    import hashlib
-
-    try:
-        col_count = train.shape[1]
-        dtype_str = "|".join(f"{col}:{train[col].dtype}" for col in sorted(train.columns))
-        combined = f"ncols={col_count}|{dtype_str}"
-        feature_hash = hashlib.sha256(combined.encode("utf-8")).hexdigest()[:16]
-        return feature_hash
-    except Exception as e:
-        Console.warn(f"Hash computation failed: {e}", component="HASH",
-                     equip=equip, error_type=type(e).__name__, error=str(e)[:200])
-        return None

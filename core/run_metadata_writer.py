@@ -11,8 +11,11 @@ Called at the end of every ACM run (success or failure).
 """
 
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Dict, List, Optional
+from dataclasses import dataclass
+import json
 import pandas as pd
+import numpy as np
 from core.observability import Console
 
 
@@ -166,6 +169,44 @@ def compute_run_health_status(avg_health: float, min_health: float) -> str:
     return "HEALTHY"
 
 
+def resolve_run_outcome_from_degradations(degradations: Optional[List[str]]) -> tuple[str, Optional[str]]:
+    """
+    Compute final run outcome from degradation list.
+
+    Returns:
+        Tuple of (outcome, err_json). err_json is populated only for DEGRADED.
+    """
+    if degradations:
+        return "DEGRADED", json.dumps({"degraded_steps": degradations[:20]}, ensure_ascii=False)
+    return "OK", None
+
+
+def serialize_run_exception(exc: Exception) -> str:
+    """
+    Build stable JSON payload for run failure serialization.
+    """
+    try:
+        return json.dumps({"type": exc.__class__.__name__, "message": str(exc)}, ensure_ascii=False)
+    except Exception:
+        return '{"type":"Exception","message":"<serialization failed>"}'
+
+
+def finalize_noop_run(sql_client: Any, run_id: Optional[str], logger: Any = Console) -> None:
+    """
+    Finalize a run as NOOP with zero row counts.
+    """
+    if not sql_client or not run_id:
+        return
+    sql_client.finalize_run(
+        run_id=run_id,
+        outcome="NOOP",
+        rows_read=0,
+        rows_written=0,
+        err_json=None,
+    )
+    logger.info(f"Finalized NOOP RunID={run_id}", component="RUN")
+
+
 def extract_run_metadata_from_scores(scores: pd.DataFrame, per_regime_enabled: bool = False, regime_count: int = 0) -> dict:
     """
     Extract health and quality metrics from scores dataframe.
@@ -221,96 +262,103 @@ def extract_run_metadata_from_scores(scores: pd.DataFrame, per_regime_enabled: b
     return metadata
 
 
-def extract_data_quality_score(data_quality_path=None, sql_client=None, run_id=None, equip_id=None) -> float:
+def extract_data_quality_score(
+    sql_client: Any,
+    run_id: str,
+    equip_id: int,
+) -> float:
     """
-    Extract overall data quality score from data_quality.csv or ACM_DataQuality SQL table.
-    
-    OM-CSV-03: Updated to support SQL mode - queries ACM_DataQuality if sql_client provided,
-    falls back to CSV if data_quality_path exists.
-    
-    RM-COR-01: Validates expected schema columns and logs missing fields
-    to help diagnose schema drift or incomplete data quality metrics.
-    
+    Extract overall data quality score from ACM_DataQuality (SQL-only runtime).
+
     Args:
-        data_quality_path: Path to data_quality.csv file (file mode)
-        sql_client: SQL client for database queries (SQL mode)
-        run_id: RunID to query from SQL (SQL mode)
-        equip_id: EquipID to query from SQL (SQL mode)
-    
+        sql_client: SQL client for database query.
+        run_id: RunID for the current batch.
+        equip_id: EquipID for the current equipment.
+
     Returns:
-        float: Quality score (0-100), or 100.0 if no data found
+        float: Quality score in [0, 100]. Defaults to 100.0 if no records exist
+        or if quality rows are not yet written for this run.
     """
+    if sql_client is None:
+        Console.warn(
+            "Data quality query skipped: sql_client is None; defaulting to 100.0",
+            component="RUN_META",
+            run_id=run_id,
+            equip_id=equip_id,
+        )
+        return 100.0
+
+    if not run_id or int(equip_id) <= 0:
+        Console.warn(
+            "Data quality query skipped: invalid run_id/equip_id; defaulting to 100.0",
+            component="RUN_META",
+            run_id=run_id,
+            equip_id=equip_id,
+        )
+        return 100.0
+
     try:
-        import pandas as pd
-        from pathlib import Path
-        
-        # OM-CSV-03: SQL mode - query ACM_DataQuality
-        if sql_client and run_id:
-            try:
-                query = """
-                    SELECT sensor, train_null_pct, score_null_pct
-                    FROM dbo.ACM_DataQuality
-                    WHERE RunID = ? AND EquipID = ? AND CheckName = 'data_quality'
-                """
-                with sql_client.cursor() as cur:
-                    cur.execute(query, (run_id, int(equip_id or 0)))
-                    rows = cur.fetchall()
-                
-                if rows:
-                    # Fix: Convert pyodbc.Row objects to tuples to ensure pandas infers shape correctly
-                    rows = [tuple(r) for r in rows]
-                    df = pd.DataFrame(rows, columns=["sensor", "train_null_pct", "score_null_pct"])
-                    # Average null rate across train and score
-                    avg_null_pct = (df["train_null_pct"].mean() + df["score_null_pct"].mean()) / 2.0
-                    quality_score = 100.0 * (1.0 - avg_null_pct / 100.0)
-                    Console.debug(f"Data quality from SQL: avg_null={avg_null_pct:.2f}%, score={quality_score:.1f}", component="RUN_META")
-                    return float(quality_score)
-                else:
-                    Console.debug("No data quality records found in SQL, defaulting to 100.0", component="RUN_META")
-                    return 100.0
-            except Exception as e:
-                Console.warn(f"Failed to query ACM_DataQuality: {e}, falling back to CSV", component="RUN_META", run_id=run_id, equip_id=equip_id, error_type=type(e).__name__)
-        
-        # File mode: read from CSV
-        if data_quality_path and Path(data_quality_path).exists():
-            df = pd.read_csv(data_quality_path)
-            
-            # RM-COR-01: Schema validation - check for expected columns
-            expected_columns = {"sensor_name", "null_rate", "constant_rate", "outlier_rate"}
-            actual_columns = set(df.columns)
-            missing_columns = expected_columns - actual_columns
-            
-            if missing_columns:
-                Console.warn(
-                    f"[RUN_META] Data quality schema incomplete: missing columns {sorted(missing_columns)}. "
-                    f"Quality score coverage may be reduced."
-                )
-            
-            # Calculate quality score based on null rates
-            if "null_rate" in df.columns:
-                # 100 - (average null rate across sensors)
-                avg_null_rate = df["null_rate"].mean()
-                quality_score = 100.0 * (1.0 - avg_null_rate / 100.0)
-                
-                # Log additional quality metrics if available
-                if "constant_rate" in df.columns and "outlier_rate" in df.columns:
-                    avg_constant = df["constant_rate"].mean()
-                    avg_outlier = df["outlier_rate"].mean()
-                    Console.debug(
-                        f"[RUN_META] Data quality metrics: null={avg_null_rate:.2f}%, "
-                        f"constant={avg_constant:.2f}%, outlier={avg_outlier:.2f}%"
-                    )
-                
-                return float(quality_score)
-            else:
-                Console.warn(
-                    "[RUN_META] Missing 'null_rate' column in data_quality.csv. "
-                    "Defaulting to quality score 100.0 (optimistic fallback)."
-                )
-                return 100.0
-        
+        query = """
+            SELECT train_null_pct, score_null_pct
+            FROM dbo.ACM_DataQuality
+            WHERE RunID = ? AND EquipID = ? AND CheckName = 'data_quality'
+        """
+        with sql_client.cursor() as cur:
+            cur.execute(query, (run_id, int(equip_id)))
+            rows = cur.fetchall()
+
+        if not rows:
+            Console.debug(
+                "No data quality rows found in SQL; defaulting to 100.0",
+                component="RUN_META",
+                run_id=run_id,
+                equip_id=equip_id,
+            )
+            return 100.0
+
+        train_null_values: List[float] = []
+        score_null_values: List[float] = []
+        for row in rows:
+            train_null = row[0] if len(row) > 0 else None
+            score_null = row[1] if len(row) > 1 else None
+            if train_null is not None:
+                train_null_values.append(float(train_null))
+            if score_null is not None:
+                score_null_values.append(float(score_null))
+
+        if not train_null_values and not score_null_values:
+            Console.debug(
+                "Data quality rows contain no null-rate values; defaulting to 100.0",
+                component="RUN_META",
+                run_id=run_id,
+                equip_id=equip_id,
+            )
+            return 100.0
+
+        train_mean = float(np.mean(train_null_values)) if train_null_values else 0.0
+        score_mean = float(np.mean(score_null_values)) if score_null_values else 0.0
+        avg_null_pct = (train_mean + score_mean) / 2.0
+
+        # Guard against unexpected out-of-range values.
+        avg_null_pct = float(np.clip(avg_null_pct, 0.0, 100.0))
+        quality_score = float(np.clip(100.0 * (1.0 - avg_null_pct / 100.0), 0.0, 100.0))
+
+        Console.debug(
+            f"Data quality from SQL: avg_null={avg_null_pct:.2f}%, score={quality_score:.1f}",
+            component="RUN_META",
+            run_id=run_id,
+            equip_id=equip_id,
+        )
+        return quality_score
     except Exception as e:
-        Console.warn(f"Failed to extract data quality score: {e}", component="RUN_META", error_type=type(e).__name__, error=str(e)[:200])
+        Console.warn(
+            f"Failed to query ACM_DataQuality: {e}; defaulting to 100.0",
+            component="RUN_META",
+            run_id=run_id,
+            equip_id=equip_id,
+            error_type=type(e).__name__,
+            error=str(e)[:200],
+        )
         return 100.0
 
 
@@ -380,12 +428,374 @@ def write_retrain_metadata(
         Console.info(f"Wrote retrain metadata RunID={run_id} StateV={forecast_state_version}", component="RUN_META")
         return True
     except Exception as e:
-        Console.error(f"Failed to write ACM_RunMetadata: {e}", component="RUN_META", run_id=run_id, equip_id=equip_id, equip_name=equip_name, error_type=type(e).__name__, error=str(e)[:200])
+        Console.error(
+            f"Failed to write ACM_RunMetadata: {e}",
+            component="RUN_META",
+            run_id=run_id,
+            equip_id=equip_id,
+            equip_name=equip_name,
+            error_type=type(e).__name__,
+            error=str(e)[:200],
+        )
         try:
             sql_client.conn.rollback()
         except Exception:
             pass
         return False
+
+
+def emit_batch_summary(
+    console: Any,
+    equip: str,
+    run_id: Optional[str],
+    win_start: Optional[pd.Timestamp],
+    win_end: Optional[pd.Timestamp],
+    outcome: str,
+    frame: Optional[pd.DataFrame] = None,
+    episodes: Optional[pd.DataFrame] = None,
+    score_out: Optional[Dict[str, Any]] = None,
+    regime_quality_ok: bool = False,
+    model_state: Optional[Any] = None,
+    rows_read: int = 0,
+    train: Optional[pd.DataFrame] = None,
+    degradations: Optional[List[str]] = None,
+    refit_requested: bool = False,
+    timer: Optional[Any] = None,
+) -> None:
+    """
+    Emit consolidated batch summary and timing logs (best-effort).
+    """
+    try:
+        from core.analytics_builder import health_index as _compute_health_index
+
+        _eq = equip if equip else "?"
+        _ws = win_start.strftime("%Y-%m-%d %H:%M") if win_start is not None else "?"
+        _we = win_end.strftime("%H:%M") if win_end is not None else "?"
+        _rid = str(run_id)[:8] if run_id else "?"
+        _out = outcome if outcome else "?"
+
+        # Health summary
+        _health_str = ""
+        _health_status = "?"
+        _anomaly_str = ""
+        if isinstance(frame, pd.DataFrame) and "fused" in frame.columns:
+            _fused = frame["fused"].dropna().to_numpy()
+            if len(_fused) > 0:
+                _hi = _compute_health_index(_fused)
+                _health_str = (
+                    f"avg={np.mean(_hi):.1f}%  min={np.min(_hi):.1f}%  max={np.max(_hi):.1f}%  "
+                    f"P10={np.percentile(_hi,10):.1f}%  P50={np.percentile(_hi,50):.1f}%"
+                )
+                _health_status = compute_run_health_status(float(np.mean(_hi)), float(np.min(_hi)))
+                _n_anom = int((_fused > 3.0).sum())
+                _anomaly_str = f"{_n_anom}/{len(_fused)} ({_n_anom/len(_fused)*100:.1f}%)"
+
+        # RUL (forecasting disabled)
+        _rul_str = "disabled"
+
+        # Episodes
+        _ep_str = ""
+        if isinstance(episodes, pd.DataFrame):
+            _ep_total = len(episodes)
+            _active_col = next((c for c in ("Active", "active", "IsActive") if c in episodes.columns), None)
+            _ep_active = int(episodes[_active_col].sum()) if _active_col else 0
+            _sev_cols = [c for c in ("severity", "Severity") if c in episodes.columns]
+            _ep_str = f"{_ep_total} total, {_ep_active} active"
+            if _sev_cols and _ep_total > 0:
+                _sevs = episodes[_sev_cols[0]].dropna()
+                if len(_sevs) > 0:
+                    _ep_str += f", avg_severity={_sevs.mean():.2f}"
+
+        # Regime
+        _regime_str = ""
+        if isinstance(score_out, dict):
+            _k = score_out.get("regime_k", 0)
+            _qok = "OK" if regime_quality_ok else "FAIL"
+            _regime_str = f"K={_k}  quality={_qok}"
+            if isinstance(frame, pd.DataFrame) and "regime_label" in frame.columns:
+                _dom = frame["regime_label"].mode()
+                if len(_dom) > 0 and len(frame) > 0:
+                    _dom_pct = (frame["regime_label"] == _dom.iloc[0]).sum() / len(frame) * 100
+                    _regime_str += f"  dominant=R{int(_dom.iloc[0])}({_dom_pct:.0f}%)"
+
+        # Drift
+        _drift_str = ""
+        if isinstance(frame, pd.DataFrame) and "drift_mode" in frame.columns and len(frame) > 0:
+            _drift_str = str(frame["drift_mode"].iloc[-1])
+
+        # Model
+        _model_str = ""
+        if model_state is not None:
+            _ms = model_state
+            _model_str = f"{_ms.maturity.value}  runs={_ms.consecutive_runs}  days={_ms.training_days:.1f}"
+
+        # Data volume
+        _scored = rows_read
+        _trained = len(train) if isinstance(train, pd.DataFrame) else "?"
+
+        # Timing
+        _timing_str = ""
+        if timer is not None and hasattr(timer, "totals") and timer.totals:
+            _total_t = timer.total_elapsed() if hasattr(timer, "total_elapsed") else sum(timer.totals.values())
+            _top = sorted(timer.totals.items(), key=lambda x: x[1], reverse=True)[:5]
+            _timing_str = f"total={_total_t:.1f}s  " + "  ".join(f"{s}={t:.1f}s" for s, t in _top)
+
+        _deg = ", ".join(degradations) if degradations else "none"
+        _refit = "yes" if refit_requested else "no"
+
+        console.info(
+            f"Batch summary | {_eq} | RunID={_rid} | [{_ws}-{_we}] | outcome={_out} | "
+            f"health=[{_health_str}] status={_health_status} | "
+            f"anomalies={_anomaly_str} | "
+            f"episodes=[{_ep_str}] | "
+            f"RUL=[{_rul_str}] | "
+            f"regime=[{_regime_str}] | drift={_drift_str} | "
+            f"model=[{_model_str}] | "
+            f"data={_scored} scored, {_trained} trained | "
+            f"refit={_refit} | degraded=[{_deg}]",
+            component="SUMMARY",
+            equip=_eq,
+            run_id=_rid,
+            outcome=_out,
+            health_status=_health_status,
+        )
+        if _timing_str:
+            console.info(f"Timing | {_timing_str}", component="SUMMARY")
+    except Exception:
+        pass
+
+
+def finalize_run_with_metadata(
+    sql_client: Any,
+    output_manager: Optional[Any],
+    run_id: Optional[str],
+    equip_id: int,
+    equip_name: str,
+    started_at: datetime,
+    outcome: str,
+    rows_read: int,
+    rows_written: int,
+    err_json: Optional[str],
+    frame: Optional[pd.DataFrame] = None,
+    train: Optional[pd.DataFrame] = None,
+    episodes: Optional[pd.DataFrame] = None,
+    meta: Optional[Any] = None,
+    refit_requested: bool = False,
+    config_signature: str = "UNKNOWN",
+    per_regime_enabled: bool = False,
+    regime_count: int = 0,
+    observability_enabled: bool = False,
+    record_data_quality_fn: Optional[Any] = None,
+    record_run_fn: Optional[Any] = None,
+    record_batch_processed_fn: Optional[Any] = None,
+    record_health_score_fn: Optional[Any] = None,
+    record_error_fn: Optional[Any] = None,
+    logger: Any = Console,
+) -> None:
+    """
+    Finalize ACM run metadata + status and close SQL/output resources (best-effort).
+    """
+    if not sql_client or not run_id:
+        return
+
+    record_data_quality = record_data_quality_fn or (lambda *a, **k: None)
+    record_run = record_run_fn or (lambda *a, **k: None)
+    record_batch_processed = record_batch_processed_fn or (lambda *a, **k: None)
+    record_health_score = record_health_score_fn or (lambda *a, **k: None)
+    record_error = record_error_fn or (lambda *a, **k: None)
+
+    try:
+        completed_at = datetime.now()
+
+        if isinstance(frame, pd.DataFrame) and len(frame) > 0:
+            run_metadata = extract_run_metadata_from_scores(
+                frame,
+                per_regime_enabled=per_regime_enabled,
+                regime_count=regime_count,
+            )
+            data_quality_score = extract_data_quality_score(
+                sql_client=sql_client,
+                run_id=run_id,
+                equip_id=equip_id,
+            )
+            record_data_quality(equip_name, float(data_quality_score) if data_quality_score else 0.0)
+        else:
+            run_metadata = {
+                "health_status": "UNKNOWN",
+                "avg_health_index": None,
+                "min_health_index": None,
+                "max_fused_z": None,
+            }
+            data_quality_score = 0.0
+
+        write_run_metadata(
+            sql_client=sql_client,
+            run_id=run_id,
+            equip_id=int(equip_id),
+            equip_name=equip_name,
+            started_at=started_at,
+            completed_at=completed_at,
+            config_signature=config_signature,
+            train_row_count=len(train) if isinstance(train, pd.DataFrame) else 0,
+            score_row_count=len(frame) if isinstance(frame, pd.DataFrame) else rows_read,
+            episode_count=len(episodes) if isinstance(episodes, pd.DataFrame) else 0,
+            health_status=run_metadata.get("health_status", "UNKNOWN"),
+            avg_health_index=run_metadata.get("avg_health_index"),
+            min_health_index=run_metadata.get("min_health_index"),
+            max_fused_z=run_metadata.get("max_fused_z"),
+            data_quality_score=data_quality_score,
+            refit_requested=bool(refit_requested),
+            kept_columns=",".join(getattr(meta, "kept_cols", [])) if meta is not None else "",
+            error_message=err_json if outcome in ("FAIL", "DEGRADED") else None,
+        )
+
+        sql_client.finalize_run(
+            run_id=run_id,
+            outcome=outcome,
+            rows_read=rows_read,
+            rows_written=rows_written,
+            err_json=err_json,
+        )
+        logger.info(
+            f"Finalized RunID={run_id} outcome={outcome} rows_in={rows_read} rows_out={rows_written}",
+            component="RUN",
+        )
+
+        if observability_enabled and started_at:
+            duration_seconds = (completed_at - started_at).total_seconds()
+            record_run(equip_name, outcome or "OK", duration_seconds)
+            record_batch_processed(
+                equip_name,
+                rows=rows_read,
+                duration_seconds=duration_seconds,
+                outcome=(outcome or "ok").lower(),
+            )
+            if run_metadata.get("avg_health_index") is not None:
+                record_health_score(equip_name, float(run_metadata["avg_health_index"]))
+            if outcome == "FAIL":
+                record_error(equip_name, str(err_json) if err_json else "Run failed", "RunFailure")
+
+    except Exception as e:
+        logger.error(
+            f"Run finalization failed: {e}",
+            component="RUN",
+            equip=equip_name,
+            run_id=run_id,
+        )
+    finally:
+        try:
+            if output_manager is not None:
+                output_manager.close()
+        except Exception:
+            pass
+        try:
+            sql_client.close()
+        except Exception:
+            pass
+
+
+@dataclass
+class PipelineTeardownState:
+    """Typed teardown payload passed from ACM orchestrator."""
+    console: Any
+    equip: str
+    run_id: Optional[str]
+    win_start: Optional[pd.Timestamp]
+    win_end: Optional[pd.Timestamp]
+    outcome: str
+    frame: Optional[pd.DataFrame]
+    episodes: Optional[pd.DataFrame]
+    score_out: Optional[Dict[str, Any]]
+    regime_quality_ok: bool
+    model_state: Optional[Any]
+    rows_read: int
+    train: Optional[pd.DataFrame]
+    degradations: Optional[List[str]]
+    refit_requested: bool
+    timer: Optional[Any]
+    sql_client: Any
+    output_manager: Optional[Any]
+    equip_id: int
+    equip_name: str
+    started_at: datetime
+    rows_written: int
+    err_json: Optional[str]
+    meta: Optional[Any]
+    config_signature: str
+    per_regime_enabled: bool
+    regime_count: int
+    observability_enabled: bool
+    record_data_quality_fn: Optional[Any]
+    record_run_fn: Optional[Any]
+    record_batch_processed_fn: Optional[Any]
+    record_health_score_fn: Optional[Any]
+    record_error_fn: Optional[Any]
+    span_ctx: Optional[Any]
+    root_span: Optional[Any]
+    close_run_span_fn: Any
+    shutdown_run_observability_fn: Any
+
+
+def finalize_pipeline_teardown(state: PipelineTeardownState) -> None:
+    """
+    Consolidated teardown for summary, SQL finalization, and observability shutdown.
+    """
+    emit_batch_summary(
+        console=state.console,
+        equip=state.equip,
+        run_id=state.run_id,
+        win_start=state.win_start,
+        win_end=state.win_end,
+        outcome=state.outcome,
+        frame=state.frame,
+        episodes=state.episodes,
+        score_out=state.score_out,
+        regime_quality_ok=state.regime_quality_ok,
+        model_state=state.model_state,
+        rows_read=state.rows_read,
+        train=state.train,
+        degradations=state.degradations,
+        refit_requested=state.refit_requested,
+        timer=state.timer,
+    )
+
+    finalize_run_with_metadata(
+        sql_client=state.sql_client,
+        output_manager=state.output_manager,
+        run_id=state.run_id,
+        equip_id=int(state.equip_id),
+        equip_name=state.equip_name,
+        started_at=state.started_at,
+        outcome=state.outcome,
+        rows_read=state.rows_read,
+        rows_written=state.rows_written,
+        err_json=state.err_json,
+        frame=state.frame,
+        train=state.train,
+        episodes=state.episodes,
+        meta=state.meta,
+        refit_requested=state.refit_requested,
+        config_signature=state.config_signature,
+        per_regime_enabled=state.per_regime_enabled,
+        regime_count=state.regime_count,
+        observability_enabled=state.observability_enabled,
+        record_data_quality_fn=state.record_data_quality_fn,
+        record_run_fn=state.record_run_fn,
+        record_batch_processed_fn=state.record_batch_processed_fn,
+        record_health_score_fn=state.record_health_score_fn,
+        record_error_fn=state.record_error_fn,
+        logger=state.console,
+    )
+
+    state.close_run_span_fn(
+        span_ctx=state.span_ctx,
+        root_span=state.root_span,
+        outcome=state.outcome,
+        rows_read=state.rows_read,
+        rows_written=state.rows_written,
+    )
+
+    state.shutdown_run_observability_fn(state.observability_enabled)
 
 
 

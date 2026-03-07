@@ -17,19 +17,20 @@ Promotion Criteria (LEARNING -> CONVERGED):
 Regime Quality Metrics and their promotion thresholds:
     - silhouette  [-1, 1]:  score >= min_silhouette_score (default 0.40)
     - dbcv        [-1, 1]:  score >= min_dbcv_score       (default 0.0)
-    - calinski_harabasz [0, ∞]: normalised; treat same as silhouette scale only when
-                                < 100 (raw values can be large — use quality_ok flag)
-    - bic         (-∞, 0]:  absolute value cannot be thresholded; rely on
+    - calinski_harabasz [0, inf]: normalised; treat same as silhouette scale only when
+                                < 100 (raw values can be large - use quality_ok flag)
+    - bic         (-inf, 0]:  absolute value cannot be thresholded; rely on
                             regime_quality_ok boolean from regimes.py instead
 
 v11.11.0 change: regime quality check is now metric-aware. Storing a raw BIC value
-in silhouette_score and comparing it to 0.40 used to block LEARNING→CONVERGED forever
+in silhouette_score and comparing it to 0.40 used to block LEARNING->CONVERGED forever
 for GMM-based regime detection.
 """
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
+import math
 from typing import Dict, Any, Optional, List
 import json
 
@@ -93,11 +94,11 @@ class PromotionCriteria:
         RMSE < 12 on 0-100 health scale = good prediction accuracy
     """
     min_training_days: int = 7
-    min_silhouette_score: float = 0.40   # For silhouette-scale metrics only
+    min_silhouette_score: float = 0.15   # For silhouette-scale metrics only. Matches config_table.csv.
     min_dbcv_score: float = 0.0          # For HDBSCAN DBCV/persistence metrics
-    min_stability_ratio: float = 0.75
-    min_consecutive_runs: int = 5
-    min_training_rows: int = 400
+    min_stability_ratio: float = 0.60   # Matches config_table.csv.
+    min_consecutive_runs: int = 3        # Matches config_table.csv.
+    min_training_rows: int = 200         # Matches config_table.csv.
     max_forecast_mape: float = 35.0
     max_forecast_rmse: float = 12.0
 
@@ -214,14 +215,14 @@ def _regime_quality_criterion_met(
     quality_ok = state.regime_quality_ok  # may be None if not set
 
     if metric in _SILHOUETTE_SCALE_METRICS:
-        # Score ∈ [-1, 1]; compare against threshold
+        # Score in [-1, 1]; compare against threshold
         if score is None or score < criteria.min_silhouette_score:
             s = score if score is not None else 0.0
             return False, f"{metric}={s:.3f} < {criteria.min_silhouette_score}"
         return True, None
 
     if metric in _DBCV_SCALE_METRICS:
-        # DBCV ∈ [-1, 1]; > 0.0 means non-trivial cluster structure
+        # DBCV in [-1, 1]; > 0.0 means non-trivial cluster structure
         if score is None or score < criteria.min_dbcv_score:
             s = score if score is not None else 0.0
             return False, f"{metric}={s:.3f} < {criteria.min_dbcv_score}"
@@ -232,10 +233,10 @@ def _regime_quality_criterion_met(
         if quality_ok is False:
             s = score if score is not None else 0.0
             return False, f"regime_quality_ok=False ({metric}={s:.3f})"
-        # quality_ok=True or quality_ok=None (unknown) → pass
+        # quality_ok=True or quality_ok=None (unknown) -> pass
         return True, None
 
-    # Unknown metric — trust quality_ok if available, otherwise pass.
+    # Unknown metric - trust quality_ok if available, otherwise pass.
     if quality_ok is False:
         s = score if score is not None else 0.0
         return False, f"regime_quality_ok=False ({metric}={s:.3f})"
@@ -308,7 +309,9 @@ def promote_model(state: ModelState) -> ModelState:
     state.promoted_at = datetime.now()
 
     Console.info(
-        f"Model v{state.version} promoted to CONVERGED",
+        f"Model v{state.version} promoted LEARNING to CONVERGED. "
+        f"Regime metric={state.regime_quality_metric} score={state.regime_quality_score}, "
+        f"stability={state.stability_ratio}, consecutive_runs={state.consecutive_runs}.",
         component="LIFECYCLE",
         equip_id=state.equip_id,
         version=state.version,
@@ -386,7 +389,9 @@ def create_new_model_state(
     )
 
     Console.info(
-        f"Created model v{version} in LEARNING state",
+        f"New model v{version} created in LEARNING state "
+        f"({training_rows} training rows, {training_days:.1f} training days). "
+        "Model will accumulate consecutive scoring runs before promotion to CONVERGED.",
         component="LIFECYCLE",
         equip_id=equip_id,
         version=version,
@@ -459,6 +464,251 @@ def update_model_state_from_run(
     return state
 
 
+def update_and_persist_model_lifecycle(
+    *,
+    sql_client: Any,
+    output_manager: Any,
+    equip_id: int,
+    regime_state_version: int,
+    cfg: Dict[str, Any],
+    train_data: Any,
+    run_id: Optional[str],
+    regime_model: Optional[Any],
+    score_out: Optional[Dict[str, Any]],
+    regime_quality_ok: Optional[bool],
+    logger: Any = Console,
+) -> Optional[ModelState]:
+    """
+    Update lifecycle state after model training and persist active-model pointers.
+
+    This keeps lifecycle policy in one owner module and lets the pipeline call a
+    single function instead of inlining the same logic.
+    """
+    if sql_client is None or output_manager is None:
+        return None
+
+    # Resolve training window from the current training dataframe.
+    if hasattr(train_data, "index") and len(train_data.index) > 0:
+        train_start_raw = train_data.index.min()
+        train_end_raw = train_data.index.max()
+    else:
+        train_start_raw = datetime.now()
+        train_end_raw = datetime.now()
+
+    if isinstance(train_start_raw, datetime):
+        train_start = train_start_raw
+    elif hasattr(train_start_raw, "to_pydatetime"):
+        train_start = train_start_raw.to_pydatetime()
+    else:
+        train_start = datetime.now()
+
+    if isinstance(train_end_raw, datetime):
+        train_end = train_end_raw
+    elif hasattr(train_end_raw, "to_pydatetime"):
+        train_end = train_end_raw.to_pydatetime()
+    else:
+        train_end = datetime.now()
+
+    # Metric name: prefer score_out (most current), then model fit metadata.
+    if score_out and score_out.get("regime_metric"):
+        regime_fit_metric = score_out["regime_metric"]
+    elif regime_model is not None and hasattr(regime_model, "meta"):
+        regime_fit_metric = regime_model.meta.get("fit_metric", "silhouette")
+    else:
+        regime_fit_metric = "silhouette"
+
+    # Score: prefer model fit score, then label-time score.
+    if regime_model is not None and hasattr(regime_model, "meta"):
+        regime_fit_score = regime_model.meta.get("fit_score")
+        if regime_fit_score is None and score_out:
+            regime_fit_score = score_out.get("regime_score")
+    elif score_out:
+        regime_fit_score = score_out.get("regime_score")
+    else:
+        regime_fit_score = None
+
+    # Compute weighted stability across regimes when available.
+    actual_stability = 1.0 if regime_quality_ok else 0.75
+    if regime_model is not None and hasattr(regime_model, "stats") and regime_model.stats:
+        total_samples = 0
+        weighted_stability = 0.0
+        for _regime_id, stat in regime_model.stats.items():
+            count = stat.get("count", 0)
+            stab = stat.get("stability_score", 1.0)
+            try:
+                stab_f = float(stab)
+            except Exception:
+                continue
+            if count > 0 and math.isfinite(stab_f):
+                weighted_stability += stab_f * count
+                total_samples += count
+        if total_samples > 0:
+            actual_stability = weighted_stability / total_samples
+
+    model_state = load_model_state_from_sql(sql_client, equip_id)
+    if model_state is None:
+        model_state = create_new_model_state(
+            equip_id=int(equip_id),
+            version=regime_state_version,
+            training_rows=len(train_data),
+            training_start=train_start,
+            training_end=train_end,
+            silhouette_score=regime_fit_score,
+            regime_quality_metric=regime_fit_metric,
+            regime_quality_ok=regime_quality_ok if regime_quality_ok is not None else True,
+            run_id=run_id,
+        )
+    else:
+        training_days = (train_end - train_start).total_seconds() / 86400.0
+        model_state = update_model_state_from_run(
+            state=model_state,
+            run_id=run_id,  # type: ignore[arg-type]
+            run_success=True,
+            silhouette_score=regime_fit_score,
+            regime_quality_metric=regime_fit_metric,
+            regime_quality_ok=regime_quality_ok if regime_quality_ok is not None else True,
+            stability_ratio=actual_stability,
+            additional_rows=len(train_data),
+            additional_days=training_days,
+        )
+
+        if model_state.maturity == MaturityState.LEARNING:
+            promotion_criteria = PromotionCriteria.from_config(cfg or {})
+            eligible, unmet = check_promotion_eligibility(model_state, promotion_criteria)
+            if eligible:
+                old_maturity = model_state.maturity.value
+                model_state = promote_model(model_state)
+                try:
+                    promotion_record = [{
+                        "RegimeLabel": "ALL",
+                        "FromState": old_maturity,
+                        "ToState": model_state.maturity.value,
+                        "Reason": "met_promotion_criteria",
+                        "PromotedAt": datetime.now(),
+                        "Version": model_state.version,
+                        "ConsecutiveRuns": model_state.consecutive_runs,
+                        "TotalDays": model_state.total_days,
+                    }]
+                    output_manager.write_regime_promotion_log(promotion_record)
+                except Exception:
+                    pass
+                logger.ok(
+                    f"Model promoted: LEARNING->CONVERGED (runs={model_state.consecutive_runs}, days={model_state.total_days:.1f})",
+                    component="LIFECYCLE",
+                )
+            else:
+                logger.info(f"Promotion not eligible: {', '.join(unmet)}", component="LIFECYCLE")
+
+    output_manager.write_active_models(
+        get_active_model_dict(model_state, regime_version=regime_state_version)
+    )
+    output_manager.set_maturity_state(str(model_state.maturity.value))
+    logger.info(
+        f"Model state: {model_state.maturity.value}",
+        component="LIFECYCLE",
+        version=model_state.version,
+        consecutive_runs=model_state.consecutive_runs,
+    )
+    return model_state
+
+
+def update_and_persist_model_lifecycle_safe(
+    *,
+    sql_client: Any,
+    output_manager: Any,
+    equip_id: int,
+    regime_state_version: int,
+    cfg: Dict[str, Any],
+    train_data: Any,
+    run_id: Optional[str],
+    regime_model: Optional[Any],
+    score_out: Optional[Dict[str, Any]],
+    regime_quality_ok: Optional[bool],
+    logger: Any = Console,
+) -> Optional[ModelState]:
+    """
+    Safe wrapper around update_and_persist_model_lifecycle.
+
+    Returns None on failure and logs a warning instead of raising.
+    """
+    try:
+        return update_and_persist_model_lifecycle(
+            sql_client=sql_client,
+            output_manager=output_manager,
+            equip_id=equip_id,
+            regime_state_version=regime_state_version,
+            cfg=cfg,
+            train_data=train_data,
+            run_id=run_id,
+            regime_model=regime_model,
+            score_out=score_out,
+            regime_quality_ok=regime_quality_ok,
+            logger=logger,
+        )
+    except Exception as e:
+        logger.warn(
+            f"Failed to update model lifecycle: {e}",
+            component="LIFECYCLE",
+            error=str(e)[:200],
+        )
+        return None
+
+
+def load_model_state_safe(
+    sql_client: Any,
+    equip_id: int,
+    logger: Any = Console,
+) -> Optional[ModelState]:
+    """
+    Safely load model state from SQL.
+
+    Returns None when SQL is unavailable or on load errors.
+    """
+    if sql_client is None or not equip_id:
+        return None
+    try:
+        return load_model_state_from_sql(sql_client, equip_id)
+    except Exception as e:
+        logger.warn(
+            f"Failed to load model state: {e}",
+            component="LIFECYCLE",
+            error=str(e)[:200],
+        )
+        return None
+
+
+def resolve_maturity_for_regime_stage(
+    *,
+    sql_client: Any,
+    equip_id: int,
+    refit_requested: bool,
+    logger: Any = Console,
+) -> Optional[str]:
+    """
+    Resolve maturity string used by regime discovery/labeling stage.
+
+    Behavior:
+    1. Load current model maturity from SQL.
+    2. If refit is requested and maturity is CONVERGED, return LEARNING so
+       regime rediscovery can proceed in the same run.
+    """
+    model_state = load_model_state_safe(sql_client, equip_id, logger=logger)
+    if model_state is None:
+        return None
+
+    maturity = model_state.maturity.value
+    logger.info(f"Model maturity: {maturity}", component="LIFECYCLE")
+
+    if refit_requested and maturity == "CONVERGED":
+        logger.info(
+            "Refit requested with CONVERGED state - overriding to LEARNING to allow regime rediscovery",
+            component="LIFECYCLE",
+        )
+        return "LEARNING"
+
+    return maturity
+
+
 def get_active_model_dict(
     state: ModelState,
     regime_version: Optional[int] = None,
@@ -468,8 +718,16 @@ def get_active_model_dict(
     """
     Get dict suitable for write_active_models in output_manager.
     """
+    _regime_score_str = (
+        f"{state.regime_quality_score:.3f}" if state.regime_quality_score is not None else "N/A"
+    )
     Console.info(
-        f"Model state v{state.version}: {state.maturity.value}",
+        f"Active model v{state.version}: state={state.maturity.value} | "
+        f"runs={state.consecutive_runs} | "
+        f"regime_metric={state.regime_quality_metric} score={_regime_score_str} "
+        f"quality_ok={state.regime_quality_ok} | "
+        f"stability={state.stability_ratio} | "
+        f"training={state.training_rows} rows / {state.training_days:.1f} days",
         component="LIFECYCLE",
         regime_metric=state.regime_quality_metric,
         regime_score=(
@@ -491,6 +749,7 @@ def get_active_model_dict(
         'RegimePromotedAt': state.promoted_at,
         'ActiveThresholdVersion': threshold_version or effective_regime_version,
         'ActiveForecastVersion': forecast_version or effective_regime_version,
+        'RegimeQualityMetric': state.regime_quality_metric,
         'SilhouetteScore': state.regime_quality_score,
         'StabilityRatio': state.stability_ratio,
         'TrainingRows': state.training_rows,
@@ -510,10 +769,9 @@ def load_model_state_from_sql(
     """
     Load current model state from ACM_ActiveModels.
 
-    Note: SilhouetteScore column stores whatever metric was last used (BIC,
-    DBCV, or silhouette). regime_quality_metric is not persisted to SQL and
-    defaults to "silhouette" on load — it will be overwritten with the correct
-    metric from the current run's score_out before the promotion check runs.
+    SilhouetteScore stores the raw regime quality score regardless of which
+    metric was used (BIC, DBCV, silhouette). RegimeQualityMetric records
+    which metric it is so the promotion check can evaluate it correctly.
     """
     try:
         with sql_client.cursor() as cur:
@@ -532,7 +790,8 @@ def load_model_state_from_sql(
                     TotalRuns,
                     ForecastMAPE,
                     ForecastRMSE,
-                    CreatedAt
+                    CreatedAt,
+                    ISNULL(RegimeQualityMetric, 'silhouette') AS RegimeQualityMetric
                 FROM dbo.[ACM_ActiveModels]
                 WHERE EquipID = ?
             """, (equip_id,))
@@ -556,9 +815,7 @@ def load_model_state_from_sql(
                 created_at=row[13] or row[3] or datetime.now(),
                 promoted_at=row[2],
                 regime_quality_score=row[5],
-                # regime_quality_metric is NOT persisted; it will be set from
-                # score_out in the current run before any promotion check.
-                regime_quality_metric="silhouette",
+                regime_quality_metric=row[14] or "silhouette",
                 stability_ratio=row[6],
                 training_rows=row[7] or 0,
                 training_days=row[8] or 0.0,
@@ -570,5 +827,11 @@ def load_model_state_from_sql(
                 last_run_at=row[3],
             )
     except Exception as e:
-        Console.warn(f"Failed to load model state: {e}", component="LIFECYCLE", error=str(e)[:200])
+        Console.warn(
+            f"Failed to load model state from ACM_ActiveModels: {e}. "
+            "Lifecycle will be treated as a fresh start (no prior state).",
+            component="LIFECYCLE",
+            equip_id=equip_id,
+            error=str(e)[:200],
+        )
         return None

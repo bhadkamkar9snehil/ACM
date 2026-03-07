@@ -860,3 +860,63 @@ def build_contribution_timeline(
         return None
     
     return contrib_df
+
+
+def build_sensor_analytics_context(
+    raw_train: Optional[pd.DataFrame],
+    raw_score: Optional[pd.DataFrame],
+    frame: pd.DataFrame,
+    omr_contributions_data: Optional[Any] = None,
+    regime_model: Optional[Any] = None,
+    logger: Any = Console,
+    equip: str = "",
+) -> Optional[Dict[str, Any]]:
+    """
+    Build sensor analytics context aligned to the score frame index.
+    """
+    try:
+        if raw_train is None or raw_score is None or len(raw_train) == 0 or len(raw_score) == 0:
+            return None
+
+        common_cols = [col for col in raw_score.columns if col in raw_train.columns]
+        if not common_cols:
+            return None
+
+        train_baseline = raw_train[common_cols]
+        score_baseline = raw_score[common_cols]
+
+        # Robust baseline from median + MAD.
+        train_median = train_baseline.median()
+        train_mad = (train_baseline - train_median).abs().median()
+        train_std = (train_mad * 1.4826).replace(0.0, np.nan).fillna(1e-10)
+        valid_cols = train_std[train_std > 1e-10].index.tolist()
+        if not valid_cols:
+            return None
+
+        train_median = train_median[valid_cols]
+        train_std = train_std[valid_cols]
+        score_baseline = score_baseline[valid_cols]
+        score_aligned = score_baseline.reindex(frame.index)
+        score_aligned = score_aligned.apply(pd.to_numeric, errors="coerce")
+        sensor_z = (score_aligned - train_median) / train_std
+        sensor_z = sensor_z.replace([np.inf, -np.inf], np.nan)
+
+        return {
+            "values": score_aligned,
+            "z_scores": sensor_z,
+            "train_mean": train_median,  # Median kept under legacy key for compatibility.
+            "train_std": train_std,
+            "train_p95": train_baseline[valid_cols].quantile(0.95),
+            "train_p05": train_baseline[valid_cols].quantile(0.05),
+            "omr_contributions": omr_contributions_data,
+            "regime_meta": regime_model.meta if regime_model else {},
+        }
+    except Exception as sensor_ctx_err:
+        logger.warn(
+            f"Failed to build sensor analytics context: {sensor_ctx_err}",
+            component="SENSOR",
+            equip=equip,
+            error_type=type(sensor_ctx_err).__name__,
+            error=str(sensor_ctx_err)[:200],
+        )
+        return None

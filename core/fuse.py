@@ -10,7 +10,7 @@ v11.3.3 (2026-01-19): Added CalibrationContaminationFilter for robust calibratio
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Mapping, Optional, Tuple, cast
+from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple, cast
 from core.observability import Console, Span
 from utils.detector_labels import format_culprit_label
 
@@ -88,7 +88,7 @@ class CalibrationContaminationFilter:
         Args:
             method: Filtering method ('iqr', 'iterative_mad', 'z_trim', 'hybrid', 'none')
             z_threshold: Z-score threshold for exclusion (MAD-scaled)
-            iqr_multiplier: IQR multiplier for IQR method (default 2.5 = ~3.5σ for normal)
+            iqr_multiplier: IQR multiplier for IQR method (default 2.5 = about 3.5 std for normal)
             max_iterations: Maximum iterations for iterative methods
             convergence_tol: Convergence tolerance (median change) for iterative methods
             min_retained_ratio: Minimum ratio of samples to retain (0.70 = keep at least 70%)
@@ -488,10 +488,6 @@ def tune_detector_weights(
         Tuple of (tuned_weights, diagnostics)
     """
     tune_cfg = (cfg or {}).get("fusion", {}).get("auto_tune", {}) if cfg else {}
-    enabled = tune_cfg.get("enabled", False)
-    
-    if not enabled:
-        return current_weights, {"enabled": False, "reason": "auto_tune.enabled=False in config"}
 
     with Span("fusion.tune_weights", n_detectors=len(streams), n_samples=len(fused) if isinstance(fused, np.ndarray) else 0):
         # FUSE-09: Configurable parameters
@@ -530,17 +526,6 @@ def tune_detector_weights(
                     component="TUNE", episode_source=episode_source
                 )
                 use_statistical_fallback = True
-            elif fallback_method == "disable":
-                Console.warn(
-                    "Circular tuning guard: require_external_labels=True but episodes appear to be from "
-                    f"same run (source='{episode_source}'). Weight tuning disabled to prevent mode collapse.",
-                    component="TUNE", episode_source=episode_source
-                )
-                return current_weights, {
-                    "enabled": False, 
-                    "reason": "circular_tuning_guard",
-                    "episode_source": episode_source
-                }
             else:
                 # Use explicit fallback method
                 Console.info(
@@ -797,18 +782,9 @@ def tune_detector_weights(
                     diagnostics["detector_metrics"][detector_name] = det_diag
 
                 except Exception as e:
-                    Console.warn(f"{detector_name}: metric calculation failed - {e}", component="TUNE", detector=detector_name, method=tuning_method, error_type=type(e).__name__, error=str(e)[:200])
-                    prior = float(detector_priors.get(detector_name, 0.1))
-                    fallback_score = prior
-                    quality_scores[detector_name] = fallback_score
-                    diagnostics["detector_metrics"][detector_name] = {
-                        "status": "error",
-                        "error": str(e),
-                        "metric_type": "prior_only",
-                        "metric_value": 0.0,
-                        "prior": prior,
-                        "final_score": float(fallback_score)
-                    }
+                    raise RuntimeError(
+                        f"{detector_name}: metric calculation failed for method={tuning_method}: {e}"
+                    ) from e
 
             if not quality_scores:
                 diagnostics["reason"] = "no_valid_quality_scores"
@@ -1131,25 +1107,22 @@ class ScoreCalibrator:
         self.regime_thresh_.clear()
         self.regime_params_.clear()
 
-        # Self-tuning path: find threshold that matches target FP rate
-        # NOTE: Uses CLEANED data for threshold calculation
-        if self.self_tune_cfg.get("enabled", False):
-            target_fp_rate = float(self.self_tune_cfg.get("target_fp_rate", 0.001))
-            # The quantile for the target FP rate is (1 - rate)
-            auto_q = float(np.clip(1.0 - target_fp_rate, 0.9, 0.995))
-            try:
-                q_val = float(np.quantile(x_clean, auto_q))
-            except Exception:
-                q_val = float(np.quantile(x_clean, min(0.99, self.q)))
-            spread = abs(q_val - self.med)
-            if spread < 1e-6 or spread > 1e6 or not np.isfinite(spread):
-                fallback_q = min(0.99, max(self.q, 0.95))
-                q_val = float(np.quantile(x_clean, fallback_q))
-            self.q_thresh = float(q_val)
-            Console.info(f"Self-tuning enabled. Target FP rate {target_fp_rate:.3%} -> q={auto_q:.4f}, threshold={self.q_thresh:.4f}", component="CAL")
-        else:
-            # Standard quantile-based threshold (on cleaned data)
-            self.q_thresh = float(np.quantile(x_clean, self.q))
+        # Self-tuning path is always active.
+        target_fp_rate = float(self.self_tune_cfg.get("target_fp_rate", 0.001))
+        auto_q = float(np.clip(1.0 - target_fp_rate, 0.9, 0.995))
+        try:
+            q_val = float(np.quantile(x_clean, auto_q))
+        except Exception:
+            q_val = float(np.quantile(x_clean, min(0.99, self.q)))
+        spread = abs(q_val - self.med)
+        if spread < 1e-6 or spread > 1e6 or not np.isfinite(spread):
+            fallback_q = min(0.99, max(self.q, 0.95))
+            q_val = float(np.quantile(x_clean, fallback_q))
+        self.q_thresh = float(q_val)
+        Console.info(
+            f"Self-tuning active. Target FP rate {target_fp_rate:.3%} -> q={auto_q:.4f}, threshold={self.q_thresh:.4f}",
+            component="CAL",
+        )
         
         # FUSE-FIX-04: Validate and clamp threshold to reasonable range
         # Thresholds should be in a sensible range for z-scores/raw anomaly metrics
@@ -1246,7 +1219,7 @@ class ScoreCalibrator:
         denom = max(self.scale, 1e-9)
         z = (x - self.med) / denom
         z = np.nan_to_num(z, nan=0.0, posinf=clip_z, neginf=-clip_z)
-        # FUSE-FIX-02: Apply global z-score clipping to ±10
+        # FUSE-FIX-02: Apply global z-score clipping to +/-10
         if clip_z > 0:
             z = np.clip(z, -clip_z, clip_z)
         z = np.clip(z, -10.0, 10.0)  # Enforce hard limit for all fused z-scores
@@ -1293,6 +1266,447 @@ class ScoreCalibrator:
         return z_clipped, z_raw
 
 
+def build_per_regime_threshold_rows(
+    calibrators: List[Tuple[str, "ScoreCalibrator"]],
+) -> List[Dict[str, Any]]:
+    """
+    Build per-regime threshold transparency rows from fitted calibrators.
+    """
+    rows: List[Dict[str, Any]] = []
+    for detector_name, calibrator in calibrators:
+        for regime_id in sorted(calibrator.regime_thresh_.keys()):
+            med_r, scale_r = calibrator.regime_params_[regime_id]
+            thresh_z = calibrator.regime_thresh_[regime_id]
+            rows.append(
+                {
+                    "detector": detector_name,
+                    "regime": int(regime_id),
+                    "median": float(med_r),
+                    "scale": float(scale_r),
+                    "z_threshold": float(thresh_z),
+                    "global_median": float(calibrator.med),
+                    "global_scale": float(calibrator.scale),
+                }
+            )
+    return rows
+
+
+def build_threshold_rows(
+    calibrators: List[Tuple[str, "ScoreCalibrator"]],
+) -> List[Dict[str, Any]]:
+    """
+    Build global + per-regime threshold rows for ACM thresholds artifact.
+    """
+    rows: List[Dict[str, Any]] = []
+    for detector_name, calibrator in calibrators:
+        rows.append(
+            {
+                "detector": detector_name,
+                "regime": "GLOBAL",
+                "median": float(calibrator.med),
+                "scale": float(calibrator.scale),
+                "z_threshold": float(calibrator.q_z),
+                "raw_threshold": float(calibrator.q_thresh),
+            }
+        )
+        for regime_id, regime_thresh in calibrator.regime_thresh_.items():
+            med_r, scale_r = calibrator.regime_params_.get(regime_id, (calibrator.med, calibrator.scale))
+            rows.append(
+                {
+                    "detector": detector_name,
+                    "regime": int(regime_id),
+                    "median": float(med_r),
+                    "scale": float(scale_r),
+                    "z_threshold": float(regime_thresh),
+                    "raw_threshold": float(med_r + regime_thresh * max(scale_r, 1e-9)),
+                }
+            )
+    return rows
+
+
+def build_calibration_summary_rows(
+    calibrators: List[Tuple[str, "ScoreCalibrator"]],
+) -> List[Dict[str, Any]]:
+    """
+    Build calibration summary payload rows for SQL write.
+    """
+    rows: List[Dict[str, Any]] = []
+    for detector_name, calibrator in calibrators:
+        rows.append(
+            {
+                "DetectorType": detector_name,
+                "CalibrationScore": float(calibrator.q_z) if hasattr(calibrator, "q_z") else 0.0,
+                "Median": float(calibrator.med) if hasattr(calibrator, "med") else 0.0,
+                "Scale": float(calibrator.scale) if hasattr(calibrator, "scale") else 0.0,
+                "NumRegimes": len(calibrator.regime_thresh_) if hasattr(calibrator, "regime_thresh_") else 0,
+            }
+        )
+    return rows
+
+
+def persist_threshold_artifacts(
+    output_manager: Optional[Any],
+    calibrators: List[Tuple[str, "ScoreCalibrator"]],
+    quality_ok: bool,
+    use_per_regime: bool,
+) -> Tuple[int, int]:
+    """
+    Persist per-regime and global threshold artifacts.
+
+    Returns:
+        Tuple of (per_regime_row_count, threshold_row_count)
+    """
+    if output_manager is None:
+        return 0, 0
+
+    per_regime_count = 0
+    if quality_ok and use_per_regime:
+        per_regime_rows = build_per_regime_threshold_rows(calibrators)
+        if per_regime_rows:
+            per_regime_df = pd.DataFrame(per_regime_rows)
+            output_manager.write_dataframe(per_regime_df, "per_regime_thresholds")
+            per_regime_count = len(per_regime_rows)
+
+    threshold_rows = build_threshold_rows(calibrators)
+    if threshold_rows:
+        thresholds_df = pd.DataFrame(threshold_rows)
+        output_manager.write_dataframe(thresholds_df, "acm_thresholds")
+
+    return per_regime_count, len(threshold_rows)
+
+
+def apply_contamination_filter_config(
+    self_tune_cfg: Dict[str, Any],
+    thresholds_cfg: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """
+    Apply contamination-filter settings into calibration self-tune config.
+
+    Mutates and returns self_tune_cfg to preserve existing runtime behavior.
+    """
+    contam_filter_cfg = (thresholds_cfg or {}).get("contamination_filter", {})
+    if contam_filter_cfg:
+        self_tune_cfg["contamination_filter"] = {
+            "enabled": contam_filter_cfg.get("enabled", True),
+            "method": contam_filter_cfg.get("method", "iterative_mad"),
+            "z_threshold": float(contam_filter_cfg.get("z_threshold", 4.0)),
+            "max_iterations": int(contam_filter_cfg.get("max_iterations", 10)),
+            "min_retained_ratio": float(contam_filter_cfg.get("min_retained_ratio", 0.70)),
+        }
+    else:
+        self_tune_cfg["contamination_filter"] = {
+            "enabled": True,
+            "method": "iterative_mad",
+            "z_threshold": 4.0,
+            "max_iterations": 10,
+            "min_retained_ratio": 0.70,
+        }
+    return self_tune_cfg
+
+
+def choose_pca_cache_for_calibration(
+    pca_train_spe: Optional[np.ndarray],
+    pca_train_t2: Optional[np.ndarray],
+    train_len: int,
+    logger: Any = Console,
+) -> Optional[Tuple[np.ndarray, Optional[np.ndarray]]]:
+    """
+    Return cached PCA scores only when cache length exactly matches train length.
+    """
+    if pca_train_spe is not None and len(pca_train_spe) == train_len:
+        return (pca_train_spe, pca_train_t2)
+
+    if pca_train_spe is not None:
+        logger.info(
+            f"PCA cache length mismatch: cached={len(pca_train_spe)}, train={train_len} - re-scoring",
+            component="CALIBRATE",
+        )
+    return None
+
+
+def compute_and_set_adaptive_clip(
+    train_frame: pd.DataFrame,
+    self_tune_cfg: Dict[str, Any],
+    omr_enabled: bool,
+) -> float:
+    """
+    Compute adaptive z-clip from TRAIN raw detector scores and update self_tune_cfg.
+    """
+    default_clip = float(self_tune_cfg.get("clip_z", 8.0))
+    train_z_p99: Dict[str, float] = {}
+    det_raw_cols = [
+        ("ar1", "ar1_raw"),
+        ("pca_spe", "pca_spe"),
+        ("pca_t2", "pca_t2"),
+        ("iforest", "iforest_raw"),
+        ("gmm", "gmm_raw"),
+    ]
+    if omr_enabled:
+        det_raw_cols.append(("omr", "omr_raw"))
+
+    for det_name, raw_col in det_raw_cols:
+        if raw_col not in train_frame.columns:
+            continue
+        raw_vals = train_frame[raw_col].to_numpy(copy=False)
+        finite_vals = raw_vals[np.isfinite(raw_vals)]
+        if len(finite_vals) <= 10:
+            continue
+        med = float(np.median(finite_vals))
+        mad = float(np.median(np.abs(finite_vals - med)))
+        scale = mad * 1.4826 if mad > 1e-9 else float(np.nanstd(finite_vals))
+        scale = max(scale, 1e-3)
+        z_vals = (finite_vals - med) / scale
+        p99 = float(np.percentile(z_vals, 99))
+        if 0 < p99 < 100:
+            train_z_p99[det_name] = p99
+
+    adaptive_clip = default_clip
+    if train_z_p99:
+        max_train_p99 = max(train_z_p99.values())
+        adaptive_clip = max(default_clip, min(max_train_p99 * 1.5, 50.0))
+        self_tune_cfg["clip_z"] = adaptive_clip
+    return adaptive_clip
+
+
+def compute_pca_train_percentiles(
+    train_frame: pd.DataFrame,
+    fit_regimes: Optional[np.ndarray],
+    pca_enabled: bool,
+    calibrators_dict: Dict[str, Any],
+) -> Tuple[float, float]:
+    """
+    Compute P95 TRAIN z-scores for PCA SPE and T2 calibrators.
+    """
+    spe_p95_train = 0.0
+    t2_p95_train = 0.0
+    cal_pca_spe = calibrators_dict.get("pca_spe_z")
+    cal_pca_t2 = calibrators_dict.get("pca_t2_z")
+
+    if pca_enabled and cal_pca_spe is not None and "pca_spe" in train_frame.columns:
+        pca_train_spe_z = cal_pca_spe.transform(
+            train_frame["pca_spe"].to_numpy(dtype=np.float32), regime_labels=fit_regimes
+        )
+        spe_p95_train = float(np.nanpercentile(pca_train_spe_z, 95))
+
+    if pca_enabled and cal_pca_t2 is not None and "pca_t2" in train_frame.columns:
+        pca_train_t2_z = cal_pca_t2.transform(
+            train_frame["pca_t2"].to_numpy(dtype=np.float32), regime_labels=fit_regimes
+        )
+        t2_p95_train = float(np.nanpercentile(pca_train_t2_z, 95))
+
+    return spe_p95_train, t2_p95_train
+
+
+def collect_enabled_calibrators(
+    calibrators_dict: Dict[str, Any],
+    frame: pd.DataFrame,
+    ar1_enabled: bool,
+    pca_enabled: bool,
+    iforest_enabled: bool,
+    gmm_enabled: bool,
+    omr_enabled: bool,
+) -> List[Tuple[str, "ScoreCalibrator"]]:
+    """
+    Collect active calibrator objects in detector output order.
+    """
+    calibrators: List[Tuple[str, "ScoreCalibrator"]] = []
+    cal_ar = calibrators_dict.get("ar1_z")
+    cal_pca_spe = calibrators_dict.get("pca_spe_z")
+    cal_pca_t2 = calibrators_dict.get("pca_t2_z")
+    cal_if = calibrators_dict.get("iforest_z")
+    cal_gmm = calibrators_dict.get("gmm_z")
+    cal_omr = calibrators_dict.get("omr_z")
+
+    if ar1_enabled and cal_ar is not None:
+        calibrators.append(("ar1_z", cal_ar))
+    if pca_enabled and cal_pca_spe is not None:
+        calibrators.append(("pca_spe_z", cal_pca_spe))
+    if pca_enabled and cal_pca_t2 is not None:
+        calibrators.append(("pca_t2_z", cal_pca_t2))
+    if iforest_enabled and cal_if is not None:
+        calibrators.append(("iforest_z", cal_if))
+    if gmm_enabled and cal_gmm is not None:
+        calibrators.append(("gmm_z", cal_gmm))
+    if omr_enabled and cal_omr is not None and "omr_raw" in frame.columns:
+        calibrators.append(("omr_z", cal_omr))
+    return calibrators
+
+
+def write_calibration_summary_safe(
+    output_manager: Optional[Any],
+    calibrators: List[Tuple[str, "ScoreCalibrator"]],
+    logger: Any = Console,
+    equip: str = "",
+) -> int:
+    """
+    Write calibration summary payload and return written row count.
+    """
+    if output_manager is None or not calibrators:
+        return 0
+
+    try:
+        calibration_summary = build_calibration_summary_rows(calibrators)
+        if not calibration_summary:
+            return 0
+        return int(output_manager.write_calibration_summary(calibration_summary))
+    except Exception as e:
+        logger.warn(
+            f"Calibration summary write failed: {e}",
+            component="CAL",
+            equip=equip,
+            error=str(e)[:200],
+        )
+        return 0
+
+
+@dataclass
+class CalibrationStageResult:
+    """Result payload from calibration stage orchestration."""
+    frame: pd.DataFrame
+    train_frame: pd.DataFrame
+    calibrators_dict: Dict[str, Any]
+    calibrators: List[Tuple[str, "ScoreCalibrator"]]
+    spe_p95_train: float
+    t2_p95_train: float
+    quality_ok: bool
+    use_per_regime: bool
+
+
+def run_calibration_stage(
+    *,
+    train: pd.DataFrame,
+    frame: pd.DataFrame,
+    cfg: Dict[str, Any],
+    regime_quality_ok: bool,
+    train_regime_labels: Optional[np.ndarray],
+    score_regime_labels: Optional[np.ndarray],
+    pca_train_spe: Optional[np.ndarray],
+    pca_train_t2: Optional[np.ndarray],
+    detectors: Dict[str, Any],
+    detector_flags: Dict[str, bool],
+    cached_calibration_params: Optional[Dict[str, Any]],
+    saved_model_version: Optional[int],
+    score_all_detectors_fn: Callable[..., Tuple[pd.DataFrame, Optional[Any]]],
+    calibrate_all_detectors_fn: Callable[..., Tuple[pd.DataFrame, Dict[str, Any]]],
+    persist_calibration_params_fn: Optional[Callable[..., bool]] = None,
+    output_manager: Optional[Any] = None,
+    logger: Any = Console,
+    equip: str = "",
+) -> CalibrationStageResult:
+    """
+    Run calibration stage end-to-end while keeping behavior parity with acm.py.
+    """
+    cal_q = float((cfg or {}).get("thresholds", {}).get("q", 0.98))
+    self_tune_cfg = (cfg or {}).get("thresholds", {}).get("self_tune", {})
+    use_per_regime = (cfg.get("fusion", {}) or {}).get("per_regime", False)
+    quality_ok = bool(
+        use_per_regime
+        and regime_quality_ok
+        and train_regime_labels is not None
+        and score_regime_labels is not None
+    )
+
+    apply_contamination_filter_config(
+        self_tune_cfg=self_tune_cfg,
+        thresholds_cfg=(cfg or {}).get("thresholds", {}),
+    )
+
+    pca_cached_for_train = choose_pca_cache_for_calibration(
+        pca_train_spe=pca_train_spe,
+        pca_train_t2=pca_train_t2,
+        train_len=len(train),
+        logger=logger,
+    )
+
+    train_frame, _ = score_all_detectors_fn(
+        data=train,
+        ar1_detector=detectors.get("ar1_detector"),
+        pca_detector=detectors.get("pca_detector"),
+        iforest_detector=detectors.get("iforest_detector"),
+        gmm_detector=detectors.get("gmm_detector"),
+        omr_detector=detectors.get("omr_detector"),
+        ar1_enabled=bool(detector_flags.get("ar1_enabled", True)),
+        pca_enabled=bool(detector_flags.get("pca_enabled", True)),
+        iforest_enabled=bool(detector_flags.get("iforest_enabled", True)),
+        gmm_enabled=bool(detector_flags.get("gmm_enabled", True)),
+        omr_enabled=bool(detector_flags.get("omr_enabled", True)),
+        pca_cached=pca_cached_for_train,
+        return_omr_contributions=False,
+    )
+
+    adaptive_clip = compute_and_set_adaptive_clip(
+        train_frame=train_frame,
+        self_tune_cfg=self_tune_cfg,
+        omr_enabled=bool(detector_flags.get("omr_enabled", True)),
+    )
+
+    fit_regimes = train_regime_labels if quality_ok else None
+    transform_regimes = score_regime_labels if quality_ok else None
+    frame["per_regime_active"] = 1 if quality_ok else 0
+
+    frame, calibrators_dict = calibrate_all_detectors_fn(
+        train_frame=train_frame,
+        score_frame=frame,
+        cal_q=cal_q,
+        self_tune_cfg=self_tune_cfg,
+        fit_regimes=fit_regimes,
+        transform_regimes=transform_regimes,
+        omr_enabled=bool(detector_flags.get("omr_enabled", True)),
+        cached_calibration_params=cached_calibration_params,
+    )
+
+    if persist_calibration_params_fn is not None:
+        persist_calibration_params_fn(saved_model_version, calibrators_dict)
+
+    spe_p95_train, t2_p95_train = compute_pca_train_percentiles(
+        train_frame=train_frame,
+        fit_regimes=fit_regimes,
+        pca_enabled=bool(detector_flags.get("pca_enabled", True)),
+        calibrators_dict=calibrators_dict,
+    )
+
+    calibrators = collect_enabled_calibrators(
+        calibrators_dict=calibrators_dict,
+        frame=frame,
+        ar1_enabled=bool(detector_flags.get("ar1_enabled", True)),
+        pca_enabled=bool(detector_flags.get("pca_enabled", True)),
+        iforest_enabled=bool(detector_flags.get("iforest_enabled", True)),
+        gmm_enabled=bool(detector_flags.get("gmm_enabled", True)),
+        omr_enabled=bool(detector_flags.get("omr_enabled", True)),
+    )
+
+    per_regime_count, threshold_count = persist_threshold_artifacts(
+        output_manager=output_manager,
+        calibrators=calibrators,
+        quality_ok=quality_ok,
+        use_per_regime=use_per_regime,
+    )
+
+    cal_summary_count = write_calibration_summary_safe(
+        output_manager=output_manager,
+        calibrators=calibrators,
+        logger=logger,
+        equip=equip,
+    )
+
+    logger.info(
+        f"Calibration complete: q={cal_q} | clip_z={adaptive_clip:.2f} | detectors={len(calibrators)} | "
+        f"thresholds={threshold_count} | per_regime={per_regime_count} | summary={cal_summary_count}",
+        component="CAL",
+    )
+
+    return CalibrationStageResult(
+        frame=frame,
+        train_frame=train_frame,
+        calibrators_dict=calibrators_dict,
+        calibrators=calibrators,
+        spe_p95_train=spe_p95_train,
+        t2_p95_train=t2_p95_train,
+        quality_ok=quality_ok,
+        use_per_regime=use_per_regime,
+    )
+
+
 @dataclass
 class EpisodeParams:
     """Parameters for episode detection with hysteresis.
@@ -1331,7 +1745,7 @@ class Fuser:
         """Clean calibrated z-scores for fusion (NaN/inf handling only).
 
         v11.9.0: Input z-scores are already training-anchored via ScoreCalibrator.
-        Do NOT re-center or re-scale — that destroys cross-batch comparability.
+        Do NOT re-center or re-scale; that destroys cross-batch comparability.
         Previous _zscore() re-normalized against the current batch, making health
         scores incomparable between batches (e.g., 39% vs 94% on same data).
         """
@@ -1357,7 +1771,7 @@ class Fuser:
             streams: Dict of detector_name -> z-score array.
             original_features: Score-window feature DataFrame (provides index).
             discounted_weights: Pre-computed correlation-discounted weights from
-                compute_discounted_weights(). Compute once upstream and pass in —
+                compute_discounted_weights(). Compute once upstream and pass in,
                 never compute inside fuse() per call.
         """
         # ANA-03: normalize weights over PRESENT keys only (robust to missing detectors)
@@ -1589,7 +2003,7 @@ class Fuser:
             # PERF-FIX (v11.1.7): Precompute global baseline statistics for feature attribution
             # This avoids recomputing median/MAD for each episode (was causing 700s+ overhead)
             # PERF-FIX (v11.15.2): Precompute the FULL feature z-score matrix as numpy array once.
-            # Per-episode attribution then just slices rows and calls np.nanmean(abs, axis=0) —
+            # Per-episode attribution then just slices rows and calls np.nanmean(abs, axis=0),
             # eliminating the 5789 pandas Series.fillna() calls that caused 191s in coldstart.
             global_feature_medians: Optional[pd.Series] = None
             global_feature_mads: Optional[pd.Series] = None
@@ -1645,7 +2059,7 @@ class Fuser:
                 culprits_raw = primary_detector
                 if 'pca' in primary_detector or 'mhal' in primary_detector:
                     # P2-FIX (v11.1.6): Improved PCA attribution using absolute deviation
-                    # PERF-FIX (v11.15.2): Use precomputed numpy z-score matrix — slice rows for
+                    # PERF-FIX (v11.15.2): Use precomputed numpy z-score matrix; slice rows for
                     # the episode window and call np.nanmean(abs, axis=0) once.  Eliminates
                     # 5789 pandas Series.fillna() calls that were costing 191s in coldstart.
                     top_feature: Optional[str] = None
@@ -1753,10 +2167,8 @@ class Fuser:
 def compute_episode_params(streams: Dict[str, np.ndarray], cfg: Dict[str, Any]) -> EpisodeParams:
     """Compute CUSUM episode detection parameters from current stream statistics.
 
-    Computed once in run_fusion_pipeline() and shared across the baseline, train,
-    and score passes — avoiding redundant computation and triplicated log output.
-
-    Logs CUSUM tuning at INFO level (intended to appear exactly once per pipeline run).
+    Computed once in run_fusion_pipeline() and shared across baseline, train, and
+    score passes to avoid redundant computation and duplicate logging.
     """
     epcfg = (cfg or {}).get("episodes", {})
     cpd = epcfg.get("cpd", {}) if isinstance(epcfg, dict) else {}
@@ -1775,57 +2187,47 @@ def compute_episode_params(streams: Dict[str, np.ndarray], cfg: Dict[str, Any]) 
     min_release = int(epcfg.get("min_release", 3))
 
     auto_tune_cfg = cpd.get("auto_tune", {})
-    auto_tune_enabled = auto_tune_cfg.get("enabled", False)
+    all_values: List[np.ndarray] = []
+    for stream in streams.values():
+        finite_mask = np.isfinite(stream)
+        if finite_mask.any():
+            all_values.append(stream[finite_mask])
 
-    if auto_tune_enabled:
-        try:
-            all_values = []
-            for stream in streams.values():
-                finite_mask = np.isfinite(stream)
-                if finite_mask.any():
-                    all_values.append(stream[finite_mask])
+    statistic_vals = np.concatenate(all_values) if all_values else np.array([], dtype=float)
 
-            statistic_vals = np.concatenate(all_values) if all_values else np.array([], dtype=float)
+    if statistic_vals.size:
+        statistic_median = float(np.nanmedian(statistic_vals))
+        statistic_mad = float(np.nanmedian(np.abs(statistic_vals - statistic_median)))
+        std = max(statistic_mad * 1.4826, 1e-3)
+        p50 = float(np.nanpercentile(statistic_vals, 50))
+        p95 = float(np.nanpercentile(statistic_vals, 95))
+        spread = max(p95 - p50, 1e-3)
 
-            if statistic_vals.size:
-                # v11.1.3: Use MAD * 1.4826 instead of std for robustness
-                statistic_median = float(np.nanmedian(statistic_vals))
-                statistic_mad = float(np.nanmedian(np.abs(statistic_vals - statistic_median)))
-                std = max(statistic_mad * 1.4826, 1e-3)
-                p50 = float(np.nanpercentile(statistic_vals, 50))
-                p95 = float(np.nanpercentile(statistic_vals, 95))
-                spread = max(p95 - p50, 1e-3)
+        # k_factor and h_factor are dimensionless multipliers; detect_episodes()
+        # applies the actual scale based on stream dispersion.
+        k_factor = float(auto_tune_cfg.get("k_factor", 0.5))
+        h_factor = float(auto_tune_cfg.get("h_factor", 5.0))
+        k_min = float(auto_tune_cfg.get("k_min", 0.25))
+        k_max = float(auto_tune_cfg.get("k_max", max(base_k_sigma, 2.0)))
+        h_min = float(auto_tune_cfg.get("h_min", 3.0))
+        h_max = float(auto_tune_cfg.get("h_max", max(base_h_sigma, 10.0)))
 
-                # P0-FIX (v11.1.6): k_factor and h_factor ARE the dimensionless multipliers.
-                # DO NOT multiply by std or spread — detect_episodes() does that.
-                k_factor = float(auto_tune_cfg.get("k_factor", 0.5))
-                h_factor = float(auto_tune_cfg.get("h_factor", 5.0))
-                k_min = float(auto_tune_cfg.get("k_min", 0.25))
-                k_max = float(auto_tune_cfg.get("k_max", max(base_k_sigma, 2.0)))
-                h_min = float(auto_tune_cfg.get("h_min", 3.0))
-                h_max = float(auto_tune_cfg.get("h_max", max(base_h_sigma, 10.0)))
+        spread_ratio = spread / std if std > 1e-6 else 1.0
+        adaptive_h_factor = h_factor * min(1.5, max(0.8, spread_ratio / 2.0))
+        k_sigma = float(np.clip(k_factor, k_min, k_max))
+        h_sigma = float(np.clip(adaptive_h_factor, h_min, h_max))
 
-                spread_ratio = spread / std if std > 1e-6 else 1.0
-                adaptive_h_factor = h_factor * min(1.5, max(0.8, spread_ratio / 2.0))
-                k_sigma = float(np.clip(k_factor, k_min, k_max))
-                h_sigma = float(np.clip(adaptive_h_factor, h_min, h_max))
-
-                Console.info(
-                    f"CUSUM auto-tuned: k_sigma={base_k_sigma:.3f}->{k_sigma:.3f}, "
-                    f"h_sigma={base_h_sigma:.3f}->{h_sigma:.3f} (spread_ratio={spread_ratio:.2f})",
-                    component="FUSE",
-                )
-            else:
-                Console.warn(
-                    "CUSUM auto-tune skipped: no finite stream values",
-                    component="FUSE",
-                    n_streams=len(streams),
-                )
-        except Exception as tune_e:
-            Console.warn(
-                f"CUSUM auto-tune failed: {tune_e}",
-                component="FUSE", error_type=type(tune_e).__name__, error=str(tune_e)[:200],
-            )
+        Console.info(
+            f"CUSUM auto-tuned: k_sigma={base_k_sigma:.3f}->{k_sigma:.3f}, "
+            f"h_sigma={base_h_sigma:.3f}->{h_sigma:.3f} (spread_ratio={spread_ratio:.2f})",
+            component="FUSE",
+        )
+    else:
+        Console.warn(
+            "CUSUM auto-tune skipped: no finite stream values",
+            component="FUSE",
+            n_streams=len(streams),
+        )
 
     return EpisodeParams(
         k_sigma=k_sigma,
@@ -1839,7 +2241,6 @@ def compute_episode_params(streams: Dict[str, np.ndarray], cfg: Dict[str, Any]) 
         min_release=min_release,
     )
 
-
 def compute_discounted_weights(
     weights: Dict[str, float],
     streams: Dict[str, np.ndarray],
@@ -1850,7 +2251,7 @@ def compute_discounted_weights(
     Detectors that are strongly correlated (|r| > 0.5) with others receive
     a downward weight adjustment to prevent double-counting of redundant signal.
 
-    Computed once in run_fusion_pipeline() and passed into Fuser.fuse() —
+    Computed once in run_fusion_pipeline() and passed into Fuser.fuse();
     never computed inside fuse() per-call.
 
     Returns a new dict of (unnormalized) discounted weights keyed by detector name.
@@ -1867,58 +2268,53 @@ def compute_discounted_weights(
     pairs_checked = 0
     pairs_correlated = 0
 
-    try:
-        zs = {k: Fuser._sanitize(np.asarray(streams[k], dtype=float)) for k in keys}
-        sorted_keys = sorted(keys)
-        for i, k1 in enumerate(sorted_keys):
-            for k2 in sorted_keys[i + 1:]:
-                arr1, arr2 = zs[k1], zs[k2]
-                valid_mask = np.isfinite(arr1) & np.isfinite(arr2)
-                if valid_mask.sum() > 10:
-                    # P3-FIX (v11.1.6): Spearman over Pearson — robust to outliers
-                    # Skip constant arrays — Spearman is undefined and scipy raises
-                    # ConstantInputWarning. Correlation simply doesn't apply here.
-                    valid_1, valid_2 = arr1[valid_mask], arr2[valid_mask]
-                    if np.unique(valid_1).size < 2 or np.unique(valid_2).size < 2:
-                        continue
-                    pairs_checked += 1
-                    spearman_result = spearmanr(valid_1, valid_2)
-                    corr = float(spearman_result.correlation)  # type: ignore[union-attr]
-                    if np.isfinite(corr) and abs(corr) > 0.5:
-                        pairs_correlated += 1
-                        correlation_count[k1] += 1
-                        correlation_count[k2] += 1
-                        correlation_sum[k1] += abs(corr)
-                        correlation_sum[k2] += abs(corr)
-                        if not quiet:
-                            Console.debug(
-                                f"Detector Spearman correlation {k1}<->{k2}: {corr:.2f}",
-                                component="FUSE",
-                            )
+    zs = {k: Fuser._sanitize(np.asarray(streams[k], dtype=float)) for k in keys}
+    sorted_keys = sorted(keys)
+    for i, k1 in enumerate(sorted_keys):
+        for k2 in sorted_keys[i + 1:]:
+            arr1, arr2 = zs[k1], zs[k2]
+            valid_mask = np.isfinite(arr1) & np.isfinite(arr2)
+            if valid_mask.sum() > 10:
+                # P3-FIX (v11.1.6): Spearman over Pearson - robust to outliers.
+                valid_1, valid_2 = arr1[valid_mask], arr2[valid_mask]
+                if np.unique(valid_1).size < 2 or np.unique(valid_2).size < 2:
+                    continue
+                pairs_checked += 1
+                spearman_result = spearmanr(valid_1, valid_2)
+                corr = float(spearman_result.correlation)  # type: ignore[union-attr]
+                if np.isfinite(corr) and abs(corr) > 0.5:
+                    pairs_correlated += 1
+                    correlation_count[k1] += 1
+                    correlation_count[k2] += 1
+                    correlation_sum[k1] += abs(corr)
+                    correlation_sum[k2] += abs(corr)
+                    if not quiet:
+                        Console.debug(
+                            f"Detector Spearman correlation {k1}<->{k2}: {corr:.2f}",
+                            component="FUSE",
+                        )
 
-        for k in keys:
-            if correlation_count[k] > 0:
-                avg_corr = correlation_sum[k] / correlation_count[k]
-                # At avg_corr=0.8, discount=15%; capped at 30%
-                discount_factor = min(0.3, (avg_corr - 0.5) * 0.5)
-                w_raw[k] *= (1 - discount_factor)
-                if not quiet:
-                    Console.debug(
-                        f"Detector {k}: correlated with {correlation_count[k]} others, "
-                        f"avg_corr={avg_corr:.2f}, discount={discount_factor:.1%}",
-                        component="FUSE",
-                    )
+    for k in keys:
+        if correlation_count[k] > 0:
+            avg_corr = correlation_sum[k] / correlation_count[k]
+            # At avg_corr=0.8, discount=15%; capped at 30%
+            discount_factor = min(0.3, (avg_corr - 0.5) * 0.5)
+            w_raw[k] *= (1 - discount_factor)
+            if not quiet:
+                Console.debug(
+                    f"Detector {k}: correlated with {correlation_count[k]} others, "
+                    f"avg_corr={avg_corr:.2f}, discount={discount_factor:.1%}",
+                    component="FUSE",
+                )
 
-        if pairs_correlated > 0 and not quiet:
-            Console.info(
-                f"{pairs_correlated}/{pairs_checked} detector pairs correlated, "
-                f"weight adjustments applied",
-                component="FUSE",
-                pairs_checked=pairs_checked,
-                pairs_correlated=pairs_correlated,
-            )
-    except Exception as ce:
-        Console.debug(f"Correlation adjustment failed: {ce}", component="FUSE")
+    if pairs_correlated > 0 and not quiet:
+        Console.info(
+            f"{pairs_correlated}/{pairs_checked} detector pairs correlated, "
+            f"weight adjustments applied",
+            component="FUSE",
+            pairs_checked=pairs_checked,
+            pairs_correlated=pairs_correlated,
+        )
 
     return w_raw
 
@@ -2066,15 +2462,9 @@ def normalize_episodes_schema(
     start_ts = pd.to_datetime(episodes["start_ts"], errors="coerce")
     end_ts = pd.to_datetime(episodes["end_ts"], errors="coerce")
     episodes["duration_s"] = (end_ts - start_ts).dt.total_seconds()
-    try:
-        episodes["duration_hours"] = episodes["duration_s"].astype(float) / 3600.0
-    except Exception:
-        duration_s_series = episodes["duration_s"] if "duration_s" in episodes.columns else pd.Series(0.0, index=episodes.index)
-        episodes["duration_hours"] = np.where(
-            pd.notna(duration_s_series),
-            duration_s_series.astype(float) / 3600.0,
-            0.0
-        )
+    episodes["duration_hours"] = (
+        pd.to_numeric(episodes["duration_s"], errors="coerce").fillna(0.0).astype(float) / 3600.0
+    )
     
     # Sort and finalize
     episodes = episodes.sort_values(["start_ts", "end_ts", "episode_id"]).reset_index(drop=True)
@@ -2159,7 +2549,7 @@ def run_fusion_pipeline(
     equip: str = "",
 ) -> FusionResult:
     """
-    Execute complete fusion pipeline: validate → auto-tune → fuse → detect episodes.
+    Execute complete fusion pipeline: validate -> auto-tune -> fuse -> detect episodes.
     
     Args:
         frame: Score data with detector z-score columns
@@ -2187,54 +2577,48 @@ def run_fusion_pipeline(
     episode_params = compute_episode_params(present, effective_cfg)
     discounted_weights = compute_discounted_weights(weights, present)
 
-    # 3. Auto-tune detector weights (optional — quick baseline fuse pass, no episodes)
+    # 3. Auto-tune detector weights (baseline fuse pass, no episodes)
     auto_tuned = False
     tuning_diagnostics = None
-    try:
-        with Span("fusion.baseline", n_detectors=len(present), n_samples=len(score_data)):
-            fused_baseline = Fuser(weights=weights, ep=episode_params).fuse(
-                present, score_data, discounted_weights=discounted_weights
-            )
-        fused_baseline_np = np.asarray(fused_baseline, dtype=np.float32).reshape(-1)
-
-        tuned, diagnostics = tune_detector_weights(
-            streams=present, fused=fused_baseline_np,
-            current_weights=weights, cfg=cfg,
+    with Span("fusion.baseline", n_detectors=len(present), n_samples=len(score_data)):
+        fused_baseline = Fuser(weights=weights, ep=episode_params).fuse(
+            present, score_data, discounted_weights=discounted_weights
         )
+    fused_baseline_np = np.asarray(fused_baseline, dtype=np.float32).reshape(-1)
 
-        if diagnostics.get("enabled"):
-            weights = tuned
-            auto_tuned = True
-            tuning_diagnostics = diagnostics
-            # Recompute discounted weights with the newly tuned base weights
-            discounted_weights = compute_discounted_weights(weights, present, quiet=True)
+    tuned, diagnostics = tune_detector_weights(
+        streams=present, fused=fused_baseline_np,
+        current_weights=weights, cfg=cfg,
+    )
 
-            if output_manager:
-                output_manager.write_fusion_metrics(
-                    fusion_weights=weights,
-                    tuning_diagnostics=diagnostics,
-                    previous_weights=previous_weights,
-                )
-    except Exception as e:
-        Console.warn(f"Auto-tuning failed: {e}", component="FUSE", equip=equip)
+    if diagnostics.get("enabled"):
+        weights = tuned
+        auto_tuned = True
+        tuning_diagnostics = diagnostics
+        # Recompute discounted weights with the newly tuned base weights
+        discounted_weights = compute_discounted_weights(weights, present, quiet=True)
 
-    # 4. Fuse training data (for threshold baseline — no episodes needed)
+        if output_manager:
+            output_manager.write_fusion_metrics(
+                fusion_weights=weights,
+                tuning_diagnostics=diagnostics,
+                previous_weights=previous_weights,
+            )
+
+    # 4. Fuse training data (for threshold baseline, no episodes needed)
     train_fused = None
     if train_frame is not None and train_data is not None and not train_data.empty:
         train_present = {k: train_frame[k].to_numpy(copy=False)
                         for k in present.keys() if k in train_frame.columns}
         if train_present:
-            try:
-                # Train uses its own discounted weights — Spearman correlations may
-                # differ on the training population vs the current scoring window.
-                train_discounted = compute_discounted_weights(weights, train_present)
-                with Span("fusion.train", n_detectors=len(train_present), n_samples=len(train_data)):
-                    train_fused_series = Fuser(weights=weights, ep=episode_params).fuse(
-                        train_present, train_data, discounted_weights=train_discounted
-                    )
-                train_fused = np.asarray(train_fused_series, dtype=np.float32).reshape(-1)
-            except Exception as e:
-                Console.warn(f"Train fusion failed: {e}", component="FUSE", equip=equip)
+            # Train uses its own discounted weights; Spearman correlations may
+            # differ on the training population vs the current scoring window.
+            train_discounted = compute_discounted_weights(weights, train_present)
+            with Span("fusion.train", n_detectors=len(train_present), n_samples=len(train_data)):
+                train_fused_series = Fuser(weights=weights, ep=episode_params).fuse(
+                    train_present, train_data, discounted_weights=train_discounted
+                )
+            train_fused = np.asarray(train_fused_series, dtype=np.float32).reshape(-1)
 
     # 5. Score fusion with episode detection
     with Span("fusion.score", n_detectors=len(present), n_samples=len(score_data)):
@@ -2261,3 +2645,272 @@ def run_fusion_pipeline(
         tuning_diagnostics=tuning_diagnostics,
         train_fused=train_fused,
     )
+
+
+def apply_fusion_result_and_record_metrics(
+    frame: pd.DataFrame,
+    train_frame: Optional[pd.DataFrame],
+    fusion_result: "FusionResult",
+    equip: str = "",
+    record_detector_scores_fn: Optional[Callable[..., None]] = None,
+    record_episode_fn: Optional[Callable[..., None]] = None,
+) -> Tuple[pd.DataFrame, Optional[pd.DataFrame], pd.DataFrame, Dict[str, float]]:
+    """
+    Apply fusion outputs to score/train frames and emit observability metrics.
+    """
+    frame["fused"] = fusion_result.fused_scores
+    episodes = fusion_result.episodes
+    fusion_weights_used = fusion_result.weights_used
+
+    if train_frame is not None and fusion_result.train_fused is not None:
+        train_frame["fused"] = fusion_result.train_fused
+
+    detector_scores = {
+        "fused_z": float(fusion_result.fused_scores[-1]) if len(fusion_result.fused_scores) > 0 else 0.0
+    }
+    for det in ["ar1_z", "pca_spe_z", "pca_t2_z", "iforest_z", "gmm_z", "omr_z"]:
+        if det in frame.columns:
+            detector_scores[det] = float(frame[det].iloc[-1])
+
+    if record_detector_scores_fn is not None:
+        record_detector_scores_fn(equip, detector_scores)
+    if record_episode_fn is not None and len(episodes) > 0:
+        record_episode_fn(equip, count=len(episodes), severity="warning")
+
+    return frame, train_frame, episodes, fusion_weights_used
+
+
+@dataclass
+class FusionStageResult:
+    """Result bundle for the full fusion stage."""
+    frame: pd.DataFrame
+    train_frame: Optional[pd.DataFrame]
+    episodes: pd.DataFrame
+    fusion_weights_used: Dict[str, float]
+
+
+def run_fusion_stage(
+    *,
+    frame: pd.DataFrame,
+    train_frame: Optional[pd.DataFrame],
+    score_data: pd.DataFrame,
+    train_data: Optional[pd.DataFrame],
+    cfg: Optional[Dict[str, Any]],
+    score_regime_labels: Optional[np.ndarray] = None,
+    train_regime_labels: Optional[np.ndarray] = None,
+    output_manager: Optional[Any] = None,
+    previous_weights: Optional[Dict[str, float]] = None,
+    omr_contributions: Optional[pd.DataFrame] = None,
+    equip: str = "",
+    record_detector_scores_fn: Optional[Callable[..., None]] = None,
+    record_episode_fn: Optional[Callable[..., None]] = None,
+) -> FusionStageResult:
+    """
+    Execute fusion pipeline and apply outputs to score/train frames.
+    """
+    fusion_result = run_fusion_pipeline(
+        frame=frame,
+        train_frame=train_frame,
+        score_data=score_data,
+        train_data=train_data,
+        cfg=cfg,
+        score_regime_labels=score_regime_labels,
+        train_regime_labels=train_regime_labels,
+        output_manager=output_manager,
+        previous_weights=previous_weights,
+        omr_contributions=omr_contributions,
+        equip=equip,
+    )
+
+    frame, train_frame, episodes, fusion_weights_used = apply_fusion_result_and_record_metrics(
+        frame=frame,
+        train_frame=train_frame,
+        fusion_result=fusion_result,
+        equip=equip,
+        record_detector_scores_fn=record_detector_scores_fn,
+        record_episode_fn=record_episode_fn,
+    )
+
+    return FusionStageResult(
+        frame=frame,
+        train_frame=train_frame,
+        episodes=episodes,
+        fusion_weights_used=fusion_weights_used,
+    )
+
+
+@dataclass
+class HealthStageResult:
+    """Result bundle for calibration, fusion, thresholds, and regime postprocess stages."""
+    frame: pd.DataFrame
+    train_frame: pd.DataFrame
+    episodes: pd.DataFrame
+    fusion_weights_used: Dict[str, float]
+    spe_p95_train: float
+    t2_p95_train: float
+    quality_ok: bool
+    use_per_regime: bool
+
+
+def run_health_stage(
+    *,
+    section_fn: Any,
+    train: pd.DataFrame,
+    score: pd.DataFrame,
+    frame: pd.DataFrame,
+    cfg: Dict[str, Any],
+    regime_quality_ok: bool,
+    train_regime_labels: Optional[np.ndarray],
+    score_regime_labels: Optional[np.ndarray],
+    pca_train_spe: Optional[np.ndarray],
+    pca_train_t2: Optional[np.ndarray],
+    detectors: Dict[str, Any],
+    detector_flags: Dict[str, bool],
+    cached_calibration_params: Optional[Dict[str, Any]],
+    saved_model_version: Optional[int],
+    output_manager: Any,
+    logger: Any,
+    equip: str,
+    previous_weights: Optional[Dict[str, float]],
+    omr_contributions_data: Optional[pd.DataFrame],
+    record_detector_scores_fn: Optional[Callable[..., None]],
+    record_episode_fn: Optional[Callable[..., None]],
+    coldstart_complete: bool,
+    equip_id: int,
+    regime_model: Any,
+    score_out: Dict[str, Any],
+    sql_client: Any,
+    run_id: Optional[str],
+    cached_manifest: Optional[Dict[str, Any]],
+    score_all_detectors_fn: Optional[Any] = None,
+    calibrate_all_detectors_fn: Optional[Any] = None,
+    persist_calibration_params_fn: Optional[Any] = None,
+    maybe_update_adaptive_thresholds_fn: Optional[Any] = None,
+    run_regime_postprocess_stage_fn: Optional[Any] = None,
+    auto_tune_parameters_fn: Optional[Any] = None,
+) -> HealthStageResult:
+    """
+    Execute post-model health stages in pipeline order.
+    """
+    score_detectors_fn = score_all_detectors_fn
+    calibrate_detectors_fn = calibrate_all_detectors_fn
+    adaptive_thresholds_fn = maybe_update_adaptive_thresholds_fn
+    regime_postprocess_fn = run_regime_postprocess_stage_fn
+    auto_tune_fn = auto_tune_parameters_fn
+
+    if score_detectors_fn is None or calibrate_detectors_fn is None:
+        from core.detector_orchestrator import score_all_detectors as _score_all_detectors
+        from core.detector_orchestrator import calibrate_all_detectors as _calibrate_all_detectors
+        score_detectors_fn = score_detectors_fn or _score_all_detectors
+        calibrate_detectors_fn = calibrate_detectors_fn or _calibrate_all_detectors
+
+    if adaptive_thresholds_fn is None:
+        from core.adaptive_thresholds import maybe_update_adaptive_thresholds as _adaptive_thresholds
+        adaptive_thresholds_fn = _adaptive_thresholds
+
+    if regime_postprocess_fn is None:
+        from core.regimes import run_regime_postprocess_stage as _run_regime_postprocess_stage
+        regime_postprocess_fn = _run_regime_postprocess_stage
+
+    if auto_tune_fn is None:
+        from core.model_evaluation import auto_tune_parameters as _auto_tune_parameters
+        auto_tune_fn = _auto_tune_parameters
+
+    with section_fn("calibrate"):
+        calibration_result = run_calibration_stage(
+            train=train,
+            frame=frame,
+            cfg=cfg,
+            regime_quality_ok=regime_quality_ok,
+            train_regime_labels=train_regime_labels,
+            score_regime_labels=score_regime_labels,
+            pca_train_spe=pca_train_spe,
+            pca_train_t2=pca_train_t2,
+            detectors=detectors,
+            detector_flags=detector_flags,
+            cached_calibration_params=cached_calibration_params,
+            saved_model_version=saved_model_version,
+            score_all_detectors_fn=score_detectors_fn,
+            calibrate_all_detectors_fn=calibrate_detectors_fn,
+            persist_calibration_params_fn=persist_calibration_params_fn,
+            output_manager=output_manager,
+            logger=logger,
+            equip=equip,
+        )
+        frame = calibration_result.frame
+        train_frame = calibration_result.train_frame
+        spe_p95_train = calibration_result.spe_p95_train
+        t2_p95_train = calibration_result.t2_p95_train
+        quality_ok = calibration_result.quality_ok
+        use_per_regime = calibration_result.use_per_regime
+
+    with section_fn("fusion"):
+        fusion_stage = run_fusion_stage(
+            frame=frame,
+            train_frame=train_frame,
+            score_data=score,
+            train_data=train,
+            cfg=cfg,
+            score_regime_labels=score_regime_labels,
+            train_regime_labels=train_regime_labels,
+            output_manager=output_manager,
+            previous_weights=previous_weights,
+            omr_contributions=omr_contributions_data,
+            equip=equip,
+            record_detector_scores_fn=record_detector_scores_fn,
+            record_episode_fn=record_episode_fn,
+        )
+        frame = fusion_stage.frame
+        train_frame = fusion_stage.train_frame
+        episodes = fusion_stage.episodes
+        fusion_weights_used = fusion_stage.fusion_weights_used
+
+    with section_fn("thresholds.adaptive"):
+        adaptive_thresholds_fn(
+            train_frame=train_frame,
+            train_data=train,
+            cfg=cfg,
+            equip_id=equip_id,
+            output_manager=output_manager,
+            coldstart_complete=coldstart_complete,
+            regime_quality_ok=regime_quality_ok,
+            logger=logger,
+        )
+
+    with section_fn("regimes.postprocess"):
+        regime_post = regime_postprocess_fn(
+            frame=frame,
+            score_data=score,
+            regime_model=regime_model,
+            regime_quality_ok=regime_quality_ok,
+            cfg=cfg,
+            output_manager=output_manager,
+            logger=logger,
+        )
+        frame = regime_post.frame
+
+    auto_tune_fn(
+        frame=frame,
+        episodes=episodes,
+        score_out=score_out,
+        regime_quality_ok=regime_quality_ok,
+        cfg=cfg,
+        sql_client=sql_client,
+        run_id=run_id,
+        equip_id=equip_id,
+        equip=equip,
+        output_manager=output_manager,
+        cached_manifest=cached_manifest,
+    )
+
+    return HealthStageResult(
+        frame=frame,
+        train_frame=train_frame,
+        episodes=episodes,
+        fusion_weights_used=fusion_weights_used,
+        spe_p95_train=spe_p95_train,
+        t2_p95_train=t2_p95_train,
+        quality_ok=quality_ok,
+        use_per_regime=use_per_regime,
+    )
+

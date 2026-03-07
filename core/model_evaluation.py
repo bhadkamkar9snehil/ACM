@@ -11,11 +11,11 @@ Quality Metrics Monitored:
 5. Sensor Coverage: % of sensors contributing to detections
 
 Retraining Triggers:
-- Saturation > 5% → Model underfitting, recalibrate
-- Anomaly rate > 10% or < 0.01% → Miscalibration
-- Regime silhouette < 0.15 → Poor clustering
-- Episode coverage > 80% → Excessive false positives
-- Config signature changed → Parameter update
+- Saturation > 5% -> Model underfitting, recalibrate
+- Anomaly rate > 10% or < 0.01% -> Miscalibration
+- Regime silhouette < 0.15 -> Poor clustering
+- Episode coverage > 80% -> Excessive false positives
+- Config signature changed -> Parameter update
 
 Actions:
 - Auto-retrains models when degradation detected
@@ -29,6 +29,7 @@ import pandas as pd
 from typing import Dict, Any, Optional, Tuple, List
 from pathlib import Path
 from datetime import datetime, timezone
+from dataclasses import dataclass
 from core.observability import Console
 
 
@@ -381,6 +382,298 @@ def assess_model_quality(
     return should_retrain, reasons, quality_report
 
 
+def evaluate_force_retrain_triggers(
+    cfg: Dict[str, Any],
+    cached_manifest: Optional[Dict[str, Any]],
+    score_out: Dict[str, Any],
+    regime_quality_ok: bool,
+    current_model_maturity: Optional[str],
+    boolean_only_metrics: List[str],
+    equip: str = "",
+    logger: Any = Console,
+) -> Dict[str, Any]:
+    """
+    Evaluate force-retrain triggers for cached models.
+
+    This function centralizes policy logic for:
+    - config signature changes
+    - model age threshold
+    - regime-quality threshold by metric type
+    """
+    config_changed = False
+    if cached_manifest:
+        cached_sig = cached_manifest.get("config_signature", "")
+        current_sig = cfg.get("_signature", "unknown")
+        config_changed = (cached_sig != current_sig)
+
+    auto_retrain_cfg = cfg.get("models", {}).get("auto_retrain", {})
+    if isinstance(auto_retrain_cfg, bool):
+        auto_retrain_cfg = {}
+
+    model_age_trigger = False
+    model_age_hours = 0.0
+    max_age_hours = float(auto_retrain_cfg.get("max_model_age_hours", 720))
+    if cached_manifest:
+        created_at_str = cached_manifest.get("created_at")
+        if created_at_str:
+            try:
+                created_at = datetime.fromisoformat(created_at_str)
+                model_age_hours = (datetime.now() - created_at).total_seconds() / 3600.0
+                if model_age_hours > max_age_hours:
+                    model_age_trigger = True
+            except Exception:
+                pass
+
+    regime_quality_trigger = False
+    current_regime_score = float(score_out.get("regime_score", 0.0))
+    regime_metric_name = str(score_out.get("regime_metric", "silhouette"))
+    min_regime_quality = float(auto_retrain_cfg.get("min_regime_quality", 0.3))
+    min_dbcv_quality = float(auto_retrain_cfg.get("min_dbcv_quality", 0.0))
+
+    if regime_metric_name in ("silhouette", "silhouette_non_noise"):
+        regime_quality_trigger = current_regime_score < min_regime_quality
+    elif regime_metric_name in ("dbcv", "persistence"):
+        # For HDBSCAN-style metrics use the raw DBCV/persistence threshold.
+        regime_quality_trigger = current_regime_score < min_dbcv_quality
+    elif regime_metric_name not in boolean_only_metrics:
+        # Unknown numeric metric: fallback to quality_ok boolean.
+        regime_quality_trigger = not regime_quality_ok
+    # boolean_only_metrics: no threshold trigger.
+
+    force_retrain = config_changed or model_age_trigger or regime_quality_trigger
+
+    reasons: List[str] = []
+    if config_changed:
+        reasons.append("config_changed")
+    if model_age_trigger:
+        reasons.append(f"age={model_age_hours:.0f}h>{max_age_hours:.0f}h")
+    if regime_quality_trigger:
+        if not regime_quality_ok:
+            reasons.append(
+                f"regime_quality_ok=False (metric={regime_metric_name}, score={current_regime_score:.3f})"
+            )
+        else:
+            threshold_used = min_dbcv_quality if regime_metric_name in ("dbcv", "persistence") else min_regime_quality
+            reasons.append(f"{regime_metric_name}={current_regime_score:.3f}<{threshold_used}")
+
+    if force_retrain and reasons:
+        logger.warn(f"Forcing retraining: {' | '.join(reasons)}", component="MODEL", equip=equip)
+
+    retrain_reason = "config_changed" if config_changed else (
+        "model_age" if model_age_trigger else (
+            "regime_quality" if regime_quality_trigger else "forced"
+        )
+    )
+
+    clear_regime_model = bool(
+        regime_quality_trigger and current_model_maturity in (None, "COLDSTART", "LEARNING")
+    )
+
+    return {
+        "force_retrain": force_retrain,
+        "reasons": reasons,
+        "retrain_reason": retrain_reason,
+        "config_changed": config_changed,
+        "model_age_trigger": model_age_trigger,
+        "model_age_hours": model_age_hours,
+        "max_age_hours": max_age_hours,
+        "regime_quality_trigger": regime_quality_trigger,
+        "regime_metric_name": regime_metric_name,
+        "current_regime_score": current_regime_score,
+        "clear_regime_model": clear_regime_model,
+    }
+
+
+def evaluate_and_maybe_refit_cached_models(
+    *,
+    cfg: Dict[str, Any],
+    cached_models: Optional[Dict[str, Any]],
+    cached_manifest: Optional[Dict[str, Any]],
+    detectors_just_trained: bool,
+    score_out: Dict[str, Any],
+    regime_quality_ok: bool,
+    current_model_maturity: Optional[str],
+    boolean_only_metrics: List[str],
+    equip: str,
+    logger: Any,
+    record_model_refit_fn: Any,
+    fit_all_detectors_fn: Any,
+    train: pd.DataFrame,
+    det_flags: Dict[str, Any],
+    output_manager: Any,
+    sql_client: Any,
+    run_id: Optional[str],
+    equip_id: int,
+    regime_model: Optional[Any],
+) -> "AutoRetrainDecision":
+    """
+    Evaluate auto-retrain triggers for cached models and optionally refit detectors.
+    """
+    force_retrain = False
+    retrain_result = None
+    cached_models_out = cached_models
+    regime_model_out = regime_model
+
+    if not (cached_models and not detectors_just_trained):
+        return AutoRetrainDecision(
+            force_retrain=force_retrain,
+            cached_models=cached_models_out,
+            regime_model=regime_model_out,
+            retrain_result=retrain_result,
+        )
+
+    try:
+        trigger_eval = evaluate_force_retrain_triggers(
+            cfg=cfg,
+            cached_manifest=cached_manifest,
+            score_out=score_out,
+            regime_quality_ok=regime_quality_ok,
+            current_model_maturity=current_model_maturity,
+            boolean_only_metrics=boolean_only_metrics,
+            equip=equip,
+            logger=logger,
+        )
+        force_retrain = bool(trigger_eval["force_retrain"])
+
+        if force_retrain:
+            cached_models_out = None
+            if bool(trigger_eval["clear_regime_model"]):
+                regime_model_out = None
+
+            retrain_reason = str(trigger_eval["retrain_reason"])
+            record_model_refit_fn(equip, reason=retrain_reason, detector="all")
+
+            retrain_result = fit_all_detectors_fn(
+                train=train,
+                cfg=cfg,
+                **det_flags,
+                output_manager=output_manager,
+                sql_client=sql_client,
+                run_id=run_id,
+                equip_id=equip_id,
+                equip=equip,
+            )
+    except Exception as e:
+        raise RuntimeError(f"Quality assessment failed: {e}") from e
+
+    return AutoRetrainDecision(
+        force_retrain=force_retrain,
+        cached_models=cached_models_out,
+        regime_model=regime_model_out,
+        retrain_result=retrain_result,
+    )
+
+
+@dataclass
+class AutoRetrainDecision:
+    """Internal decision payload for cached-model retrain evaluation."""
+    force_retrain: bool
+    cached_models: Optional[Dict[str, Any]]
+    regime_model: Optional[Any]
+    retrain_result: Optional[Dict[str, Any]]
+
+
+def run_auto_retrain_stage(
+    *,
+    cfg: Dict[str, Any],
+    cached_models: Optional[Dict[str, Any]],
+    cached_manifest: Optional[Dict[str, Any]],
+    detectors_just_trained: bool,
+    score_out: Dict[str, Any],
+    regime_quality_ok: bool,
+    current_model_maturity: Optional[str],
+    boolean_only_metrics: List[str],
+    equip: str,
+    logger: Any,
+    record_model_refit_fn: Any,
+    fit_all_detectors_fn: Any,
+    train: pd.DataFrame,
+    det_flags: Dict[str, Any],
+    output_manager: Any,
+    sql_client: Any,
+    run_id: Optional[str],
+    equip_id: int,
+    regime_model: Optional[Any],
+    detectors: Dict[str, Any],
+    force_retrain_requested: bool = False,
+) -> "AutoRetrainStageResult":
+    """
+    Run auto-retrain evaluation and apply retrain detector outputs when triggered.
+    """
+    if force_retrain_requested:
+        logger.warn(
+            "Force retrain requested from CLI - fitting detectors unconditionally",
+            component="MODEL",
+            equip=equip,
+        )
+        record_model_refit_fn(equip, reason="force_retrain_cli", detector="all")
+        retrain_result = fit_all_detectors_fn(
+            train=train,
+            cfg=cfg,
+            **det_flags,
+            output_manager=output_manager,
+            sql_client=sql_client,
+            run_id=run_id,
+            equip_id=equip_id,
+            equip=equip,
+        )
+        retrain_out = AutoRetrainDecision(
+            force_retrain=True,
+            cached_models=None,
+            regime_model=regime_model,
+            retrain_result=retrain_result,
+        )
+    else:
+        retrain_out = evaluate_and_maybe_refit_cached_models(
+            cfg=cfg,
+            cached_models=cached_models,
+            cached_manifest=cached_manifest,
+            detectors_just_trained=detectors_just_trained,
+            score_out=score_out,
+            regime_quality_ok=regime_quality_ok,
+            current_model_maturity=current_model_maturity,
+            boolean_only_metrics=boolean_only_metrics,
+            equip=equip,
+            logger=logger,
+            record_model_refit_fn=record_model_refit_fn,
+            fit_all_detectors_fn=fit_all_detectors_fn,
+            train=train,
+            det_flags=det_flags,
+            output_manager=output_manager,
+            sql_client=sql_client,
+            run_id=run_id,
+            equip_id=equip_id,
+            regime_model=regime_model,
+        )
+
+    retrain_result = retrain_out.retrain_result
+    detectors_out = dict(detectors)
+    if retrain_result is not None:
+        detectors_out["ar1_detector"] = retrain_result["ar1_detector"]
+        detectors_out["pca_detector"] = retrain_result["pca_detector"]
+        detectors_out["iforest_detector"] = retrain_result["iforest_detector"]
+        detectors_out["gmm_detector"] = retrain_result["gmm_detector"]
+        detectors_out["omr_detector"] = retrain_result["omr_detector"]
+        detectors_out["pca_train_spe"] = retrain_result["pca_train_spe"]
+        detectors_out["pca_train_t2"] = retrain_result["pca_train_t2"]
+
+    return AutoRetrainStageResult(
+        force_retrain=bool(retrain_out.force_retrain),
+        cached_models=retrain_out.cached_models,
+        regime_model=retrain_out.regime_model,
+        detectors=detectors_out,
+    )
+
+
+@dataclass
+class AutoRetrainStageResult:
+    """Typed result payload for auto-retrain stage."""
+    force_retrain: bool
+    cached_models: Optional[Dict[str, Any]]
+    regime_model: Optional[Any]
+    detectors: Dict[str, Any]
+
+
 def auto_tune_parameters(
     frame: pd.DataFrame,
     episodes: pd.DataFrame,
@@ -428,9 +721,6 @@ def auto_tune_parameters(
     Guard: CONVERGED models skip refit evaluation entirely (v11.6.0).
     Quality thresholds (silhouette, drift, anomaly rate) gate refit requests.
     """
-    if not cfg.get("models", {}).get("auto_tune", True):
-        return
-    
     # v11.6.0 FIX #3: Skip refit evaluation entirely for CONVERGED models
     # CONVERGED models are stable and should NOT trigger refit requests.
     # This prevents 170+ spurious refit requests for stable equipment.
@@ -583,5 +873,4 @@ def auto_tune_parameters(
             )
     
     except Exception as e:
-        Console.warn(f"Autonomous tuning failed: {e}", component="AUTO-TUNE",
-                    equip=equip, error_type=type(e).__name__, error=str(e)[:200])
+        raise RuntimeError(f"Autonomous tuning failed: {e}") from e

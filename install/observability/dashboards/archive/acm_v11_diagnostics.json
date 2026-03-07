@@ -1,0 +1,716 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "ACM V11 Diagnostics Dashboard - Sensor Analysis, Defects, Hotspots",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [
+    { "asDropdown": true, "icon": "external link", "includeVars": true, "keepTime": true, "tags": ["acm", "v11"], "targetBlank": false, "title": "ACM Dashboards", "type": "dashboards" }
+  ],
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 1,
+      "panels": [],
+      "title": "🔧 SENSOR DEFECTS",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "mssql", "uid": "${datasource}" },
+      "description": "Active sensor defects count",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "#73BF69", "value": null },
+              { "color": "#FADE2A", "value": 1 },
+              { "color": "#FF9830", "value": 3 },
+              { "color": "#C4162A", "value": 5 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 5, "w": 4, "x": 0, "y": 1 },
+      "id": 2,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "percentChangeColorMode": "standard",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "11.4.0",
+      "targets": [
+        {
+          "datasource": { "type": "mssql", "uid": "${datasource}" },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT COUNT(*) AS ActiveDefects\nFROM ACM_SensorDefects\nWHERE EquipID = $equipment\n  AND ActiveDefect = 1\n  AND RunID = (\n      SELECT TOP 1 RunID \n      FROM ACM_SensorDefects \n      WHERE EquipID = $equipment \n      ORDER BY ID DESC\n  )",
+          "refId": "A"
+        }
+      ],
+      "title": "Active Defects",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "mssql", "uid": "${datasource}" },
+      "description": "Total sensors monitored",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "#6ED0E0", "value": null }] }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 5, "w": 4, "x": 4, "y": 1 },
+      "id": 3,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "percentChangeColorMode": "standard",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "11.4.0",
+      "targets": [
+        {
+          "datasource": { "type": "mssql", "uid": "${datasource}" },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT COUNT(DISTINCT SensorName) AS TotalSensors\nFROM ACM_SensorDefects\nWHERE EquipID = $equipment\n  AND RunID = (\n      SELECT TOP 1 RunID \n      FROM ACM_SensorDefects \n      WHERE EquipID = $equipment \n      ORDER BY ID DESC\n  )",
+          "refId": "A"
+        }
+      ],
+      "title": "Total Sensors",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "mssql", "uid": "${datasource}" },
+      "description": "Distribution of defects by severity",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "hideFrom": { "legend": false, "tooltip": false, "viz": false } },
+          "mappings": []
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "CRITICAL" }, "properties": [{ "id": "color", "value": { "fixedColor": "#C4162A", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "HIGH" }, "properties": [{ "id": "color", "value": { "fixedColor": "#FF9830", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "MEDIUM" }, "properties": [{ "id": "color", "value": { "fixedColor": "#FADE2A", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "LOW" }, "properties": [{ "id": "color", "value": { "fixedColor": "#73BF69", "mode": "fixed" } }] }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 1 },
+      "id": 4,
+      "options": {
+        "displayLabels": ["name", "value"],
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "pieType": "pie",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": true },
+        "tooltip": { "mode": "single", "sort": "none" }
+      },
+      "pluginVersion": "11.4.0",
+      "targets": [
+        {
+          "datasource": { "type": "mssql", "uid": "${datasource}" },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT \n    Severity AS metric,\n    COUNT(*) AS value\nFROM ACM_SensorDefects\nWHERE EquipID = $equipment\n  AND ActiveDefect = 1\n  AND RunID = (\n      SELECT TOP 1 RunID \n      FROM ACM_SensorDefects \n      WHERE EquipID = $equipment \n      ORDER BY ID DESC\n  )\nGROUP BY Severity\nORDER BY \n    CASE Severity \n        WHEN 'CRITICAL' THEN 1 \n        WHEN 'HIGH' THEN 2 \n        WHEN 'MEDIUM' THEN 3 \n        WHEN 'LOW' THEN 4 \n        ELSE 5 \n    END",
+          "refId": "A"
+        }
+      ],
+      "title": "Defects by Severity",
+      "type": "piechart"
+    },
+    {
+      "datasource": { "type": "mssql", "uid": "${datasource}" },
+      "description": "Distribution of defects by detector type",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "hideFrom": { "legend": false, "tooltip": false, "viz": false } },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 1 },
+      "id": 5,
+      "options": {
+        "displayLabels": ["name", "value"],
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "pieType": "pie",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": true },
+        "tooltip": { "mode": "single", "sort": "none" }
+      },
+      "pluginVersion": "11.4.0",
+      "targets": [
+        {
+          "datasource": { "type": "mssql", "uid": "${datasource}" },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT \n    DetectorType AS metric,\n    COUNT(*) AS value\nFROM ACM_SensorDefects\nWHERE EquipID = $equipment\n  AND ActiveDefect = 1\n  AND RunID = (\n      SELECT TOP 1 RunID \n      FROM ACM_SensorDefects \n      WHERE EquipID = $equipment \n      ORDER BY ID DESC\n  )\nGROUP BY DetectorType\nORDER BY value DESC",
+          "refId": "A"
+        }
+      ],
+      "title": "Defects by Detector",
+      "type": "piechart"
+    },
+    {
+      "datasource": { "type": "mssql", "uid": "${datasource}" },
+      "description": "Detailed list of sensor defects",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "custom": {
+            "align": "auto",
+            "cellOptions": { "type": "auto" },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Severity" },
+            "properties": [
+              { "id": "custom.cellOptions", "value": { "mode": "basic", "type": "color-background" } },
+              {
+                "id": "mappings",
+                "value": [
+                  { "options": { "CRITICAL": { "color": "#C4162A", "index": 0 } }, "type": "value" },
+                  { "options": { "HIGH": { "color": "#FF9830", "index": 1 } }, "type": "value" },
+                  { "options": { "MEDIUM": { "color": "#FADE2A", "index": 2 } }, "type": "value" },
+                  { "options": { "LOW": { "color": "#73BF69", "index": 3 } }, "type": "value" }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Active" },
+            "properties": [
+              { "id": "custom.cellOptions", "value": { "mode": "basic", "type": "color-background" } },
+              {
+                "id": "mappings",
+                "value": [
+                  { "options": { "1": { "color": "#C4162A", "index": 0, "text": "YES" } }, "type": "value" },
+                  { "options": { "0": { "color": "#73BF69", "index": 1, "text": "NO" } }, "type": "value" }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "MaxZ" },
+            "properties": [{ "id": "decimals", "value": 2 }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "CurrentZ" },
+            "properties": [{ "id": "decimals", "value": 2 }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "ViolationPct" },
+            "properties": [{ "id": "unit", "value": "percent" }]
+          }
+        ]
+      },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 9 },
+      "id": 6,
+      "options": {
+        "cellHeight": "sm",
+        "footer": { "countRows": false, "enablePagination": true, "fields": "", "reducer": ["sum"], "show": false },
+        "showHeader": true,
+        "sortBy": [{ "desc": true, "displayName": "CurrentZ" }]
+      },
+      "pluginVersion": "11.4.0",
+      "targets": [
+        {
+          "datasource": { "type": "mssql", "uid": "${datasource}" },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT \n    SensorName,\n    DetectorType,\n    Severity,\n    ROUND(ViolationPct, 1) AS ViolationPct,\n    ROUND(MaxZ, 2) AS MaxZ,\n    ROUND(CurrentZ, 2) AS CurrentZ,\n    ActiveDefect AS Active\nFROM ACM_SensorDefects\nWHERE EquipID = $equipment\n  AND RunID = (\n      SELECT TOP 1 RunID \n      FROM ACM_SensorDefects \n      WHERE EquipID = $equipment \n      ORDER BY ID DESC\n  )\nORDER BY \n    CASE Severity \n        WHEN 'CRITICAL' THEN 1 \n        WHEN 'HIGH' THEN 2 \n        WHEN 'MEDIUM' THEN 3 \n        WHEN 'LOW' THEN 4 \n        ELSE 5 \n    END,\n    CurrentZ DESC",
+          "refId": "A"
+        }
+      ],
+      "title": "Sensor Defects List",
+      "type": "table"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 19 },
+      "id": 7,
+      "panels": [],
+      "title": "🔥 SENSOR HOTSPOTS",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "mssql", "uid": "${datasource}" },
+      "description": "Total hotspot sensors identified",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "#73BF69", "value": null },
+              { "color": "#FADE2A", "value": 5 },
+              { "color": "#FF9830", "value": 10 },
+              { "color": "#C4162A", "value": 20 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 5, "w": 4, "x": 0, "y": 20 },
+      "id": 8,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "percentChangeColorMode": "standard",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "11.4.0",
+      "targets": [
+        {
+          "datasource": { "type": "mssql", "uid": "${datasource}" },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT COUNT(*) AS HotspotCount\nFROM ACM_SensorHotspots\nWHERE EquipID = $equipment\n  AND RunID = (\n      SELECT TOP 1 RunID \n      FROM ACM_SensorHotspots \n      WHERE EquipID = $equipment \n      ORDER BY ID DESC\n  )",
+          "refId": "A"
+        }
+      ],
+      "title": "Total Hotspots",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "mssql", "uid": "${datasource}" },
+      "description": "Sensors with alerts (above alert threshold)",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "#73BF69", "value": null },
+              { "color": "#FADE2A", "value": 1 },
+              { "color": "#C4162A", "value": 3 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 5, "w": 4, "x": 4, "y": 20 },
+      "id": 9,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "percentChangeColorMode": "standard",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "11.4.0",
+      "targets": [
+        {
+          "datasource": { "type": "mssql", "uid": "${datasource}" },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT COUNT(*) AS AlertSensors\nFROM ACM_SensorHotspots\nWHERE EquipID = $equipment\n  AND AboveAlertCount > 0\n  AND RunID = (\n      SELECT TOP 1 RunID \n      FROM ACM_SensorHotspots \n      WHERE EquipID = $equipment \n      ORDER BY ID DESC\n  )",
+          "refId": "A"
+        }
+      ],
+      "title": "Alert Sensors",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "mssql", "uid": "${datasource}" },
+      "description": "Top 10 sensors by maximum Z-score (most anomalous)",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "#73BF69", "value": null },
+              { "color": "#FADE2A", "value": 1.5 },
+              { "color": "#FF9830", "value": 2.5 },
+              { "color": "#C4162A", "value": 3.5 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 20 },
+      "id": 10,
+      "options": {
+        "displayMode": "lcd",
+        "maxVizHeight": 300,
+        "minVizHeight": 16,
+        "minVizWidth": 8,
+        "namePlacement": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": true },
+        "showUnfilled": true,
+        "sizing": "auto",
+        "valueMode": "color"
+      },
+      "pluginVersion": "11.4.0",
+      "targets": [
+        {
+          "datasource": { "type": "mssql", "uid": "${datasource}" },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT TOP 10\n    SensorName AS metric,\n    MaxAbsZ AS value\nFROM ACM_SensorHotspots\nWHERE EquipID = $equipment\n  AND RunID = (\n      SELECT TOP 1 RunID \n      FROM ACM_SensorHotspots \n      WHERE EquipID = $equipment \n      ORDER BY ID DESC\n  )\nORDER BY MaxAbsZ DESC",
+          "refId": "A"
+        }
+      ],
+      "title": "Top Anomalous Sensors (Max Z)",
+      "type": "bargauge"
+    },
+    {
+      "datasource": { "type": "mssql", "uid": "${datasource}" },
+      "description": "Top 10 sensors by current Z-score (latest reading)",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "#73BF69", "value": null },
+              { "color": "#FADE2A", "value": 1.5 },
+              { "color": "#FF9830", "value": 2.5 },
+              { "color": "#C4162A", "value": 3.5 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 20 },
+      "id": 11,
+      "options": {
+        "displayMode": "lcd",
+        "maxVizHeight": 300,
+        "minVizHeight": 16,
+        "minVizWidth": 8,
+        "namePlacement": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": true },
+        "showUnfilled": true,
+        "sizing": "auto",
+        "valueMode": "color"
+      },
+      "pluginVersion": "11.4.0",
+      "targets": [
+        {
+          "datasource": { "type": "mssql", "uid": "${datasource}" },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT TOP 10\n    SensorName AS metric,\n    LatestAbsZ AS value\nFROM ACM_SensorHotspots\nWHERE EquipID = $equipment\n  AND RunID = (\n      SELECT TOP 1 RunID \n      FROM ACM_SensorHotspots \n      WHERE EquipID = $equipment \n      ORDER BY ID DESC\n  )\nORDER BY LatestAbsZ DESC",
+          "refId": "A"
+        }
+      ],
+      "title": "Top Anomalous Sensors (Current Z)",
+      "type": "bargauge"
+    },
+    {
+      "datasource": { "type": "mssql", "uid": "${datasource}" },
+      "description": "Detailed list of sensor hotspots",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "custom": {
+            "align": "auto",
+            "cellOptions": { "type": "auto" },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "MaxAbsZ" },
+            "properties": [
+              { "id": "decimals", "value": 2 },
+              { "id": "custom.cellOptions", "value": { "mode": "gradient", "type": "color-background" } },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    { "color": "#73BF69", "value": null },
+                    { "color": "#FADE2A", "value": 1.5 },
+                    { "color": "#FF9830", "value": 2.5 },
+                    { "color": "#C4162A", "value": 3.5 }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "LatestAbsZ" },
+            "properties": [
+              { "id": "decimals", "value": 2 },
+              { "id": "custom.cellOptions", "value": { "mode": "gradient", "type": "color-background" } },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    { "color": "#73BF69", "value": null },
+                    { "color": "#FADE2A", "value": 1.5 },
+                    { "color": "#FF9830", "value": 2.5 },
+                    { "color": "#C4162A", "value": 3.5 }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "AboveAlertCount" },
+            "properties": [
+              { "id": "custom.cellOptions", "value": { "mode": "gradient", "type": "color-background" } },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    { "color": "#73BF69", "value": null },
+                    { "color": "#FADE2A", "value": 1 },
+                    { "color": "#C4162A", "value": 5 }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 28 },
+      "id": 12,
+      "options": {
+        "cellHeight": "sm",
+        "footer": { "countRows": false, "enablePagination": true, "fields": "", "reducer": ["sum"], "show": false },
+        "showHeader": true,
+        "sortBy": [{ "desc": true, "displayName": "MaxAbsZ" }]
+      },
+      "pluginVersion": "11.4.0",
+      "targets": [
+        {
+          "datasource": { "type": "mssql", "uid": "${datasource}" },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT \n    SensorName,\n    ROUND(MaxAbsZ, 2) AS MaxAbsZ,\n    ROUND(LatestAbsZ, 2) AS LatestAbsZ,\n    AboveWarnCount,\n    AboveAlertCount\nFROM ACM_SensorHotspots\nWHERE EquipID = $equipment\n  AND RunID = (\n      SELECT TOP 1 RunID \n      FROM ACM_SensorHotspots \n      WHERE EquipID = $equipment \n      ORDER BY ID DESC\n  )\nORDER BY MaxAbsZ DESC",
+          "refId": "A"
+        }
+      ],
+      "title": "Sensor Hotspots List",
+      "type": "table"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 38 },
+      "id": 13,
+      "panels": [],
+      "title": "📊 RUL CONTRIBUTORS",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "mssql", "uid": "${datasource}" },
+      "description": "Sensors contributing to RUL degradation",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "#73BF69", "value": null },
+              { "color": "#FADE2A", "value": 0.3 },
+              { "color": "#FF9830", "value": 0.5 },
+              { "color": "#C4162A", "value": 0.7 }
+            ]
+          },
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 39 },
+      "id": 14,
+      "options": {
+        "displayMode": "lcd",
+        "maxVizHeight": 300,
+        "minVizHeight": 16,
+        "minVizWidth": 8,
+        "namePlacement": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": true },
+        "showUnfilled": true,
+        "sizing": "auto",
+        "valueMode": "color"
+      },
+      "pluginVersion": "11.4.0",
+      "targets": [
+        {
+          "datasource": { "type": "mssql", "uid": "${datasource}" },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH LatestRUL AS (\n    SELECT TOP 1 \n        TopSensor1, TopSensor1Contribution,\n        TopSensor2, TopSensor2Contribution,\n        TopSensor3, TopSensor3Contribution\n    FROM ACM_RUL\n    WHERE EquipID = $equipment\n    ORDER BY CreatedAt DESC\n)\nSELECT TopSensor1 AS metric, TopSensor1Contribution AS value FROM LatestRUL WHERE TopSensor1 IS NOT NULL\nUNION ALL\nSELECT TopSensor2, TopSensor2Contribution FROM LatestRUL WHERE TopSensor2 IS NOT NULL\nUNION ALL\nSELECT TopSensor3, TopSensor3Contribution FROM LatestRUL WHERE TopSensor3 IS NOT NULL\nORDER BY value DESC",
+          "refId": "A"
+        }
+      ],
+      "title": "Top RUL Contributing Sensors",
+      "type": "bargauge"
+    },
+    {
+      "datasource": { "type": "mssql", "uid": "${datasource}" },
+      "description": "Latest RUL details with confidence",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "custom": {
+            "align": "auto",
+            "cellOptions": { "type": "auto" },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "RUL_Hours" },
+            "properties": [{ "id": "unit", "value": "h" }, { "id": "decimals", "value": 1 }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "P10" },
+            "properties": [{ "id": "unit", "value": "h" }, { "id": "decimals", "value": 1 }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "P50" },
+            "properties": [{ "id": "unit", "value": "h" }, { "id": "decimals", "value": 1 }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "P90" },
+            "properties": [{ "id": "unit", "value": "h" }, { "id": "decimals", "value": 1 }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Confidence" },
+            "properties": [{ "id": "unit", "value": "percentunit" }, { "id": "decimals", "value": 2 }]
+          }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 39 },
+      "id": 15,
+      "options": {
+        "cellHeight": "sm",
+        "footer": { "countRows": false, "enablePagination": false, "fields": "", "reducer": ["sum"], "show": false },
+        "showHeader": true
+      },
+      "pluginVersion": "11.4.0",
+      "targets": [
+        {
+          "datasource": { "type": "mssql", "uid": "${datasource}" },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT TOP 1\n    Method,\n    RUL_Hours,\n    P10_LowerBound AS P10,\n    P50_Median AS P50,\n    P90_UpperBound AS P90,\n    Confidence,\n    TopSensor1,\n    TopSensor2,\n    TopSensor3\nFROM ACM_RUL\nWHERE EquipID = $equipment\nORDER BY CreatedAt DESC",
+          "refId": "A"
+        }
+      ],
+      "title": "Latest RUL Details",
+      "type": "table"
+    }
+  ],
+  "refresh": "5m",
+  "schemaVersion": 40,
+  "tags": ["acm", "v11", "diagnostics"],
+  "templating": {
+    "list": [
+      {
+        "current": {},
+        "hide": 0,
+        "includeAll": false,
+        "label": "Datasource",
+        "multi": false,
+        "name": "datasource",
+        "options": [],
+        "query": "mssql",
+        "queryValue": "",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "datasource"
+      },
+      {
+        "current": {},
+        "datasource": { "type": "mssql", "uid": "${datasource}" },
+        "definition": "SELECT EquipCode AS __text, EquipID AS __value FROM Equipment WHERE EquipID IN (SELECT DISTINCT EquipID FROM ACM_SensorDefects) ORDER BY EquipCode",
+        "hide": 0,
+        "includeAll": false,
+        "label": "Equipment",
+        "multi": false,
+        "name": "equipment",
+        "options": [],
+        "query": "SELECT EquipCode AS __text, EquipID AS __value FROM Equipment WHERE EquipID IN (SELECT DISTINCT EquipID FROM ACM_SensorDefects) ORDER BY EquipCode",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": { "from": "now-30d", "to": "now" },
+  "timepicker": {},
+  "timezone": "",
+  "title": "ACM V11 - Diagnostics",
+  "uid": "acm-v11-diagnostics",
+  "version": 1,
+  "weekStart": ""
+}

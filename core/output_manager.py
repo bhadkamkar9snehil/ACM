@@ -18,49 +18,81 @@ from __future__ import annotations
 
 import json
 import time
-import math
 import threading
-from pathlib import Path
+import inspect
+import re
 from contextlib import contextmanager, nullcontext
-from typing import Dict, Any, List, Optional, Union, Tuple, TypeVar, Callable, cast, Set
+from typing import Dict, Any, List, Optional, Tuple, Callable, cast, Literal
 from dataclasses import dataclass, field
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pandas as pd
 import numpy as np
-import warnings 
-from datetime import datetime, timezone
+import warnings
+from datetime import datetime
 
 # FOR-DQ-02: Use centralized timestamp normalization
 from utils.timestamp_utils import (
     normalize_timestamp_scalar,
-    normalize_timestamp_series,
-    normalize_timestamps,
-    normalize_index
 )
-
-from utils.detector_labels import get_detector_label, format_culprit_label
 
 from core.observability import Console
 
 # Phase 2 Extraction: Data loading moved to core/data_loader.py
 from core.data_loader import (
     DataLoader,
-    DataMeta,  # Re-exported for backward compatibility
-    parse_ts_index as _parse_ts_index,
-    coerce_local_and_filter_future as _coerce_local_and_filter_future,
-    infer_numeric_cols as _infer_numeric_cols,
-    native_cadence_secs as _native_cadence_secs,
-    check_cadence as _check_cadence,
-    resample_df as _resample,
 )
 
 # Phase 3 Extraction: Analytics generation moved to core/analytics_builder.py
 from core.analytics_builder import (
     AnalyticsBuilder,
-    AnalyticsConstants as _AnalyticsConstants,  # Re-exported for backward compat
-    health_index as _health_index_impl,
 )
+from core.output_artifacts import write_pca_artifacts, write_sql_artifacts
+from core.output_contracts import (
+    ALLOWED_TABLES,
+    REPLACE_POLICY_KEYS,
+    TableWriteContract,
+    get_table_write_contract,
+    audit_replace_policy_contract as _audit_replace_policy_contract,
+    audit_table_write_contracts as _audit_table_write_contracts,
+)
+from core.output_sql_core import (
+    SqlWriteEngine,
+    _table_exists,
+    _get_table_columns,
+    _get_insertable_columns,
+)
+from core.output_manager_services import (
+    load_omr_drift_context_service,
+    write_refit_request_service,
+    write_fusion_metrics_service,
+    check_refit_request_service,
+    update_baseline_buffer_service,
+    write_sensor_normalized_ts_service,
+    write_sensor_correlations_service,
+    write_sensor_correlations_from_raw_service,
+    write_anomaly_events_service,
+    write_regime_episodes_service,
+    write_pca_model_service,
+    write_detector_correlation_service,
+    write_detector_correlation_from_scores_service,
+    write_drift_series_service,
+    write_feature_drop_log_service,
+    write_calibration_summary_service,
+    write_regime_occupancy_service,
+    write_regime_transitions_service,
+    write_contribution_timeline_service,
+    write_contribution_timeline_from_frame_service,
+    write_regime_promotion_log_service,
+    write_sensor_normalized_ts_from_raw_service,
+    write_seasonal_patterns_from_detected_service,
+    persist_additional_artifacts_service,
+    generate_all_analytics_with_context_service,
+    persist_pipeline_outputs_service,
+    run_persistence_stage_service,
+    prepare_persistence_inputs_service,
+    release_persist_memory_service,
+)
+from core.output_dataframe_builders import build_data_quality_records
 
 # V11: Confidence model for health and episode confidence
 try:
@@ -89,217 +121,8 @@ except ImportError:
     record_sql_op = None
     Span = None
 
-# =============================================================================
-# ALLOWED_TABLES - v11.0.0 Functionality-Based Table Set
-# =============================================================================
-# DESIGN PRINCIPLE: Tables chosen based on ACM's core mission:
-#   1. What is current health? (HealthTimeline, Scores, Episodes)
-#   2. If not healthy, what's the reason? (SensorDefects, Hotspots, Culprits)
-#   3. What will future health look like? (RUL, Forecasts)
-#   4. What will cause future degradation? (SensorForecast, Drift, Contributions)
-#
-# Additional tables support: data persistence, model evolution, diagnostics
-#
-# See docs/ACM_OUTPUT_TABLES_REFINED.md for complete rationale.
-#
-# TIER 1 - CURRENT STATE (What's happening NOW?)
-# TIER 2 - FUTURE STATE (What will happen?)
-# TIER 3 - ROOT CAUSE (WHY is this happening/will happen?)
-# TIER 4 - DATA & MODEL MANAGEMENT (Long-term storage, model building)
-# TIER 5 - OPERATIONS & AUDIT (Is ACM working? What changed?)
-# TIER 6 - ADVANCED ANALYTICS (Deep patterns and trends)
-# TIER 7 - V11 NEW FEATURES (Typed contracts, maturity lifecycle, seasonality)
-# =============================================================================
-
-ALLOWED_TABLES = {
-    # TIER 1: CURRENT STATE (6 tables) - Answers "What is current health?"
-    'ACM_HealthTimeline',        # Health history + current state
-    'ACM_Scores_Wide',           # All 6 detector scores per timestamp
-    'ACM_Episodes',              # Active and historical anomaly events
-    'ACM_RegimeTimeline',        # Operating mode context
-    'ACM_SensorDefects',         # Which sensors are problematic NOW
-    'ACM_SensorHotspots',        # Top culprit sensors ranked
-    
-    # TIER 2: FUTURE STATE (5 tables) - Answers "What will future health look like?"
-    'ACM_RUL',                   # When will it fail? (Remaining Useful Life)
-    'ACM_HealthForecast',        # Projected health trajectory with confidence bounds
-    'ACM_FailureForecast',       # Failure probability over time
-    'ACM_SensorForecast',        # Physical sensor value predictions
-    'ACM_MultivariateForecast',  # Multivariate sensor forecast with correlations
-    
-    # TIER 3: ROOT CAUSE (6 tables) - Answers "Why?" (current + future)
-    'ACM_EpisodeCulprits',       # What caused each episode
-    'ACM_EpisodeDiagnostics',    # Episode details and severity
-    'ACM_DetectorCorrelation',   # How detectors relate (model quality)
-    'ACM_DriftSeries',           # Behavior changes that lead to degradation
-    'ACM_SensorCorrelations',    # Multivariate sensor relationships (correlation matrix)
-    'ACM_FeatureDropLog',        # Why features were dropped (quality issues)
-    'ACM_OMR_Diagnostics',       # OMR detector diagnostics
-    
-    # TIER 4: DATA & MODEL MANAGEMENT (10 tables) - Long-term storage, enables progressive learning
-    'ACM_BaselineBuffer',        # Raw sensor data accumulation for training
-    'ACM_HistorianData',         # Cached historian data for efficiency
-    'ACM_SensorNormalized_TS',   # Normalized sensor time series
-    'ACM_DataQuality',           # Input data health metrics
-    'ACM_ForecastingState',      # Forecast model state persistence
-    'ACM_CalibrationSummary',    # Model quality tracking over time
-    'ACM_AdaptiveConfig',        # Auto-tuned configuration
-    'ACM_RefitRequests',         # Model retraining requests and acknowledgements
-    'ACM_PCA_Metrics',           # PCA component metrics and explained variance
-    'ACM_RunMetadata',           # Detailed run context (batch info, data ranges)
-    
-    # TIER 5: OPERATIONS & AUDIT (6 tables) - Is ACM working? What changed?
-    'ACM_Runs',                  # Execution tracking and status
-    'ACM_RunLogs',               # Detailed logs for troubleshooting
-    # Observability stack (Tempo/Prometheus/Loki) handles timing metrics
-    'ACM_RunMetrics',            # Fusion quality metrics (EAV format)
-    'ACM_Run_Stats',             # Run-level statistics
-    'ACM_Config',                # Current configuration
-    'ACM_ConfigHistory',         # Configuration change audit trail
-    
-    # TIER 6: ADVANCED ANALYTICS (5 tables) - Deep insights and patterns
-    'ACM_RegimeOccupancy',       # Operating mode utilization
-    'ACM_RegimeTransitions',     # Mode switching patterns
-    'ACM_Regime_Episodes',       # Regime episode tracking
-    'ACM_RegimePromotionLog',    # Regime maturity evolution tracking
-    'ACM_RegimeState',           # Regime model state persistence (KMeans params, scaler, PCA)
-    'ACM_ContributionTimeline',  # Historical sensor attribution for pattern analysis
-    'ACM_DriftController',       # Drift detection control and thresholds
-    'ACM_PCA_Models',            # PCA model metadata
-    'ACM_PCA_Loadings',          # PCA component loadings per sensor
-    'ACM_Anomaly_Events',        # Anomaly event records
-    
-    # TIER 7: V11 NEW FEATURES (4 tables) - Advanced capabilities from v11.0.0
-    'ACM_RegimeDefinitions',     # Regime centroids and metadata (MaturityState lifecycle)
-    'ACM_ActiveModels',          # Active model versions per equipment
-    'ACM_DataContractValidation',# Data quality validation at pipeline entry
-    'ACM_SeasonalPatterns',      # Detected seasonal patterns (diurnal, weekly)
-}
-
-# ============================================================================
-# DATETIME COLUMN REGISTRY (Phase 1 Schema Fix)
-# ============================================================================
-# Centralized constant for all columns requiring datetime handling.
-# This replaces heuristic detection like "'timestamp' in c.lower()" which
-# missed columns like StartTime, EndTime, LastUpdate, CreatedAt, etc.
-DATETIME_COLUMNS: Set[str] = {
-    # Standard timestamps
-    'Timestamp', 'timestamp', 'Date', 'date', 'EntryDateTime',
-    # Window/range columns
-    'StartTime', 'EndTime', 'start_ts', 'end_ts', 'WindowStart', 'WindowEnd',
-    # Audit columns
-    'CreatedAt', 'UpdatedAt', 'ModifiedAt', 'CompletedAt', 'StartedAt', 'LoggedAt', 'DetectedAt',
-    # Forecast columns
-    'ForecastTime', 'EarliestMaintenance', 'LatestMaintenance', 'FailureTime',
-    # Validity columns
-    'LastUpdate', 'ValidFrom', 'ValidTo',
-}
-
-def _table_exists(cursor_factory: Callable[[], Any], name: str) -> bool:
-    cur = None
-    try:
-        cur = cursor_factory()
-        cur.execute(f"SELECT TOP 0 * FROM dbo.[{name}]")
-        return True
-    except Exception:
-        return False
-    finally:
-        try:
-            if cur is not None:
-                cur.close()
-        except Exception:
-            pass
-
-def _get_table_columns(cursor_factory: Callable[[], Any], name: str) -> List[str]:
-    """Return the list of column names for a table by probing TOP 0."""
-    cur = cursor_factory()
-    try:
-        cur.execute(f"SELECT TOP 0 * FROM dbo.[{name}]")
-        return [d[0] for d in (cur.description or [])]
-    finally:
-        try:
-            cur.close()
-        except Exception:
-            pass
-
-def _get_insertable_columns(cursor_factory: Callable[[], Any], name: str) -> List[str]:
-    """Return columns excluding identity columns for safe INSERT.
-    Uses sys.columns joined via OBJECT_ID('schema.table') without square brackets.
-    """
-    cur = cursor_factory()
-    try:
-        # OBJECT_ID expects a schema-qualified name without brackets
-        cur.execute(
-            "SELECT c.name, c.is_identity FROM sys.columns c WHERE c.object_id = OBJECT_ID(?)",
-            (f"dbo.{name}",)
-        )
-        rows = cur.fetchall() or []
-        return [r[0] for r in rows if not getattr(r, 'is_identity', r[1])]
-    finally:
-        try:
-            cur.close()
-        except Exception:
-            pass
-
-# constants for analytics & guardrails (re-exported from analytics_builder for backward compat)
-AnalyticsConstants = _AnalyticsConstants
-
-# CHART-12: Centralized severity color palette
-SEVERITY_COLORS = {
-    "CRITICAL": "#dc2626",  # Red - immediate action required
-    "HIGH": "#f97316",      # Orange - urgent attention
-    "MEDIUM": "#f59e0b",    # Amber - monitor closely
-    "LOW": "#10b981",       # Green - informational
-    "INFO": "#10b981",      # Alias for LOW
-    "WARNING": "#f59e0b",   # Alias for MEDIUM
-}
-
-# Tables that require UPSERT instead of INSERT (to handle duplicate key conflicts)
-# Maps table name -> upsert method name (method must exist on OutputManager)
-UPSERT_TABLES: Dict[str, str] = {
-    "ACM_HealthForecast": "_upsert_health_forecast",
-    "ACM_FailureForecast": "_upsert_failure_forecast",
-    "ACM_SensorForecast": "_upsert_sensor_forecast",
-    "ACM_DetectorForecast_TS": "_upsert_detector_forecast_ts",
-    "ACM_PCA_Metrics": "_upsert_pca_metrics",
-}
-
-# Enhanced config getter with typing
-T = TypeVar("T")
-
-def _cfg_get(cfg: Dict[str, Any], path: str, default: T) -> T:
-    """Get config value by dot path with type preservation."""
-    keys = path.split('.')
-    current: Any = cfg
-    for key in keys:
-        if isinstance(current, dict) and key in current:
-            current = current[key]
-        else:
-            return default
-    return current  # type: ignore[return-value]
-
-
-def _future_cutoff_ts(cfg: Dict[str, Any]) -> pd.Timestamp:
-    """Return timestamp cutoff that optionally allows future data via config."""
-    raw_value = _cfg_get(cfg, "runtime.future_grace_minutes", 0) or 0
-    try:
-        minutes = int(raw_value)
-    except (TypeError, ValueError):
-        minutes = 0
-    minutes = max(0, minutes)
-    return pd.Timestamp.now() + pd.Timedelta(minutes=minutes)
-
-# ==================== DATA LOADING ====================
-# Data loading functions extracted to core/data_loader.py (Phase 2)
-# DataMeta, _parse_ts_index, _coerce_local_and_filter_future, _infer_numeric_cols,
-# _native_cadence_secs, _check_cadence, _resample are all imported from data_loader
-# and re-exported for backward compatibility.
-
-# Phase 3: _health_index delegated to analytics_builder.health_index
-def _health_index(fused_z, z_threshold: float = 5.0, steepness: float = 1.5):
-    """Backward compat wrapper - delegates to core.analytics_builder.health_index."""
-    return _health_index_impl(fused_z, z_threshold, steepness)
-
+# Module-level SQL helpers now live in core.output_sql_core
+# (imported above for backward compatibility)
 
 # ==================== MAIN OUTPUT MANAGER CLASS ====================
 
@@ -314,16 +137,70 @@ class OutputBatch:
     total_rows: int = 0
 
 
+@dataclass
+class WritePolicy:
+    """Explicit write policy declared by payload generators."""
+    mode: Literal["insert", "upsert"] = "insert"
+    upsert_handler: Optional[Callable[[pd.DataFrame], int]] = None
+
+
+@dataclass
+class PersistArtifactsResult:
+    """Counts for optional persist-phase artifact writes."""
+    detector_correlation_rows: int = 0
+    sensor_correlation_rows: int = 0
+    sensor_normalized_ts_rows: int = 0
+    seasonal_pattern_rows: int = 0
+
+
+@dataclass
+class PersistCoreOutputsResult:
+    """Row counts for core persist-phase writes."""
+    scores_inserted: int = 0
+    episodes_inserted: int = 0
+    episode_count: int = 0
+
+    @property
+    def rows_written_delta(self) -> int:
+        return int(self.scores_inserted) + int(self.episodes_inserted)
+
+
+@dataclass
+class PersistPipelineOutputsResult:
+    """Aggregate result for full persist-stage output orchestration."""
+    rows_written_delta: int = 0
+    episode_count: int = 0
+    analytics_table_count: int = 0
+    raw_train: Optional[pd.DataFrame] = None
+    raw_score: Optional[pd.DataFrame] = None
+    sensor_context: Optional[Dict[str, Any]] = None
+
+
+@dataclass
+class PersistenceStageResult:
+    """Result bundle for pipeline persistence stage execution."""
+    rows_written: int = 0
+    analytics_table_count: int = 0
+    raw_train: Optional[pd.DataFrame] = None
+    raw_score: Optional[pd.DataFrame] = None
+    sensor_context: Optional[Dict[str, Any]] = None
+
+
+@dataclass
+class PersistenceInputPreparationResult:
+    """Result bundle for pre-persistence context preparation."""
+    sensor_context: Optional[Dict[str, Any]] = None
+
+
 class OutputManager:
     """
     Unified output manager that consolidates all scattered output generation.
     
     Features:
     - Batched writes for improved I/O performance
-    - Smart SQL health checking with caching
-    - Automatic file/SQL dual-write coordination
+    - SQL-first persistence with centralized write paths
     - Thread-safe operations with connection pooling
-    - Intelligent error handling and fallback strategies
+    - Explicit error handling for required versus optional outputs
     """
     
     def __init__(self, 
@@ -355,7 +232,8 @@ class OutputManager:
                 f"Received equip_id={equip_id}. This prevents catastrophic "
                 f"data corruption in multi-asset deployments."
             )
-        self.equip_id = equip_id
+        # CRITICAL: convert numpy.int64 to native int to prevent HY000 error
+        self.equip_id = int(equip_id) if equip_id is not None else None
         self.equipment = ""  # Will be set by set_equipment() or inferred from equip_id
         self.maturity_state = maturity_state or 'COLDSTART'  # V11: Cached maturity
         self.batch_size = batch_size
@@ -386,13 +264,19 @@ class OutputManager:
         self._in_flight_futures: List[Any] = []  # List of active futures
         self._futures_lock = threading.Lock()
 
-        # lightweight caches for table probes
-        self._table_exists_cache: Dict[str, bool] = {}
-        self._table_columns_cache: Dict[str, set] = {}
-        self._table_insertable_cache: Dict[str, set] = {}
-        
-        # PERF-OPT: Track tables that have been bulk pre-deleted (skip individual DELETE)
-        self._bulk_predeleted_tables: set = set()
+        # Phase A extraction: SQL write engine holds all SQL plumbing and caches
+        self._sql_engine = SqlWriteEngine(
+            sql_client=sql_client,
+            run_id=run_id,
+            equip_id=equip_id,
+            batch_size=batch_size,
+        )
+        # Expose engine caches for backward compatibility
+        self._table_exists_cache = self._sql_engine._table_exists_cache
+        self._table_columns_cache = self._sql_engine._table_columns_cache
+        self._table_insertable_cache = self._sql_engine._table_insertable_cache
+        self._table_datetime_cache = self._sql_engine._table_datetime_cache
+        self._bulk_predeleted_tables = self._sql_engine._bulk_predeleted_tables
         
         # FCST-15: Artifact cache for SQL-only mode
         # Stores DataFrames written to files/SQL so they can be consumed by downstream modules
@@ -421,8 +305,8 @@ class OutputManager:
         
         Usage:
             with output_mgr.batched_transaction():
-                output_mgr.write_table("Table1", df1, "sql")
-                output_mgr.write_table("Table2", df2, "sql")
+                output_mgr.write_table("Table1", df1)
+                output_mgr.write_table("Table2", df2)
                 # Single commit after all writes
         """
         if self._batched_transaction_active:
@@ -431,17 +315,16 @@ class OutputManager:
             return
         
         if self.sql_client is None:
-            # No SQL client - just pass through
+            # Backward-compatible fallback for unit tests that build a partial manager.
             yield
             return
         
-        # Check SQL health ONCE at transaction entry
+        # Check SQL health ONCE at transaction entry. Fail fast to avoid silent writes loss.
         if not self._check_sql_health():
-            Console.error("SQL unhealthy at transaction start - aborting", component="OUTPUT", equip_id=self.equip_id)
-            yield
-            return
+            raise RuntimeError("SQL unhealthy at transaction start")
         
         self._batched_transaction_active = True
+        self._sql_engine._batched_transaction_active = True
         start_time = time.time()
         
         try:
@@ -460,6 +343,7 @@ class OutputManager:
             raise
         finally:
             self._batched_transaction_active = False
+            self._sql_engine._batched_transaction_active = False
     
     def _load_data_from_sql(self, cfg: Dict[str, Any], equipment_name: str, start_utc: Optional[pd.Timestamp], end_utc: Optional[pd.Timestamp], is_coldstart: bool = False):
         """
@@ -475,7 +359,7 @@ class OutputManager:
             is_coldstart: If True, split data for coldstart training. If False, use all data for scoring.
         
         Returns:
-            Tuple of (train_df, score_df, DataMeta)
+            Tuple of (train_df, score_df, loader metadata object)
         """
         loader = DataLoader(self.sql_client)
         return loader.load_from_sql(cfg, equipment_name, start_utc, end_utc, is_coldstart)
@@ -520,91 +404,50 @@ class OutputManager:
                     cur.close()
             except Exception:
                 pass
-    
-    def _prepare_dataframe_for_sql(self, df: pd.DataFrame, non_numeric_cols: Optional[set] = None) -> pd.DataFrame:
+
+    @staticmethod
+    def _is_non_empty_dataframe(df: Optional[pd.DataFrame]) -> bool:
+        """Return True when DataFrame exists and has at least one row."""
+        return df is not None and not df.empty
+
+    def _can_write_dataframe(self, df: Optional[pd.DataFrame], require_healthy_sql: bool = True) -> bool:
+        """Centralized write gate for DataFrame payloads.
+
+        `require_healthy_sql` is kept for compatibility but health probing is no
+        longer part of deep write paths. Runtime SQL availability is enforced at
+        startup in `core.acm`.
+        """
+        if self.sql_client is None:
+            return False
+        return self._is_non_empty_dataframe(df)
+
+    def _can_write_payload(self, payload: Any, require_healthy_sql: bool = True) -> bool:
+        """Centralized write gate for dict/list payloads.
+
+        `require_healthy_sql` is kept for compatibility but health probing is no
+        longer part of deep write paths.
+        """
+        if self.sql_client is None:
+            return False
+        return bool(payload)
+
+    def _get_datetime_columns_for_table(self, table_name: Optional[str]) -> set[str]:
+        """Return datetime-typed columns from SQL schema for a table."""
+        return self._sql_engine.get_datetime_columns_for_table(table_name)
+
+    @staticmethod
+    def _looks_like_datetime_column(col_name: str) -> bool:
+        """Name-based fallback for datetime-like columns when schema metadata is unavailable."""
+        return SqlWriteEngine.looks_like_datetime_column(col_name)
+
+    def _prepare_dataframe_for_sql(
+        self,
+        df: pd.DataFrame,
+        non_numeric_cols: Optional[set] = None,
+        sql_table: Optional[str] = None,
+    ) -> pd.DataFrame:
         """Prepare DataFrame for SQL insertion with robust type coercion (SQL Server safe)."""
-        if df.empty:
-            return df
-
-        out = df.copy()
-        non_numeric_cols = set(non_numeric_cols or set())
-
-        # Helper: name-based timestamp detection to handle object/string timestamp columns too
-        def _looks_like_ts(col_name: str) -> bool:
-            c = (col_name or "").lower()
-            return c in {"timestamp", "time", "ts", "datetime"} or c.endswith("_ts") or c.endswith("_time") or c.endswith("_timestamp")
-
-        # 1) Normalize datetime columns (dtype-based) + timestamp-like object columns (name-based)
-        for col in out.columns:
-            is_dt = pd.api.types.is_datetime64_any_dtype(out[col])
-            is_obj_ts = (not is_dt) and _looks_like_ts(col) and out[col].dtype == object
-
-            if is_dt or is_obj_ts:
-                ts_series = pd.to_datetime(out[col], errors="coerce")
-                # drop timezone if present, keep UTC-naive convention
-                try:
-                    ts_series = ts_series.dt.tz_localize(None)
-                except Exception:
-                    pass
-                ts_series = ts_series.dt.floor("s")
-
-                with warnings.catch_warnings():
-                    warnings.filterwarnings("ignore", message=".*to_pydatetime.*", category=FutureWarning)
-                    out[col] = np.array(ts_series.dt.to_pydatetime())
-
-        # 2) Replace Inf/-Inf and NaNs to None (SQL-friendly)
-        # Use float types only for isinf check - nullable integers (Int64) don't support isinf
-        float_only = out.select_dtypes(include=[np.floating])
-        inf_count = 0
-        if not float_only.empty:
-            try:
-                inf_count = int(np.isinf(float_only.values).sum())
-            except TypeError:
-                # Fallback: check column-by-column for mixed types
-                for col in float_only.columns:
-                    col_vals = float_only[col].dropna()
-                    if len(col_vals) > 0:
-                        try:
-                            inf_count += int(np.isinf(col_vals.values).sum())
-                        except TypeError:
-                            pass
-        if inf_count > 0:
-            Console.warn(
-                f"Replaced {inf_count} Inf/-Inf values with None for SQL compatibility",
-                component="OUTPUT",
-                inf_count=inf_count,
-                columns=len(float_only.columns),
-            )
-
-        out = out.replace({np.inf: None, -np.inf: None})
-        # Note: do NOT blanket-coerce everything to object early; keep types until after numeric handling
-
-        # 3) Preserve integer types for known ID-like columns (case-insensitive)
-        integer_columns_ci = {c.lower() for c in {"EquipID", "equip_id", "episode_id", "EpisodeID", "RegimeLabel", "regime_label"}}
-
-        for col in out.columns:
-            col_l = col.lower()
-
-            # Skip caller-marked non-numeric columns for numeric coercion only
-            # (but do NOT skip boolean normalization; booleans must become int for SQL)
-            if pd.api.types.is_bool_dtype(out[col]):
-                out[col] = out[col].astype(object).where(pd.isna(out[col]), out[col].astype(int))
-                continue
-
-            if col_l in integer_columns_ci and pd.api.types.is_numeric_dtype(out[col]):
-                out[col] = out[col].astype("Int64")  # nullable integer
-                continue
-
-            if col in non_numeric_cols:
-                continue
-
-            if pd.api.types.is_numeric_dtype(out[col]):
-                out[col] = out[col].astype(float)
-
-        # 4) Finally, normalize NaN/NaT to None for pyodbc binding
-        out = out.where(pd.notnull(out), None)
-
-        return out
+        return self._sql_engine.prepare_dataframe_for_sql(df, non_numeric_cols, sql_table)
     
     
     def _should_auto_flush(self) -> bool:
@@ -634,6 +477,74 @@ class OutputManager:
             
             # Wait a bit before checking again
             time.sleep(0.1)
+
+    def _resolve_policy_from_contract(
+        self,
+        contract: TableWriteContract,
+        write_mode: Optional[Literal["insert", "replace"]] = None,
+        key_columns: Optional[List[str]] = None,
+    ) -> WritePolicy:
+        """Resolve final write policy from table contract plus optional overrides."""
+        mode = write_mode or contract.mode
+        if mode == "replace":
+            keys = list(key_columns) if key_columns is not None else list(contract.key_columns)
+            return self.build_replace_policy(contract.table_name, keys)
+        return self.build_insert_policy()
+
+    def write_sql_table(
+        self,
+        table_name: str,
+        df: pd.DataFrame,
+        artifact_name: Optional[str] = None,
+        sql_columns: Optional[Dict[str, str]] = None,
+        non_numeric_cols: Optional[set] = None,
+        required: Optional[bool] = None,
+        write_mode: Optional[Literal["insert", "replace"]] = None,
+        key_columns: Optional[List[str]] = None,
+        write_policy: Optional[WritePolicy] = None,
+    ) -> Dict[str, Any]:
+        """
+        Canonical, contract-driven SQL writer for all standardized table writes.
+        """
+        contract = get_table_write_contract(table_name)
+        if contract is None:
+            error_msg = (
+                f"Table '{table_name}' has no write contract. "
+                "Add contract in core/output_contracts.py (TABLE_WRITE_CONTRACTS)."
+            )
+            Console.warn(
+                error_msg,
+                component="OUTPUT",
+                table=table_name,
+                rows=len(df),
+                equip_id=self.equip_id,
+                run_id=self.run_id,
+            )
+            return {
+                "sql_written": False,
+                "rows": int(len(df)),
+                "inserted": 0,
+                "error": error_msg,
+                "sql_table": table_name,
+                "artifact": artifact_name or f"table:{table_name}",
+            }
+
+        effective_required = contract.required if required is None else required
+        effective_policy = write_policy or self._resolve_policy_from_contract(
+            contract=contract,
+            write_mode=write_mode,
+            key_columns=key_columns,
+        )
+
+        return self.write_dataframe(
+            df=df,
+            artifact_name=artifact_name or f"table:{table_name}",
+            sql_table=table_name,
+            sql_columns=sql_columns,
+            non_numeric_cols=non_numeric_cols,
+            required=effective_required,
+            write_policy=effective_policy,
+        )
     
     def write_dataframe(
         self,
@@ -642,8 +553,8 @@ class OutputManager:
         sql_table: Optional[str] = None,
         sql_columns: Optional[Dict[str, str]] = None,
         non_numeric_cols: Optional[set] = None,
-        add_created_at: bool = False,
         required: bool = False,
+        write_policy: Optional[WritePolicy] = None,
     ) -> Dict[str, Any]:
         """
         Write DataFrame to SQL (SQL-only; file output removed).
@@ -654,8 +565,8 @@ class OutputManager:
             sql_table: Optional SQL table name. If None, no SQL write is attempted.
             sql_columns: Optional column mapping for SQL (df_col -> sql_col)
             non_numeric_cols: Set of columns to treat as non-numeric for SQL preparation
-            add_created_at: Whether to add CreatedAt timestamp column for SQL
             required: If True, raise on write failure; if False, log warning and continue (default False for backwards-compat)
+            write_policy: Optional explicit insert/upsert behavior from generator.
 
         Returns:
             Dict with SQL write results and metadata.
@@ -693,6 +604,12 @@ class OutputManager:
             if not sql_table:
                 return result
 
+            if write_policy is None:
+                raise ValueError(
+                    f"write_dataframe(sql_table={sql_table}) requires explicit write_policy; "
+                    "use write_sql_table(...) for contract-driven writes."
+                )
+
             # Guard: Only write to ALLOWED_TABLES (contract enforcement)
             if sql_table not in ALLOWED_TABLES:
                 Console.warn(
@@ -708,68 +625,20 @@ class OutputManager:
             if df.empty:
                 return result
 
-            # If SQL unhealthy, fail appropriately based on required flag
-            if not self._check_sql_health():
-                msg = f"SQL health check failed; cannot write to {sql_table}"
-                result["error"] = msg
-                if required:
-                    Console.error(msg, component="OUTPUT", table=sql_table, rows=len(df), equip_id=self.equip_id)
-                    raise RuntimeError(msg)
-                else:
-                    Console.warn(msg, component="OUTPUT", table=sql_table, rows=len(df), equip_id=self.equip_id)
-                    return result
+            sql_df = self._prepare_sql_write_payload(
+                df=df,
+                sql_table=sql_table,
+                sql_columns=sql_columns,
+                non_numeric_cols=non_numeric_cols or set(),
+            )
+            inserted = self._execute_write_policy(
+                sql_table=sql_table,
+                sql_df=sql_df,
+                write_policy=write_policy,
+            )
 
-            # Prepare data for SQL
-            sql_df = self._prepare_dataframe_for_sql(df, non_numeric_cols or set())
-
-            # Apply column mapping (df_col -> sql_col)
-            if sql_columns:
-                mapped_source_cols = [c for c in sql_columns.keys() if c in sql_df.columns]
-                sql_df = sql_df[mapped_source_cols].rename(columns=sql_columns)
-
-            # Required metadata columns (all SQL tables)
-            # Note: equip_id validated in __init__, run_id should be set by caller
-            if "RunID" not in sql_df.columns:
-                if not self.run_id:
-                    raise ValueError("RunID is required but not set on OutputManager")
-                sql_df["RunID"] = self.run_id
-            if "EquipID" not in sql_df.columns:
-                sql_df["EquipID"] = self.equip_id  # Already validated in __init__
-
-            # CreatedAt is optional and explicitly requested
-            if add_created_at and "CreatedAt" not in sql_df.columns:
-                sql_df["CreatedAt"] = pd.Timestamp.now().tz_localize(None)
-
-            # Special-case: avoid PK collisions for maintenance recommendation (keep as-is)
-            if sql_table == "ACM_MaintenanceRecommendation" and self.sql_client is not None:
-                try:
-                    with self.sql_client.cursor() as cur:
-                        cur.execute(
-                            "DELETE FROM dbo.[ACM_MaintenanceRecommendation] WHERE RunID = ? AND EquipID = ?",
-                            (self.run_id, int(self.equip_id or 0)),
-                        )
-                    # Commit semantics: support both patterns
-                    if hasattr(self.sql_client, "commit"):
-                        self.sql_client.commit()
-                    elif hasattr(self.sql_client, "conn") and hasattr(self.sql_client.conn, "commit"):
-                        if not getattr(self.sql_client.conn, "autocommit", True):
-                            self.sql_client.conn.commit()
-                except Exception as del_ex:
-                    Console.warn(
-                        f"Pre-delete failed for {sql_table}: {del_ex}",
-                        component="OUTPUT",
-                        table=sql_table,
-                        equip_id=self.equip_id,
-                        run_id=self.run_id,
-                        error_type=type(del_ex).__name__,
-                    )
-
-            # Route upsert tables via UPSERT_TABLES dict, else bulk insert
-            upsert_method = UPSERT_TABLES.get(sql_table)
-            if upsert_method:
-                inserted = int(getattr(self, upsert_method)(sql_df))
-            else:
-                inserted = int(self._bulk_insert_sql(sql_table, sql_df))
+            if required and inserted <= 0 and not sql_df.empty:
+                raise RuntimeError(f"Required table {sql_table} write inserted 0 rows")
 
             result["inserted"] = inserted
             result["sql_written"] = inserted > 0
@@ -810,7 +679,6 @@ class OutputManager:
                     error_type=type(e).__name__,
                 )
                 result["error"] = error_msg
-            result["error"] = str(e)
             self.stats["sql_failures"] += 1
             return result
 
@@ -820,75 +688,443 @@ class OutputManager:
             # FCST-15: cache for downstream modules
             self._artifact_cache[artifact_name] = df
 
-    def write_table(self, table_name: str, df: pd.DataFrame, delete_existing: bool = False) -> int:
-        """Generic SQL table writer with RunID/EquipID injection and upsert routing."""
-        with Span("persist.write", table=table_name, delete_existing=delete_existing) if _OBSERVABILITY_AVAILABLE and Span else nullcontext() as span:
+    def _prepare_sql_write_payload(
+        self,
+        df: pd.DataFrame,
+        sql_table: str,
+        sql_columns: Optional[Dict[str, str]],
+        non_numeric_cols: set,
+    ) -> pd.DataFrame:
+        """Prepare DataFrame payload for SQL writing, including metadata enrichment."""
+        sql_df = self._prepare_dataframe_for_sql(
+            df,
+            non_numeric_cols,
+            sql_table=sql_table,
+        )
+        if sql_columns:
+            mapped_source_cols = [c for c in sql_columns.keys() if c in sql_df.columns]
+            sql_df = sql_df[mapped_source_cols].rename(columns=sql_columns)
+        return self._populate_standard_metadata(sql_df)
+
+    def _execute_write_policy(
+        self,
+        sql_table: str,
+        sql_df: pd.DataFrame,
+        write_policy: Optional[WritePolicy],
+    ) -> int:
+        """Execute SQL write based on explicit generator-declared policy."""
+        policy = write_policy or WritePolicy(mode="insert")
+        if policy.mode == "upsert":
+            if policy.upsert_handler is None:
+                Console.warn(
+                    f"write_dataframe upsert requested without handler for {sql_table}; falling back to insert",
+                    component="OUTPUT",
+                    table=sql_table,
+                )
+                return int(self._bulk_insert_sql(sql_table, sql_df))
+            return int(policy.upsert_handler(sql_df))
+        return int(self._bulk_insert_sql(sql_table, sql_df))
+
+    def _get_table_columns_for_contract(self, table_name: str) -> set[str]:
+        """Resolve and cache table columns for schema-contract enforcement."""
+        return self._sql_engine.get_table_columns_for_contract(table_name)
+
+    def _populate_standard_metadata(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Populate standard metadata (RunID, EquipID, CreatedAt) during payload generation."""
+        return self._sql_engine.populate_standard_metadata(df)
+
+    def audit_allowed_tables_write_integrity(
+        self,
+        run_id: Optional[str] = None,
+        equip_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """
+        Verify metadata completeness in ALLOWED_TABLES for a run/equipment scope.
+
+        Checks table existence and reports NULL counts for RunID/EquipID/CreatedAt
+        where those columns exist.
+        """
+        if self.sql_client is None:
+            raise RuntimeError("SQL client is required for write integrity audit")
+
+        scope_run = run_id if run_id is not None else self.run_id
+        scope_equip = int(equip_id) if equip_id is not None else (int(self.equip_id) if self.equip_id is not None else None)
+        details: List[Dict[str, Any]] = []
+        tables_with_null_meta: List[str] = []
+        cursor_factory = lambda: cast(Any, self.sql_client).cursor()
+
+        for table_name in sorted(ALLOWED_TABLES):
+            if not _table_exists(cursor_factory, table_name):
+                details.append({"table": table_name, "exists": False})
+                continue
+
+            cols = self._get_table_columns_for_contract(table_name)
+            has_runid = "RunID" in cols
+            has_equipid = "EquipID" in cols
+            has_createdat = "CreatedAt" in cols
+
+            where_parts: List[str] = []
+            params: List[Any] = []
+            if has_runid and scope_run:
+                where_parts.append("RunID = ?")
+                params.append(scope_run)
+            if has_equipid and scope_equip is not None:
+                where_parts.append("EquipID = ?")
+                params.append(scope_equip)
+            where_sql = (" WHERE " + " AND ".join(where_parts)) if where_parts else ""
+
+            tbl_escaped = f"dbo.[{table_name}]"
+            cur = cursor_factory()
             try:
-                if not self._check_sql_health() or df is None or df.empty:
-                    return 0
+                cur.execute(f"SELECT COUNT(*) FROM {tbl_escaped}{where_sql}", tuple(params))
+                total_rows = int((cur.fetchone() or [0])[0] or 0)
 
-                sql_df = df.copy()
+                null_runid = 0
+                null_equipid = 0
+                null_createdat = 0
+                if has_runid:
+                    cur.execute(f"SELECT COUNT(*) FROM {tbl_escaped}{where_sql}" + (" AND " if where_parts else " WHERE ") + "RunID IS NULL", tuple(params))
+                    null_runid = int((cur.fetchone() or [0])[0] or 0)
+                if has_equipid:
+                    cur.execute(f"SELECT COUNT(*) FROM {tbl_escaped}{where_sql}" + (" AND " if where_parts else " WHERE ") + "EquipID IS NULL", tuple(params))
+                    null_equipid = int((cur.fetchone() or [0])[0] or 0)
+                if has_createdat:
+                    cur.execute(f"SELECT COUNT(*) FROM {tbl_escaped}{where_sql}" + (" AND " if where_parts else " WHERE ") + "CreatedAt IS NULL", tuple(params))
+                    null_createdat = int((cur.fetchone() or [0])[0] or 0)
 
-                # Inject standard metadata columns
-                if 'RunID' not in sql_df.columns:
-                    if not self.run_id:
-                        raise ValueError("RunID is required but not set on OutputManager")
-                    sql_df['RunID'] = self.run_id
-                if 'EquipID' not in sql_df.columns:
-                    sql_df['EquipID'] = self.equip_id
+                if null_runid > 0 or null_equipid > 0 or null_createdat > 0:
+                    tables_with_null_meta.append(table_name)
 
-                sql_df = self._prepare_dataframe_for_sql(sql_df)
+                details.append(
+                    {
+                        "table": table_name,
+                        "exists": True,
+                        "rows_in_scope": total_rows,
+                        "has_runid": has_runid,
+                        "has_equipid": has_equipid,
+                        "has_createdat": has_createdat,
+                        "null_runid": null_runid,
+                        "null_equipid": null_equipid,
+                        "null_createdat": null_createdat,
+                    }
+                )
+            finally:
+                try:
+                    cur.close()
+                except Exception:
+                    pass
 
-                # Optional delete-existing by RunID (+EquipID when available)
-                if delete_existing and self.sql_client is not None and self.run_id:
-                    try:
-                        with self.sql_client.cursor() as cur:
-                            if 'EquipID' in sql_df.columns and self.equip_id is not None:
-                                cur.execute(f"DELETE FROM dbo.[{table_name}] WHERE RunID = ? AND EquipID = ?", (self.run_id, self.equip_id))
-                            else:
-                                cur.execute(f"DELETE FROM dbo.[{table_name}] WHERE RunID = ?", (self.run_id,))
-                            self.sql_client.commit()
-                    except Exception as del_ex:
-                        Console.warn(f"delete_existing failed for {table_name}: {del_ex}", component="OUTPUT", table=table_name)
+        return {
+            "scope_run_id": scope_run,
+            "scope_equip_id": scope_equip,
+            "tables_with_null_metadata": sorted(set(tables_with_null_meta)),
+            "details": details,
+        }
 
-                # Route upsert tables via UPSERT_TABLES dict, else bulk insert
-                upsert_method = UPSERT_TABLES.get(table_name)
-                rows_written = getattr(self, upsert_method)(sql_df) if upsert_method else self._bulk_insert_sql(table_name, sql_df)
+    def audit_allowed_tables_schema_contract(self) -> Dict[str, Any]:
+        """
+        Audit schema consistency for all ALLOWED_TABLES in the current SQL DB.
 
-                if span:
-                    span._span.set_attribute("acm.rows_written", rows_written)
-                return rows_written
+        Reports table existence and whether common metadata columns are present.
+        This is an operational verification helper and does not mutate data.
+        """
+        if self.sql_client is None:
+            raise RuntimeError("SQL client is required for schema audit")
 
-            except Exception as e:
-                Console.warn(f"write_table failed for {table_name}: {e}", component="OUTPUT", table=table_name, error=str(e)[:200])
-                if span:
-                    span._span.set_attribute("acm.error", True)
+        cursor_factory = lambda: cast(Any, self.sql_client).cursor()
+        details: List[Dict[str, Any]] = []
+        missing_tables: List[str] = []
+        runid_without_equipid: List[str] = []
+        equipid_without_runid: List[str] = []
+        missing_createdat: List[str] = []
+
+        for table_name in sorted(ALLOWED_TABLES):
+            exists = _table_exists(cursor_factory, table_name)
+            if not exists:
+                missing_tables.append(table_name)
+                details.append(
+                    {
+                        "table": table_name,
+                        "exists": False,
+                        "has_runid": False,
+                        "has_equipid": False,
+                        "has_createdat": False,
+                        "has_timestamp": False,
+                    }
+                )
+                continue
+
+            cols = self._get_table_columns_for_contract(table_name)
+            has_runid = "RunID" in cols
+            has_equipid = "EquipID" in cols
+            has_createdat = "CreatedAt" in cols
+            has_timestamp = "Timestamp" in cols
+
+            if has_runid and not has_equipid:
+                runid_without_equipid.append(table_name)
+            if has_equipid and not has_runid:
+                equipid_without_runid.append(table_name)
+            if not has_createdat:
+                missing_createdat.append(table_name)
+
+            details.append(
+                {
+                    "table": table_name,
+                    "exists": True,
+                    "has_runid": has_runid,
+                    "has_equipid": has_equipid,
+                    "has_createdat": has_createdat,
+                    "has_timestamp": has_timestamp,
+                }
+            )
+
+        return {
+            "table_count": len(ALLOWED_TABLES),
+            "missing_tables": missing_tables,
+            "runid_without_equipid": runid_without_equipid,
+            "equipid_without_runid": equipid_without_runid,
+            "missing_createdat": missing_createdat,
+            "details": details,
+        }
+
+    def audit_allowed_tables_write_coverage(self) -> Dict[str, Any]:
+        """
+        Audit whether ALLOWED_TABLES appear in known SQL write paths.
+
+        This is static/introspective coverage: it scans OutputManager and
+        output artifact writer sources for ACM table string literals.
+        """
+        sources: List[str] = []
+        try:
+            sources.append(inspect.getsource(type(self)))
+        except Exception:
+            pass
+        try:
+            sources.append(inspect.getsource(write_sql_artifacts))
+        except Exception:
+            pass
+        try:
+            sources.append(inspect.getsource(write_pca_artifacts))
+        except Exception:
+            pass
+
+        referenced_tables: set[str] = set()
+        pattern = re.compile(r"(?:'|\")(?P<table>ACM_[A-Za-z0-9_]+)(?:'|\")")
+        for src in sources:
+            for m in pattern.finditer(src):
+                referenced_tables.add(m.group("table"))
+
+        allowed_tables = set(ALLOWED_TABLES)
+        missing_write_paths = sorted(allowed_tables - referenced_tables)
+        referenced_not_allowed = sorted(referenced_tables - allowed_tables)
+
+        return {
+            "allowed_count": len(allowed_tables),
+            "referenced_count": len(referenced_tables),
+            "missing_write_paths": missing_write_paths,
+            "referenced_not_allowed": referenced_not_allowed,
+            "referenced_tables": sorted(referenced_tables),
+        }
+
+    def write_table(
+        self,
+        table_name: str,
+        df: pd.DataFrame,
+        write_policy: Optional[WritePolicy] = None,
+    ) -> int:
+        """Generic SQL table writer routed through contract-driven `write_sql_table`."""
+        with Span("persist.write", table=table_name) if _OBSERVABILITY_AVAILABLE and Span else nullcontext() as span:
+            if not self._can_write_dataframe(df):
                 return 0
 
+            result = self.write_sql_table(
+                table_name=table_name,
+                df=df,
+                artifact_name=f"table:{table_name}",
+                required=False,
+                write_policy=write_policy,
+            )
+            rows_written = int(result.get("inserted", 0))
+            if span:
+                span._span.set_attribute("acm.rows_written", rows_written)
+                if result.get("error"):
+                    span._span.set_attribute("acm.error", True)
+            return rows_written
+
+    def _ensure_table_exists(self, table_name: str, cursor_factory: Callable[[], Any]) -> None:
+        """Ensure target table exists (cached) before insert attempts."""
+        self._sql_engine.ensure_table_exists(table_name, cursor_factory)
+
+    def _apply_standard_predelete(self, cur: Any, table_name: str, table_cols: set[str]) -> None:
+        """Delete existing rows for the current run when table supports RunID keys."""
+        self._sql_engine.apply_standard_predelete(cur, table_name, table_cols)
+
+    def _project_insert_columns(self, table_name: str, df: pd.DataFrame, table_cols: set[str]) -> List[str]:
+        """Project payload columns to target table insertable columns."""
+        return self._sql_engine.project_insert_columns(table_name, df, table_cols)
+
+    # Start Here
+
+    def _sanitize_for_sql_insert(
+        self,
+        table_name: str,
+        df: pd.DataFrame,
+        columns: List[str],
+    ) -> pd.DataFrame:
+        """Sanitize payload values for robust SQL binding (pyodbc-safe)."""
+        return self._sql_engine.sanitize_for_sql_insert(table_name, df, columns)
+
+    # End Here
+    @staticmethod
+    def _build_insert_sql(table_name: str, columns: List[str]) -> str:
+        """Build parameterized INSERT statement for target table/columns."""
+        return SqlWriteEngine.build_insert_sql(table_name, columns)
+
+    def _execute_insert_batches(self, cur: Any, insert_sql: str, records: List[Tuple[Any, ...]], table_name: str) -> int:
+        """Execute batched inserts with batch-level diagnostics."""
+        return self._sql_engine.execute_insert_batches(cur, insert_sql, records, table_name)
+
+    def _commit_if_needed(self, table_name: str) -> None:
+        """Commit write if not already in an outer batched transaction."""
+        self._sql_engine.commit_if_needed(table_name)
+
+    def _rollback_if_needed(self, table_name: str) -> None:
+        """Rollback current transaction when supported by the SQL client wrapper."""
+        self._sql_engine.rollback_if_needed(table_name)
+
+
+    def _replace_by_keys(self, table_name: str, df: pd.DataFrame, key_columns: List[str]) -> int:
+        """
+        Replace rows by key set: delete matching key tuples then bulk insert payload.
+        Ensures delete key tuples are converted to pure Python scalars (pyodbc-safe).
+        """
+        if not self._can_write_dataframe(df, require_healthy_sql=False):
+            return 0
+        if self.sql_client is None:
+            return 0
+        if table_name not in ALLOWED_TABLES:
+            raise ValueError(f"Invalid table name for replace policy: {table_name}")
+        if not key_columns:
+            raise ValueError("replace policy requires at least one key column")
+
+        sql_df = df.copy()
+        missing_keys = [k for k in key_columns if k not in sql_df.columns]
+        if missing_keys:
+            raise ValueError(f"{table_name} replace policy missing key columns: {missing_keys}")
+
+        def _pyodbc_safe_scalar(v: Any) -> Any:
+            # Null-like
+            if v is None:
+                return None
+            try:
+                if pd.isna(v):
+                    return None
+            except Exception:
+                pass
+
+            # pandas Timestamp / datetime-like
+            if isinstance(v, pd.Timestamp):
+                try:
+                    if v.tzinfo is not None:
+                        v = v.tz_convert(None)
+                except Exception:
+                    try:
+                        v = v.tz_localize(None)
+                    except Exception:
+                        pass
+                return v.to_pydatetime()
+
+            # numpy / pandas scalar -> python scalar
+            if hasattr(v, "item"):
+                try:
+                    return v.item()
+                except Exception:
+                    pass
+
+            return v
+
+        key_frame = sql_df[key_columns].dropna().drop_duplicates()
+
+        if len(key_frame) > 0:
+            # Normalize delete keys BEFORE executemany (this is the actual failing path)
+            delete_rows = [
+                tuple(_pyodbc_safe_scalar(val) for val in row)
+                for row in key_frame.itertuples(index=False, name=None)
+            ]
+
+            with self.sql_client.cursor() as cur:
+                try:
+                    cur.fast_executemany = True
+                except Exception:
+                    pass
+
+                where_sql = " AND ".join(f"[{k}] = ?" for k in key_columns)
+                delete_sql = f"DELETE FROM dbo.[{table_name}] WHERE {where_sql}"
+
+                cur.executemany(delete_sql, delete_rows)
+
+            self._commit_if_needed(table_name)
+
+        self._bulk_predeleted_tables.add(table_name)
+        try:
+            return self._bulk_insert_sql(table_name, sql_df)
+        finally:
+            self._bulk_predeleted_tables.discard(table_name)
+
+
+    def build_replace_policy(
+        self,
+        table_name: str,
+        key_columns: Optional[List[str]] = None,
+    ) -> WritePolicy:
+        """
+        Build an explicit upsert policy using replace-by-keys semantics.
+        If `key_columns` is omitted, keys are derived from REPLACE_POLICY_KEYS.
+        """
+        if key_columns is None:
+            configured = REPLACE_POLICY_KEYS.get(table_name)
+            if not configured:
+                raise ValueError(
+                    f"No replace key contract configured for table {table_name}. "
+                    "Pass key_columns explicitly or add table to REPLACE_POLICY_KEYS."
+                )
+            keys = list(configured)
+        else:
+            keys = list(key_columns)
+        return WritePolicy(
+            mode="upsert",
+            upsert_handler=lambda payload: self._replace_by_keys(table_name, payload, keys),
+        )
+
+    @staticmethod
+    def build_insert_policy() -> WritePolicy:
+        """Build an explicit insert policy."""
+        return WritePolicy(mode="insert")
+
+    @staticmethod
+    def audit_replace_policy_contract() -> Dict[str, Any]:
+        """Validate centralized replace-key contract shape and table references."""
+        return _audit_replace_policy_contract()
+
+    @staticmethod
+    def audit_table_write_contracts() -> Dict[str, Any]:
+        """Validate canonical table write contracts."""
+        return _audit_table_write_contracts()
+
+    # Bulk Insert Starts Here
     def _bulk_insert_sql(self, table_name: str, df: pd.DataFrame) -> int:
-        """Perform bulk SQL insert with optimized batching and robust commit."""
-        _sql_start_time = time.perf_counter()  # Track for observability
-        
+        """Perform bulk SQL insert with optimized batching and robust commit (pyodbc-safe scalars)."""
+        _sql_start_time = time.perf_counter()
+
         if df.empty:
             return 0
         if table_name not in ALLOWED_TABLES:
             raise ValueError(f"Invalid table name: {table_name}")
         if self.sql_client is None:
-            return 0
+            raise RuntimeError(f"SQL client is not available for table write: {table_name}")
 
-        inserted = 0
-        if self.sql_client is None:
-            return 0
         cursor_factory = lambda: cast(Any, self.sql_client).cursor()
-
-        # Optional: skip if the table doesn't exist (avoids noisy logs on dev DBs)
-        exists = self._table_exists_cache.get(table_name)
-        if exists is None:
-            exists = _table_exists(cursor_factory, table_name)
-            self._table_exists_cache[table_name] = bool(exists)
-        if not exists:
-            Console.warn(f"Skipping write: table dbo.[{table_name}] not found", component="OUTPUT", table=table_name, equip_id=self.equip_id, run_id=self.run_id)
-            return 0
+        self._ensure_table_exists(table_name, cursor_factory)
 
         cur = cursor_factory()
         try:
@@ -897,115 +1133,32 @@ class OutputManager:
             except Exception:
                 pass
 
-            # discover table columns and scope delete by RunID only when present
-            # determine insertable columns (exclude identity)
-            table_cols: set
-            try:
-                if table_name in self._table_insertable_cache:
-                    table_cols = self._table_insertable_cache[table_name]
-                else:
-                    cols = set(_get_insertable_columns(cursor_factory, table_name))
-                    if not cols:
-                        cols = set(_get_table_columns(cursor_factory, table_name))
-                    self._table_insertable_cache[table_name] = cols
-                    table_cols = cols
-            except Exception:
-                if table_name in self._table_columns_cache:
-                    table_cols = self._table_columns_cache[table_name]
-                else:
-                    cols_all = set(_get_table_columns(cursor_factory, table_name))
-                    self._table_columns_cache[table_name] = cols_all
-                    table_cols = cols_all
-            # CRIT-01/HIGH-02: Standardize DELETE-before-INSERT for tables keyed by RunID
-            # Apply for all tables with RunID in schema, scoped by EquipID when available.
-            # PERF-OPT: Skip if table was already bulk pre-deleted
-            if table_name in self._bulk_predeleted_tables:
-                pass  # Already deleted in bulk operation
-            else:
-                try:
-                    if "RunID" in table_cols and self.run_id:
-                        if "EquipID" in table_cols and self.equip_id is not None:
-                            rows_deleted = cur.execute(
-                                f"DELETE FROM dbo.[{table_name}] WHERE RunID = ? AND EquipID = ?",
-                                (self.run_id, int(self.equip_id or 0))
-                            ).rowcount
-                        else:
-                            rows_deleted = cur.execute(
-                                f"DELETE FROM dbo.[{table_name}] WHERE RunID = ?",
-                                (self.run_id,)
-                            ).rowcount
-                        if rows_deleted and rows_deleted > 0:
-                            Console.info(f"SQL delete from {table_name}: {rows_deleted} rows", component="OUTPUT")
-                except Exception as del_ex:
-                    Console.warn(f"Standard pre-delete for {table_name} failed: {del_ex}", component="OUTPUT", table=table_name, equip_id=self.equip_id, run_id=self.run_id, error_type=type(del_ex).__name__)
+            table_cols = self._get_table_columns_for_contract(table_name)
+            self._apply_standard_predelete(cur, table_name, table_cols)
 
-            # Note: RUL tables are already covered by standardized pre-delete above.
+            columns = self._project_insert_columns(table_name, df, table_cols)
+            if not columns:
+                return 0
 
-            # only insert columns that actually exist in the table
-            columns = [c for c in df.columns if c in table_cols]
-            cols_str = ", ".join(f"[{c}]" for c in columns)
-            placeholders = ", ".join(["?"] * len(columns))
-            insert_sql = f"INSERT INTO dbo.[{table_name}] ({cols_str}) VALUES ({placeholders})"
+            # sanitize_for_sql_insert handles NaN→None, tz-strip, and extreme-float clamp.
+            # _to_python_records then uses Polars .rows() for vectorized numpy→Python conversion.
+            df_clean = self._sanitize_for_sql_insert(table_name, df, columns)
+            insert_sql = self._build_insert_sql(table_name, columns)
+            records = self._sql_engine._to_python_records(df_clean, columns)
 
-            # Clean NaN/Inf values for SQL Server compatibility (pyodbc cannot handle these).
-            # Fast path: avoid repeated DataFrame.replace() calls which iterate block-by-block.
-            import numpy as np
-            df_clean = df[columns].copy()
+            inserted = self._execute_insert_batches(cur, insert_sql, records, table_name)
 
-            # Replace 'N/A' strings with None using per-column mask (avoids block replace).
-            # Only scan object/string columns where these tokens can appear.
-            _NA_STRINGS = {'N/A', 'n/a', 'NA', 'na', '#N/A'}
-            for col in df_clean.select_dtypes(include='object').columns:
-                mask = df_clean[col].isin(_NA_STRINGS)
-                if mask.any():
-                    df_clean.loc[mask, col] = None
-
-            # Convert timestamp columns to datetime objects (vectorized)
-            ts_cols = [c for c in df_clean.columns if c in DATETIME_COLUMNS or 'timestamp' in c.lower()]
-            for col in ts_cols:
-                try:
-                    df_clean[col] = pd.to_datetime(df_clean[col], format='mixed', errors='coerce')
-                    try:
-                        df_clean[col] = df_clean[col].dt.tz_localize(None)
-                    except Exception:
-                        pass
-                    null_count = df_clean[col].isna().sum()
-                    if null_count > 0:
-                        Console.warn(f"{null_count} timestamps failed to parse in column {col}", component="OUTPUT", table=table_name, column=col, failed_count=null_count)
-                except Exception as ex:
-                    Console.warn(f"Timestamp conversion failed for {col}: {ex}", component="OUTPUT", table=table_name, column=col, error_type=type(ex).__name__)
-
-            # Vectorised float sanitisation: clamp extremes and convert Inf/NaN → None.
-            # Convert the whole frame to object dtype once, then apply numpy masks per column.
-            float_cols = df_clean.select_dtypes(include=[np.float64, np.float32]).columns
-            if len(float_cols):
-                float_arr = df_clean[float_cols].to_numpy(dtype=float)
-                # Clamp values outside SQL float range to NaN
-                extreme = np.abs(float_arr) > 1e38
-                if extreme.any():
-                    n_extreme = int(extreme.sum())
-                    Console.warn(f"Clamping {n_extreme} extreme float values in {table_name}", component="OUTPUT", table=table_name, extreme_count=n_extreme)
-                    float_arr[extreme] = np.nan
-                # Replace Inf with NaN (in-place)
-                np.copyto(float_arr, np.nan, where=~np.isfinite(float_arr))
-                df_clean[float_cols] = float_arr
-
-            # Final: convert to object dtype and replace any remaining NaN with None.
-            df_clean = df_clean.astype(object).where(pd.notnull(df_clean), None)
-            
-            records = [tuple(row) for row in df_clean.itertuples(index=False, name=None)]
-            for i in range(0, len(records), self.batch_size):
-                batch = records[i:i+self.batch_size]
-                try:
-                    cur.executemany(insert_sql, batch)
-                    inserted += len(batch)
-                except Exception as batch_error:
-                    # Log failed batch with first few records for debugging
-                    sample = batch[:3] if len(batch) > 3 else batch
-                    Console.error(f"Batch insert failed for {table_name} (sample: {sample}): {batch_error}", component="OUTPUT", table=table_name, batch_size=len(batch), equip_id=self.equip_id, run_id=self.run_id, error_type=type(batch_error).__name__, error=str(batch_error)[:200])
-                    raise
         except Exception as e:
-            Console.error(f"SQL insert failed for {table_name}: {e}", component="OUTPUT", table=table_name, rows=len(df), equip_id=self.equip_id, run_id=self.run_id, error_type=type(e).__name__, error=str(e)[:200])
+            Console.error(
+                f"SQL insert failed for {table_name}: {e}",
+                component="OUTPUT",
+                table=table_name,
+                rows=len(df),
+                equip_id=self.equip_id,
+                run_id=self.run_id,
+                error_type=type(e).__name__,
+                error=str(e)[:200],
+            )
             raise
         finally:
             try:
@@ -1013,22 +1166,10 @@ class OutputManager:
             except Exception:
                 pass
 
-        # Only commit if not in batched transaction mode
-        if not self._batched_transaction_active:
-            try:
-                if hasattr(self.sql_client, "commit"):
-                    self.sql_client.commit()
-                elif hasattr(self.sql_client, "conn") and hasattr(self.sql_client.conn, "commit"):
-                    # some wrappers expose .conn
-                    if not getattr(self.sql_client.conn, "autocommit", True):
-                        self.sql_client.conn.commit()
-            except Exception as e:
-                Console.error(f"SQL commit failed for {table_name}: {e}", component="OUTPUT", table=table_name, equip_id=self.equip_id, run_id=self.run_id, error_type=type(e).__name__, error=str(e)[:200])
-                raise
+        self._commit_if_needed(table_name)
 
         Console.info(f"SQL insert to {table_name}: {inserted} rows", component="OUTPUT")
-        
-        # P1: Track SQL ops for observability metrics
+
         if _OBSERVABILITY_AVAILABLE and record_sql_op:
             try:
                 duration_ms = (time.perf_counter() - _sql_start_time) * 1000
@@ -1040,11 +1181,9 @@ class OutputManager:
                     duration_ms=duration_ms,
                 )
             except Exception:
-                pass  # Non-critical tracking
-        
-        return inserted
+                pass
 
-    
+        return inserted
     # ==================== ARTIFACT CACHE METHODS (FCST-15) ====================
     
     def get_cached_table(self, table_name: str) -> Optional[pd.DataFrame]:
@@ -1078,11 +1217,11 @@ class OutputManager:
 
         Two calling conventions:
 
-        1. ``pca_detector=<PCASubspaceDetector>`` — called immediately after model fitting
+        1. ``pca_detector=<PCASubspaceDetector>`` - called immediately after model fitting
            (detector_orchestrator.py).  Extracts all metrics directly from the fitted object.
            Pass ``train=<DataFrame>`` to populate TrainSamples/TrainFeatures.
 
-        2. ``df=<DataFrame>`` — called by write_pca_artifacts after scoring.  The DataFrame
+        2. ``df=<DataFrame>`` - called by write_pca_artifacts after scoring.  The DataFrame
            must already be in new-format (NComponents, ExplainedVariance, ComponentsJson,
            MetricType, TrainSamples, TrainFeatures).  Score statistics (SPE/T2 percentiles)
            are appended to ComponentsJson before this call, so the second write supersedes
@@ -1095,7 +1234,7 @@ class OutputManager:
             train: Training DataFrame used to fit the detector.  Provides TrainSamples and
                 TrainFeatures when pca_detector is supplied.
         """
-        if not self._check_sql_health():
+        if self.sql_client is None:
             return 0
 
         try:
@@ -1134,13 +1273,15 @@ class OutputManager:
                 }])
 
             elif df is not None:
-                if df.empty:
+                if not self._is_non_empty_dataframe(df):
                     return 0
                 sql_df = df.copy()
-                if 'RunID' not in sql_df.columns:
-                    sql_df['RunID'] = run_id or self.run_id
-                if 'EquipID' not in sql_df.columns:
-                    sql_df['EquipID'] = self.equip_id
+                # Respect explicit run_id override when caller passes a frame.
+                if run_id is not None:
+                    if 'RunID' not in sql_df.columns:
+                        sql_df['RunID'] = run_id
+                    else:
+                        sql_df['RunID'] = sql_df['RunID'].where(pd.notna(sql_df['RunID']), run_id)
 
             else:
                 Console.warn(
@@ -1149,7 +1290,18 @@ class OutputManager:
                 )
                 return 0
 
-            return self._upsert_pca_metrics(sql_df)
+            if "MetricType" not in sql_df.columns:
+                sql_df["MetricType"] = "pca_fit"
+            else:
+                sql_df["MetricType"] = sql_df["MetricType"].fillna("pca_fit")
+
+            result = self.write_sql_table(
+                table_name="ACM_PCA_Metrics",
+                df=sql_df,
+                artifact_name="pca_metrics",
+                required=False,
+            )
+            return int(result.get("inserted", 0))
 
         except Exception as e:
             Console.warn(
@@ -1179,9 +1331,7 @@ class OutputManager:
         Returns:
             Number of rows written
         """
-        if df is None or df.empty:
-            return 0
-        if not self._check_sql_health():
+        if not self._can_write_dataframe(df):
             return 0
         
         try:
@@ -1234,217 +1384,22 @@ class OutputManager:
             keep_cols = ['RunID', 'EquipID', 'ComponentIndex', 'SensorName', 'Loading', 'AbsLoading', 'CreatedAt']
             sql_df = sql_df[[c for c in keep_cols if c in sql_df.columns]]
             
-            return self._bulk_insert_sql('ACM_PCA_Loadings', sql_df)
+            result = self.write_sql_table(
+                table_name="ACM_PCA_Loadings",
+                df=sql_df,
+                artifact_name="pca_loadings",
+                required=False,
+            )
+            return int(result.get("inserted", 0))
             
         except Exception as e:
             Console.warn(f"write_pca_loadings failed: {e}", component="OUTPUT",
                         equip_id=self.equip_id, run_id=run_id, error=str(e)[:200])
             return 0
 
-    def _upsert_pca_metrics(self, df: pd.DataFrame) -> int:
-        """Upsert PCA metrics using DELETE + INSERT pattern.
-
-        Expects a new-format DataFrame with columns matching ACM_PCA_Metrics:
-          - RunID           (required, UNIQUEIDENTIFIER)
-          - EquipID         (required, INT)
-          - NComponents     (nullable, INT)
-          - ExplainedVariance (nullable, FLOAT — cumulative variance ratio)
-          - ComponentsJson  (nullable, NVARCHAR — JSON array of per-component entries)
-          - MetricType      (nullable, e.g. 'pca_fit')
-          - TrainSamples    (nullable, INT)
-          - TrainFeatures   (nullable, INT)
-          - CreatedAt       (server default)
-        """
-        if df.empty or self.sql_client is None:
-            return 0
-
-        try:
-            conn = self.sql_client.conn
-            cursor = conn.cursor()
-
-            # Ensure RunID and EquipID are present
-            if 'RunID' not in df.columns:
-                df = df.copy()
-                df['RunID'] = self.run_id
-            if 'EquipID' not in df.columns:
-                df = df.copy()
-                df['EquipID'] = self.equip_id
-
-            # DELETE existing rows for this RunID+EquipID before re-inserting
-            run_equip_pairs = df[['RunID', 'EquipID']].drop_duplicates()
-            for run_id, equip_id in run_equip_pairs.values:
-                if equip_id is None:
-                    continue
-                cursor.execute(
-                    "DELETE FROM ACM_PCA_Metrics WHERE RunID = ? AND EquipID = ?",
-                    (str(run_id), int(equip_id))
-                )
-
-            insert_sql = """
-            INSERT INTO ACM_PCA_Metrics
-                (RunID, EquipID, NComponents, ExplainedVariance, ComponentsJson, MetricType, TrainSamples, TrainFeatures)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """
-
-            valid_records = [r for r in df.to_dict('records') if r.get('EquipID') is not None]
-            rows_to_insert = [
-                (
-                    str(row['RunID']),
-                    int(row['EquipID']),
-                    int(row['NComponents']) if pd.notna(row.get('NComponents')) else None,
-                    float(row['ExplainedVariance']) if pd.notna(row.get('ExplainedVariance')) else None,
-                    str(row['ComponentsJson']) if pd.notna(row.get('ComponentsJson')) else None,
-                    str(row.get('MetricType', 'pca_fit')) if pd.notna(row.get('MetricType')) else 'pca_fit',
-                    int(row['TrainSamples']) if pd.notna(row.get('TrainSamples')) else None,
-                    int(row['TrainFeatures']) if pd.notna(row.get('TrainFeatures')) else None,
-                )
-                for row in valid_records
-            ]
-
-            if rows_to_insert:
-                cursor.fast_executemany = True
-                cursor.executemany(insert_sql, rows_to_insert)
-
-            conn.commit()
-            return len(rows_to_insert)
-
-        except Exception as e:
-            Console.warn(
-                f"_upsert_pca_metrics failed: {e}",
-                component="OUTPUT", table="ACM_PCA_Metrics", rows=len(df),
-                equip_id=self.equip_id, error_type=type(e).__name__, error=str(e)[:200],
-            )
-            if self.sql_client and self.sql_client.conn:
-                try:
-                    self.sql_client.conn.rollback()
-                except Exception:
-                    pass
-            return 0
-    
-    def _upsert_health_forecast(self, df: pd.DataFrame) -> int:
-        """
-        FORECAST-WRITE-01: Write health forecast using bulk insert.
-        v10 schema: ACM_HealthForecast has (RunID, EquipID, Timestamp, ForecastHealth, CI_Lower, CI_Upper, Method, CreatedAt)
-        """
-        if df.empty or self.sql_client is None:
-            return 0
-        
-        try:
-            # Bulk insert is standard for forecast tables in v10
-            return self._bulk_insert_sql('ACM_HealthForecast', df)
-        except Exception as e:
-            Console.warn(f"_upsert_health_forecast failed: {e}", component="OUTPUT", table="ACM_HealthForecast", rows=len(df), equip_id=self.equip_id, error_type=type(e).__name__, error=str(e)[:200])
-            return 0
-    
-    def _upsert_failure_forecast(self, df: pd.DataFrame) -> int:
-        """
-        FORECAST-WRITE-02: Write failure forecast using bulk insert.
-        v10 schema: ACM_FailureForecast has (RunID, EquipID, Timestamp, FailureProb, ThresholdUsed, Method, CreatedAt)
-        """
-        if df.empty or self.sql_client is None:
-            return 0
-        
-        try:
-            return self._bulk_insert_sql('ACM_FailureForecast', df)
-        except Exception as e:
-            Console.warn(f"_upsert_failure_forecast failed: {e}", component="OUTPUT", table="ACM_FailureForecast", rows=len(df), equip_id=self.equip_id, error_type=type(e).__name__, error=str(e)[:200])
-            return 0
-    
-    def _upsert_detector_forecast_ts(self, df: pd.DataFrame) -> int:
-        """
-        FORECAST-UPSERT-03: Upsert detector forecast time series using MERGE.
-        
-        Primary key is (RunID, EquipID, DetectorName, Timestamp), so update if exists.
-        Schema: RunID, EquipID, DetectorName, Timestamp, ForecastValue, CiLower, CiUpper, ForecastStd, Method, CreatedAt
-        """
-        if df.empty or self.sql_client is None:
-            return 0
-        
-        # Ensure all required columns exist with defaults before upsert
-        df = df.copy()
-        if 'Method' not in df.columns:
-            df['Method'] = 'AR1'
-        if 'ForecastStd' not in df.columns:
-            df['ForecastStd'] = 0.0
-        
-        # Fill any NaN values in critical columns
-        df['Method'] = df['Method'].fillna('AR1')
-        # Avoid FutureWarning for silent downcasting by ensuring float dtype before fillna
-        df['ForecastStd'] = pd.to_numeric(df['ForecastStd'], errors='coerce').astype(float).fillna(0.0)
-        if 'DetectorName' in df.columns:
-            df['DetectorName'] = df['DetectorName'].fillna('UNKNOWN')
-        
-        try:
-            # PERFORMANCE FIX: Replace row-by-row MERGE with DELETE + bulk INSERT
-            # The MERGE pattern was doing N individual SQL round-trips (catastrophic)
-            
-            # First, delete existing records for this RunID/EquipID
-            conn = self.sql_client.conn
-            cursor = conn.cursor()
-            
-            # Get unique RunID/EquipID pairs
-            run_id = df['RunID'].iloc[0] if 'RunID' in df.columns else self.run_id
-            equip_id = df['EquipID'].iloc[0] if 'EquipID' in df.columns else self.equip_id
-            
-            if equip_id is None:
-                Console.warn("_upsert_detector_forecast_ts: equip_id is None, skipping", component="OUTPUT")
-                return 0
-            
-            cursor.execute(
-                "DELETE FROM ACM_DetectorForecast_TS WHERE RunID = ? AND EquipID = ?",
-                (run_id, equip_id)
-            )
-            
-            # Clean NaN values vectorized (not row-by-row)
-            df = df.copy()
-            df['ForecastValue'] = pd.to_numeric(df['ForecastValue'], errors='coerce').fillna(0.0)
-            df['CiLower'] = pd.to_numeric(df['CiLower'], errors='coerce').fillna(0.0)
-            df['CiUpper'] = pd.to_numeric(df['CiUpper'], errors='coerce').fillna(0.0)
-            df['ForecastStd'] = pd.to_numeric(df['ForecastStd'], errors='coerce').fillna(0.0)
-            df['Method'] = df['Method'].fillna('AR1')
-            df['DetectorName'] = df['DetectorName'].fillna('UNKNOWN')
-            if 'CreatedAt' not in df.columns:
-                df['CreatedAt'] = datetime.now()
-            
-            # Bulk insert with fast_executemany
-            cursor.fast_executemany = True
-            
-            insert_sql = """
-            INSERT INTO ACM_DetectorForecast_TS 
-            (RunID, EquipID, DetectorName, Timestamp, ForecastValue, CiLower, CiUpper, ForecastStd, Method, CreatedAt)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """
-            
-            # Build tuples for executemany (vectorized)
-            records = list(df[['RunID', 'EquipID', 'DetectorName', 'Timestamp', 
-                              'ForecastValue', 'CiLower', 'CiUpper', 'ForecastStd', 
-                              'Method', 'CreatedAt']].itertuples(index=False, name=None))
-            
-            cursor.executemany(insert_sql, records)
-            conn.commit()
-            return len(records)
-            
-        except Exception as e:
-            Console.warn(f"_upsert_detector_forecast_ts failed: {e}", component="OUTPUT", table="ACM_DetectorForecast_TS", rows=len(df), equip_id=self.equip_id, error_type=type(e).__name__, error=str(e)[:200])
-            return 0
-    
-    def _upsert_sensor_forecast(self, df: pd.DataFrame) -> int:
-        """
-        FORECAST-WRITE-04: Write sensor forecast using bulk insert.
-        v10 schema: ACM_SensorForecast has (RunID, EquipID, SensorName, Timestamp, ForecastValue, CiLower, CiUpper, ForecastStd, Method, RegimeLabel, CreatedAt)
-        """
-        if df.empty or self.sql_client is None:
-            return 0
-        
-        try:
-            return self._bulk_insert_sql('ACM_SensorForecast', df)
-        except Exception as e:
-            Console.warn(f"_upsert_sensor_forecast failed: {e}", component="OUTPUT", table="ACM_SensorForecast", rows=len(df), equip_id=self.equip_id, error_type=type(e).__name__, error=str(e)[:200])
-            return 0
-    
     def write_run_stats(self, stats_data: Dict[str, Any]) -> int:
         """Write run statistics to ACM_Run_Stats table."""
-        if not self._check_sql_health():
+        if self.sql_client is None:
             return 0
         try:
             row = dict(stats_data)
@@ -1459,7 +1414,13 @@ class OutputManager:
                 return 0
             row.setdefault('EquipID', self.equip_id)
             sql_df = pd.DataFrame([row])
-            return self._bulk_insert_sql('ACM_Run_Stats', sql_df)
+            result = self.write_sql_table(
+                table_name="ACM_Run_Stats",
+                df=sql_df,
+                artifact_name="run_stats",
+                required=False,
+            )
+            return int(result.get("inserted", 0))
         except Exception as e:
             Console.error(f"write_run_stats failed: {e}", component="OUTPUT", equip_id=self.equip_id, run_id=self.run_id, error_type=type(e).__name__, error=str(e)[:200])
             return 0
@@ -1506,17 +1467,9 @@ class OutputManager:
                                 component="OUTPUT", table="ACM_Scores_Wide",
                                 equip_id=self.equip_id, min_ts=str(min_ts), max_ts=str(max_ts)
                             )
-                    if hasattr(self.sql_client, "commit"):
-                        self.sql_client.commit()
-                    elif hasattr(self.sql_client, "conn") and hasattr(self.sql_client.conn, "commit"):
-                        if not getattr(self.sql_client.conn, "autocommit", True):
-                            self.sql_client.conn.commit()
+                    self._commit_if_needed("ACM_Scores_Wide")
                 except Exception as del_ex:
-                    Console.warn(
-                        f"Failed to delete overlapping scores: {del_ex}",
-                        component="OUTPUT", table="ACM_Scores_Wide",
-                        equip_id=self.equip_id, error_type=type(del_ex).__name__
-                    )
+                    raise RuntimeError(f"Failed to delete overlapping scores: {del_ex}") from del_ex
 
         score_columns = {
             "timestamp": "Timestamp",
@@ -1535,15 +1488,147 @@ class OutputManager:
         }
 
         # non_numeric_cols must refer to *pre-mapping* column names because prepare() runs first.
-        return self.write_dataframe(
+        return self.write_sql_table(
+            table_name="ACM_Scores_Wide",
             df=scores_for_output.reset_index(),
             artifact_name="scores",
-            sql_table="ACM_Scores_Wide",
             sql_columns=score_columns,
             non_numeric_cols={"timestamp", "regime_label", "transient_state"},
-            add_created_at=False,
+            required=True,
         )
-    
+
+    def _normalize_episodes_for_diagnostics(self, episodes_df: pd.DataFrame) -> Tuple[pd.DataFrame, List[str]]:
+        """
+        Normalize episode payload into ACM_EpisodeDiagnostics-compatible shape.
+        Returns the normalized frame and the list of applied repairs.
+        """
+        episodes_for_output = episodes_df.copy().reset_index(drop=True)
+        repairs_applied: List[str] = []
+
+        fallback_ids = pd.Series(
+            np.arange(1, len(episodes_for_output) + 1),
+            index=episodes_for_output.index,
+            dtype="int64",
+        )
+        if 'episode_id' not in episodes_for_output.columns:
+            episodes_for_output['episode_id'] = fallback_ids
+            repairs_applied.append("episode_id_added")
+        else:
+            raw_episode_ids = pd.to_numeric(episodes_for_output['episode_id'], errors='coerce')
+            valid_episode_ids = (
+                raw_episode_ids.notna()
+                & np.isfinite(raw_episode_ids)
+                & (raw_episode_ids >= 1)
+                & (np.floor(raw_episode_ids) == raw_episode_ids)
+            )
+            replaced_count = int((~valid_episode_ids).sum())
+            episodes_for_output['episode_id'] = (
+                raw_episode_ids.where(valid_episode_ids, fallback_ids).astype("int64")
+            )
+            if replaced_count > 0:
+                repairs_applied.append(f"episode_id_sanitized:{replaced_count}")
+
+        if 'duration_hours' not in episodes_for_output.columns and 'duration_s' in episodes_for_output.columns:
+            episodes_for_output['duration_hours'] = episodes_for_output['duration_s'] / 3600.0
+            repairs_applied.append("duration_hours_derived")
+
+        if 'peak_timestamp' not in episodes_for_output.columns and 'start_ts' in episodes_for_output.columns:
+            episodes_for_output['peak_timestamp'] = episodes_for_output['start_ts']
+            repairs_applied.append("peak_timestamp_fallback_used")
+
+        if 'regime_label' in episodes_for_output.columns:
+            episodes_for_output['MaxRegimeLabel'] = episodes_for_output['regime_label']
+            repairs_applied.append("regime_label_mapped")
+        elif 'regime' in episodes_for_output.columns:
+            episodes_for_output['MaxRegimeLabel'] = episodes_for_output['regime']
+            repairs_applied.append("regime_mapped_fallback")
+
+        if 'culprits' in episodes_for_output.columns:
+            culprits_col = episodes_for_output['culprits'].fillna('').astype(str)
+            arrow = ' ' + chr(8594) + ' '
+            has_arrow = culprits_col.str.contains(arrow, na=False, regex=False)
+            split_result = culprits_col.str.split(arrow).str[0].str.strip()
+            episodes_for_output['dominant_sensor'] = np.where(
+                culprits_col == '',
+                'UNKNOWN',
+                np.where(has_arrow, split_result, culprits_col.str.strip())
+            )
+            repairs_applied.append("dominant_sensor_extracted")
+        else:
+            episodes_for_output['dominant_sensor'] = 'UNKNOWN'
+            repairs_applied.append("dominant_sensor_defaulted")
+
+        if 'peak_fused_z' in episodes_for_output.columns:
+            peak_z = episodes_for_output['peak_fused_z']
+            abs_peak_z = np.abs(peak_z)
+            conditions = [
+                peak_z.isna(),
+                abs_peak_z >= 6,
+                abs_peak_z >= 4,
+                abs_peak_z >= 2,
+            ]
+            choices = ['UNKNOWN', 'CRITICAL', 'HIGH', 'MEDIUM']
+            episodes_for_output['severity'] = np.select(conditions, choices, default='LOW')
+            repairs_applied.append("severity_calculated")
+        elif 'severity' not in episodes_for_output.columns:
+            episodes_for_output['severity'] = 'UNKNOWN'
+            repairs_applied.append("severity_defaulted")
+
+        if 'status' not in episodes_for_output.columns:
+            episodes_for_output['status'] = 'CLOSED'
+            repairs_applied.append("status_defaulted")
+
+        return episodes_for_output, repairs_applied
+
+    def _persist_episode_rows(self, episodes_for_output: pd.DataFrame) -> int:
+        """
+        Persist per-episode rows into ACM_Episodes using normalized episode payload.
+        Routes through write_sql_table for contract-driven metadata and SQL normalization.
+        """
+        if episodes_for_output.empty:
+            return 0
+
+        episode_records: List[Dict[str, Any]] = []
+        for idx, row in episodes_for_output.iterrows():
+            duration_s = row.get('duration_s')
+            episode_id_value = row.get('episode_id')
+            if pd.notna(episode_id_value):
+                try:
+                    episode_id = int(episode_id_value)
+                except (TypeError, ValueError):
+                    episode_id = idx + 1
+            else:
+                episode_id = idx + 1
+            if episode_id <= 0:
+                episode_id = idx + 1
+            episode_records.append({
+                'RunID': self.run_id,
+                'EquipID': self.equip_id or 0,
+                'EpisodeID': episode_id,
+                'StartTime': row.get('start_ts', datetime.now()),
+                'EndTime': row.get('end_ts', None),
+                'DurationSeconds': float(duration_s) if pd.notna(duration_s) else None,
+                'DurationHours': float(duration_s) / 3600.0 if pd.notna(duration_s) else None,
+                'RecordCount': int(row.get('n_samples', 1)) if pd.notna(row.get('n_samples')) else 1,
+                'Culprits': str(row.get('culprits', ''))[:500] if pd.notna(row.get('culprits')) else None,
+                'PrimaryDetector': str(row.get('dominant_sensor', 'UNKNOWN'))[:100] if pd.notna(row.get('dominant_sensor')) else 'UNKNOWN',
+                'Severity': str(row.get('severity', 'UNKNOWN'))[:50],
+                'RegimeLabel': int(row.get('regime_label', 0)) if pd.notna(row.get('regime_label')) else None,
+                'RegimeState': str(row.get('regime_state', ''))[:50] if pd.notna(row.get('regime_state')) else None,
+            })
+
+        if not episode_records:
+            return 0
+
+        summary_df = pd.DataFrame(episode_records)
+        result = self.write_sql_table(
+            table_name="ACM_Episodes",
+            df=summary_df,
+            artifact_name="episode_rows",
+            required=False,
+        )
+        return int(result.get("inserted", 0))
+
     def write_episodes(self, episodes_df: pd.DataFrame) -> Dict[str, Any]:
         """
         Write episodes to SQL (SQL-only).
@@ -1554,11 +1639,7 @@ class OutputManager:
         if episodes_df.empty:
             return {"sql_written": False, "rows": 0, "inserted": 0, "error": None}
         
-        # Prepare episodes for output
-        episodes_for_output = episodes_df.copy().reset_index(drop=True)
-        
-        # Track which repairs are applied for explicit schema drift reporting
-        repairs_applied = []
+        episodes_for_output, repairs_applied = self._normalize_episodes_for_diagnostics(episodes_df)
         
         episode_columns = {
             'episode_id': 'EpisodeID',
@@ -1574,118 +1655,45 @@ class OutputManager:
             'culprits': 'Culprits'
         }
         
-        # Add episode_id if missing (sequential)
-        if 'episode_id' not in episodes_for_output.columns:
-            episodes_for_output['episode_id'] = range(1, len(episodes_for_output) + 1)
-            repairs_applied.append("episode_id_added")
-        
-        # Calculate duration_hours from duration_s if needed
-        if 'duration_hours' not in episodes_for_output.columns and 'duration_s' in episodes_for_output.columns:
-            episodes_for_output['duration_hours'] = episodes_for_output['duration_s'] / 3600.0
-            repairs_applied.append("duration_hours_derived")
-        
-        # Extract peak_timestamp from start_ts if missing
-        if 'peak_timestamp' not in episodes_for_output.columns and 'start_ts' in episodes_for_output.columns:
-            episodes_for_output['peak_timestamp'] = episodes_for_output['start_ts']
-            repairs_applied.append("peak_timestamp_fallback_used")
-        
-        # Map regime_label to MaxRegimeLabel
-        if 'regime_label' in episodes_for_output.columns:
-            episodes_for_output['MaxRegimeLabel'] = episodes_for_output['regime_label']
-            repairs_applied.append("regime_label_mapped")
-        elif 'regime' in episodes_for_output.columns:
-            episodes_for_output['MaxRegimeLabel'] = episodes_for_output['regime']
-            repairs_applied.append("regime_mapped_fallback")
-        
-        # Extract dominant sensor from culprits field
-        # PERF-OPT: Vectorized dominant sensor extraction from culprits field
-        # culprits format: "Detector (Sensor Name)" or "Detector"
-        if 'culprits' in episodes_for_output.columns:
-            culprits_col = episodes_for_output['culprits'].fillna('').astype(str)
-            # Split on arrow separator and take first part (handle encoding variants)
-            # Use unicode arrow character (U+2192)
-            arrow = ' ' + chr(8594) + ' '  # Unicode arrow with spaces
-            has_arrow = culprits_col.str.contains(arrow, na=False, regex=False)
-            split_result = culprits_col.str.split(arrow).str[0].str.strip()
-            episodes_for_output['dominant_sensor'] = np.where(
-                culprits_col == '',
-                'UNKNOWN',
-                np.where(has_arrow, split_result, culprits_col.str.strip())
-            )
-            repairs_applied.append("dominant_sensor_extracted")
-        else:
-            episodes_for_output['dominant_sensor'] = 'UNKNOWN'
-            repairs_applied.append("dominant_sensor_defaulted")
-        
-        # PERF-OPT: Vectorized severity calculation from peak_fused_z using np.select
-        # FIX: Use ABSOLUTE VALUE of z-scores - negative z-scores (below-normal) are equally anomalous
-        if 'peak_fused_z' in episodes_for_output.columns:
-            peak_z = episodes_for_output['peak_fused_z']
-            abs_peak_z = np.abs(peak_z)  # FIX: Both +17.9 and -17.9 should be CRITICAL
-            conditions = [
-                peak_z.isna(),
-                abs_peak_z >= 6,
-                abs_peak_z >= 4,
-                abs_peak_z >= 2,
-            ]
-            choices = ['UNKNOWN', 'CRITICAL', 'HIGH', 'MEDIUM']
-            episodes_for_output['severity'] = np.select(conditions, choices, default='LOW')
-            repairs_applied.append("severity_calculated")
-        elif 'severity' not in episodes_for_output.columns:
-            episodes_for_output['severity'] = 'UNKNOWN'
-            repairs_applied.append("severity_defaulted")
-        
-        # Add status default
-        if 'status' not in episodes_for_output.columns:
-            episodes_for_output['status'] = 'CLOSED'
-            repairs_applied.append("status_defaulted")
-        
         # Log all repairs for explicit schema drift tracking
         if repairs_applied:
             Console.info(f"Applied {len(repairs_applied)} schema repairs to episodes: {', '.join(repairs_applied)}", 
                         component="EPISODES", equip_id=self.equip_id, episode_count=len(episodes_for_output))
         
-        result = self.write_dataframe(
-            episodes_for_output,
-            "episodes",
-            sql_table="ACM_EpisodeDiagnostics",
+        result = self.write_sql_table(
+            table_name="ACM_EpisodeDiagnostics",
+            df=episodes_for_output,
+            artifact_name="episodes",
             sql_columns=episode_columns,
             non_numeric_cols={
                 "RunID", "EquipID", "episode_id", "peak_timestamp",
                 "dominant_sensor", "severity", "min_health_index", "culprits"
             },
-            required=True
+            required=True,
         )
         
-        # Also write individual episodes to ACM_Episodes (actual table schema)
-        # ACM_Episodes stores per-episode data, NOT run summaries
-        if not episodes_df.empty:
-            try:
-                # Build episode records matching actual table schema
-                episode_records = []
-                for idx, row in episodes_df.iterrows():
-                    episode_records.append({
-                        'RunID': self.run_id,
-                        'EquipID': self.equip_id or 0,
-                        'EpisodeID': int(row.get('episode_id', idx + 1)),
-                        'StartTime': row.get('start_ts', datetime.now()),
-                        'EndTime': row.get('end_ts', None),
-                        'DurationSeconds': float(row.get('duration_s', 0)) if pd.notna(row.get('duration_s')) else None,
-                        'DurationHours': float(row.get('duration_s', 0)) / 3600.0 if pd.notna(row.get('duration_s')) else None,
-                        'RecordCount': int(row.get('n_samples', 1)) if pd.notna(row.get('n_samples')) else 1,
-                        'Culprits': str(row.get('culprits', ''))[:500] if pd.notna(row.get('culprits')) else None,
-                        'PrimaryDetector': str(row.get('dominant_sensor', 'UNKNOWN'))[:100] if pd.notna(row.get('dominant_sensor')) else 'UNKNOWN',
-                        'Severity': str(row.get('severity', 'UNKNOWN'))[:50],
-                        'RegimeLabel': int(row.get('regime_label', 0)) if pd.notna(row.get('regime_label')) else None,
-                        'RegimeState': str(row.get('regime_state', ''))[:50] if pd.notna(row.get('regime_state')) else None,
-                    })
-                if episode_records:
-                    summary_df = pd.DataFrame(episode_records)
-                    self._bulk_insert_sql('ACM_Episodes', summary_df)
-            except Exception as summary_err:
-                Console.warn(f"Failed to write to ACM_Episodes: {summary_err}", component="EPISODES", equip_id=self.equip_id, run_id=self.run_id, episode_count=len(episodes_df), error_type=type(summary_err).__name__)
+        # Also persist per-episode rows to ACM_Episodes (actual table schema).
+        episode_rows_inserted = self._persist_episode_rows(episodes_for_output)
+        result["episodes_rows_inserted"] = int(episode_rows_inserted)
         
         return result
+
+    def persist_core_outputs(
+        self,
+        scores_df: pd.DataFrame,
+        episodes_df: Optional[pd.DataFrame],
+    ) -> PersistCoreOutputsResult:
+        """
+        Persist core outputs and return inserted row counts for batch accounting.
+        """
+        scores_result = self.write_scores(scores_df)
+        episodes_safe = pd.DataFrame() if episodes_df is None else episodes_df
+        episodes_result = self.write_episodes(episodes_safe)
+        return PersistCoreOutputsResult(
+            scores_inserted=int(scores_result.get("inserted", 0)),
+            episodes_inserted=int(episodes_result.get("inserted", 0)),
+            episode_count=int(len(episodes_safe)),
+        )
     
     def write_threshold_metadata(
         self,
@@ -1725,7 +1733,7 @@ class OutputManager:
         Returns:
             Number of rows written (1 on success, 0 on failure)
         """
-        if not self._check_sql_health():
+        if self.sql_client is None:
             return 0
         try:
             # Handle dict values (per-regime thresholds) - store first value only
@@ -1747,181 +1755,20 @@ class OutputManager:
                 'ResearchReference': f"{calculation_method}: {notes}" if notes else calculation_method,
                 'Source': 'adaptive_threshold_calculator',
             }
-            # Use MERGE to handle existing records (UNIQUE constraint on EquipID+ConfigKey)
-            return self._upsert_adaptive_config(row)
+            result = self.write_sql_table(
+                table_name="ACM_AdaptiveConfig",
+                df=pd.DataFrame([row]),
+                artifact_name="threshold_metadata",
+                required=False,
+            )
+            return int(result.get("inserted", 0))
         except Exception as e:
             Console.warn(f"write_threshold_metadata failed: {e}", component="THRESHOLD", error=str(e)[:200])
             return 0
     
-    def _upsert_adaptive_config(self, row: dict) -> int:
-        """Upsert single row into ACM_AdaptiveConfig using MERGE.
-        
-        Table has UNIQUE constraint on (EquipID, ConfigKey).
-        """
-        if self.sql_client is None:
-            return 0
-        try:
-            conn = self.sql_client.conn
-            cursor = conn.cursor()
-            merge_sql = """
-            MERGE INTO ACM_AdaptiveConfig AS target
-            USING (SELECT ? AS EquipID, ? AS ConfigKey) AS source (EquipID, ConfigKey)
-            ON target.EquipID = source.EquipID AND target.ConfigKey = source.ConfigKey
-            WHEN MATCHED THEN
-                UPDATE SET 
-                    ConfigValue = ?,
-                    MinBound = ?,
-                    MaxBound = ?,
-                    IsLearned = ?,
-                    DataVolumeAtTuning = ?,
-                    PerformanceMetric = ?,
-                    ResearchReference = ?,
-                    Source = ?,
-                    UpdatedAt = GETDATE()
-            WHEN NOT MATCHED THEN
-                INSERT (EquipID, ConfigKey, ConfigValue, MinBound, MaxBound, IsLearned, 
-                        DataVolumeAtTuning, PerformanceMetric, ResearchReference, Source)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-            """
-            cursor.execute(merge_sql, (
-                # Match keys
-                row['EquipID'], row['ConfigKey'],
-                # Update values
-                row['ConfigValue'], row['MinBound'], row['MaxBound'], row['IsLearned'],
-                row['DataVolumeAtTuning'], row['PerformanceMetric'], row['ResearchReference'], row['Source'],
-                # Insert values
-                row['EquipID'], row['ConfigKey'], row['ConfigValue'], row['MinBound'], row['MaxBound'],
-                row['IsLearned'], row['DataVolumeAtTuning'], row['PerformanceMetric'], 
-                row['ResearchReference'], row['Source']
-            ))
-            conn.commit()
-            return 1
-        except Exception as e:
-            Console.warn(f"_upsert_adaptive_config failed: {e}", component="OUTPUT",
-                        equip_id=row.get('EquipID'), config_key=row.get('ConfigKey'), error=str(e)[:200])
-            if self.sql_client and self.sql_client.conn:
-                try:
-                    self.sql_client.conn.rollback()
-                except:
-                    pass
-            return 0
-    
     def load_omr_drift_context(self, equip_id: int, lookback_hours: int = 24) -> dict:
-        """Load OMR and drift context from recent data for forecasting.
-        
-        Queries ACM_Scores_Wide for recent OMR/drift values and ACM_DriftSeries for trend.
-        
-        Args:
-            equip_id: Equipment ID
-            lookback_hours: How many hours of history to consider
-            
-        Returns:
-            Dict with keys:
-                - omr_z: Most recent OMR z-score (or None)
-                - omr_trend: 'increasing', 'decreasing', 'stable', or 'unknown'
-                - top_contributors: List of top contributing sensors
-                - drift_z: Most recent drift z-score (or None)
-                - drift_trend: 'increasing', 'decreasing', 'stable', or 'unknown'
-        """
-        result = {
-            'omr_z': None,
-            'omr_trend': 'unknown',
-            'top_contributors': [],
-            'drift_z': None,
-            'drift_trend': 'unknown'
-        }
-        
-        if not self._check_sql_health():
-            return result
-        
-        try:
-            conn = self.sql_client.conn
-            cursor = conn.cursor()
-            
-            # Get most recent fused score (Overall Model Residual is computed from fused scores)
-            # ACM_Scores_Wide has 'fused' column, not 'omr_z'
-            cursor.execute("""
-                SELECT TOP 1 fused
-                FROM ACM_Scores_Wide
-                WHERE EquipID = ? AND fused IS NOT NULL
-                ORDER BY Timestamp DESC
-            """, (equip_id,))
-            row = cursor.fetchone()
-            if row:
-                result['omr_z'] = float(row[0]) if row[0] is not None else None
-            
-            # Get OMR/fused trend from recent values
-            cursor.execute("""
-                SELECT fused
-                FROM (
-                    SELECT TOP 10 fused, Timestamp
-                    FROM ACM_Scores_Wide
-                    WHERE EquipID = ? AND fused IS NOT NULL
-                    ORDER BY Timestamp DESC
-                ) sub
-                ORDER BY Timestamp ASC
-            """, (equip_id,))
-            omr_values = [float(r[0]) for r in cursor.fetchall() if r[0] is not None]
-            if len(omr_values) >= 3:
-                # Simple trend: compare first half avg to second half avg
-                mid = len(omr_values) // 2
-                first_avg = sum(omr_values[:mid]) / mid
-                second_avg = sum(omr_values[mid:]) / (len(omr_values) - mid)
-                if second_avg > first_avg * 1.1:
-                    result['omr_trend'] = 'increasing'
-                elif second_avg < first_avg * 0.9:
-                    result['omr_trend'] = 'decreasing'
-                else:
-                    result['omr_trend'] = 'stable'
-            
-            # Get top contributors from SensorHotspots (most recent by max z-score)
-            cursor.execute("""
-                SELECT TOP 3 SensorName
-                FROM ACM_SensorHotspots
-                WHERE EquipID = ?
-                ORDER BY MaxAbsZ DESC
-            """, (equip_id,))
-            result['top_contributors'] = [r[0] for r in cursor.fetchall() if r[0]]
-            
-            # Get drift from DriftSeries
-            cursor.execute("""
-                SELECT TOP 1 DriftValue
-                FROM ACM_DriftSeries
-                WHERE EquipID = ?
-                ORDER BY Timestamp DESC
-            """, (equip_id,))
-            row = cursor.fetchone()
-            if row:
-                result['drift_z'] = float(row[0]) if row[0] is not None else None
-            
-            # Get drift trend
-            cursor.execute("""
-                SELECT DriftValue
-                FROM (
-                    SELECT TOP 10 DriftValue, Timestamp
-                    FROM ACM_DriftSeries
-                    WHERE EquipID = ?
-                    ORDER BY Timestamp DESC
-                ) sub
-                ORDER BY Timestamp ASC
-            """, (equip_id,))
-            drift_values = [float(r[0]) for r in cursor.fetchall() if r[0] is not None]
-            if len(drift_values) >= 3:
-                mid = len(drift_values) // 2
-                first_avg = sum(drift_values[:mid]) / mid
-                second_avg = sum(drift_values[mid:]) / (len(drift_values) - mid)
-                if second_avg > first_avg * 1.1:
-                    result['drift_trend'] = 'increasing'
-                elif second_avg < first_avg * 0.9:
-                    result['drift_trend'] = 'decreasing'
-                else:
-                    result['drift_trend'] = 'stable'
-            
-            cursor.close()
-        except Exception as e:
-            Console.debug(f"load_omr_drift_context failed: {e}", component="OUTPUT", error=str(e)[:200])
-        
-        return result
+        """Load OMR and drift context from recent SQL outputs."""
+        return load_omr_drift_context_service(self, equip_id=equip_id, lookback_hours=lookback_hours)
     
     # =========================================================================
     # DataFrame Builder Methods (moved from acm_main.py in v11.2)
@@ -1937,644 +1784,92 @@ class OutputManager:
         cfg: Dict[str, Any],
         low_var_threshold: float = 1e-4,
     ) -> List[Dict[str, Any]]:
-        """Build a SINGLE summary data quality record (not per-sensor).
-        
-        v11.3.3: Changed from 81 rows (per-sensor) to 1 summary row per run.
-        This dramatically reduces SQL writes while keeping aggregate diagnostics.
-        
-        Computes aggregate metrics across all sensors:
-        - Total sensors count
-        - Avg/max null percentages
-        - Low-variance sensor count
-        - Flatline sensor count
-        - Time ranges
-        
-        Args:
-            train_numeric: Training data DataFrame
-            score_numeric: Score data DataFrame
-            cfg: Config dictionary with data settings
-            low_var_threshold: Threshold for low-variance detection
-            
-        Returns:
-            List containing ONE summary record (for compatibility with existing write logic)
-        """
-        interp_method = str((cfg.get("data", {}) or {}).get("interp_method", "linear"))
-        sampling_secs_raw = (cfg.get("data", {}) or {}).get("sampling_secs", None)
-        # v11.5.0: sampling_secs can be "auto" (string) - convert to None for SQL float column
-        try:
-            sampling_secs = float(sampling_secs_raw) if sampling_secs_raw not in (None, "auto", "") else None
-        except (ValueError, TypeError):
-            sampling_secs = None
-        
-        # Find common columns
-        common_cols = []
-        if hasattr(train_numeric, "columns") and hasattr(score_numeric, "columns"):
-            common_cols = [c for c in train_numeric.columns if c in score_numeric.columns]
-        
-        if not common_cols:
-            return []
-        
-        # Aggregate metrics across all sensors
-        total_sensors = len(common_cols)
-        tr_total_rows = len(train_numeric)
-        sc_total_rows = len(score_numeric)
-        
-        # Per-sensor stats for aggregation
-        low_var_count = 0
-        flatline_count = 0
-        all_null_train_count = 0
-        all_null_score_count = 0
-        tr_null_pcts = []
-        sc_null_pcts = []
-        
-        for col in common_cols:
-            tr_series = train_numeric[col]
-            sc_series = score_numeric[col]
-            tr_nulls = int(tr_series.isna().sum())
-            sc_nulls = int(sc_series.isna().sum())
-            
-            # Null percentages
-            tr_null_pct = (100.0 * tr_nulls / tr_total_rows) if tr_total_rows else 0.0
-            sc_null_pct = (100.0 * sc_nulls / sc_total_rows) if sc_total_rows else 0.0
-            tr_null_pcts.append(tr_null_pct)
-            sc_null_pcts.append(sc_null_pct)
-            
-            # Low variance check
-            tr_std = pd.to_numeric(tr_series, errors="coerce").std()
-            if tr_total_rows > 0 and (pd.isna(tr_std) or tr_std < low_var_threshold):
-                low_var_count += 1
-            
-            # All-null check
-            if tr_total_rows > 0 and tr_nulls == tr_total_rows:
-                all_null_train_count += 1
-            if sc_total_rows > 0 and sc_nulls == sc_total_rows:
-                all_null_score_count += 1
-            
-            # Flatline check (simplified: std < threshold on score data)
-            sc_std = pd.to_numeric(sc_series, errors="coerce").std()
-            if sc_total_rows > 10 and (pd.isna(sc_std) or sc_std < low_var_threshold):
-                flatline_count += 1
-        
-        # Aggregate null percentages
-        avg_train_null_pct = float(np.mean(tr_null_pcts)) if tr_null_pcts else 0.0
-        max_train_null_pct = float(np.max(tr_null_pcts)) if tr_null_pcts else 0.0
-        avg_score_null_pct = float(np.mean(sc_null_pcts)) if sc_null_pcts else 0.0
-        max_score_null_pct = float(np.max(sc_null_pcts)) if sc_null_pcts else 0.0
-        
-        # Time range
-        tr_min_ts = pd.Timestamp(train_numeric.index.min()).strftime('%Y-%m-%d %H:%M:%S') if tr_total_rows > 0 else None
-        tr_max_ts = pd.Timestamp(train_numeric.index.max()).strftime('%Y-%m-%d %H:%M:%S') if tr_total_rows > 0 else None
-        sc_min_ts = pd.Timestamp(score_numeric.index.min()).strftime('%Y-%m-%d %H:%M:%S') if sc_total_rows > 0 else None
-        sc_max_ts = pd.Timestamp(score_numeric.index.max()).strftime('%Y-%m-%d %H:%M:%S') if sc_total_rows > 0 else None
-        
-        # Build summary notes
-        note_bits = []
-        if low_var_count > 0:
-            note_bits.append(f"low_var:{low_var_count}")
-        if all_null_train_count > 0:
-            note_bits.append(f"null_train:{all_null_train_count}")
-        if all_null_score_count > 0:
-            note_bits.append(f"null_score:{all_null_score_count}")
-        if flatline_count > 0:
-            note_bits.append(f"flatline:{flatline_count}")
-        
-        # Return single summary record
-        return [{
-            "sensor": f"_SUMMARY_{total_sensors}_SENSORS",
-            "train_count": tr_total_rows,
-            "train_nulls": int(avg_train_null_pct * tr_total_rows / 100) if tr_total_rows else 0,  # Approx total nulls
-            "train_null_pct": avg_train_null_pct,
-            "train_std": max_train_null_pct,  # Repurpose: store max null pct for worst sensor
-            "train_longest_gap": low_var_count,  # Repurpose: store low-var sensor count
-            "train_flatline_span": all_null_train_count,  # Repurpose: store all-null sensor count
-            "train_min_ts": tr_min_ts,
-            "train_max_ts": tr_max_ts,
-            "score_count": sc_total_rows,
-            "score_nulls": int(avg_score_null_pct * sc_total_rows / 100) if sc_total_rows else 0,
-            "score_null_pct": avg_score_null_pct,
-            "score_std": max_score_null_pct,  # Repurpose: store max null pct
-            "score_longest_gap": flatline_count,  # Repurpose: store flatline sensor count
-            "score_flatline_span": all_null_score_count,  # Repurpose: store all-null sensor count
-            "score_min_ts": sc_min_ts,
-            "score_max_ts": sc_max_ts,
-            "interp_method": interp_method,
-            "sampling_secs": sampling_secs,
-            "notes": ",".join(note_bits) if note_bits else f"sensors:{total_sensors}"
-        }]
+        """Build a single summary data-quality record for SQL persistence."""
+        return build_data_quality_records(
+            train_numeric=train_numeric,
+            score_numeric=score_numeric,
+            cfg=cfg,
+            low_var_threshold=low_var_threshold,
+        )
 
     def write_anomaly_events(self, df_events: pd.DataFrame, run_id: str) -> int:
-        """Write anomaly events to ACM_Anomaly_Events table.
-        
-        V11: Adds Confidence column based on episode duration and maturity state.
-        
-        Args:
-            df_events: DataFrame with event data (EquipID, start_ts, end_ts, severity, etc.)
-            run_id: Current run ID
-        
-        Returns:
-            Number of rows written
-        """
-        if not self._check_sql_health() or df_events is None or df_events.empty:
-            return 0
-        try:
-            df = df_events.copy()
-            df['RunID'] = run_id
-            # Rename columns to match table schema
-            col_map = {
-                'start_ts': 'StartTime',
-                'end_ts': 'EndTime',
-                'severity': 'Severity',
-                'Detector': 'DetectorType',
-                'Score': 'PeakScore',
-                'ContributorsJSON': 'ContributorsJSON'
-            }
-            for old, new in col_map.items():
-                if old in df.columns and new not in df.columns:
-                    df[new] = df[old]
-            
-            # V11: Add confidence for each episode - VECTORIZED for performance
-            if _CONFIDENCE_AVAILABLE and compute_episode_confidence is not None:
-                try:
-                    maturity_state = getattr(self, 'maturity_state', 'COLDSTART')
-                    
-                    # PERFORMANCE FIX: Vectorized episode confidence computation
-                    import numpy as np
-                    
-                    # Determine column names
-                    start_col = 'StartTime' if 'StartTime' in df.columns else 'start_ts'
-                    end_col = 'EndTime' if 'EndTime' in df.columns else 'end_ts'
-                    
-                    # Calculate durations vectorized
-                    if start_col in df.columns and end_col in df.columns:
-                        start_times = pd.to_datetime(df[start_col], errors='coerce')
-                        end_times = pd.to_datetime(df[end_col], errors='coerce')
-                        duration_seconds = (end_times - start_times).dt.total_seconds().fillna(3600).values
-                    else:
-                        duration_seconds = np.full(len(df), 3600.0)
-                    
-                    # Get peak scores vectorized
-                    if 'PeakScore' in df.columns:
-                        peak_z = pd.to_numeric(df['PeakScore'], errors='coerce').fillna(3.0).values
-                    elif 'Score' in df.columns:
-                        peak_z = pd.to_numeric(df['Score'], errors='coerce').fillna(3.0).values
-                    else:
-                        peak_z = np.full(len(df), 3.0)
-                    
-                    # Vectorized confidence calculation
-                    maturity_base = {'COLDSTART': 0.4, 'LEARNING': 0.6, 'CONVERGED': 0.8, 'DEPRECATED': 0.65}.get(maturity_state, 0.5)
-                    
-                    # Duration confidence: longer episodes more reliable (up to 1 hour = full weight)
-                    duration_conf = np.minimum(duration_seconds / 3600.0, 1.0) * 0.2
-                    
-                    # Peak Z confidence: higher peaks more confident
-                    peak_conf = np.minimum(np.abs(peak_z) / 8.0, 1.0) * 0.3
-                    
-                    # Combined (vectorized)
-                    raw_conf = maturity_base * 0.5 + duration_conf + peak_conf
-                    df['Confidence'] = np.round(np.clip(raw_conf, 0.2, 0.95), 3)
-                    
-                except Exception as e:
-                    Console.warn(f"Failed to compute episode confidence: {e}", component="EPISODES")
-            
-            return self.write_table('ACM_Anomaly_Events', df, delete_existing=True)
-        except Exception as e:
-            Console.warn(f"write_anomaly_events failed: {e}", component="OUTPUT", error=str(e)[:200])
-            return 0
+        """Write anomaly events to ACM_Anomaly_Events table."""
+        return write_anomaly_events_service(
+            self,
+            df_events=df_events,
+            run_id=run_id,
+            confidence_enabled=(_CONFIDENCE_AVAILABLE and compute_episode_confidence is not None),
+        )
     
     def write_regime_episodes(self, df_reg: pd.DataFrame, run_id: str) -> int:
-        """Write regime episodes to ACM_RegimeEpisodes table.
-        
-        Args:
-            df_reg: DataFrame with regime episode data
-            run_id: Current run ID
-            
-        Returns:
-            Number of rows written
-        """
-        if not self._check_sql_health() or df_reg is None or df_reg.empty:
-            return 0
-        try:
-            df = df_reg.copy()
-            df['RunID'] = run_id
-            return self.write_table('ACM_Regime_Episodes', df, delete_existing=True)
-        except Exception as e:
-            Console.warn(f"write_regime_episodes failed: {e}", component="OUTPUT", error=str(e)[:200])
-            return 0
+        """Write regime episodes to ACM_Regime_Episodes."""
+        return write_regime_episodes_service(self, df_reg=df_reg, run_id=run_id)
     
     def write_pca_model(self, model_row: Dict[str, Any]) -> int:
-        """Write PCA model metadata to ACM_PCA_Models table.
-        
-        v11.1.5: Maps legacy model_row keys to current ACM_PCA_Models schema.
-        
-        Args:
-            model_row: Dict with model metadata (legacy keys from write_pca_outputs)
-            
-        Returns:
-            Number of rows written
-        """
-        if not self._check_sql_health() or not model_row:
-            return 0
-        try:
-            # v11.1.5: Map legacy model_row keys to ACM_PCA_Models schema
-            # Legacy keys: RunID, EquipID, EntryDateTime, NComponents, TargetVar, VarExplainedJSON, 
-            #              ScalingSpecJSON, ModelVersion, TrainStartEntryDateTime, TrainEndEntryDateTime
-            # Schema: RunID, EquipID, ModelVersion, NComponents, ExplainedVarianceRatio, TrainSamples,
-            #         TrainFeatures, ScalerMeanJson, ScalerScaleJson, ComponentsJson, CreatedAt
-            
-            # Extract ModelVersion as integer (strip 'v' prefix and parse major version)
-            model_version_str = str(model_row.get('ModelVersion', '1'))
-            if model_version_str.startswith('v'):
-                # Parse version string like 'v10.1.0' -> extract major version 10
-                try:
-                    model_version = int(model_version_str.lstrip('v').split('.')[0])
-                except ValueError:
-                    model_version = 1
-            else:
-                try:
-                    model_version = int(model_version_str)
-                except ValueError:
-                    model_version = 1
-            
-            # Parse VarExplainedJSON to get explained variance ratio
-            var_json_str = model_row.get('VarExplainedJSON', '[]')
-            try:
-                import json
-                var_list = json.loads(var_json_str) if isinstance(var_json_str, str) else var_json_str
-                explained_var_ratio = float(sum(var_list)) if var_list else None
-            except (json.JSONDecodeError, TypeError):
-                explained_var_ratio = None
-            
-            row = {
-                'RunID': self.run_id,
-                'EquipID': self.equip_id or 0,
-                'ModelVersion': model_version,
-                'NComponents': int(model_row.get('NComponents', 0)),
-                'ExplainedVarianceRatio': explained_var_ratio,
-                'TrainSamples': None,  # Not in legacy model_row
-                'TrainFeatures': None,  # Not in legacy model_row
-                'ScalerMeanJson': None,  # Not in legacy model_row
-                'ScalerScaleJson': model_row.get('ScalingSpecJSON'),
-                'ComponentsJson': None,  # Not in legacy model_row
-                'CreatedAt': datetime.now()
-            }
-            return self.write_table('ACM_PCA_Models', pd.DataFrame([row]), delete_existing=True)
-        except Exception as e:
-            Console.warn(f"write_pca_model failed: {e}", component="OUTPUT", error=str(e)[:200])
-            return 0
+        """Write PCA model metadata to ACM_PCA_Models."""
+        return write_pca_model_service(self, model_row=model_row)
     
     def write_detector_correlation(self, detector_correlations: Dict[str, Dict[str, float]]) -> int:
-        """Write detector correlation matrix to ACM_DetectorCorrelation.
-        
-        PERFORMANCE: Uses list comprehension instead of nested loops.
-        
-        Args:
-            detector_correlations: Nested dict {detector1: {detector2: correlation}}
-        """
-        if not self._check_sql_health() or not detector_correlations:
-            return 0
-        try:
-            # PERFORMANCE FIX: Single list comprehension instead of nested append loops
-            run_id = self.run_id
-            equip_id = self.equip_id or 0
-            
-            rows = [
-                {
-                    'RunID': run_id,
-                    'EquipID': equip_id,
-                    'Detector1': d1,
-                    'Detector2': d2,
-                    'Correlation': float(corr) if not pd.isna(corr) else 0.0
-                }
-                for d1, correlations in detector_correlations.items()
-                for d2, corr in correlations.items()
-            ]
-            
-            if not rows:
-                return 0
-            return self.write_table('ACM_DetectorCorrelation', pd.DataFrame(rows), delete_existing=True)
-        except Exception as e:
-            Console.warn(f"write_detector_correlation failed: {e}", component="OUTPUT", error=str(e)[:200])
-            return 0
+        """Write detector correlation matrix to ACM_DetectorCorrelation."""
+        return write_detector_correlation_service(self, detector_correlations=detector_correlations)
+
+    def write_detector_correlation_from_scores(self, scores_df: pd.DataFrame) -> int:
+        """Build detector correlation matrix from score frame and persist it."""
+        return write_detector_correlation_from_scores_service(self, scores_df=scores_df)
     
     def write_drift_series(self, drift_df: pd.DataFrame) -> int:
-        """Write drift detection time series to ACM_DriftSeries.
-        
-        Args:
-            drift_df: DataFrame with Timestamp, DriftValue, optionally DriftState
-        """
-        if not self._check_sql_health() or drift_df is None or drift_df.empty:
-            return 0
-        try:
-            df = drift_df.copy()
-            df['RunID'] = self.run_id
-            df['EquipID'] = self.equip_id or 0
-            # Map column names if needed
-            if 'DriftZ' in df.columns and 'DriftValue' not in df.columns:
-                df['DriftValue'] = df['DriftZ']
-            return self.write_table('ACM_DriftSeries', df, delete_existing=True)
-        except Exception as e:
-            Console.warn(f"write_drift_series failed: {e}", component="OUTPUT", error=str(e)[:200])
-            return 0
+        """Write drift detection time series to ACM_DriftSeries."""
+        return write_drift_series_service(self, drift_df=drift_df)
     
     def write_sensor_normalized_ts(self, scores_df: pd.DataFrame, sensor_cols: List[str] = None) -> int:
-        """Write normalized sensor z-scores to ACM_SensorNormalized_TS.
-        
-        Transforms wide-format scores DataFrame (one column per sensor) to long format
-        (one row per timestamp/sensor pair) for time-series analysis.
-        
-        PERFORMANCE: Uses vectorized pd.melt() instead of row-by-row loops.
-        
-        Schema: ID, RunID, EquipID, Timestamp, SensorName, RawValue, NormalizedValue, CreatedAt
-        
-        Args:
-            scores_df: DataFrame with Timestamp index/column and sensor z-score columns
-            sensor_cols: List of sensor column names to extract (if None, uses all float columns)
-            
-        Returns:
-            Number of rows written
-        """
-        if not self._check_sql_health() or scores_df is None or scores_df.empty:
-            return 0
-        
-        try:
-            df = scores_df.copy()
-            
-            # Ensure Timestamp is a column, not index
-            if 'Timestamp' not in df.columns:
-                if isinstance(df.index, pd.DatetimeIndex) or df.index.name in ('Timestamp', 'EntryDateTime'):
-                    df = df.reset_index()
-                    if 'EntryDateTime' in df.columns:
-                        df['Timestamp'] = df['EntryDateTime']
-                    elif df.columns[0] != 'Timestamp' and pd.api.types.is_datetime64_any_dtype(df[df.columns[0]]):
-                        df['Timestamp'] = df.iloc[:, 0]
-                elif 'EntryDateTime' in df.columns:
-                    df['Timestamp'] = df['EntryDateTime']
-                else:
-                    dt_cols = [c for c in df.columns if pd.api.types.is_datetime64_any_dtype(df[c])]
-                    if dt_cols:
-                        df['Timestamp'] = df[dt_cols[0]]
-                    else:
-                        Console.warn("write_sensor_normalized_ts: No Timestamp column found", component="OUTPUT")
-                        return 0
-            
-            # Determine sensor columns
-            if sensor_cols is None:
-                exclude = {'Timestamp', 'RunID', 'EquipID', 'regime_label', 'fused', 'health', 
-                          'ar1_z', 'pca_spe_z', 'pca_t2_z', 'iforest_z', 'gmm_z', 'omr_z',
-                          'mhal_z', 'cusum_z', 'drift_z', 'hst_z', 'river_hst_z'}
-                sensor_cols = [c for c in df.columns if c not in exclude 
-                              and df[c].dtype in ['float64', 'float32', 'int64', 'int32']
-                              and not c.endswith('_z')]
-            
-            # Filter to only columns that exist
-            sensor_cols = [c for c in sensor_cols if c in df.columns]
-            
-            if not sensor_cols:
-                Console.debug("write_sensor_normalized_ts: No sensor columns found", component="OUTPUT")
-                return 0
-            
-            # PERFORMANCE FIX: Use vectorized pd.melt() instead of row-by-row loops
-            # This is 100-1000x faster than the previous nested loop approach
-            long_df = df[['Timestamp'] + sensor_cols].melt(
-                id_vars=['Timestamp'],
-                value_vars=sensor_cols,
-                var_name='SensorName',
-                value_name='NormalizedValue'
-            )
-            
-            # Drop NaN values (vectorized)
-            long_df = long_df.dropna(subset=['NormalizedValue'])
-            
-            if long_df.empty:
-                return 0
-            
-            # Add required columns (vectorized assignment)
-            long_df['RunID'] = self.run_id or ''
-            long_df['EquipID'] = self.equip_id or 0
-            long_df['RawValue'] = None
-            
-            # Reorder columns for consistency
-            long_df = long_df[['RunID', 'EquipID', 'Timestamp', 'SensorName', 'RawValue', 'NormalizedValue']]
-            
-            # v11.1.5 FIX: Delete by TIMESTAMP RANGE instead of just RunID
-            # This prevents duplicates when overlapping batch runs cover same time periods
-            min_ts = long_df['Timestamp'].min()
-            max_ts = long_df['Timestamp'].max()
-            if pd.notna(min_ts) and pd.notna(max_ts) and self.sql_client and self.equip_id:
-                try:
-                    with self.sql_client.cursor() as cur:
-                        cur.execute(
-                            "DELETE FROM dbo.[ACM_SensorNormalized_TS] "
-                            "WHERE EquipID = ? AND Timestamp BETWEEN ? AND ?",
-                            (int(self.equip_id), min_ts, max_ts)
-                        )
-                        deleted = cur.rowcount
-                        if deleted > 0:
-                            Console.info(
-                                f"Deleted {deleted} overlapping rows from ACM_SensorNormalized_TS",
-                                component="OUTPUT", table="ACM_SensorNormalized_TS",
-                                equip_id=self.equip_id, min_ts=str(min_ts), max_ts=str(max_ts)
-                            )
-                    if hasattr(self.sql_client, "commit"):
-                        self.sql_client.commit()
-                    elif hasattr(self.sql_client, "conn") and hasattr(self.sql_client.conn, "commit"):
-                        if not getattr(self.sql_client.conn, "autocommit", True):
-                            self.sql_client.conn.commit()
-                except Exception as del_ex:
-                    Console.warn(
-                        f"Failed to delete overlapping sensor data: {del_ex}",
-                        component="OUTPUT", table="ACM_SensorNormalized_TS",
-                        equip_id=self.equip_id, error_type=type(del_ex).__name__
-                    )
-            
-            # Now insert new data (delete_existing=False since we handled it above)
-            return self.write_table('ACM_SensorNormalized_TS', long_df, delete_existing=False)
-            
-        except Exception as e:
-            Console.warn(f"write_sensor_normalized_ts failed: {e}", component="OUTPUT", 
-                        error=str(e)[:200], sensor_count=len(sensor_cols) if sensor_cols else 0)
-            return 0
+        """Write normalized sensor z-scores to ACM_SensorNormalized_TS."""
+        return write_sensor_normalized_ts_service(self, scores_df=scores_df, sensor_cols=sensor_cols)
     
     def write_sensor_correlations(self, corr_matrix: pd.DataFrame, corr_type: str = 'pearson') -> int:
-        """Write sensor correlation matrix to ACM_SensorCorrelations.
-        
-        PERFORMANCE: Uses vectorized numpy operations instead of nested loops.
-        NOTE: Keeps only latest run's correlations per equipment (deletes all prior).
-        
-        Args:
-            corr_matrix: Pandas correlation matrix (sensors x sensors)
-            corr_type: 'pearson' or 'spearman'
-        """
-        if not self._check_sql_health() or corr_matrix is None or corr_matrix.empty:
-            return 0
-        try:
-            import numpy as np
-            
-            # PERFORMANCE FIX: Vectorized upper triangle extraction
-            # Get upper triangle indices (including diagonal)
-            sensors = list(corr_matrix.columns)
-            n = len(sensors)
-            
-            # Use numpy to get upper triangle mask
-            mask = np.triu(np.ones((n, n), dtype=bool))
-            
-            # Stack to create all (i, j) pairs efficiently
-            rows_idx, cols_idx = np.where(mask)
-            
-            # Extract correlation values at those positions
-            corr_values = corr_matrix.values[rows_idx, cols_idx]
-            
-            # Build DataFrame directly (vectorized)
-            df = pd.DataFrame({
-                'RunID': self.run_id,
-                'EquipID': self.equip_id or 0,
-                'Sensor1': [sensors[i] for i in rows_idx],
-                'Sensor2': [sensors[j] for j in cols_idx],
-                'Correlation': corr_values,
-                'CorrelationType': corr_type
-            })
-            
-            # Drop NaN correlations (vectorized)
-            df = df.dropna(subset=['Correlation'])
-            
-            if df.empty:
-                return 0
-            
-            # Delete ALL prior correlations for this equipment (not just this run)
-            # We only need the latest correlation matrix per equipment
-            try:
-                with self.sql_client.cursor() as cur:
-                    cur.execute("DELETE FROM dbo.[ACM_SensorCorrelations] WHERE EquipID = ?", 
-                               (int(self.equip_id or 0),))
-                    if hasattr(self.sql_client, "commit"):
-                        self.sql_client.commit()
-            except Exception as del_ex:
-                Console.debug(f"ACM_SensorCorrelations cleanup skipped: {del_ex}", component="OUTPUT")
-            
-            return self.write_table('ACM_SensorCorrelations', df, delete_existing=False)
-        except Exception as e:
-            Console.warn(f"write_sensor_correlations failed: {e}", component="OUTPUT", error=str(e)[:200])
-            return 0
+        """Write sensor correlation matrix to ACM_SensorCorrelations."""
+        return write_sensor_correlations_service(self, corr_matrix=corr_matrix, corr_type=corr_type)
+
+    def write_sensor_correlations_from_raw(self, raw_score: Optional[pd.DataFrame]) -> int:
+        """Build sensor correlation matrix from raw sensor frame and persist it."""
+        return write_sensor_correlations_from_raw_service(self, raw_score=raw_score)
     
     def write_feature_drop_log(self, dropped_features: List[Dict[str, Any]]) -> int:
-        """Write dropped features log to ACM_FeatureDropLog.
-        
-        Args:
-            dropped_features: List of dicts with keys: FeatureName, DropReason, DropValue, Threshold
-        """
-        if not self._check_sql_health() or not dropped_features:
-            return 0
-        try:
-            df = pd.DataFrame(dropped_features)
-            df['RunID'] = self.run_id
-            df['EquipID'] = self.equip_id or 0
-            return self.write_table('ACM_FeatureDropLog', df, delete_existing=True)
-        except Exception as e:
-            Console.warn(f"write_feature_drop_log failed: {e}", component="OUTPUT", error=str(e)[:200])
-            return 0
+        """Write dropped features log to ACM_FeatureDropLog."""
+        return write_feature_drop_log_service(self, dropped_features=dropped_features)
     
     def write_calibration_summary(self, calibration_data: List[Dict[str, Any]]) -> int:
-        """Write detector calibration summary to ACM_CalibrationSummary.
-        
-        Args:
-            calibration_data: List of dicts with DetectorType, CalibrationScore, etc.
-        """
-        if not self._check_sql_health() or not calibration_data:
-            return 0
-        try:
-            df = pd.DataFrame(calibration_data)
-            df['RunID'] = self.run_id
-            df['EquipID'] = self.equip_id or 0
-            return self.write_table('ACM_CalibrationSummary', df, delete_existing=True)
-        except Exception as e:
-            Console.warn(f"write_calibration_summary failed: {e}", component="OUTPUT", error=str(e)[:200])
-            return 0
+        """Write detector calibration summary to ACM_CalibrationSummary."""
+        return write_calibration_summary_service(self, calibration_data=calibration_data)
     
     def write_regime_occupancy(self, occupancy_data: List[Dict[str, Any]]) -> int:
-        """Write regime occupancy stats to ACM_RegimeOccupancy.
-        
-        Args:
-            occupancy_data: List of dicts with RegimeLabel, DwellTimeHours, DwellFraction, etc.
-        """
-        if not self._check_sql_health() or not occupancy_data:
-            return 0
-        try:
-            df = pd.DataFrame(occupancy_data)
-            df['RunID'] = self.run_id
-            df['EquipID'] = self.equip_id or 0
-            return self.write_table('ACM_RegimeOccupancy', df, delete_existing=True)
-        except Exception as e:
-            Console.warn(f"write_regime_occupancy failed: {e}", component="OUTPUT", error=str(e)[:200])
-            return 0
+        """Write regime occupancy stats to ACM_RegimeOccupancy."""
+        return write_regime_occupancy_service(self, occupancy_data=occupancy_data)
     
     def write_regime_transitions(self, transition_matrix: Dict[str, Dict[str, int]]) -> int:
-        """Write regime transition matrix to ACM_RegimeTransitions.
-        
-        PERFORMANCE: Uses list comprehension instead of nested loops.
-        
-        Args:
-            transition_matrix: Nested dict {from_regime: {to_regime: count}}
-        """
-        if not self._check_sql_health() or not transition_matrix:
-            return 0
-        try:
-            run_id = self.run_id
-            equip_id = self.equip_id or 0
-            
-            # PERFORMANCE FIX: List comprehension with precomputed totals
-            rows = [
-                {
-                    'RunID': run_id,
-                    'EquipID': equip_id,
-                    'FromRegime': str(from_r),
-                    'ToRegime': str(to_r),
-                    'TransitionCount': int(count),
-                    'TransitionProbability': float(count) / sum(transitions.values()) if sum(transitions.values()) > 0 else 0.0
-                }
-                for from_r, transitions in transition_matrix.items()
-                for to_r, count in transitions.items()
-            ]
-            
-            if not rows:
-                return 0
-            return self.write_table('ACM_RegimeTransitions', pd.DataFrame(rows), delete_existing=True)
-        except Exception as e:
-            Console.warn(f"write_regime_transitions failed: {e}", component="OUTPUT", error=str(e)[:200])
-            return 0
+        """Write regime transition matrix to ACM_RegimeTransitions."""
+        return write_regime_transitions_service(self, transition_matrix=transition_matrix)
     
     def write_contribution_timeline(self, contributions_df: pd.DataFrame) -> int:
-        """Write detector contribution timeline to ACM_ContributionTimeline.
-        
-        Args:
-            contributions_df: DataFrame with Timestamp, DetectorType, ContributionPct
-        """
-        if not self._check_sql_health() or contributions_df is None or contributions_df.empty:
-            return 0
-        try:
-            df = contributions_df.copy()
-            df['RunID'] = self.run_id
-            df['EquipID'] = self.equip_id or 0
-            return self.write_table('ACM_ContributionTimeline', df, delete_existing=True)
-        except Exception as e:
-            Console.warn(f"write_contribution_timeline failed: {e}", component="OUTPUT", error=str(e)[:200])
-            return 0
+        """Write detector contribution timeline to ACM_ContributionTimeline."""
+        return write_contribution_timeline_service(self, contributions_df=contributions_df)
+
+    def write_contribution_timeline_from_frame(
+        self,
+        frame: pd.DataFrame,
+        fusion_weights: Optional[Dict[str, float]],
+        equip: str = "",
+    ) -> int:
+        """Build and persist detector contribution timeline from score frame."""
+        return write_contribution_timeline_from_frame_service(
+            self,
+            frame=frame,
+            fusion_weights=fusion_weights,
+            equip=equip,
+        )
     
     def write_regime_promotion_log(self, promotions: List[Dict[str, Any]]) -> int:
-        """Write regime maturity promotions to ACM_RegimePromotionLog.
-        
-        Args:
-            promotions: List of dicts with RegimeLabel, FromState, ToState, Reason, etc.
-        """
-        if not self._check_sql_health() or not promotions:
-            return 0
-        try:
-            df = pd.DataFrame(promotions)
-            df['RunID'] = self.run_id
-            df['EquipID'] = self.equip_id or 0
-            return self.write_table('ACM_RegimePromotionLog', df, delete_existing=False)  # Append, don't delete
-        except Exception as e:
-            Console.warn(f"write_regime_promotion_log failed: {e}", component="OUTPUT", error=str(e)[:200])
-            return 0
+        """Write regime maturity promotions to ACM_RegimePromotionLog."""
+        return write_regime_promotion_log_service(self, promotions=promotions)
     
     def write_refit_request(
         self, 
@@ -2583,64 +1878,14 @@ class OutputManager:
         drift_score: Optional[float] = None,
         regime_quality: Optional[float] = None
     ) -> int:
-        """Write refit request to ACM_RefitRequests table.
-        
-        Creates the table if it doesn't exist and inserts a refit request record.
-        This is used by auto-tuning when model quality degrades.
-        
-        Args:
-            reasons: List of reasons triggering the refit request
-            anomaly_rate: Current anomaly rate (if triggered by high anomaly rate)
-            drift_score: Drift score (if triggered by drift)
-            regime_quality: Regime silhouette score (if triggered by regime quality)
-            
-        Returns:
-            1 if request written successfully, 0 otherwise
-        """
-        if not self._check_sql_health():
-            return 0
-        
-        try:
-            with self.sql_client.cursor() as cur:
-                # Ensure table exists (idempotent DDL)
-                cur.execute("""
-                    IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[ACM_RefitRequests]') AND type in (N'U'))
-                    BEGIN
-                        CREATE TABLE [dbo].[ACM_RefitRequests] (
-                            [RequestID] INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
-                            [EquipID] INT NOT NULL,
-                            [RequestedAt] DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
-                            [Reason] NVARCHAR(MAX) NULL,
-                            [AnomalyRate] FLOAT NULL,
-                            [DriftScore] FLOAT NULL,
-                            [ModelAgeHours] FLOAT NULL,
-                            [RegimeQuality] FLOAT NULL,
-                            [Acknowledged] BIT NOT NULL DEFAULT 0,
-                            [AcknowledgedAt] DATETIME2 NULL
-                        );
-                        CREATE INDEX [IX_RefitRequests_EquipID_Ack] ON [dbo].[ACM_RefitRequests]([EquipID], [Acknowledged]);
-                    END
-                """)
-                
-                # Insert request - use datetime.now() so RequestedAt matches log timestamps (both local time)
-                cur.execute("""
-                    INSERT INTO [dbo].[ACM_RefitRequests]
-                        (EquipID, RequestedAt, Reason, AnomalyRate, DriftScore, RegimeQuality)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, (
-                    int(self.equip_id or 0),
-                    datetime.now(),
-                    "; ".join(reasons) if reasons else None,
-                    float(anomaly_rate) if anomaly_rate is not None else None,
-                    float(drift_score) if drift_score is not None else None,
-                    float(regime_quality) if regime_quality is not None else None,
-                ))
-                
-            Console.info("SQL insert to ACM_RefitRequests: 1 rows", component="OUTPUT")
-            return 1
-        except Exception as e:
-            Console.warn(f"write_refit_request failed: {e}", component="OUTPUT", error=str(e)[:200])
-            return 0
+        """Write a model-refit request to ACM_RefitRequests."""
+        return write_refit_request_service(
+            self,
+            reasons=reasons,
+            anomaly_rate=anomaly_rate,
+            drift_score=drift_score,
+            regime_quality=regime_quality,
+        )
     
     def write_fusion_metrics(
         self, 
@@ -2648,125 +1893,17 @@ class OutputManager:
         tuning_diagnostics: Dict[str, Any],
         previous_weights: Optional[Dict[str, float]] = None
     ) -> int:
-        """Write fusion tuning diagnostics and metrics to ACM_RunMetrics (EAV format).
-        
-        Writes fusion weight metrics, quality scores, and sample counts to ACM_RunMetrics
-        table in Entity-Attribute-Value format for flexibility.
-        
-        Args:
-            fusion_weights: Dict mapping detector names to their fusion weights
-            tuning_diagnostics: Dict with detector_metrics, method, etc.
-            previous_weights: Optional dict of weights from previous run (for warm start tracking)
-            
-        Returns:
-            Number of records written (0 if failed or disabled)
-        """
-        if not self._check_sql_health() or not tuning_diagnostics:
-            return 0
-            
-        try:
-            # Add timestamp and metadata
-            tuning_diagnostics["timestamp"] = pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')
-            tuning_diagnostics["warm_started"] = previous_weights is not None
-            if previous_weights:
-                tuning_diagnostics["previous_weights"] = previous_weights
-            
-            # Build metrics rows for CSV output
-            metrics_rows = []
-            for detector_name, weight in fusion_weights.items():
-                det_metrics = tuning_diagnostics.get("detector_metrics", {}).get(detector_name, {})
-                metrics_rows.append({
-                    "detector_name": detector_name,
-                    "weight": weight,
-                    "n_samples": det_metrics.get("n_samples", 0),
-                    "quality_score": det_metrics.get("quality_score", 0.0),
-                    "tuning_method": tuning_diagnostics.get("method", "unknown"),
-                    "timestamp": tuning_diagnostics["timestamp"]
-                })
-            
-            if not metrics_rows:
-                return 0
-            
-            # SQL mode: Write to ACM_RunMetrics in EAV format
-            if not self.sql_client:
-                return 0
-                
-            timestamp_now = pd.Timestamp.now()
-            insert_records = [
-                (self.run_id, int(self.equip_id), f"fusion.weight.{row['detector_name']}", 
-                 float(row['weight']), timestamp_now)
-                for row in metrics_rows
-            ] + [
-                (self.run_id, int(self.equip_id), f"fusion.quality.{row['detector_name']}", 
-                 float(row['quality_score']), timestamp_now)
-                for row in metrics_rows
-            ] + [
-                (self.run_id, int(self.equip_id), f"fusion.n_samples.{row['detector_name']}", 
-                 float(row['n_samples']), timestamp_now)
-                for row in metrics_rows
-            ]
-            
-            insert_sql = """
-                INSERT INTO dbo.ACM_RunMetrics 
-                (RunID, EquipID, MetricName, MetricValue, CreatedAt)
-                VALUES (?, ?, ?, ?, ?)
-            """
-            
-            with self.sql_client.cursor() as cur:
-                cur.fast_executemany = True
-                cur.executemany(insert_sql, insert_records)
-            self.sql_client.conn.commit()
-            
-            Console.info(f"SQL insert to ACM_RunMetrics: {len(insert_records)} rows", component="OUTPUT")
-            return len(insert_records)
-            
-        except Exception as e:
-            Console.warn(f"write_fusion_metrics failed: {e}", component="OUTPUT",
-                         equip=self.equipment, error=str(e)[:200])
-            return 0
+        """Write fusion diagnostics and metrics to ACM_RunMetrics."""
+        return write_fusion_metrics_service(
+            self,
+            fusion_weights=fusion_weights,
+            tuning_diagnostics=tuning_diagnostics,
+            previous_weights=previous_weights,
+        )
     
     def check_refit_request(self) -> bool:
-        """Check for pending refit requests in ACM_RefitRequests table.
-        
-        If a pending request exists, acknowledges it so it won't be processed again
-        on the next run.
-        
-        Returns:
-            True if a pending refit request was found and acknowledged, False otherwise
-        """
-        if not self._check_sql_health():
-            return False
-            
-        try:
-            with self.sql_client.cursor() as cur:
-                cur.execute(
-                    """
-                    IF OBJECT_ID(N'[dbo].[ACM_RefitRequests]', N'U') IS NOT NULL
-                    BEGIN
-                        SELECT TOP 1 RequestID, RequestedAt, Reason
-                        FROM [dbo].[ACM_RefitRequests]
-                        WHERE EquipID = ? AND Acknowledged = 0
-                        ORDER BY RequestedAt DESC
-                    END
-                    """,
-                    (int(self.equip_id),),
-                )
-                row = cur.fetchone()
-                if row:
-                    Console.warn(f"SQL refit request found: id={row[0]} at {row[1]}", component="MODEL",
-                                 equip=self.equipment, refit_request_id=row[0])
-                    # Acknowledge refit so it is not re-used next run
-                    cur.execute(
-                        "UPDATE [dbo].[ACM_RefitRequests] SET Acknowledged = 1, AcknowledgedAt = SYSDATETIME() WHERE RequestID = ?",
-                        (int(row[0]),),
-                    )
-                    self.sql_client.conn.commit()
-                    return True
-        except Exception as rf_err:
-            Console.warn(f"Refit check failed: {rf_err}", component="MODEL",
-                         equip=self.equipment, error_type=type(rf_err).__name__, error=str(rf_err)[:200])
-        
-        return False
+        """Check and acknowledge pending refit request for this equipment."""
+        return check_refit_request_service(self)
     
     def update_baseline_buffer(
         self, 
@@ -2774,121 +1911,13 @@ class OutputManager:
         cfg: Dict[str, Any],
         coldstart_complete: bool
     ) -> bool:
-        """Update the ACM_BaselineBuffer table with latest raw score data.
-        
-        Uses smart refresh logic to avoid writing on every batch:
-        - Always write during coldstart
-        - Write periodically (every N batches) after coldstart
-        - Uses vectorized pandas melt for 100x speedup over loops
-        
-        Args:
-            score_numeric: Raw score DataFrame with sensor columns
-            cfg: Configuration dictionary
-            coldstart_complete: Whether coldstart phase is complete
-        
-        Returns:
-            True if buffer was written, False if skipped
-        """
-        if not self._check_sql_health():
-            return False
-            
-        baseline_cfg = (cfg.get("runtime", {}) or {}).get("baseline", {}) or {}
-        window_hours = float(baseline_cfg.get("window_hours", 72))
-        max_points = int(baseline_cfg.get("max_points", 100000))
-        refresh_interval = int(baseline_cfg.get("refresh_interval_batches", 10))
-        
-        # Determine if we should write baseline buffer this run
-        should_write_buffer = False
-        write_reason = ""
-        recent_run_count = 0
-        
-        if not coldstart_complete:
-            # Coldstart in progress - always write to build baseline
-            should_write_buffer = True
-            write_reason = "coldstart"
-        else:
-            # Models exist - check periodic refresh
-            try:
-                with self.sql_client.cursor() as cur:
-                    run_count_result = cur.execute(
-                        "SELECT COUNT(*) FROM ACM_Runs WHERE EquipID = ? AND CreatedAt > DATEADD(DAY, -7, GETDATE())",
-                        (int(self.equip_id),)
-                    ).fetchone()
-                    recent_run_count = run_count_result[0] if run_count_result else 0
-                    if recent_run_count == 0 or (recent_run_count % refresh_interval == 0):
-                        should_write_buffer = True
-                        write_reason = f"periodic_refresh (batch {recent_run_count})"
-            except Exception:
-                should_write_buffer = True
-                write_reason = "fallback"
-        
-        if not should_write_buffer:
-            batches_until_refresh = refresh_interval - (recent_run_count % refresh_interval) if refresh_interval > 0 else 0
-            Console.info(f"Skipping buffer write (models exist, next refresh in {batches_until_refresh} batches)", component="BASELINE")
-            return False
-        
-        # Skip if no data to write
-        if len(score_numeric) == 0:
-            return False
-        
-        # Normalize index to local naive timestamps
-        to_append = score_numeric.copy()
-        to_append = self._ensure_local_index(to_append)
-        
-        # OPTIMIZATION v10.2.1: Vectorized pandas melt (100x faster than Python loops)
-        try:
-            to_append_reset = to_append.reset_index()
-            ts_col = to_append_reset.columns[0]
-            
-            long_df = to_append_reset.melt(
-                id_vars=[ts_col],
-                var_name='SensorName',
-                value_name='SensorValue'
-            )
-            
-            long_df = long_df.dropna(subset=['SensorValue'])
-            long_df['EquipID'] = int(self.equip_id)
-            long_df['DataQuality'] = None
-            # Normalize timestamp column to local naive
-            long_df = long_df.set_index(ts_col)
-            long_df = self._ensure_local_index(long_df)
-            long_df = long_df.reset_index().rename(columns={ts_col: 'Timestamp'})
-            long_df = long_df[['EquipID', 'Timestamp', 'SensorName', 'SensorValue', 'DataQuality']]
-            
-            if len(long_df) > 0:
-                baseline_records = list(long_df.itertuples(index=False, name=None))
-                
-                insert_sql = """
-                INSERT INTO dbo.ACM_BaselineBuffer (EquipID, Timestamp, SensorName, SensorValue, DataQuality)
-                VALUES (?, ?, ?, ?, ?)
-                """
-                with self.sql_client.cursor() as cur:
-                    cur.fast_executemany = True
-                    cur.executemany(insert_sql, baseline_records)
-                self.sql_client.conn.commit()
-                Console.info(f"SQL insert to ACM_BaselineBuffer: {len(baseline_records)} rows ({write_reason})", component="OUTPUT")
-                
-                # Run cleanup procedure
-                try:
-                    with self.sql_client.cursor() as cur:
-                        cur.execute("EXEC dbo.usp_CleanupBaselineBuffer @EquipID=?, @RetentionHours=?, @MaxRowsPerEquip=?",
-                                  (int(self.equip_id), int(window_hours), max_points))
-                    self.sql_client.conn.commit()
-                except Exception as cleanup_err:
-                    Console.warn(f"Cleanup procedure failed: {cleanup_err}", component="BASELINE",
-                                 equip=self.equipment, equip_id=self.equip_id, error=str(cleanup_err)[:200])
-                
-                return True
-                
-        except Exception as sql_err:
-            Console.warn(f"SQL write to ACM_BaselineBuffer failed: {sql_err}", component="BASELINE",
-                         equip=self.equipment, equip_id=self.equip_id, error=str(sql_err)[:200])
-            try:
-                self.sql_client.conn.rollback()
-            except:
-                pass
-        
-        return False
+        """Update ACM_BaselineBuffer using periodic refresh policy."""
+        return update_baseline_buffer_service(
+            self,
+            score_numeric=score_numeric,
+            cfg=cfg,
+            coldstart_complete=coldstart_complete,
+        )
     
     def _ensure_local_index(self, df: pd.DataFrame) -> pd.DataFrame:
         """Ensure the DataFrame index is a timezone-naive local DatetimeIndex.
@@ -2906,6 +1935,40 @@ class OutputManager:
                 # Fallback: coerce to naive datetimes
                 df.index = pd.to_datetime(df.index, errors="coerce")
         return df
+
+    def _get_numeric_sensor_columns(
+        self,
+        df: pd.DataFrame,
+        exclude: Optional[set[str]] = None,
+    ) -> List[str]:
+        """
+        Return numeric sensor columns excluding metadata and z-score columns.
+        """
+        exclude_set = exclude or set()
+        cols: List[str] = []
+        for col in df.columns:
+            if col in exclude_set or col.endswith("_z"):
+                continue
+            series = df[col]
+            if pd.api.types.is_bool_dtype(series):
+                continue
+            if pd.api.types.is_float_dtype(series) or pd.api.types.is_integer_dtype(series):
+                cols.append(col)
+        return cols
+
+    def _filter_low_variance_columns(
+        self,
+        df: pd.DataFrame,
+        cols: List[str],
+        min_variance: float = 1e-10,
+    ) -> List[str]:
+        """
+        Keep only columns with variance above the configured floor.
+        """
+        if len(cols) < 2:
+            return cols
+        variances = df[cols].var()
+        return variances[variances > float(min_variance)].index.tolist()
     
     def write_drift_controller(self, controller_state: Dict[str, Any]) -> int:
         """Write drift controller state to ACM_DriftController.
@@ -2913,13 +1976,19 @@ class OutputManager:
         Args:
             controller_state: Dict with ControllerState, Threshold, Sensitivity, etc.
         """
-        if not self._check_sql_health() or not controller_state:
+        if not self._can_write_payload(controller_state):
             return 0
         try:
             row = dict(controller_state)
-            row['RunID'] = self.run_id
-            row['EquipID'] = self.equip_id or 0
-            return self.write_table('ACM_DriftController', pd.DataFrame([row]), delete_existing=True)
+            row["RunID"] = self.run_id
+            row["EquipID"] = self.equip_id or 0
+            result = self.write_sql_table(
+                table_name="ACM_DriftController",
+                df=pd.DataFrame([row]),
+                artifact_name="drift_controller",
+                required=False,
+            )
+            return int(result.get("inserted", 0))
         except Exception as e:
             Console.warn(f"write_drift_controller failed: {e}", component="OUTPUT", error=str(e)[:200])
             return 0
@@ -2931,65 +2000,142 @@ class OutputManager:
             regime_defs: List of dicts with RegimeID, RegimeName, CentroidJSON, etc.
             version: Regime model version number
         """
-        if not self._check_sql_health() or not regime_defs:
+        if not self._can_write_payload(regime_defs):
             return 0
         try:
             df = pd.DataFrame(regime_defs)
-            df['EquipID'] = self.equip_id or 0
-            df['RegimeVersion'] = version
-            df['RunID'] = self.run_id
-            return self.write_table('ACM_RegimeDefinitions', df, delete_existing=False)  # Keep history
+            df["EquipID"] = self.equip_id or 0
+            df["RegimeVersion"] = version
+            df["RunID"] = self.run_id
+            result = self.write_sql_table(
+                table_name="ACM_RegimeDefinitions",
+                df=df,
+                artifact_name="regime_definitions",
+                required=False,
+            )
+            return int(result.get("inserted", 0))
         except Exception as e:
             Console.warn(f"write_regime_definitions failed: {e}", component="OUTPUT", error=str(e)[:200])
             return 0
-    
+
+    def _normalize_active_models_payload(self, model_state: Dict[str, Any]) -> Optional[pd.DataFrame]:
+        """Normalize active-model state into ACM_ActiveModels payload shape."""
+        equip_raw = model_state.get("EquipID", self.equip_id)
+        if equip_raw is None:
+            Console.warn(
+                "write_active_models skipped: EquipID is missing",
+                component="OUTPUT",
+                run_id=self.run_id,
+            )
+            return None
+        try:
+            equip_id = int(equip_raw)
+        except (TypeError, ValueError):
+            Console.warn(
+                "write_active_models skipped: EquipID is not an integer",
+                component="OUTPUT",
+                run_id=self.run_id,
+                equip_raw=str(equip_raw),
+            )
+            return None
+        if equip_id <= 0:
+            Console.warn(
+                "write_active_models skipped: EquipID must be > 0",
+                component="OUTPUT",
+                run_id=self.run_id,
+                equip_id=equip_id,
+            )
+            return None
+
+        row = dict(model_state)
+        row["EquipID"] = equip_id
+
+        maturity_raw = str(row.get("RegimeMaturityState", self.maturity_state) or "INITIALIZING")
+        maturity_value = maturity_raw.split(".")[-1].upper()
+        valid_maturity = {"INITIALIZING", "LEARNING", "CONVERGED", "DEPRECATED"}
+        row["RegimeMaturityState"] = maturity_value if maturity_value in valid_maturity else "INITIALIZING"
+
+        for version_col in ("ActiveRegimeVersion", "ActiveThresholdVersion", "ActiveForecastVersion"):
+            if version_col in row and pd.notna(row[version_col]):
+                try:
+                    row[version_col] = int(row[version_col])
+                except (TypeError, ValueError):
+                    row[version_col] = None
+
+        row["LastUpdatedAt"] = datetime.now()
+        row["LastUpdatedBy"] = self.run_id or str(row.get("LastUpdatedBy", "SYSTEM"))
+        return pd.DataFrame([row])
+
     def write_active_models(self, model_state: Dict[str, Any]) -> int:
         """Write/update active model versions to ACM_ActiveModels (v11).
         
         Args:
             model_state: Dict with ActiveRegimeVersion, RegimeMaturityState, etc.
-        
-        Note: ACM_ActiveModels has EquipID only (no RunID), so we delete by EquipID before insert.
+
+        Uses contract-driven replace semantics on EquipID.
         """
-        if not self._check_sql_health() or not model_state:
+        if not self._can_write_payload(model_state):
             return 0
+
+        df = self._normalize_active_models_payload(model_state)
+        if df is None or df.empty:
+            return 0
+
         try:
-            row = dict(model_state)
-            row['EquipID'] = self.equip_id or 0
-            row['LastUpdatedAt'] = datetime.now()
-            row['LastUpdatedBy'] = self.run_id
-            
-            # Manual delete by EquipID (table has no RunID column)
-            try:
-                with self.sql_client.cursor() as cur:
-                    cur.execute("DELETE FROM dbo.[ACM_ActiveModels] WHERE EquipID = ?", (int(self.equip_id or 0),))
-                    if hasattr(self.sql_client, "commit"):
-                        self.sql_client.commit()
-            except Exception as del_ex:
-                Console.debug(f"ACM_ActiveModels delete skipped: {del_ex}", component="OUTPUT")
-            
-            # Insert new row (delete_existing=False since we manually deleted)
-            return self.write_table('ACM_ActiveModels', pd.DataFrame([row]), delete_existing=False)
+            result = self.write_sql_table(
+                table_name="ACM_ActiveModels",
+                df=df,
+                artifact_name="active_models",
+                required=False,
+            )
+            return int(result.get("inserted", 0))
         except Exception as e:
             Console.warn(f"write_active_models failed: {e}", component="OUTPUT", error=str(e)[:200])
             return 0
-    
+    # Start Write Data Contract Validation Here    
     def write_data_contract_validation(self, validation_result: Dict[str, Any]) -> int:
-        """Write data contract validation result to ACM_DataContractValidation (v11).
+        """Write data contract validation result to ACM_DataContractValidation (v11)."""
         
-        Args:
-            validation_result: Dict with Passed, RowsValidated, ColumnsValidated, IssuesJSON, etc.
-        """
-        if not self._check_sql_health() or not validation_result:
+        if not self._can_write_payload(validation_result):
             return 0
+
+        # 🔥 Normalize numpy scalars recursively BEFORE DataFrame creation
+        def _normalize(val):
+            if isinstance(val, np.generic):
+                return val.item()
+            if isinstance(val, dict):
+                return {k: _normalize(v) for k, v in val.items()}
+            if isinstance(val, list):
+                return [_normalize(v) for v in val]
+            if isinstance(val, tuple):
+                return tuple(_normalize(v) for v in val)
+            return val
+
         try:
-            row = dict(validation_result)
-            row['RunID'] = self.run_id
-            row['EquipID'] = self.equip_id or 0
-            row['ValidatedAt'] = datetime.now()
-            return self.write_table('ACM_DataContractValidation', pd.DataFrame([row]), delete_existing=True)
+            row = _normalize(dict(validation_result))
+
+            row["RunID"] = self.run_id
+            row["EquipID"] = self.equip_id or 0
+            row["ValidatedAt"] = datetime.now()
+
+            df = pd.DataFrame([row])
+
+            result = self.write_sql_table(
+                table_name="ACM_DataContractValidation",
+                df=df,
+                artifact_name="data_contract_validation",
+                required=False,
+            )
+
+            return int(result.get("inserted", 0))
+
         except Exception as e:
-            Console.warn(f"write_data_contract_validation failed: {e}", component="OUTPUT", error=str(e)[:200])
+            Console.warn(
+                f"Data contract validation write failed: {e}",
+                component="OUTPUT",
+                equip_id=self.equip_id,
+                run_id=self.run_id,
+            )
             return 0
     
     def write_seasonal_patterns(self, patterns: List[Dict[str, Any]]) -> int:
@@ -2998,17 +2144,265 @@ class OutputManager:
         Args:
             patterns: List of dicts with SensorName, PatternType, PeriodHours, Amplitude, etc.
         """
-        if not self._check_sql_health() or not patterns:
+        if not self._can_write_payload(patterns):
             return 0
         try:
             df = pd.DataFrame(patterns)
-            df['EquipID'] = self.equip_id or 0
-            df['DetectedAt'] = datetime.now()
-            df['RunID'] = self.run_id
-            return self.write_table('ACM_SeasonalPatterns', df, delete_existing=True)
+            df["EquipID"] = self.equip_id or 0
+            df["DetectedAt"] = datetime.now()
+            df["RunID"] = self.run_id
+            result = self.write_sql_table(
+                table_name="ACM_SeasonalPatterns",
+                df=df,
+                artifact_name="seasonal_patterns",
+                required=False,
+            )
+            return int(result.get("inserted", 0))
         except Exception as e:
             Console.warn(f"write_seasonal_patterns failed: {e}", component="OUTPUT", error=str(e)[:200])
             return 0
+
+    def write_sensor_normalized_ts_from_raw(self, raw_score: Optional[pd.DataFrame], max_total_rows: int = 10000) -> int:
+        """Sample raw sensor frame and persist normalized sensor time-series rows."""
+        return write_sensor_normalized_ts_from_raw_service(
+            self,
+            raw_score=raw_score,
+            max_total_rows=max_total_rows,
+        )
+
+    def write_seasonal_patterns_from_detected(self, seasonal_patterns: Optional[Dict[str, List[Any]]]) -> int:
+        """Flatten detected seasonal patterns and persist them to SQL."""
+        return write_seasonal_patterns_from_detected_service(self, seasonal_patterns=seasonal_patterns)
+
+    def persist_additional_artifacts(
+        self,
+        scores_df: pd.DataFrame,
+        raw_score: Optional[pd.DataFrame],
+        seasonal_patterns: Optional[Dict[str, List[Any]]],
+        max_total_rows: int = 10000,
+    ) -> PersistArtifactsResult:
+        """Persist optional secondary artifacts derived from current run data."""
+        payload = persist_additional_artifacts_service(
+            self,
+            scores_df=scores_df,
+            raw_score=raw_score,
+            seasonal_patterns=seasonal_patterns,
+            max_total_rows=max_total_rows,
+        )
+        return PersistArtifactsResult(**payload)
+
+    def generate_all_analytics_with_context(
+        self,
+        scores_df: pd.DataFrame,
+        cfg: Dict[str, Any],
+        sensor_context: Optional[Dict[str, Any]],
+        fusion_weights_used: Optional[Dict[str, float]] = None,
+    ) -> Dict[str, Any]:
+        """Persist analytics tables after optional fusion-weight injection into cfg."""
+        return generate_all_analytics_with_context_service(
+            self,
+            scores_df=scores_df,
+            cfg=cfg,
+            sensor_context=sensor_context,
+            fusion_weights_used=fusion_weights_used,
+        )
+
+    def _write_sql_artifacts(
+        self,
+        *,
+        frame: pd.DataFrame,
+        episodes: pd.DataFrame,
+        train: pd.DataFrame,
+        pca_detector: Any,
+        sql_client: Any,
+        run_id: Optional[str],
+        equip_id: int,
+        equip: str,
+        cfg: Dict[str, Any],
+        meta: Any,
+        win_start: Optional[pd.Timestamp],
+        win_end: Optional[pd.Timestamp],
+        rows_read: int,
+        spe_p95_train: float,
+        t2_p95_train: float,
+        anomaly_count: int,
+        timer: Any,
+        culprit_writer_func: Optional[Callable[..., Any]] = None,
+    ) -> int:
+        """Internal adapter to keep output-artifact write logic out of service layer imports."""
+        return int(
+            write_sql_artifacts(
+                output_manager=self,
+                frame=frame,
+                episodes=episodes,
+                train=train,
+                pca_detector=pca_detector,
+                sql_client=sql_client,
+                run_id=run_id,
+                equip_id=equip_id,
+                equip=equip,
+                cfg=cfg,
+                meta=meta,
+                win_start=win_start,
+                win_end=win_end,
+                rows_read=rows_read,
+                spe_p95_train=spe_p95_train,
+                t2_p95_train=t2_p95_train,
+                anomaly_count=anomaly_count,
+                T=timer,
+                culprit_writer_func=culprit_writer_func,
+            )
+        )
+
+    def persist_pipeline_outputs(
+        self,
+        scores_df: pd.DataFrame,
+        episodes_df: Optional[pd.DataFrame],
+        raw_train: Optional[pd.DataFrame],
+        raw_score: Optional[pd.DataFrame],
+        iforest_detector: Optional[Any],
+        omr_detector: Optional[Any],
+        seasonal_patterns: Optional[Dict[str, List[Any]]],
+        cfg: Dict[str, Any],
+        sensor_context: Optional[Dict[str, Any]],
+        fusion_weights_used: Optional[Dict[str, float]],
+        record_episode_fn: Optional[Callable[..., Any]] = None,
+        equip: Optional[str] = None,
+        max_total_rows: int = 10000,
+    ) -> PersistPipelineOutputsResult:
+        """Persist core and optional run artifacts, then release persist-phase memory."""
+        payload = persist_pipeline_outputs_service(
+            self,
+            scores_df=scores_df,
+            episodes_df=episodes_df,
+            raw_train=raw_train,
+            raw_score=raw_score,
+            iforest_detector=iforest_detector,
+            omr_detector=omr_detector,
+            seasonal_patterns=seasonal_patterns,
+            cfg=cfg,
+            sensor_context=sensor_context,
+            fusion_weights_used=fusion_weights_used,
+            record_episode_fn=record_episode_fn,
+            equip=equip,
+            max_total_rows=max_total_rows,
+        )
+        return PersistPipelineOutputsResult(**payload)
+
+    def run_persistence_stage(
+        self,
+        *,
+        section_fn: Any,
+        logger: Any,
+        scores_df: pd.DataFrame,
+        episodes_df: pd.DataFrame,
+        train_df: pd.DataFrame,
+        raw_train: Optional[pd.DataFrame],
+        raw_score: Optional[pd.DataFrame],
+        iforest_detector: Optional[Any],
+        omr_detector: Optional[Any],
+        seasonal_patterns: Optional[Dict[str, List[Any]]],
+        cfg: Dict[str, Any],
+        sensor_context: Optional[Dict[str, Any]],
+        fusion_weights_used: Optional[Dict[str, float]],
+        record_episode_fn: Optional[Callable[..., Any]],
+        equip: str,
+        pca_detector: Any,
+        sql_client: Any,
+        run_id: Optional[str],
+        equip_id: int,
+        meta: Any,
+        win_start: Optional[pd.Timestamp],
+        win_end: Optional[pd.Timestamp],
+        rows_read: int,
+        spe_p95_train: float,
+        t2_p95_train: float,
+        anomaly_count: int,
+        timer: Any,
+        culprit_writer_func: Optional[Callable[..., Any]] = None,
+        max_total_rows: int = 10000,
+    ) -> PersistenceStageResult:
+        """Execute full persistence stage for pipeline outputs and SQL artifacts."""
+        payload = run_persistence_stage_service(
+            self,
+            section_fn=section_fn,
+            logger=logger,
+            scores_df=scores_df,
+            episodes_df=episodes_df,
+            train_df=train_df,
+            raw_train=raw_train,
+            raw_score=raw_score,
+            iforest_detector=iforest_detector,
+            omr_detector=omr_detector,
+            seasonal_patterns=seasonal_patterns,
+            cfg=cfg,
+            sensor_context=sensor_context,
+            fusion_weights_used=fusion_weights_used,
+            record_episode_fn=record_episode_fn,
+            equip=equip,
+            pca_detector=pca_detector,
+            sql_client=sql_client,
+            run_id=run_id,
+            equip_id=equip_id,
+            meta=meta,
+            win_start=win_start,
+            win_end=win_end,
+            rows_read=rows_read,
+            spe_p95_train=spe_p95_train,
+            t2_p95_train=t2_p95_train,
+            anomaly_count=anomaly_count,
+            timer=timer,
+            culprit_writer_func=culprit_writer_func,
+            max_total_rows=max_total_rows,
+        )
+        return PersistenceStageResult(**payload)
+
+    def prepare_persistence_inputs(
+        self,
+        *,
+        section_fn: Any,
+        raw_train: Optional[pd.DataFrame],
+        raw_score: Optional[pd.DataFrame],
+        frame: pd.DataFrame,
+        omr_contributions_data: Optional[pd.DataFrame],
+        regime_model: Any,
+        cfg: Dict[str, Any],
+        coldstart_complete: bool,
+        build_sensor_analytics_context_fn: Any,
+        logger: Any,
+        equip: str,
+    ) -> PersistenceInputPreparationResult:
+        """Prepare persistence-stage inputs: baseline buffer update and sensor context."""
+        payload = prepare_persistence_inputs_service(
+            self,
+            section_fn=section_fn,
+            raw_train=raw_train,
+            raw_score=raw_score,
+            frame=frame,
+            omr_contributions_data=omr_contributions_data,
+            regime_model=regime_model,
+            cfg=cfg,
+            coldstart_complete=coldstart_complete,
+            build_sensor_analytics_context_fn=build_sensor_analytics_context_fn,
+            logger=logger,
+            equip=equip,
+        )
+        return PersistenceInputPreparationResult(**payload)
+
+    def release_persist_memory(
+        self,
+        raw_train: Optional[pd.DataFrame],
+        raw_score: Optional[pd.DataFrame],
+        iforest_detector: Optional[Any] = None,
+        omr_detector: Optional[Any] = None,
+    ) -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame]]:
+        """Free large persist-phase objects after SQL writes are complete."""
+        return release_persist_memory_service(
+            raw_train=raw_train,
+            raw_score=raw_score,
+            iforest_detector=iforest_detector,
+            omr_detector=omr_detector,
+        )
     
     
     def get_stats(self) -> Dict[str, Any]:
@@ -3070,7 +2464,6 @@ class OutputManager:
             return 0
             
         total_deleted = 0
-        cursor_factory = lambda: cast(Any, self.sql_client).cursor()
         
         for table_name in tables:
             if table_name not in ALLOWED_TABLES:
@@ -3091,13 +2484,7 @@ class OutputManager:
                             component="OUTPUT", table=table_name,
                             equip_id=self.equip_id, min_ts=str(min_ts), max_ts=str(max_ts)
                         )
-                        
-                # Commit after each table
-                if hasattr(self.sql_client, "commit"):
-                    self.sql_client.commit()
-                elif hasattr(self.sql_client, "conn") and hasattr(self.sql_client.conn, "commit"):
-                    if not getattr(self.sql_client.conn, "autocommit", True):
-                        self.sql_client.conn.commit()
+                self._commit_if_needed(table_name)
                         
             except Exception as del_ex:
                 Console.warn(
@@ -3213,13 +2600,7 @@ DECLARE @EquipID INT = ?;
 {batch_sql};
 """
                 cur.execute(sql, (self.run_id, int(self.equip_id or 0)))
-
-                # Commit behavior: follow your existing pattern (depends on autocommit / wrapper)
-                if hasattr(self.sql_client, "commit"):
-                    self.sql_client.commit()
-                elif hasattr(self.sql_client, "conn") and hasattr(self.sql_client.conn, "commit"):
-                    if not getattr(self.sql_client.conn, "autocommit", True):
-                        self.sql_client.conn.commit()
+                self._commit_if_needed("analytics_bulk_predelete")
 
             finally:
                 try:
@@ -3269,315 +2650,3 @@ DECLARE @EquipID INT = ?;
         """
         builder = AnalyticsBuilder(self)
         return builder.generate_all(scores_df, cfg, sensor_context)
-
-    def _generate_health_timeline(self, scores_df: pd.DataFrame, cfg: Dict[str, Any]) -> pd.DataFrame:
-        """Backward compat wrapper - delegates to AnalyticsBuilder."""
-        builder = AnalyticsBuilder(self)
-        return builder.generate_health_timeline(scores_df, cfg)
-    
-    def _generate_regime_timeline(self, scores_df: pd.DataFrame) -> pd.DataFrame:
-        """Backward compat wrapper - delegates to AnalyticsBuilder."""
-        builder = AnalyticsBuilder(self)
-        return builder.generate_regime_timeline(scores_df)
-    
-    def _generate_sensor_defects(self, scores_df: pd.DataFrame) -> pd.DataFrame:
-        """Backward compat wrapper - delegates to AnalyticsBuilder."""
-        builder = AnalyticsBuilder(self)
-        return builder.generate_sensor_defects(scores_df)
-    
-    def _generate_sensor_hotspots_table(
-        self,
-        sensor_zscores: pd.DataFrame,
-        sensor_values: pd.DataFrame,
-        train_mean: Optional[pd.Series],
-        train_std: Optional[pd.Series],
-        warn_z: float,
-        alert_z: float,
-        top_n: int
-    ) -> pd.DataFrame:
-        """Backward compat wrapper - delegates to AnalyticsBuilder."""
-        builder = AnalyticsBuilder(self)
-        return builder.generate_sensor_hotspots(
-            sensor_zscores, sensor_values, train_mean, train_std,
-            warn_z, alert_z, top_n
-        )
-
-
-# ============================================================================
-# Artifact Write Helpers (moved from acm_main.py v11.2)
-# ============================================================================
-
-def write_pca_artifacts(
-    output_manager: "OutputManager",
-    pca_detector: Any,
-    frame: pd.DataFrame,
-    train: pd.DataFrame,
-    run_id: Optional[str],
-    equip_id: int,
-    equip: str,
-    spe_p95_train: float,
-    t2_p95_train: float,
-    cfg: Dict[str, Any],
-) -> Tuple[int, int, int]:
-    """Write PCA model, loadings, and metrics to SQL tables.
-    
-    This helper consolidates all PCA-related SQL writes:
-    - ACM_PCAModel: Model metadata, thresholds, scaler config
-    - ACM_PCALoadings: Component loadings per sensor
-    - ACM_PCAMetrics: P95 SPE/T2 score stats, variance explained
-    
-    Args:
-        output_manager: OutputManager instance for SQL writes
-        pca_detector: PCA detector instance with pca and scaler attributes
-        frame: Scored frame DataFrame with pca_spe and pca_t2 columns
-        train: Training DataFrame with sensor columns
-        run_id: Current run UUID
-        equip_id: Equipment ID
-        equip: Equipment name for logging
-        spe_p95_train: P95 SPE threshold from training data
-        t2_p95_train: P95 T2 threshold from training data
-        cfg: Config dictionary with runtime settings
-        
-    Returns:
-        Tuple of (rows_pca_model, rows_pca_load, rows_pca_metrics)
-    """
-    import json
-    rows_pca_model = rows_pca_load = rows_pca_metrics = 0
-    
-    try:
-        now_utc = pd.Timestamp.now()
-        pca_model = getattr(pca_detector, "pca", None)
-
-        # PCA Model row (TRAIN window used)
-        var_ratio = getattr(pca_model, "explained_variance_ratio_", None)
-        var_json = json.dumps(var_ratio.tolist()) if var_ratio is not None else "[]"
-
-        # Capture actual scaler type from PCA detector
-        scaler_name = pca_detector.scaler.__class__.__name__ if hasattr(pca_detector, 'scaler') else "StandardScaler"
-        scaler_params = {}
-        if hasattr(pca_detector, 'scaler'):
-            scaler_params["with_mean"] = getattr(pca_detector.scaler, 'with_mean', True)
-            scaler_params["with_std"] = getattr(pca_detector.scaler, 'with_std', True)
-        else:
-            scaler_params = {"with_mean": True, "with_std": True}
-        
-        scaling_spec = json.dumps({"scaler": scaler_name, **scaler_params})
-        model_row = {
-            "RunID": run_id or "",
-            "EquipID": int(equip_id),
-            "EntryDateTime": now_utc,
-            "NComponents": int(getattr(pca_model, "n_components_", getattr(pca_model, "n_components", 0))),
-            "TargetVar": json.dumps({"SPE_P95_train": spe_p95_train, "T2_P95_train": t2_p95_train}),
-            "VarExplainedJSON": var_json,
-            "ScalingSpecJSON": scaling_spec,
-            "ModelVersion": cfg.get("runtime", {}).get("version", "v5.0.0"),
-            "TrainStartEntryDateTime": train.index.min() if len(train.index) else None,
-            "TrainEndEntryDateTime": train.index.max() if len(train.index) else None
-        }
-        rows_pca_model = output_manager.write_pca_model(model_row)
-
-        # PCA Loadings
-        comps = getattr(pca_model, "components_", None)
-        if comps is not None and hasattr(train, "columns"):
-            load_rows = []
-            for k in range(comps.shape[0]):
-                for j, sensor in enumerate(train.columns):
-                    load_rows.append({
-                        "RunID": run_id or "",
-                        "EntryDateTime": now_utc,
-                        "ComponentNo": int(k + 1),
-                        "Sensor": str(sensor),
-                        "Loading": float(comps[k, j])
-                    })
-            df_load = pd.DataFrame(load_rows)
-            rows_pca_load = output_manager.write_pca_loadings(df_load, run_id or "")
-
-        # PCA Metrics
-        spe_p95 = float(np.nanpercentile(frame["pca_spe"].to_numpy(dtype=np.float32), 95)) if "pca_spe" in frame.columns else None
-        t2_p95 = float(np.nanpercentile(frame["pca_t2"].to_numpy(dtype=np.float32), 95)) if "pca_t2" in frame.columns else None
-
-        var90_n = None
-        if var_ratio is not None:
-            csum = np.cumsum(var_ratio)
-            var90_n = int(np.searchsorted(csum, 0.90) + 1)
-        components_json = []
-        if var_ratio is not None:
-            cum = np.cumsum(var_ratio)
-            for i, ratio in enumerate(var_ratio):
-                components_json.append({
-                    "name": f"PC{i + 1}",
-                    "type": "variance_ratio",
-                    "value": float(ratio),
-                    "cumulative": float(cum[i])
-                })
-
-        # Include score stats alongside component variance details
-        if var90_n is not None:
-            components_json.append({"name": "PCA", "type": "var90_n", "value": float(var90_n)})
-        if spe_p95 is not None:
-            components_json.append({"name": "PCA", "type": "spe_p95_score", "value": float(spe_p95)})
-        if t2_p95 is not None:
-            components_json.append({"name": "PCA", "type": "t2_p95_score", "value": float(t2_p95)})
-
-        # Calculate total explained variance as Python float
-        explained_var_val = None
-        if var_ratio is not None and len(var_ratio) > 0:
-            explained_var_val = float(np.sum(var_ratio))
-            
-        df_metrics = pd.DataFrame([{
-            "RunID": run_id or "",
-            "EquipID": int(equip_id),
-            "NComponents": int(getattr(pca_model, "n_components_", getattr(pca_model, "n_components", 0))),
-            "ExplainedVariance": explained_var_val,
-            "ComponentsJson": json.dumps(components_json) if components_json else None,
-            "MetricType": "pca_fit",
-            "TrainSamples": int(len(train)) if train is not None else None,
-            "TrainFeatures": int(train.shape[1]) if train is not None else None
-        }])
-        rows_pca_metrics = output_manager.write_pca_metrics(df=df_metrics, run_id=run_id or "")
-    except Exception as e:
-        Console.warn(f"PCA artifacts write skipped: {e}", component="SQL",
-                     equip=equip, run_id=run_id, error=str(e)[:200])
-    
-    return rows_pca_model, rows_pca_load, rows_pca_metrics
-
-
-def write_sql_artifacts(
-    output_manager: "OutputManager",
-    frame: pd.DataFrame,
-    episodes: pd.DataFrame,
-    train: pd.DataFrame,
-    pca_detector: Optional[Any],
-    sql_client: Optional[Any],
-    run_id: Optional[str],
-    equip_id: int,
-    equip: str,
-    cfg: Dict[str, Any],
-    meta: Any,
-    win_start: Optional[pd.Timestamp],
-    win_end: Optional[pd.Timestamp],
-    rows_read: int,
-    spe_p95_train: float,
-    t2_p95_train: float,
-    anomaly_count: int,
-    T: Any,
-    culprit_writer_func: Optional[Callable] = None,
-) -> int:
-    """
-    Write SQL-specific artifacts: DriftTS, AnomalyEvents, RegimeEpisodes, PCA, RunStats, Culprits.
-    
-    Args:
-        output_manager: OutputManager instance for SQL writes
-        frame: Scored DataFrame with detector columns
-        episodes: Episodes DataFrame from fusion
-        train: Training DataFrame with sensor columns
-        pca_detector: PCA detector instance (or None)
-        sql_client: SQLClient instance (or None)
-        run_id: Current run UUID
-        equip_id: Equipment ID
-        equip: Equipment name for logging
-        cfg: Config dictionary
-        meta: DataMeta instance with kept_cols, cadence_ok, etc.
-        win_start: Window start timestamp
-        win_end: Window end timestamp
-        rows_read: Number of rows read
-        spe_p95_train: P95 SPE threshold from training
-        t2_p95_train: P95 T2 threshold from training
-        anomaly_count: Number of anomalies detected
-        T: Timer/section manager for profiling
-        culprit_writer_func: Optional function to write episode culprits
-    
-    Returns:
-        Total rows written across all artifact tables.
-    """
-    rows_written = 0
-    
-    # DriftSeries [TODO v11.2.4: Implement drift time series writing]
-    # with T.section("sql.drift_series"):
-    #     try:
-    #         df_drift = output_manager._build_drift_ts(frame, equip_id, run_id, cfg)
-    #         if df_drift is not None:
-    #             rows_written += output_manager.write_drift_series(df_drift)
-    #     except Exception as e:
-    #         Console.warn(f"DriftSeries write skipped: {e}", component="SQL",
-    #                      equip=equip, run_id=run_id, error=str(e)[:200])
-
-    # AnomalyEvents [TODO v11.2.4: Implement anomaly events writing]
-    # with T.section("sql.events"):
-    #     try:
-    #         df_events = output_manager._build_anomaly_events(episodes, equip_id, run_id)
-    #         if df_events is not None:
-    #             rows_written += output_manager.write_anomaly_events(df_events, run_id or "")
-    #     except Exception as e:
-    #         Console.warn(f"AnomalyEvents write skipped: {e}", component="SQL",
-    #                      equip=equip, run_id=run_id, error=str(e)[:200])
-
-    # RegimeEpisodes [TODO v11.2.4: Implement regime episodes writing]
-    # with T.section("sql.regimes"):
-    #     try:
-    #         df_reg = output_manager._build_regime_episodes(episodes, equip_id, run_id)
-    #         if df_reg is not None:
-    #             rows_written += output_manager.write_regime_episodes(df_reg, run_id or "")
-    #     except Exception as e:
-    #         Console.warn(f"RegimeEpisodes write skipped: {e}", component="SQL",
-    #                      equip=equip, run_id=run_id, error=str(e)[:200])
-
-    # PCA artifacts
-    with T.section("sql.pca"):
-        rows_pca_model, rows_pca_load, rows_pca_metrics = write_pca_artifacts(
-            output_manager=output_manager,
-            pca_detector=pca_detector,
-            frame=frame,
-            train=train,
-            run_id=run_id,
-            equip_id=equip_id,
-            equip=equip,
-            spe_p95_train=spe_p95_train,
-            t2_p95_train=t2_p95_train,
-            cfg=cfg,
-        )
-        rows_written += int(rows_pca_model + rows_pca_load + rows_pca_metrics)
-
-    # RunStats
-    with T.section("sql.run_stats"):
-        try:
-            if sql_client and run_id and win_start is not None and win_end is not None:
-                drift_p95 = None
-                if "drift_z" in frame.columns:
-                    drift_p95 = float(np.nanpercentile(frame["drift_z"].to_numpy(dtype=np.float32), 95))
-                sensors_kept = len(getattr(meta, "kept_cols", []))
-                cadence_ok_pct = float(getattr(meta, "cadence_ok", 1.0)) * 100.0 if hasattr(meta, "cadence_ok") else None
-
-                output_manager.write_run_stats({
-                    "RunID": run_id,
-                    "EquipID": int(equip_id),
-                    "WindowStartEntryDateTime": win_start,
-                    "WindowEndEntryDateTime": win_end,
-                    "SamplesIn": rows_read,
-                    "SamplesKept": rows_read,
-                    "SensorsKept": sensors_kept,
-                    "CadenceOKPct": cadence_ok_pct,
-                    "DriftP95": drift_p95,
-                    "ReconRMSE": None,
-                    "AnomalyCount": anomaly_count
-                })
-        except Exception as e:
-            Console.warn(f"RunStats not recorded: {e}", component="RUN",
-                         equip=equip, run_id=run_id, error=str(e)[:200])
-
-    # Episode culprits
-    with T.section("sql.culprits"):
-        try:
-            if culprit_writer_func and sql_client and run_id and len(episodes) > 0:
-                culprit_writer_func(
-                    sql_client=sql_client,
-                    run_id=run_id,
-                    episodes=episodes,
-                    scores_df=frame,
-                    equip_id=equip_id
-                )
-        except Exception as e:
-            Console.warn(f"Failed to write ACM_EpisodeCulprits: {e}", component="CULPRITS",
-                         equip=equip, run_id=run_id, error=str(e))
-    
-    return rows_written

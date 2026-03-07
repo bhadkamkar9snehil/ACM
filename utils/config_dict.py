@@ -478,6 +478,51 @@ def compute_config_signature(cfg: Dict[str, Any]) -> str:
     return hashlib.sha256(config_str.encode("utf-8")).hexdigest()[:16]
 
 
+def cfg_get(cfg: Dict[str, Any], path: str, default: Any) -> Any:
+    """
+    Read nested config value by dot path.
+    """
+    keys = path.split(".")
+    current: Any = cfg or {}
+    for key in keys:
+        if hasattr(current, "get") and key in current:
+            current = current[key]
+        else:
+            return default
+    value = current
+    if default is None:
+        return value
+    expected_type = type(default)
+    if expected_type in (int, float, bool, str) and not isinstance(value, expected_type):
+        try:
+            if expected_type is int:
+                return int(value)
+            if expected_type is float:
+                return float(value)
+            if expected_type is bool:
+                return bool(value)
+            if expected_type is str:
+                return str(value)
+        except Exception:
+            return default
+    return value
+
+
+def future_cutoff_ts(cfg: Dict[str, Any]) -> Any:
+    """
+    Return timestamp cutoff with optional future grace minutes from config.
+    """
+    import pandas as pd
+
+    raw_value = cfg_get(cfg, "runtime.future_grace_minutes", 0) or 0
+    try:
+        minutes = int(raw_value)
+    except (TypeError, ValueError):
+        minutes = 0
+    minutes = max(0, minutes)
+    return pd.Timestamp.now() + pd.Timedelta(minutes=minutes)
+
+
 def load_config(
     path: Optional[Path] = None,
     equipment_name: Optional[str] = None,

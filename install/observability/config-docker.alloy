@@ -86,6 +86,9 @@ otelcol.exporter.prometheus "default" {
 prometheus.remote_write "default" {
   endpoint {
     url = "http://prometheus:9090/api/v1/write"
+    // Alloy v1.11+ (Prometheus v3 dependency) changed enable_http2 default to false.
+    // Explicitly set true to preserve HTTP/2 multiplexing to Prometheus.
+    enable_http2 = true
   }
   external_labels = {
     source = "alloy",
