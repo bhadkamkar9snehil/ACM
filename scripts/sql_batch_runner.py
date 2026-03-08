@@ -29,6 +29,7 @@ import textwrap
 import os
 import math
 import time
+from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, List, Dict, Optional, Tuple
@@ -124,6 +125,14 @@ except Exception:  # pragma: no cover - keeps runner usable without optional obs
 
     def get_trace_context() -> Dict[str, Any]:
         return {}
+
+@dataclass(frozen=True)
+class BatchProcessingResult:
+    """Summarizes the post-coldstart batch phase for one equipment run."""
+
+    completed: int
+    attempted: int
+    failed: bool
 
 
 class SQLBatchRunner:
@@ -1252,7 +1261,7 @@ class SQLBatchRunner:
         return False, last_processed_end
 
     def _process_batches(self, equip_name: str, start_from: Optional[datetime] = None,
-                        *, dry_run: bool = False, resume: bool = False) -> int:
+                        *, dry_run: bool = False, resume: bool = False) -> BatchProcessingResult:
         """Process all available data in batches.
 
         Args:
@@ -1262,7 +1271,7 @@ class SQLBatchRunner:
             resume: If True, resume from last successful batch
 
         Returns:
-            Number of batches successfully processed
+            Summary of the batch phase, including whether any attempted batch failed.
         """
         Console.info(f"\n{'='*60}", component="BATCH")
         Console.info(f"Starting batch processing for {equip_name}", component="BATCH", equipment=equip_name)
@@ -1272,7 +1281,7 @@ class SQLBatchRunner:
         min_ts, max_ts = self._get_data_range(equip_name)
         if not min_ts or not max_ts:
             Console.warn(f"{equip_name}: No data available in historian", component="BATCH", equipment=equip_name)
-            return 0
+            return BatchProcessingResult(completed=0, attempted=0, failed=False)
 
         Console.info(f"{equip_name}: Data available from {min_ts} to {max_ts}", component="BATCH", equipment=equip_name, min_timestamp=min_ts, max_timestamp=max_ts)
 
@@ -1328,6 +1337,7 @@ class SQLBatchRunner:
 
         # Process batches
         batch_num = 0
+        batch_failed = False
         while current_ts < max_ts:
             batch_num += 1
             # SP uses <= for end time, so subtract 1 second to get [start, end] inclusive of full last period
@@ -1353,6 +1363,7 @@ class SQLBatchRunner:
 
             if not success:
                 Console.error(f"{equip_name}: Batch {batch_num} FAILED", component="BATCH", equipment=equip_name, batch=batch_num)
+                batch_failed = True
                 break
 
             batches_completed_total += 1
@@ -1385,7 +1396,11 @@ class SQLBatchRunner:
             batches_completed=batches_completed_session,
             batches_completed_total=batches_completed_total,
         )
-        return batches_completed_session
+        return BatchProcessingResult(
+            completed=batches_completed_session,
+            attempted=batch_num,
+            failed=batch_failed,
+        )
 
     def _emit_equipment_summary(
         self,
@@ -1540,20 +1555,32 @@ class SQLBatchRunner:
             except Exception:
                 start_from_ts = None
 
-            batches = self._process_batches(equip_name, start_from=start_from_ts, dry_run=dry_run, resume=resume)
-            batches_processed_for_summary = batches
+            batch_result = self._process_batches(equip_name, start_from=start_from_ts, dry_run=dry_run, resume=resume)
+            batches_processed_for_summary = batch_result.completed
 
             elapsed_time = time.time() - start_time
             elapsed_minutes = int(elapsed_time / 60)
             elapsed_seconds = int(elapsed_time % 60)
 
-            if batches > 0:
+            if batch_result.failed:
+                final_note = "batch_failed"
+                result = False
+                Console.error(
+                    f"{equip_name}: Batch processing failed after {batch_result.completed} successful batch(es)",
+                    component="BATCH",
+                    equipment=equip_name,
+                    batches=batch_result.completed,
+                    attempted_batches=batch_result.attempted,
+                )
+                Console.info(f"{equip_name}: Total time = {elapsed_minutes}m {elapsed_seconds}s", component="TIMING", equipment=equip_name, minutes=elapsed_minutes, seconds=elapsed_seconds)
+                return False
+            if batch_result.completed > 0:
                 result = True
                 final_note = "batches_processed"
-                Console.ok(f"{equip_name}: Completed - {batches} batch(es) processed", component="BATCH", equipment=equip_name, batches=batches)
+                Console.ok(f"{equip_name}: Completed - {batch_result.completed} batch(es) processed", component="BATCH", equipment=equip_name, batches=batch_result.completed)
                 Console.info(f"{equip_name}: Total time = {elapsed_minutes}m {elapsed_seconds}s", component="TIMING", equipment=equip_name, minutes=elapsed_minutes, seconds=elapsed_seconds)
                 return True
-            elif coldstart_ran_this_session:
+            elif coldstart_ran_this_session and batch_result.attempted == 0:
                 # Coldstart consumed all available data - this is OK when using --max-batches 1
                 # The processing was successful even though there's nothing left for batch phase
                 result = True

@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 import scripts.sql_batch_runner as sql_batch_runner_module
-from scripts.sql_batch_runner import SQLBatchRunner
+from scripts.sql_batch_runner import BatchProcessingResult, SQLBatchRunner
 
 
 class _DummyCursor:
@@ -112,9 +112,11 @@ def test_process_batches_resume_starts_after_last_batch_end(tmp_path):
 
     runner._run_acm_batch = _run_batch  # type: ignore[method-assign]
 
-    completed = runner._process_batches("FD_FAN", resume=True)
+    result = runner._process_batches("FD_FAN", resume=True)
 
-    assert completed == 1
+    assert result.completed == 1
+    assert result.attempted == 1
+    assert result.failed is False
     assert starts
     assert starts[0] == datetime(2024, 1, 1, 0, 10, 0)
 
@@ -227,7 +229,11 @@ def test_process_equipment_emits_final_summary_on_success(tmp_path, monkeypatch)
     runner._get_equip_id = lambda equip_name: None  # type: ignore[method-assign]
     runner._log_historian_overview = lambda equip_name: True  # type: ignore[method-assign]
     runner._process_coldstart = lambda equip_name, dry_run=False: (True, None)  # type: ignore[method-assign]
-    runner._process_batches = lambda equip_name, start_from=None, dry_run=False, resume=False: 2  # type: ignore[method-assign]
+    runner._process_batches = lambda equip_name, start_from=None, dry_run=False, resume=False: BatchProcessingResult(  # type: ignore[method-assign]
+        completed=2,
+        attempted=2,
+        failed=False,
+    )
 
     success = runner.process_equipment("FD_FAN")
 
@@ -284,6 +290,107 @@ def test_process_equipment_emits_final_summary_on_exception(tmp_path, monkeypatc
 
     assert any(
         "Final summary | status=FAIL" in msg and "note=exception:RuntimeError" in msg
+        for _, msg in messages
+    )
+
+
+def test_process_equipment_fails_when_post_coldstart_batch_fails(tmp_path, monkeypatch):
+    runner = _make_runner(tmp_path)
+    messages = []
+
+    class _ConsoleCapture:
+        @staticmethod
+        def header(msg, **kwargs):
+            messages.append(("header", msg))
+
+        @staticmethod
+        def info(msg, **kwargs):
+            messages.append(("info", msg))
+
+        @staticmethod
+        def ok(msg, **kwargs):
+            messages.append(("ok", msg))
+
+        @staticmethod
+        def warn(msg, **kwargs):
+            messages.append(("warn", msg))
+
+        @staticmethod
+        def error(msg, **kwargs):
+            messages.append(("error", msg))
+
+        @staticmethod
+        def status(msg, **kwargs):
+            messages.append(("status", msg))
+
+    monkeypatch.setattr(sql_batch_runner_module, "Console", _ConsoleCapture)
+    runner._test_sql_connection = lambda: True  # type: ignore[method-assign]
+    runner._load_progress = lambda: {}  # type: ignore[method-assign]
+    runner._get_equip_id = lambda equip_name: None  # type: ignore[method-assign]
+    runner._log_historian_overview = lambda equip_name: True  # type: ignore[method-assign]
+    runner._process_coldstart = lambda equip_name, dry_run=False: (True, datetime(2024, 1, 1, 0, 9, 59))  # type: ignore[method-assign]
+    runner._process_batches = lambda equip_name, start_from=None, dry_run=False, resume=False: BatchProcessingResult(  # type: ignore[method-assign]
+        completed=0,
+        attempted=1,
+        failed=True,
+    )
+
+    success = runner.process_equipment("FD_FAN")
+
+    assert success is False
+    assert any(
+        "Final summary | status=FAIL" in msg and "note=batch_failed" in msg
+        for _, msg in messages
+    )
+    assert not any("note=coldstart_only_no_batches" in msg for _, msg in messages)
+
+
+def test_process_equipment_marks_coldstart_only_when_no_batches_were_attempted(tmp_path, monkeypatch):
+    runner = _make_runner(tmp_path)
+    messages = []
+
+    class _ConsoleCapture:
+        @staticmethod
+        def header(msg, **kwargs):
+            messages.append(("header", msg))
+
+        @staticmethod
+        def info(msg, **kwargs):
+            messages.append(("info", msg))
+
+        @staticmethod
+        def ok(msg, **kwargs):
+            messages.append(("ok", msg))
+
+        @staticmethod
+        def warn(msg, **kwargs):
+            messages.append(("warn", msg))
+
+        @staticmethod
+        def error(msg, **kwargs):
+            messages.append(("error", msg))
+
+        @staticmethod
+        def status(msg, **kwargs):
+            messages.append(("status", msg))
+
+    monkeypatch.setattr(sql_batch_runner_module, "Console", _ConsoleCapture)
+    runner._test_sql_connection = lambda: True  # type: ignore[method-assign]
+    runner._load_progress = lambda: {}  # type: ignore[method-assign]
+    runner._get_equip_id = lambda equip_name: None  # type: ignore[method-assign]
+    runner._log_historian_overview = lambda equip_name: True  # type: ignore[method-assign]
+    runner._process_coldstart = lambda equip_name, dry_run=False: (True, datetime(2024, 1, 1, 0, 9, 59))  # type: ignore[method-assign]
+    runner._process_batches = lambda equip_name, start_from=None, dry_run=False, resume=False: BatchProcessingResult(  # type: ignore[method-assign]
+        completed=0,
+        attempted=0,
+        failed=False,
+    )
+
+    success = runner.process_equipment("FD_FAN")
+
+    assert success is True
+    assert any(
+        "Final summary | status=SUCCESS" in msg and "note=coldstart_only_no_batches" in msg
         for _, msg in messages
     )
 
