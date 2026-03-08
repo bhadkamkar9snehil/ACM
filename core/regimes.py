@@ -2673,14 +2673,21 @@ def regime_state_to_model(
         Reconstructed RegimeModel object
     """
     from sklearn.preprocessing import StandardScaler
-    
+
     # Reconstruct scaler
-    scaler = StandardScaler()
-    scaler.mean_, scaler.scale_ = state.get_scaler_params()
-    # Set n_features_in_ with proper None guard
-    n_features_in = len(scaler.mean_) if scaler.mean_ is not None else 0
-    scaler.n_features_in_ = n_features_in
-    scaler.n_samples_seen_ = 1  # Required by sklearn but not critical here
+    # If mean/scale are empty arrays the original scaler was _IdentityScaler (pre_scaled=True).
+    # Reconstructing a StandardScaler with n_features_in_=0 causes
+    # "X has N features, but StandardScaler is expecting 0" on the next batch.
+    # Use _IdentityScaler (no-op) whenever the stored params are empty.
+    _mean, _scale = state.get_scaler_params()
+    if len(_mean) == 0 or len(_scale) == 0:
+        scaler: Union[StandardScaler, "_IdentityScaler"] = _IdentityScaler()
+    else:
+        scaler = StandardScaler()
+        scaler.mean_ = _mean
+        scaler.scale_ = _scale
+        scaler.n_features_in_ = len(_mean)
+        scaler.n_samples_seen_ = 1  # Required by sklearn but not critical here
     
     # v11.1.0: Reconstruct GMM instead of KMeans
     cluster_centers = state.get_cluster_centers()

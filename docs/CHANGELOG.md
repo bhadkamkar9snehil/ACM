@@ -12,32 +12,99 @@ This document is the single canonical source for both:
 
 Current code version constant:
 - Source: `utils/version.py`
-- `__version__ = 11.15.5`
-- `__version_date__ = 2026-02-20`
-
-Current integration changelog head:
-- Latest documented release section: `11.16.0` (integration stream)
-- `Unreleased` section captures pending changes on top of that
+- `__version__ = 11.15.15`
+- `__version_date__ = 2026-03-08`
 
 Versioning rule:
 - If code version changes, update `utils/version.py` and this file in the same change set.
 
-## [Unreleased]
+## [11.15.15] - 2026-03-08
 
-### Changed - OUTPUT MANAGER COMPLEXITY REDUCTION AND ARTIFACT SPLIT
+### Fixed
+- **regimes.py** `regime_state_to_model()`: Detect empty `mean_`/`scale_` arrays from
+  `ACM_RegimeState` and restore `_IdentityScaler` instead of `StandardScaler(n_features_in_=0)`.
+  Crash: `X has 21 features, but StandardScaler is expecting 0 features` on batch 2+ when
+  the ModelRegistry joblib cache is invalidated and the state-fallback load path is taken.
+- **fuse.py** `compute_discounted_weights()`: Full weight=0.0 disable for GMM and IForest
+  when Spearman |r| ≥ `fusion.omr_correlation_disable_threshold` (default 0.95) against OMR.
+  Previous 24% discount at |r|=0.97 still allocated ~76% weight to a redundant signal.
+- **configs/config_table.csv**: Added `fusion.omr_correlation_disable_threshold = 0.95`.
+- **scripts/db_health_check.py**: Removed `Status = 1 OR Status = 'Active'` tinyint/varchar
+  conversion crash. Default query now uses `EXISTS (SELECT 1 FROM ACM_Runs...)` — fully
+  asset-agnostic, works for any equipment type.
 
-- Continued `core/output_manager.py` hardening and simplification:
-  - added `_write_optional_table(...)` to centralize best-effort optional writes
-  - removed repeated local `try/except` wrappers from multiple optional write methods
-  - made `write_active_models(...)` replace path explicit (delete then insert) without silent delete skip
-- Split low-hanging module-level artifact writers out of `core/output_manager.py` into:
-  - `core/output_artifacts.py`
-  - moved `write_pca_artifacts(...)` and `write_sql_artifacts(...)`
-  - `core/output_manager.py` now imports these helpers
-- Added full per-function audit for OutputManager:
-  - `docs/OUTPUT_MANAGER_DEF_INDEX_AUDIT.md`
-  - includes all defs with purpose, complexity, overprotection score, and simplification flags
-- Updated system overview call-chain references for artifact writing ownership:
+## [11.15.14] - 2026-03-07
+
+### Fixed
+- **regimes.py**: Regime quality gate — HDBSCAN novel-point saturation fix; quality gate
+  no longer blocks CONVERGED promotion when HDBSCAN legitimately finds 1 cluster.
+
+## [11.15.13] - 2026-03-07
+
+### Fixed
+- Merge of `fix/v11-15-12-regime-quality-gate` branch (v11.15.12–v11.15.14 changes).
+
+## [11.15.11] - 2026-03-07
+
+### Changed
+- **Observability improvements** (no functional changes): removed stale "v11 SQL-only"
+  labels; improved log message clarity across `acm.py`, `analytics_builder.py`,
+  `model_persistence.py`, `output_manager_services.py`, `regimes.py`, detector modules.
+
+## [11.15.10] - 2026-03-07
+
+### Fixed (6 bugs — coldstart + lifecycle)
+- **acm.py** B1: `coldstart_complete` was passed as `is_coldstart` to `seed_baseline_safe`.
+  Fixed: extract `meta.is_coldstart_run` (True only for actual coldstart batches).
+- **smart_coldstart.py** B2: SP gate `ModelRegistry >= 3` bypassed coldstart for stale models.
+  Fixed: direct query on `ACM_ActiveModels.RegimeMaturityState` via `_load_progress()`.
+- **smart_coldstart.py** B3: `for attempt` loop in `load_with_retry()` always returned on
+  iter 1; `max_attempts` was dead. Fixed: removed loop, linear single-attempt path.
+- **smart_coldstart.py** B4: `seed_baseline()` guard `is_coldstart and train_rows > 300`
+  missed 300–499 row batches. Fixed: unconditional `if is_coldstart: return early`.
+- **model_lifecycle.py** B5: `PromotionCriteria` defaults stricter than `config_table.csv`.
+  Fixed: `min_silhouette_score=0.15`, `min_stability_ratio=0.60`, `min_consecutive_runs=3`,
+  `min_training_rows=200`.
+- **model_lifecycle.py + SQL 013** B6: `regime_quality_metric` never persisted/loaded.
+  Fixed: column `RegimeQualityMetric` added to `ACM_ActiveModels`; written in
+  `get_active_model_dict()`; read in `load_model_state_from_sql()`.
+
+## [11.15.9] - 2026-02-25
+
+### Fixed
+- **config_history_writer.py**: `h_sigma` added to `_AUTO_TUNE_PATH_MAP` — CUSUM h_sigma
+  auto-tune changes now persist to `ACM_Config`.
+- **config_history_writer.py**: `trigger_refit` now only creates `ACM_RefitRequests` when
+  `not upsert_ok`. Previously fired unconditionally, resetting `consecutive_runs` every
+  batch and permanently blocking CONVERGED promotion.
+- **scripts/sql_batch_runner.py**: OMR culprit QA check now accepts both raw `'OMR...'`
+  and formatted `'Baseline Consistency (OMR)...'` culprit labels.
+
+## [11.15.8] - 2026-02-25
+
+### Fixed
+- **config_history_writer.py**: `_upsert_acm_config()` MERGE INSERT was missing `ValueType`
+  (`NOT NULL`, no default). Added `_infer_value_type()` helper. Both INSERT and UPDATE
+  branches now supply `ValueType` and `UpdatedBy`.
+
+## [11.15.7] - 2026-02-25
+
+### Fixed
+- **output_manager_services.py**: `write_contribution_timeline_from_frame_service()` now
+  calls `reset_index()` and renames the index to `Timestamp` before passing to
+  `build_contribution_timeline()`. `ACM_ContributionTimeline` now populates correctly.
+
+## [11.15.6] - 2026-02-25
+
+### Fixed
+- **regimes.py**: P95→P99 distance threshold; added `distance_threshold_floor_ratio=1.5`
+  clamp. Stops 100% novel-point classification on first scoring batches.
+- **output_manager.py / output_sql_core.py**: Removed `_pyodbc_safe_scalar` 32M-call
+  per-cell listcomp. `SqlWriteEngine._to_python_records()` now uses Polars `.rows()`.
+- **config_history_writer.py**: `_upsert_acm_config()` MERGE into `ACM_Config` so
+  auto-tune `k_max`/`k_sigma`/`clip_z` changes persist across batches.
+
+## [11.15.5] - 2026-02-20
   - `docs/ACM_SYSTEM_OVERVIEW.md`
 
 ### Changed - SYSTEM OVERVIEW DEEP REWRITE

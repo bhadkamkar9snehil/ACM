@@ -504,6 +504,133 @@ Detector pairs with |Spearman r| > 0.5 receive a weight discount:
 `discount = min(0.3, (|r| - 0.5) × 0.5)`. This prevents double-counting of
 correlated information in fusion.
 
+### STAT-4: OMR Full-Disable for Redundant Detectors (v11.15.15)
+
+When GMM or IForest Spearman |r| ≥ `fusion.omr_correlation_disable_threshold`
+(default 0.95) against OMR, the correlated detector's weight is set to 0.0 entirely.
+A 24% discount at |r|=0.97 still leaves a ~76% weight on a signal carrying near-identical
+information — the correct behaviour is full disablement, not discounting.
+
+**Principle**: Once two detectors are effectively measuring the same thing (|r| ≥ 0.95),
+including both adds noise and potential hallucinated severity, not information.
+
+---
+
+## P0 — v11.15.8–v11.15.15 Bug Catalogue
+
+### P0-12: ACM_Config MERGE Missing ValueType (v11.15.8)
+
+**Symptom**: `Cannot insert NULL into 'ValueType'` on every auto-tune write.
+Auto-tune changes were logged to `ACM_ConfigHistory` but never persisted to `ACM_Config`.
+
+**Root Cause**: The MERGE INSERT branch in `_upsert_acm_config()` didn't supply `ValueType`,
+which is `NOT NULL` with no default.
+
+**Fix (v11.15.8)**: Added `_infer_value_type()` helper that infers `'int'`/`'float'`/
+`'bool'`/`'string'` from the value string. Both INSERT and UPDATE branches now supply it.
+
+---
+
+### P0-13: h_sigma Missing from Auto-Tune Persist Map (v11.15.9)
+
+**Symptom**: CUSUM `h_sigma` changes logged to history but never written to `ACM_Config`.
+
+**Root Cause**: `_AUTO_TUNE_PATH_MAP` in `config_history_writer.py` had `k_max`, `k_sigma`,
+`clip_z` but was missing `h_sigma`.
+
+**Fix (v11.15.9)**: Added `h_sigma` → `episodes.cpd.h_sigma` to the map.
+
+---
+
+### P0-14: Unconditional Refit Request Locks Lifecycle at LEARNING (v11.15.9)
+
+**Symptom**: `consecutive_runs` reset to 0 every batch; model never reaches CONVERGED.
+
+**Root Cause**: `trigger_refit` in `config_history_writer.py` fired unconditionally after
+every auto-tune, not just on failure. Every refit request resets `consecutive_runs`.
+
+**Fix (v11.15.9)**: Refit request now only written when `not upsert_ok`.
+
+---
+
+### P0-15: Coldstart `is_coldstart` Flag Passed Incorrectly (v11.15.10)
+
+**Symptom**: `seed_baseline_safe()` received `coldstart_complete` (bool meaning
+"can proceed") instead of "is this an actual coldstart batch".
+
+**Root Cause**: `acm.py` passed `coldstart_complete` where `is_coldstart` was expected.
+
+**Fix (v11.15.10)**: Extract `meta.is_coldstart_run` and pass that instead.
+
+---
+
+### P0-16: SmartColdstart SP Gate Bypassed Coldstart for Stale Models (v11.15.10)
+
+**Symptom**: Stale LEARNING models bypassed coldstart check; pipeline ran on degraded
+model state without triggering refit.
+
+**Root Cause**: `check_status()` used `ModelRegistry >= 3` stored-procedure gate which
+only counted model versions, not maturity state.
+
+**Fix (v11.15.10)**: Direct query on `ACM_ActiveModels.RegimeMaturityState` via
+`_load_progress()` helper.
+
+---
+
+### P0-17: PromotionCriteria Defaults Stricter Than Config (v11.15.10)
+
+**Symptom**: Models never promoted to CONVERGED even when config says they should be.
+
+**Root Cause**: `PromotionCriteria` Python defaults were `min_consecutive_runs=5`,
+`min_silhouette_score=0.25` — stricter than `config_table.csv` values of 3 and 0.15.
+
+**Fix (v11.15.10)**: Aligned Python defaults to match config: `min_consecutive_runs=3`,
+`min_silhouette_score=0.15`, `min_stability_ratio=0.60`, `min_training_rows=200`.
+
+---
+
+### P0-18: RegimeQualityMetric Never Persisted (v11.15.10)
+
+**Symptom**: BIC-regime quality stuck at LEARNING; lifecycle gate ignored quality.
+
+**Root Cause**: `regime_quality_metric` was computed but never written to
+`ACM_ActiveModels` and never read back on next batch.
+
+**Fix (v11.15.10)**: Column `RegimeQualityMetric` added via SQL migration 013; written
+in `get_active_model_dict()`, read in `load_model_state_from_sql()`.
+
+---
+
+### P0-19: StandardScaler Crash on RegimeState Fallback Load (v11.15.15)
+
+**Symptom**: `X has 21 features, but StandardScaler is expecting 0 features as input`
+on batch 2+ when the joblib ModelRegistry cache is invalid.
+
+**Root Cause**: `_IdentityScaler` stores `mean_=[]`, `scale_=[]`. These serialize to
+`"[]"` in `ACM_RegimeState`. The fallback path `regime_state_to_model()` always
+reconstructed a `StandardScaler` from the JSON — when arrays were empty it created
+`StandardScaler(n_features_in_=0)`, which crashed on `transform(21-feature input)`.
+
+**Fix (v11.15.15)**: Detect empty arrays in `regime_state_to_model()` and use
+`_IdentityScaler` instead of `StandardScaler`.
+
+**Load paths**:
+- Path A (normal): joblib from ModelRegistry → `RegimeModel` with `_IdentityScaler` ✅
+- Path B (cache miss): `ACM_RegimeState` fallback → was broken ❌, now fixed ✅
+
+---
+
+### P0-20: GMM/IForest Redundant Weight When Correlated with OMR (v11.15.15)
+
+**Symptom**: Fusion double-counting anomaly signal; spurious severity inflation when
+OMR, GMM, and IForest all fire on the same underlying physics.
+
+**Root Cause**: Discount logic reduced weight by ~24% at |r|=0.97 but didn't fully
+disable redundant detectors. T10 batch 1 showed gmm↔omr=0.99, iforest↔omr=0.98.
+
+**Fix (v11.15.15)**: Full weight=0.0 disable in `compute_discounted_weights()` when
+Spearman |r| ≥ `fusion.omr_correlation_disable_threshold` (default 0.95).
+
 ---
 
 ## Lessons for Future Development
@@ -538,6 +665,21 @@ correlated information in fusion.
 10. **Initialise variables before all conditional paths.** Uninitialized variables
     in `finally`/`except` blocks cause cascading failures.
 
+11. **ACM_Config MERGE must always supply ValueType.** The column is NOT NULL with no
+    default. Any INSERT or UPDATE path that omits it will crash silently on auto-tune writes.
+
+12. **Refit requests must be conditional, not unconditional.** Every spurious refit
+    request resets `consecutive_runs`, permanently blocking CONVERGED promotion.
+
+13. **Never serialize _IdentityScaler as StandardScaler.** When serializing a regime
+    model to SQL state, detect empty mean_/scale_ and restore as `_IdentityScaler` on load.
+
+14. **Full disable > discount for highly correlated detectors.** Once |r| ≥ 0.95,
+    the 24% discount is meaningless — apply weight=0.0 to avoid double-counting.
+
+15. **Asset-agnostic always.** No equipment-type-specific logic anywhere in ACM.
+    Health checks, SQL queries, config defaults must work for any equipment.
+
 ---
 
-*Last updated: 2026-02-20 (v11.15.3)*
+*Last updated: 2026-03-08 (v11.15.15)*

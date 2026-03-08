@@ -17,10 +17,28 @@ Release Management:
 - Production deployments use specific tags (never merge commits)
 """
 
-__version__ = "11.15.14"
-__version_date__ = "2026-03-07"
+__version__ = "11.15.15"
+__version_date__ = "2026-03-08"
 __version_author__ = "ACM Development Team"
 
+# v11.15.15: StandardScaler-0-features crash fix + OMR correlation disable
+#
+# Fixes:
+#   1. core/regimes.py regime_state_to_model(): When the saved regime model used
+#      _IdentityScaler (pre_scaled=True from HDBSCAN coldstart), scaler_mean/scale
+#      were serialized as empty arrays "[]". On reload, a StandardScaler with
+#      n_features_in_=0 was reconstructed, causing:
+#        "X has 21 features, but StandardScaler is expecting 0 features as input"
+#      Fix: detect empty mean/scale → use _IdentityScaler (no-op) instead.
+#      This affects any scoring batch where the SQL ModelRegistry cache is
+#      invalidated and the fallback regime_state_to_model path is taken.
+#   2. core/fuse.py compute_discounted_weights(): Added OMR correlation disable.
+#      When GMM or IForest has Spearman |r| >= fusion.omr_correlation_disable_threshold
+#      (default 0.95) with OMR, the redundant detector's weight is set to 0.0 (fully
+#      disabled) rather than applying a small discount. T10 batch 1 showed
+#      gmm↔omr=0.99, iforest↔omr=0.98 — three detectors carrying identical signal.
+#      Config: configs/config_table.csv fusion.omr_correlation_disable_threshold=0.95
+#
 # v11.15.14: REGIME QUALITY GATE + HDBSCAN NOVEL SATURATION FIXES
 #
 # Fixes:

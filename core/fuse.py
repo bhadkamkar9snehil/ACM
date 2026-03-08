@@ -2245,11 +2245,17 @@ def compute_discounted_weights(
     weights: Dict[str, float],
     streams: Dict[str, np.ndarray],
     quiet: bool = False,
+    omr_correlation_disable_threshold: float = 0.95,
 ) -> Dict[str, float]:
     """Apply Spearman-based correlation discount to detector weights.
 
     Detectors that are strongly correlated (|r| > 0.5) with others receive
     a downward weight adjustment to prevent double-counting of redundant signal.
+
+    v11.15.15: If GMM or IForest has Spearman |r| >= omr_correlation_disable_threshold
+    with OMR, and OMR is present and enabled, the correlated detector is fully disabled
+    (weight set to 0.0) rather than just discounted. This prevents near-identical signals
+    from inflating the ensemble's effective count.
 
     Computed once in run_fusion_pipeline() and passed into Fuser.fuse();
     never computed inside fuse() per-call.
@@ -2265,6 +2271,8 @@ def compute_discounted_weights(
 
     correlation_count: Dict[str, int] = {k: 0 for k in keys}
     correlation_sum: Dict[str, float] = {k: 0.0 for k in keys}
+    # v11.15.15: Track per-pair correlations for OMR disable logic
+    pair_corr: Dict[tuple, float] = {}  # (k1, k2) -> abs(spearman_r)
     pairs_checked = 0
     pairs_correlated = 0
 
@@ -2288,6 +2296,7 @@ def compute_discounted_weights(
                     correlation_count[k2] += 1
                     correlation_sum[k1] += abs(corr)
                     correlation_sum[k2] += abs(corr)
+                    pair_corr[(k1, k2)] = abs(corr)
                     if not quiet:
                         Console.debug(
                             f"Detector Spearman correlation {k1}<->{k2}: {corr:.2f}",
@@ -2306,6 +2315,30 @@ def compute_discounted_weights(
                     f"avg_corr={avg_corr:.2f}, discount={discount_factor:.1%}",
                     component="FUSE",
                 )
+
+    # v11.15.15: Full disable for GMM/IForest when nearly identical to OMR.
+    # When Spearman |r| >= omr_correlation_disable_threshold, the redundant detector
+    # contributes nothing new — set its weight to 0 instead of a small discount.
+    _DISABLE_CANDIDATES = {"gmm", "iforest"}
+    _OMR_KEY = "omr"
+    if _OMR_KEY in keys and omr_correlation_disable_threshold < 1.0:
+        for candidate in _DISABLE_CANDIDATES:
+            if candidate not in keys:
+                continue
+            pair = tuple(sorted([candidate, _OMR_KEY]))
+            r = pair_corr.get(pair, 0.0)
+            if r >= omr_correlation_disable_threshold:
+                if not quiet:
+                    Console.info(
+                        f"Disabling {candidate}: Spearman r={r:.3f} with OMR "
+                        f">= threshold {omr_correlation_disable_threshold:.2f} "
+                        f"— OMR already captures this signal",
+                        component="FUSE",
+                        disabled_detector=candidate,
+                        omr_correlation=r,
+                        threshold=omr_correlation_disable_threshold,
+                    )
+                w_raw[candidate] = 0.0
 
     if pairs_correlated > 0 and not quiet:
         Console.info(
@@ -2575,7 +2608,12 @@ def run_fusion_pipeline(
 
     # 2. Pre-compute episode params and correlation-discounted weights ONCE.
     episode_params = compute_episode_params(present, effective_cfg)
-    discounted_weights = compute_discounted_weights(weights, present)
+    _omr_disable_thresh = float(
+        (effective_cfg.get("fusion", {}) or {}).get("omr_correlation_disable_threshold", 0.95)
+    )
+    discounted_weights = compute_discounted_weights(
+        weights, present, omr_correlation_disable_threshold=_omr_disable_thresh
+    )
 
     # 3. Auto-tune detector weights (baseline fuse pass, no episodes)
     auto_tuned = False
@@ -2596,7 +2634,10 @@ def run_fusion_pipeline(
         auto_tuned = True
         tuning_diagnostics = diagnostics
         # Recompute discounted weights with the newly tuned base weights
-        discounted_weights = compute_discounted_weights(weights, present, quiet=True)
+        discounted_weights = compute_discounted_weights(
+            weights, present, quiet=True,
+            omr_correlation_disable_threshold=_omr_disable_thresh,
+        )
 
         if output_manager:
             output_manager.write_fusion_metrics(
@@ -2613,7 +2654,10 @@ def run_fusion_pipeline(
         if train_present:
             # Train uses its own discounted weights; Spearman correlations may
             # differ on the training population vs the current scoring window.
-            train_discounted = compute_discounted_weights(weights, train_present)
+            train_discounted = compute_discounted_weights(
+                weights, train_present,
+                omr_correlation_disable_threshold=_omr_disable_thresh,
+            )
             with Span("fusion.train", n_detectors=len(train_present), n_samples=len(train_data)):
                 train_fused_series = Fuser(weights=weights, ep=episode_params).fuse(
                     train_present, train_data, discounted_weights=train_discounted

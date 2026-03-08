@@ -65,6 +65,7 @@ EquipID,Category,ParamPath,ParamValue,ValueType,LastUpdated,UpdatedBy,ChangeReas
 0,fusion,weights.pca_spe_z,0.30,float,2025-12-17 00:00:00,COPILOT,remove_deprecated_detectors_mhal_river_hst,
 0,fusion,weights.pca_t2_z,0.20,float,2025-12-17 00:00:00,COPILOT,remove_deprecated_detectors_mhal_river_hst,
 0,fusion,weights.omr_z,0.10,float,2025-12-17 00:00:00,COPILOT,remove_deprecated_detectors_mhal_river_hst,
+0,fusion,omr_correlation_disable_threshold,0.95,float,2026-03-08 00:00:00,SYSTEM,v11_15_15_omr_disable,
 0,fusion,cooldown,10,int,2025-10-27 00:00:00,SYSTEM,initial_config,
 0,fusion,min_silent_gap,10,int,2025-10-27 00:00:00,SYSTEM,initial_config,
 0,fusion,per_regime,True,bool,2025-10-27 00:00:00,SYSTEM,initial_config,

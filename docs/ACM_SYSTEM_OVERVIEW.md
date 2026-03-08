@@ -1,7 +1,7 @@
 # ACM System Overview
 
-Version: 11.15.5
-Last Updated: 2026-02-22
+Version: 11.15.15
+Last Updated: 2026-03-08
 Scope: Current active runtime behavior in this repository
 
 This document is the implementation-level and theory-level reference for ACM. It explains:
@@ -532,11 +532,11 @@ Runtime files to read first:
 - `core/output_artifacts.py`
 - `core/run_metadata_writer.py`
 
-Related planning docs:
-- `docs/ACM_SINGLE_ENTRYPOINT_REFACTOR_MASTER_PLAN.md`
-- `docs/OUTPUT_MANAGER_REFACTOR_MASTER_PLAN.md`
-- `docs/ACM Main Refactoring Analysis - Action.md`
+Reference docs:
+- `docs/ACM_ARCHITECTURE_DECISIONS.md` — all-time bug catalogue with root causes
+- `docs/CHANGELOG.md` — version history
+- `docs/sql/COMPREHENSIVE_SCHEMA_REFERENCE.md` — authoritative SQL table definitions
 
 ---
 
-This overview is intentionally aligned to active runtime code and refactor direction, not historical architecture snapshots.
+This overview is intentionally aligned to active runtime code, not historical architecture snapshots.
