@@ -43,10 +43,12 @@ from core import regimes, drift, fuse, fast_features
 from core.output_manager import OutputManager
 from core.run_metadata_writer import (
     PipelineTeardownState,
+    build_zero_day_run_status,
     finalize_noop_run,
     finalize_pipeline_teardown,
     resolve_run_outcome_from_degradations,
     serialize_run_exception,
+    zero_day_status_from_noop_reason,
 )
 from core.episode_culprits_writer import write_episode_culprits_enhanced
 from core.pipeline_types import (
@@ -57,6 +59,8 @@ from core.seasonality import detect_and_adjust_safe
 from core.sensor_attribution import build_sensor_analytics_context
 from core.adaptive_thresholds import maybe_update_adaptive_thresholds
 from core.smart_coldstart import seed_baseline_safe, load_and_validate_data_stage
+from core.ewm_baseline import EWMBaselineManager
+from core.regime_binner import OnlinePCABinner
 from core.detector_orchestrator import (
     score_all_detectors,
     fit_all_detectors,
@@ -121,6 +125,31 @@ def _configure_logging(logging_cfg, args):
             component="CONFIG",
             log_file=str(log_file),
         )
+
+
+def _maybe_log_zero_day_scoring_status(
+    *,
+    logger: Any,
+    lifecycle_state: Optional[Any],
+    selected_channels: int,
+) -> bool:
+    """
+    Emit a one-line operator hint when zero-day scoring is active before convergence.
+
+    Lifecycle labels now describe legacy-model maturity, not whether anomaly scoring
+    exists. Make that explicit when EWM is active in `COLDSTART` or `LEARNING`.
+    """
+    state = str(lifecycle_state or "").strip().upper()
+    if selected_channels <= 0 or state not in {"COLDSTART", "LEARNING"}:
+        return False
+
+    logger.info(
+        f"Zero-day scoring active while lifecycle={state}; lifecycle tracks legacy model maturity, not anomaly-output availability",
+        component="EWM_BASELINE",
+        lifecycle_state=state,
+        selected_channels=int(selected_channels),
+    )
+    return True
 
 
 # Backwards-compat breadcrumbs for helpers extracted from this module.
@@ -268,6 +297,36 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
     regime_quality_ok: bool = True
     refit_requested: bool = False
 
+    # ===== EWM Zero-Day Baseline: load persisted state =====
+    _ewm_cfg = cfg.get("models", {}).get("ewm_baseline", {}) or {}
+    _ewm_enabled = bool(_ewm_cfg.get("enabled", True))
+    zero_day_status = build_zero_day_run_status(
+        scoring_active=False,
+        status="inactive_disabled" if not _ewm_enabled else "inactive_not_evaluated",
+        surface_type="none",
+        channel_count=0,
+    )
+    ewm_manager = EWMBaselineManager(
+        equip_id=equip_id,
+        alpha_fast=float(_ewm_cfg.get("alpha_fast", 0.05)),
+        alpha_slow=float(_ewm_cfg.get("alpha_slow", 0.005)),
+        anomaly_z=float(_ewm_cfg.get("anomaly_z", 3.0)),
+    )
+    if _ewm_enabled:
+        ewm_manager.load_from_sql(sql_client)
+
+    # ===== Online day-0 regime proxy =====
+    # Asset-agnostic fallback regime source used before mature HDBSCAN labels exist.
+    _binner: Optional[OnlinePCABinner] = None
+    if _ewm_enabled:
+        _binner = OnlinePCABinner(
+            n_bins=int(_ewm_cfg.get("n_bins", 3)),
+            min_rows_for_assignment=int(_ewm_cfg.get("min_rows_for_assignment", 20)),
+            alpha=float(_ewm_cfg.get("proxy_alpha", 0.05)),
+            history_limit=int(_ewm_cfg.get("proxy_history_limit", 512)),
+        )
+        _binner.load_from_sql(sql_client, equip_id)
+
     # Update observability context with run_id for trace/metric/log tagging.
     set_acm_context(run_id=run_id, equip_id=equip_id)
 
@@ -340,6 +399,9 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
                 logger=Console,
             )
             if not load_stage.should_continue:
+                zero_day_status = zero_day_status_from_noop_reason(
+                    load_stage.noop_reason or "UNKNOWN_NOOP"
+                )
                 outcome = "NOOP"
                 rows_read = 0
                 rows_written = 0
@@ -427,6 +489,8 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
         cached_manifest = detector_init.cached_manifest
         cached_calibration_params = detector_init.cached_calibration_params
         detectors_just_trained = detector_init.detectors_just_trained
+        baseline_contamination_verdict = detector_init.baseline_contamination_verdict
+        baseline_contamination_rate = detector_init.baseline_contamination_rate
 
         # ===== Phase 3-5: Regime basis + detector scoring + regime labeling =====
         scoring_regime_stage = regimes.run_scoring_regime_stage(
@@ -463,8 +527,169 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
         regime_state_version = scoring_regime_stage.regime_state_version
         regime_loaded_from_state = scoring_regime_stage.regime_loaded_from_state
         current_model_maturity = scoring_regime_stage.current_model_maturity
+        regime_model_was_trained = scoring_regime_stage.regime_model_was_trained
         if scoring_regime_stage.degraded_regime_basis:
             degradations.append("regime_feature_basis")
+
+        # ===== EWM Zero-Day Scoring =====
+        # Scores score data against EWM dual-rate baselines and appends ewm_z to frame.
+        # ewm_z = mean z_slow per row (long-term character deviation = genuine fault signal).
+        # Feature-flagged: models.ewm_baseline.enabled (default True).
+        if _ewm_enabled:
+            if raw_train is None or raw_score is None:
+                zero_day_status = build_zero_day_run_status(
+                    scoring_active=False,
+                    status="inactive_raw_unavailable",
+                    surface_type="none",
+                    channel_count=0,
+                )
+                Console.warn(
+                    "EWM disabled for this run: raw_train/raw_score are unavailable, so the "
+                    "explicit day-0 monitoring surface cannot be constructed.",
+                    component="EWM_BASELINE",
+                )
+                degradations.append("ewm_monitoring_surface")
+            else:
+                _ewm_cols, _ewm_train_numeric, _ewm_score_numeric, _ewm_surface_meta = (
+                    regimes.select_ewm_monitoring_surface(
+                        raw_train.reindex(train.index),
+                        raw_score.reindex(score.index),
+                        cfg=cfg,
+                    )
+                )
+
+                if not _ewm_cols:
+                    zero_day_status = build_zero_day_run_status(
+                        scoring_active=False,
+                        status="inactive_surface_unavailable",
+                        surface_type=str(_ewm_surface_meta.get("surface_type", "none")),
+                        channel_count=0,
+                    )
+                    Console.warn(
+                        "EWM disabled for this run: no adequate explicit day-0 monitoring "
+                        "surface was found in raw data.",
+                        component="EWM_BASELINE",
+                        candidate_count=_ewm_surface_meta.get("candidate_count", 0),
+                        dropped_low_valid_count=_ewm_surface_meta.get("dropped_low_valid_count", 0),
+                        dropped_low_iqr_count=_ewm_surface_meta.get("dropped_low_iqr_count", 0),
+                    )
+                    degradations.append("ewm_monitoring_surface")
+                else:
+                    _zero_day_surface_type = str(_ewm_surface_meta.get("surface_type", "none"))
+                    Console.info(
+                        f"EWM using explicit raw monitoring surface with {len(_ewm_cols)} channels",
+                        component="EWM_BASELINE",
+                        selected_count=len(_ewm_cols),
+                    )
+                    _maybe_log_zero_day_scoring_status(
+                        logger=Console,
+                        lifecycle_state=current_model_maturity,
+                        selected_channels=len(_ewm_cols),
+                    )
+                    if _binner is not None:
+                        _surface_state_kept = _binner.align_to_surface(_ewm_cols)
+                        if not _surface_state_kept:
+                            Console.info(
+                                "Online regime proxy restarted on the active monitoring surface",
+                                component="REGIME_BINNER",
+                            )
+
+                    # --- Phase 3: HDBSCAN as regime refiner ---
+                    # When HDBSCAN first produces a stable model AND binner was the regime source
+                    # up to this point, remap binner regime IDs → HDBSCAN cluster IDs in EWM state
+                    # so coldstart history is not orphaned.
+                    if (
+                        regime_model_was_trained
+                        and _binner is not None
+                        and _binner.can_assign_fallback
+                        and train_regime_labels is not None
+                    ):
+                        _binner_train_ids = _binner.assign_batch(_ewm_train_numeric)
+                        if ewm_manager.has_binner_regime_ids(_binner_train_ids):
+                            _hdbscan_train_ids = np.asarray(train_regime_labels, dtype=int)
+                            _remap: Dict[int, int] = {}
+                            for _bid in np.unique(_binner_train_ids):
+                                if _bid < 0:
+                                    continue
+                                _mask = _binner_train_ids == _bid
+                                _hdb_subset = _hdbscan_train_ids[_mask]
+                                _valid = _hdb_subset[_hdb_subset >= 0]
+                                if len(_valid) == 0:
+                                    continue
+                                # Modal HDBSCAN cluster for this binner bin
+                                _modal = int(np.bincount(_valid).argmax())
+                                _remap[int(_bid)] = _modal
+                            if _remap:
+                                ewm_manager.remap_regime_ids(_remap)
+                                _binner.mark_remapped()
+                                _binner.save_to_sql(sql_client, equip_id)
+                                ewm_manager.save_to_sql(sql_client)
+
+                    # Determine regime IDs for each score row.
+                    # Preference: HDBSCAN labels when available and non-trivial.
+                    # Fallback 1: OnlinePCABinner (zero-day, asset-agnostic context proxy).
+                    # Fallback 2: global regime -1.
+                    _hdbscan_valid = (
+                        score_regime_labels is not None
+                        and len(score_regime_labels) == len(score)
+                        and np.any(score_regime_labels >= 0)
+                    )
+                    if _hdbscan_valid and score_regime_labels is not None:
+                        _ewm_rids = score_regime_labels.astype(int)
+                        zero_day_status = build_zero_day_run_status(
+                            scoring_active=True,
+                            status="active_hdbscan",
+                            surface_type=_zero_day_surface_type,
+                            channel_count=len(_ewm_cols),
+                        )
+                        Console.info("EWM using HDBSCAN regimes", component="EWM_BASELINE")
+                    elif _binner is not None and _binner.can_assign_fallback:
+                        # Feed binner with the explicit day-0 monitoring surface so edges refine over time.
+                        _binner.observe_batch(_ewm_score_numeric)
+                        _ewm_rids = _binner.assign_batch(_ewm_score_numeric)
+                        _binner.save_to_sql(sql_client, equip_id)
+                        if np.any(_ewm_rids >= 0):
+                            zero_day_status = build_zero_day_run_status(
+                                scoring_active=True,
+                                status="active_online_pca_binner",
+                                surface_type=_zero_day_surface_type,
+                                channel_count=len(_ewm_cols),
+                            )
+                            Console.info(
+                                f"EWM using PCA-binner regimes (HDBSCAN not ready): "
+                                f"unique={np.unique(_ewm_rids[_ewm_rids >= 0]).tolist()}",
+                                component="EWM_BASELINE",
+                            )
+                        else:
+                            zero_day_status = build_zero_day_run_status(
+                                scoring_active=True,
+                                status="active_global_fallback",
+                                surface_type=_zero_day_surface_type,
+                                channel_count=len(_ewm_cols),
+                            )
+                            Console.info(
+                                "EWM using global fallback regime (online proxy warming up)",
+                                component="EWM_BASELINE",
+                            )
+                    else:
+                        _ewm_rids = np.full(len(score), -1, dtype=int)
+                        zero_day_status = build_zero_day_run_status(
+                            scoring_active=True,
+                            status="active_global_fallback",
+                            surface_type=_zero_day_surface_type,
+                            channel_count=len(_ewm_cols),
+                        )
+                        Console.info("EWM using global fallback regime", component="EWM_BASELINE")
+
+                    # Score: vectorised, returns pd.Series of fused z_slow per row.
+                    _ewm_series = ewm_manager.score_batch(_ewm_rids, _ewm_score_numeric)
+                    if frame is not None and len(_ewm_series) == len(frame):
+                        frame["ewm_z"] = _ewm_series.values
+
+                    # Update EWM state from score batch, then per-sensor freeze check, then save.
+                    ewm_manager.update_batch(_ewm_rids, _ewm_score_numeric)
+                    ewm_manager.check_and_apply_freeze()
+                    ewm_manager.save_to_sql(sql_client)
 
         # ===== Model adaptation + persistence =====
         model_stage = run_model_adaptation_and_persistence_stage(
@@ -495,6 +720,7 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
             model_state=model_state,
             regime_state_version=regime_state_version,
             force_retrain_requested=force_retraining,
+            baseline_contamination_verdict=baseline_contamination_verdict,
         )
         cached_models = model_stage.cached_models
         regime_model = model_stage.regime_model
@@ -541,6 +767,7 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
             sql_client=sql_client,
             run_id=run_id,
             cached_manifest=cached_manifest,
+            baseline_contamination_verdict=baseline_contamination_verdict,
         )
         frame = health_stage.frame
         train_frame = health_stage.train_frame
@@ -701,6 +928,7 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
                 record_batch_processed_fn=record_batch_processed,
                 record_health_score_fn=record_health_score,
                 record_error_fn=record_error,
+                zero_day_status=zero_day_status,
                 span_ctx=_span_ctx,
                 root_span=root_span,
                 close_run_span_fn=close_run_span,
@@ -713,5 +941,3 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
 
 if __name__ == "__main__":
     main()
-
-

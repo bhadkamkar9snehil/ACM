@@ -1,19 +1,38 @@
 ---
 type: index
-generated_at: 2026-03-08T07:09:10+00:00
+auto-updated: true
+generated_at: 2026-03-09T10:46:37+00:00
 ---
 
 # ACM Obsidian Knowledge Graph
 
-Generated from code in `core/`.
+Single source of truth for ACM codebase knowledge.
 
-## Snapshot
-- modules: 41
-- symbols (functions/classes/methods): 927
-- generated_at_utc: 2026-03-08T07:09:10+00:00
+- **Generated notes** (`modules/`, `functions/`): auto-rebuilt from `core/*.py` — do not edit manually
+- **Knowledge notes** (`knowledge/`): hand-authored — edit these to capture decisions, bugs, context
 
-## Start Here
-- [[01_Modules]]
-- [[02_Functions]]
-- [[03_Runtime-Flow]]
-- [[04_Outputs-and-Status]]
+## Snapshot (auto-generated)
+- modules: 43
+- symbols (functions/classes/methods): 972
+- generated_at_utc: 2026-03-09T10:46:37+00:00
+
+## Generated — Codebase Navigation
+- [[01_Modules]] — all core modules
+- [[02_Functions]] — all functions and classes
+- [[03_Runtime-Flow]] — pipeline stage sequence
+- [[04_Outputs-and-Status]] — SQL output tables and outcome codes
+
+## Knowledge — Authored Reference
+- [[knowledge/Pipeline-Stages]] — detailed per-stage breakdown with line numbers
+- [[knowledge/Detector-Ensemble]] — six detectors, fusion logic, weight rules
+- [[knowledge/Model-Lifecycle]] — COLDSTART → LEARNING → CONVERGED, promotion criteria
+- [[knowledge/Architecture-Decisions]] — all-time bug catalogue and architectural rules
+- [[knowledge/Config-Schema]] — ACM_Config table, all key paths, auto-tune map
+- [[knowledge/SQL-Schema]] — all output tables, column names, timestamp rules
+- [[knowledge/Known-Equipment]] — Wind Farm A fleet, fault history, batch commands
+- [[knowledge/Version-History]] — changelog from v11.4.0 to current
+
+## Refresh Command
+```
+python scripts/manage_acm_agent_memory.py refresh --sync-repo-skill
+```

@@ -42,6 +42,13 @@ _Resolved items stay for 30 days, then are archived to `docs/ACM_ARCHITECTURE_DE
 - **Fix:** Verify `ACM_RegimeBinnerState` rows repopulate under the new runtime and delete obsolete legacy rows during rollout if operators want a clean state table.
 - **Files:** `core/regime_binner.py`, `scripts/sql/migrations/v11/015_acm_regime_binner_state.sql`
 
+### H6 — Explicit day-0 run observability requires SQL migration 017
+- **Status:** Open
+- **Impact:** The runtime now persists zero-day run status to `ACM_Runs` when the new columns exist, but until migration 017 is applied operators still cannot query `ZeroDayStatus` or `ZeroDayChannelCount` directly from run rows.
+- **Root cause:** `ACM_RunLogs` is not a trustworthy live operator surface, so the new contract intentionally writes day-0 status to `ACM_Runs` instead of inventing another fallback sink.
+- **Fix:** Apply `scripts/sql/migrations/v11/017_acm_runs_zero_day_status.sql`
+- **Files:** `core/run_metadata_writer.py`, `core/acm.py`, `core/smart_coldstart.py`, `scripts/sql/migrations/v11/017_acm_runs_zero_day_status.sql`
+
 ---
 
 ## MEDIUM (workaround exists or low urgency)

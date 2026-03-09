@@ -64,6 +64,10 @@ class DetectorInitState:
     cached_calibration_params: Optional[Dict[str, Any]]
     detectors_just_trained: bool
     use_cache: bool
+    # Baseline contamination assessment (only set when detectors_just_trained=True)
+    baseline_contamination_rate: float = 0.0   # fraction of train rows with raw fused z > alert_z
+    baseline_sustained_block: float = 0.0       # longest sustained high-z run / total train rows
+    baseline_contamination_verdict: str = "unknown"  # "unknown" | "ok" | "suspect" | "contaminated"
 
     def enabled_flags(self) -> Dict[str, bool]:
         """Return detector enabled-flag mapping."""
@@ -295,6 +299,163 @@ def calibrate_all_detectors(
             calibrators[name] = cal
 
     return score_frame, calibrators
+
+
+def assess_baseline_contamination(
+    train: pd.DataFrame,
+    ar1_detector: Optional[Any],
+    pca_detector: Optional[Any],
+    iforest_detector: Optional[Any],
+    gmm_detector: Optional[Any],
+    omr_detector: Optional[Any],
+    ar1_enabled: bool,
+    pca_enabled: bool,
+    iforest_enabled: bool,
+    gmm_enabled: bool,
+    omr_enabled: bool,
+    pca_train_spe: Optional[np.ndarray],
+    pca_train_t2: Optional[np.ndarray],
+    alert_z: float = 3.0,
+    suspect_rate: float = 0.15,
+    contaminated_rate: float = 0.40,
+    sustained_block_threshold: float = 0.20,
+    equip: str = "",
+) -> Tuple[float, float, str]:
+    """
+    Assess whether the training window is contaminated with fault data.
+
+    Scores the training data using the just-fitted detectors (raw z-scores,
+    no calibration). If the model was trained on a fault period, it will
+    produce elevated, temporally-clustered scores on its own training window.
+
+    Healthy training data → low, noise-distributed scores (contamination_rate < 15%).
+    Fault in training window → elevated scores concentrated in a time block.
+
+    Design principle: the model self-reports the quality of its own training data.
+    No external ground truth required.
+
+    Args:
+        train: Training DataFrame (DatetimeIndex)
+        *_detector: Fitted detector instances
+        *_enabled: Whether each detector is enabled
+        pca_train_spe, pca_train_t2: Cached PCA scores on train (avoids re-scoring)
+        alert_z: Z-score threshold above which a point is "anomalous" (default 3.0)
+        suspect_rate: contamination_rate above which baseline is SUSPECT (default 0.15)
+        contaminated_rate: contamination_rate above which baseline is CONTAMINATED (default 0.40)
+        sustained_block_threshold: sustained_block above which contamination is confirmed (default 0.20)
+        equip: Equipment name for logging
+
+    Returns:
+        Tuple of (contamination_rate, sustained_block, verdict)
+            contamination_rate: fraction of train rows where mean raw z > alert_z
+            sustained_block: longest run of consecutive high-z rows / total rows
+            verdict: "ok" | "suspect" | "contaminated"
+    """
+    n = len(train)
+    if n < 30:
+        return 0.0, 0.0, "ok"
+
+    # Collect raw z-scores from each enabled fitted detector.
+    # Use cached PCA scores to avoid double computation.
+    z_series: list[np.ndarray] = []
+
+    if ar1_enabled and ar1_detector is not None:
+        try:
+            z_series.append(np.asarray(ar1_detector.score(train), dtype=float))
+        except Exception:
+            pass
+
+    if pca_enabled and pca_detector is not None:
+        if pca_train_spe is not None and pca_train_t2 is not None:
+            z_series.append(np.asarray(pca_train_spe, dtype=float))
+            z_series.append(np.asarray(pca_train_t2, dtype=float))
+        else:
+            try:
+                spe, t2 = pca_detector.score(train)
+                z_series.append(np.asarray(spe, dtype=float))
+                z_series.append(np.asarray(t2, dtype=float))
+            except Exception:
+                pass
+
+    if iforest_enabled and iforest_detector is not None:
+        try:
+            z_series.append(np.asarray(iforest_detector.score(train), dtype=float))
+        except Exception:
+            pass
+
+    if gmm_enabled and gmm_detector is not None:
+        try:
+            z_series.append(np.asarray(gmm_detector.score(train), dtype=float))
+        except Exception:
+            pass
+
+    if omr_enabled and omr_detector is not None:
+        try:
+            z_series.append(np.asarray(omr_detector.score(train, return_contributions=False), dtype=float))
+        except Exception:
+            pass
+
+    if not z_series:
+        return 0.0, 0.0, "ok"
+
+    # Simple mean fusion of available raw scores (no calibration needed for self-assessment)
+    stacked = np.column_stack([np.nan_to_num(z, nan=0.0, posinf=alert_z * 2) for z in z_series])
+    fused = np.nanmean(stacked, axis=1)
+
+    # Contamination rate: fraction of rows above alert_z
+    high_mask = fused > alert_z
+    contamination_rate = float(np.mean(high_mask))
+
+    # Sustained block: longest consecutive run of high-z rows, normalised to window length.
+    # Fault contamination produces a contiguous block; random noise produces scattered hits.
+    max_run = 0
+    current_run = 0
+    for flag in high_mask:
+        if flag:
+            current_run += 1
+            max_run = max(max_run, current_run)
+        else:
+            current_run = 0
+    sustained_block = max_run / n
+
+    # Verdict
+    if contamination_rate >= contaminated_rate and sustained_block >= sustained_block_threshold:
+        verdict = "contaminated"
+    elif contamination_rate >= suspect_rate:
+        verdict = "suspect"
+    else:
+        verdict = "ok"
+
+    Console.info(
+        f"Baseline contamination assessment: rate={contamination_rate:.1%} "
+        f"block={sustained_block:.1%} verdict={verdict} | train_rows={n}",
+        component="BASELINE",
+        equip=equip,
+        contamination_rate=round(contamination_rate, 4),
+        sustained_block=round(sustained_block, 4),
+        verdict=verdict,
+        train_rows=n,
+    )
+
+    if verdict == "contaminated":
+        Console.warn(
+            f"Training window appears contaminated with fault data "
+            f"({contamination_rate:.0%} of rows elevated, {sustained_block:.0%} sustained block). "
+            f"Model will NOT be promoted to LEARNING this batch. "
+            f"Lifecycle will request more data for a cleaner baseline.",
+            component="BASELINE",
+            equip=equip,
+        )
+    elif verdict == "suspect":
+        Console.warn(
+            f"Training window may contain some fault data "
+            f"({contamination_rate:.0%} elevated rows). "
+            f"Model promoted with suspect flag — calibration filter will be more aggressive.",
+            component="BASELINE",
+            equip=equip,
+        )
+
+    return contamination_rate, sustained_block, verdict
 
 
 def fit_all_detectors(
@@ -555,6 +716,9 @@ def _initialize_detectors_for_run(
     )
 
     detectors_just_trained = False
+    baseline_contamination_rate: float = 0.0
+    baseline_sustained_block: float = 0.0
+    baseline_contamination_verdict: str = "unknown"
     if detectors_missing:
         logger.info(
             "Required models missing or invalid - training fresh models",
@@ -580,6 +744,39 @@ def _initialize_detectors_for_run(
         pca_train_spe = fit_result["pca_train_spe"]
         pca_train_t2 = fit_result["pca_train_t2"]
         detectors_just_trained = True
+
+        # Baseline contamination self-assessment: score the training window with
+        # the just-fitted detectors to detect if training data contained faults.
+        # A clean baseline → low scattered scores. A contaminated one → elevated,
+        # temporally-clustered scores. This runs immediately post-fit at ~1-2s cost.
+        _contamination_cfg = (cfg.get("models", {}) or {}).get("baseline_contamination", {}) or {}
+        _alert_z = float(_contamination_cfg.get("alert_z", cfg.get("thresholds", {}).get("alert_z", 3.0)))
+        _suspect_rate = float(_contamination_cfg.get("suspect_rate", 0.15))
+        _contaminated_rate = float(_contamination_cfg.get("contaminated_rate", 0.40))
+        _sustained_block_threshold = float(_contamination_cfg.get("sustained_block_threshold", 0.20))
+
+        baseline_contamination_rate, baseline_sustained_block, baseline_contamination_verdict = (
+            assess_baseline_contamination(
+                train=train,
+                ar1_detector=ar1_detector,
+                pca_detector=pca_detector,
+                iforest_detector=iforest_detector,
+                gmm_detector=gmm_detector,
+                omr_detector=omr_detector,
+                ar1_enabled=det_flags.get("ar1_enabled", True),
+                pca_enabled=det_flags.get("pca_enabled", True),
+                iforest_enabled=det_flags.get("iforest_enabled", True),
+                gmm_enabled=det_flags.get("gmm_enabled", True),
+                omr_enabled=det_flags.get("omr_enabled", True),
+                pca_train_spe=pca_train_spe,
+                pca_train_t2=pca_train_t2,
+                alert_z=_alert_z,
+                suspect_rate=_suspect_rate,
+                contaminated_rate=_contaminated_rate,
+                sustained_block_threshold=_sustained_block_threshold,
+                equip=equip,
+            )
+        )
 
     reconciled_flags = reconcile_detector_flags_fn(
         enable_flags=det_flags,
@@ -637,6 +834,9 @@ def _initialize_detectors_for_run(
         cached_calibration_params=cached_calibration_params,
         detectors_just_trained=detectors_just_trained,
         use_cache=use_cache,
+        baseline_contamination_rate=baseline_contamination_rate,
+        baseline_sustained_block=baseline_sustained_block,
+        baseline_contamination_verdict=baseline_contamination_verdict,
     )
 
 

@@ -1,9 +1,26 @@
 ---
 name: ACM
-description: "Complete ACM (Automated Condition Monitoring) expertise system for predictive maintenance and equipment health monitoring. PROACTIVELY activate for: (1) ANY ACM pipeline task (batch runs, coldstart, forecasting), (2) SQL Server data management (historian tables, ACM output tables), (3) Observability stack (Loki logs, Tempo traces, Prometheus metrics, Pyroscope profiling), (4) Grafana dashboard development, (5) Detector tuning and fusion configuration, (6) Model lifecycle management, (7) Debugging pipeline issues. Provides: T-SQL patterns for ACM tables, batch runner usage, detector behavior, RUL forecasting, episode diagnostics, and production-ready pipeline patterns. Ensures professional-grade industrial monitoring following ACM v11.15.x architecture."
+description: "Complete ACM (Automated Condition Monitoring) expertise system for predictive maintenance and equipment health monitoring. PROACTIVELY activate for: (1) ANY ACM pipeline task (batch runs, coldstart, forecasting), (2) SQL Server data management (historian tables, ACM output tables), (3) Observability stack (Loki logs, Tempo traces, Prometheus metrics, Pyroscope profiling), (4) Grafana dashboard development, (5) Detector tuning and fusion configuration, (6) Model lifecycle management, (7) Debugging pipeline issues. Provides: T-SQL patterns for ACM tables, batch runner usage, detector behavior, RUL forecasting, episode diagnostics, and production-ready pipeline patterns. Ensures professional-grade industrial monitoring following ACM v11.16.x architecture."
 ---
 
 # ACM Master Skill
+
+## Related Skills (use these for specific tasks)
+
+| Task | Use skill |
+|------|-----------|
+| Reading batch logs / diagnosing failures | `log-triage` |
+| Planning or implementing a bug fix | `bug-fix-plan` |
+| Committing changes, bumping version | `commit-changelog` |
+| Grafana dashboard work | `Grafana` |
+
+## Session Start (MANDATORY before any work)
+
+```powershell
+python scripts/acm_session_start.py
+git status && git log --oneline -5
+```
+Then read `docs/KNOWN_ISSUES.md`. Report CRITICAL and HIGH items before proceeding.
 
 ## 🚨 CRITICAL RULE #1: NEVER FILTER CONSOLE OUTPUT (NON-VIOLATABLE)
 

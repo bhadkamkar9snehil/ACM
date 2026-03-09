@@ -1,24 +1,15 @@
 ---
 type: reference
-generated_at: 2026-03-08T07:09:10+00:00
+auto-updated: true
+generated_at: 2026-03-09T10:46:37+00:00
 ---
 
 # Outputs and Status
 
-Outcome semantics:
-1. OK
-2. DEGRADED
-3. NOOP
-4. FAIL
+Outcome semantics: OK | DEGRADED | NOOP | FAIL
 
-Primary output owner:
-- [[modules/core.output_manager]]
-
-Primary run metadata owner:
-- [[modules/core.run_metadata_writer]]
-
-Primary lifecycle table:
-- ACM_Runs
+Primary output owner: [[modules/core.output_manager]]
+Primary run metadata owner: [[modules/core.run_metadata_writer]]
 
 High-value tables to inspect first:
 1. ACM_Runs
@@ -27,3 +18,5 @@ High-value tables to inspect first:
 4. ACM_HealthTimeline
 5. ACM_DriftController
 6. ACM_DataQuality
+
+See [[knowledge/SQL-Schema]] for full table reference including column names and critical gotchas.

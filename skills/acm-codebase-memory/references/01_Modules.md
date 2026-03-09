@@ -1,6 +1,7 @@
 ---
 type: index
-generated_at: 2026-03-08T07:09:10+00:00
+auto-updated: true
+generated_at: 2026-03-09T10:46:37+00:00
 ---
 
 # Module Index
@@ -17,6 +18,7 @@ generated_at: 2026-03-08T07:09:10+00:00
 - [[modules/core.detector_orchestrator]] (core/detector_orchestrator.py)
 - [[modules/core.drift]] (core/drift.py)
 - [[modules/core.episode_culprits_writer]] (core/episode_culprits_writer.py)
+- [[modules/core.ewm_baseline]] (core/ewm_baseline.py)
 - [[modules/core.failure_probability]] (core/failure_probability.py)
 - [[modules/core.fast_features]] (core/fast_features.py)
 - [[modules/core.forecast_engine]] (core/forecast_engine.py)
@@ -37,6 +39,7 @@ generated_at: 2026-03-08T07:09:10+00:00
 - [[modules/core.output_manager_services]] (core/output_manager_services.py)
 - [[modules/core.output_sql_core]] (core/output_sql_core.py)
 - [[modules/core.pipeline_types]] (core/pipeline_types.py)
+- [[modules/core.regime_binner]] (core/regime_binner.py)
 - [[modules/core.regimes]] (core/regimes.py)
 - [[modules/core.resource_monitor]] (core/resource_monitor.py)
 - [[modules/core.rul_estimator]] (core/rul_estimator.py)

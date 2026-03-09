@@ -52,6 +52,10 @@ CREATE TABLE dbo.ACM_Runs (
     RefitRequested BIT DEFAULT 0,
     ErrorMessage NVARCHAR(1000) NULL,
     KeptColumns NVARCHAR(MAX) NULL, -- JSON array from run.jsonl
+    ZeroDayScoringActive BIT NULL,
+    ZeroDayStatus NVARCHAR(64) NULL,
+    ZeroDaySurfaceType NVARCHAR(64) NULL,
+    ZeroDayChannelCount INT NULL,
     CreatedAt DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
     
     CONSTRAINT PK_ACM_Runs PRIMARY KEY CLUSTERED (RunID),

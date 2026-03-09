@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "acm-sql": {
+      "type": "stdio",
+      "command": "python",
+      "args": ["tools/mcp_sql_server.py"],
+      "cwd": "c:\\Users\\bhadk\\Documents\\ACM V8 SQL\\ACM"
+    }
+  }
+}

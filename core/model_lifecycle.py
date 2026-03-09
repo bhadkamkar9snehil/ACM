@@ -477,6 +477,7 @@ def update_and_persist_model_lifecycle(
     score_out: Optional[Dict[str, Any]],
     regime_quality_ok: Optional[bool],
     logger: Any = Console,
+    baseline_contamination_verdict: str = "unknown",
 ) -> Optional[ModelState]:
     """
     Update lifecycle state after model training and persist active-model pointers.
@@ -573,31 +574,47 @@ def update_and_persist_model_lifecycle(
         )
 
         if model_state.maturity == MaturityState.LEARNING:
-            promotion_criteria = PromotionCriteria.from_config(cfg or {})
-            eligible, unmet = check_promotion_eligibility(model_state, promotion_criteria)
-            if eligible:
-                old_maturity = model_state.maturity.value
-                model_state = promote_model(model_state)
-                try:
-                    promotion_record = [{
-                        "RegimeLabel": "ALL",
-                        "FromState": old_maturity,
-                        "ToState": model_state.maturity.value,
-                        "Reason": "met_promotion_criteria",
-                        "PromotedAt": datetime.now(),
-                        "Version": model_state.version,
-                        "ConsecutiveRuns": model_state.consecutive_runs,
-                        "TotalDays": model_state.total_days,
-                    }]
-                    output_manager.write_regime_promotion_log(promotion_record)
-                except Exception:
-                    pass
-                logger.ok(
-                    f"Model promoted: LEARNING->CONVERGED (runs={model_state.consecutive_runs}, days={model_state.total_days:.1f})",
+            # Baseline contamination gate: if the training window was detected as
+            # contaminated (fault data in training), block promotion entirely this
+            # batch. The model stays in LEARNING and the next batch will either
+            # accumulate cleaner data or trigger a refit with a better window.
+            if baseline_contamination_verdict == "contaminated":
+                logger.warn(
+                    "Promotion blocked: baseline contamination detected in training window. "
+                    "Model stays LEARNING until a cleaner window is available.",
                     component="LIFECYCLE",
+                    baseline_contamination_verdict=baseline_contamination_verdict,
                 )
             else:
-                logger.info(f"Promotion not eligible: {', '.join(unmet)}", component="LIFECYCLE")
+                promotion_criteria = PromotionCriteria.from_config(cfg or {})
+                eligible, unmet = check_promotion_eligibility(model_state, promotion_criteria)
+                if eligible:
+                    old_maturity = model_state.maturity.value
+                    model_state = promote_model(model_state)
+                    reason = "met_promotion_criteria"
+                    if baseline_contamination_verdict == "suspect":
+                        reason = "met_promotion_criteria_suspect_baseline"
+                    try:
+                        promotion_record = [{
+                            "RegimeLabel": "ALL",
+                            "FromState": old_maturity,
+                            "ToState": model_state.maturity.value,
+                            "Reason": reason,
+                            "PromotedAt": datetime.now(),
+                            "Version": model_state.version,
+                            "ConsecutiveRuns": model_state.consecutive_runs,
+                            "TotalDays": model_state.total_days,
+                        }]
+                        output_manager.write_regime_promotion_log(promotion_record)
+                    except Exception:
+                        pass
+                    suffix = " (suspect baseline — calibration filter will be aggressive)" if baseline_contamination_verdict == "suspect" else ""
+                    logger.ok(
+                        f"Model promoted: LEARNING->CONVERGED (runs={model_state.consecutive_runs}, days={model_state.total_days:.1f}){suffix}",
+                        component="LIFECYCLE",
+                    )
+                else:
+                    logger.info(f"Promotion not eligible: {', '.join(unmet)}", component="LIFECYCLE")
 
     output_manager.write_active_models(
         get_active_model_dict(model_state, regime_version=regime_state_version)
@@ -625,6 +642,7 @@ def update_and_persist_model_lifecycle_safe(
     score_out: Optional[Dict[str, Any]],
     regime_quality_ok: Optional[bool],
     logger: Any = Console,
+    baseline_contamination_verdict: str = "unknown",
 ) -> Optional[ModelState]:
     """
     Safe wrapper around update_and_persist_model_lifecycle.
@@ -644,6 +662,7 @@ def update_and_persist_model_lifecycle_safe(
             score_out=score_out,
             regime_quality_ok=regime_quality_ok,
             logger=logger,
+            baseline_contamination_verdict=baseline_contamination_verdict,
         )
     except Exception as e:
         logger.warn(

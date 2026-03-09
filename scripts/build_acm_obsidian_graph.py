@@ -207,12 +207,17 @@ def _write(path: Path, content: str) -> None:
     path.write_text(content.rstrip() + "\n", encoding="utf-8")
 
 
+KNOWLEDGE_DIR = VAULT_DIR / "knowledge"
+
+
 def _cleanup_generated_notes() -> None:
     """
     Remove previously generated module/function notes.
 
     This prevents stale symbols from lingering in the vault when source code
     changes remove or rename functions.
+
+    The knowledge/ folder is NEVER touched — it contains hand-authored notes.
     """
     locked: List[Path] = []
 
@@ -256,6 +261,7 @@ def _render_module_note(module: ModuleInfo) -> str:
 
     return f"""---
 type: module
+auto-updated: true
 module: {module.module_name}
 source: {module.source_path}
 ---
@@ -275,8 +281,11 @@ Summary: {module.doc_summary or "no module docstring summary"}
 
 
 def _render_function_note(function: FunctionInfo) -> str:
+    # Escape [[ in signatures to prevent Obsidian treating type hints as wikilinks
+    safe_sig = function.signature.replace("[[", r"\[\[").replace("]]", r"\]\]")
     return f"""---
 type: {function.kind}
+auto-updated: true
 id: {function.full_name}
 module: {function.module_name}
 source: {function.source_path}
@@ -292,7 +301,7 @@ Source: `{function.source_path}:{function.line_start}`
 
 Kind: `{function.kind}`
 
-Signature: `{function.signature}`
+Signature: `{safe_sig}`
 
 Summary: {function.doc_summary or "no docstring summary"}
 """
@@ -303,23 +312,42 @@ def _render_home(modules: List[ModuleInfo], generated_at: str) -> str:
     symbol_count = sum(len(m.functions) for m in modules)
     return f"""---
 type: index
+auto-updated: true
 generated_at: {generated_at}
 ---
 
 # ACM Obsidian Knowledge Graph
 
-Generated from code in `core/`.
+Single source of truth for ACM codebase knowledge.
 
-## Snapshot
+- **Generated notes** (`modules/`, `functions/`): auto-rebuilt from `core/*.py` — do not edit manually
+- **Knowledge notes** (`knowledge/`): hand-authored — edit these to capture decisions, bugs, context
+
+## Snapshot (auto-generated)
 - modules: {module_count}
 - symbols (functions/classes/methods): {symbol_count}
 - generated_at_utc: {generated_at}
 
-## Start Here
-- [[01_Modules]]
-- [[02_Functions]]
-- [[03_Runtime-Flow]]
-- [[04_Outputs-and-Status]]
+## Generated — Codebase Navigation
+- [[01_Modules]] — all core modules
+- [[02_Functions]] — all functions and classes
+- [[03_Runtime-Flow]] — pipeline stage sequence
+- [[04_Outputs-and-Status]] — SQL output tables and outcome codes
+
+## Knowledge — Authored Reference
+- [[knowledge/Pipeline-Stages]] — detailed per-stage breakdown with line numbers
+- [[knowledge/Detector-Ensemble]] — six detectors, fusion logic, weight rules
+- [[knowledge/Model-Lifecycle]] — COLDSTART → LEARNING → CONVERGED, promotion criteria
+- [[knowledge/Architecture-Decisions]] — all-time bug catalogue and architectural rules
+- [[knowledge/Config-Schema]] — ACM_Config table, all key paths, auto-tune map
+- [[knowledge/SQL-Schema]] — all output tables, column names, timestamp rules
+- [[knowledge/Known-Equipment]] — Wind Farm A fleet, fault history, batch commands
+- [[knowledge/Version-History]] — changelog from v11.4.0 to current
+
+## Refresh Command
+```
+python scripts/manage_acm_agent_memory.py refresh --sync-repo-skill
+```
 """
 
 
@@ -333,6 +361,7 @@ def _render_module_index(modules: List[ModuleInfo], generated_at: str) -> str:
     listing = "\n".join(lines) or "- none"
     return f"""---
 type: index
+auto-updated: true
 generated_at: {generated_at}
 ---
 
@@ -357,6 +386,7 @@ def _render_function_index(modules: List[ModuleInfo], generated_at: str) -> str:
     content = "\n".join(rows)
     return f"""---
 type: index
+auto-updated: true
 generated_at: {generated_at}
 ---
 
@@ -369,6 +399,7 @@ generated_at: {generated_at}
 def _runtime_flow_note(generated_at: str) -> str:
     return f"""---
 type: reference
+auto-updated: true
 generated_at: {generated_at}
 ---
 
@@ -395,6 +426,7 @@ Main high-level sequence:
 16. write run metadata and finalize run
 
 Read next:
+- [[knowledge/Pipeline-Stages]] — detailed per-stage breakdown with owners and line numbers
 - [[01_Modules]]
 - [[04_Outputs-and-Status]]
 """
@@ -403,25 +435,16 @@ Read next:
 def _outputs_note(generated_at: str) -> str:
     return f"""---
 type: reference
+auto-updated: true
 generated_at: {generated_at}
 ---
 
 # Outputs and Status
 
-Outcome semantics:
-1. OK
-2. DEGRADED
-3. NOOP
-4. FAIL
+Outcome semantics: OK | DEGRADED | NOOP | FAIL
 
-Primary output owner:
-- [[modules/core.output_manager]]
-
-Primary run metadata owner:
-- [[modules/core.run_metadata_writer]]
-
-Primary lifecycle table:
-- ACM_Runs
+Primary output owner: [[modules/core.output_manager]]
+Primary run metadata owner: [[modules/core.run_metadata_writer]]
 
 High-value tables to inspect first:
 1. ACM_Runs
@@ -430,6 +453,8 @@ High-value tables to inspect first:
 4. ACM_HealthTimeline
 5. ACM_DriftController
 6. ACM_DataQuality
+
+See [[knowledge/SQL-Schema]] for full table reference including column names and critical gotchas.
 """
 
 

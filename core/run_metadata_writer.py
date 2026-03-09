@@ -19,6 +19,165 @@ import numpy as np
 from core.observability import Console
 
 
+@dataclass(frozen=True)
+class ZeroDayRunStatus:
+    """Operator-facing day-0 status persisted per run."""
+
+    scoring_active: bool
+    status: str
+    surface_type: str = "none"
+    channel_count: int = 0
+
+
+def build_zero_day_run_status(
+    *,
+    scoring_active: bool,
+    status: str,
+    surface_type: str = "none",
+    channel_count: int = 0,
+) -> ZeroDayRunStatus:
+    """Create a normalized day-0 status payload."""
+    normalized_status = str(status or "inactive_unknown").strip().lower() or "inactive_unknown"
+    normalized_surface = str(surface_type or "none").strip().lower() or "none"
+    normalized_channel_count = max(0, int(channel_count or 0))
+    return ZeroDayRunStatus(
+        scoring_active=bool(scoring_active),
+        status=normalized_status,
+        surface_type=normalized_surface,
+        channel_count=normalized_channel_count,
+    )
+
+
+def zero_day_status_from_noop_reason(reason: str) -> ZeroDayRunStatus:
+    """Map load-stage NOOP reasons to persisted day-0 status."""
+    normalized = str(reason or "UNKNOWN_NOOP").strip().upper() or "UNKNOWN_NOOP"
+    mapping = {
+        "SCORING_NO_DATA": "inactive_no_data",
+        "COLDSTART_DEFERRED": "inactive_coldstart_deferred",
+    }
+    return build_zero_day_run_status(
+        scoring_active=False,
+        status=mapping.get(normalized, "inactive_unknown"),
+        surface_type="none",
+        channel_count=0,
+    )
+
+
+def _acm_runs_has_zero_day_columns(sql_client: Any) -> bool:
+    """Check whether ACM_Runs has the explicit zero-day observability columns."""
+    query = """
+        SELECT COLUMN_NAME
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = 'dbo'
+          AND TABLE_NAME = 'ACM_Runs'
+          AND COLUMN_NAME IN (
+              'ZeroDayScoringActive',
+              'ZeroDayStatus',
+              'ZeroDaySurfaceType',
+              'ZeroDayChannelCount'
+          )
+    """
+    try:
+        with sql_client.cursor() as cur:
+            cur.execute(query)
+            rows = cur.fetchall()
+    except Exception:
+        return False
+
+    required = {
+        "ZeroDayScoringActive",
+        "ZeroDayStatus",
+        "ZeroDaySurfaceType",
+        "ZeroDayChannelCount",
+    }
+    found = {str(row[0]) for row in rows}
+    return required.issubset(found)
+
+
+def _warn_missing_zero_day_columns(logger: Any, run_id: Optional[str], equip_id: Optional[int]) -> None:
+    """Warn when migration 017 has not been applied yet."""
+    logger.warn(
+        "Zero-day run observability skipped because ACM_Runs is missing explicit "
+        "zero-day status columns. Apply SQL migration 017 before relying on "
+        "persisted day-0 run visibility.",
+        component="RUN_META",
+        run_id=run_id,
+        equip_id=equip_id,
+    )
+
+
+def write_zero_day_run_status(
+    sql_client: Any,
+    run_id: Optional[str],
+    zero_day_status: Optional[ZeroDayRunStatus],
+    *,
+    equip_id: Optional[int] = None,
+    logger: Any = Console,
+) -> bool:
+    """Persist explicit day-0 status onto the ACM_Runs row."""
+    if sql_client is None or not run_id or zero_day_status is None:
+        return False
+
+    if not _acm_runs_has_zero_day_columns(sql_client):
+        _warn_missing_zero_day_columns(logger, run_id, equip_id)
+        return False
+
+    status = build_zero_day_run_status(
+        scoring_active=zero_day_status.scoring_active,
+        status=zero_day_status.status,
+        surface_type=zero_day_status.surface_type,
+        channel_count=zero_day_status.channel_count,
+    )
+
+    update_sql = """
+        UPDATE dbo.ACM_Runs
+        SET ZeroDayScoringActive = ?,
+            ZeroDayStatus = ?,
+            ZeroDaySurfaceType = ?,
+            ZeroDayChannelCount = ?
+        WHERE RunID = ?
+    """
+
+    try:
+        with sql_client.cursor() as cur:
+            cur.execute(
+                update_sql,
+                (
+                    bool(status.scoring_active),
+                    status.status,
+                    status.surface_type,
+                    int(status.channel_count),
+                    run_id,
+                ),
+            )
+        sql_client.conn.commit()
+        logger.info(
+            f"Wrote zero-day status to ACM_Runs: {run_id}",
+            component="RUN_META",
+            run_id=run_id,
+            equip_id=equip_id,
+            zero_day_status=status.status,
+            zero_day_scoring_active=bool(status.scoring_active),
+            zero_day_surface_type=status.surface_type,
+            zero_day_channel_count=int(status.channel_count),
+        )
+        return True
+    except Exception as e:
+        logger.error(
+            f"Failed to write zero-day ACM_Runs status: {e}",
+            component="RUN_META",
+            run_id=run_id,
+            equip_id=equip_id,
+            error_type=type(e).__name__,
+            error=str(e)[:200],
+        )
+        try:
+            sql_client.conn.rollback()
+        except Exception:
+            pass
+        return False
+
+
 def write_run_metadata(
     sql_client,
     run_id: str,
@@ -37,7 +196,8 @@ def write_run_metadata(
     data_quality_score: float,
     refit_requested: bool,
     kept_columns: str,
-    error_message: Optional[str] = None
+    error_message: Optional[str] = None,
+    zero_day_status: Optional[ZeroDayRunStatus] = None,
 ) -> bool:
     """
     Write run metadata to ACM_Runs table.
@@ -81,6 +241,18 @@ def write_run_metadata(
             completed_at = completed_at.replace(tzinfo=None)
         
         # Build UPDATE statement (row already exists from _sql_start_run)
+        include_zero_day = zero_day_status is not None and _acm_runs_has_zero_day_columns(sql_client)
+        normalized_zero_day = None
+        if zero_day_status is not None and not include_zero_day:
+            _warn_missing_zero_day_columns(Console, run_id, equip_id)
+        if include_zero_day and zero_day_status is not None:
+            normalized_zero_day = build_zero_day_run_status(
+                scoring_active=zero_day_status.scoring_active,
+                status=zero_day_status.status,
+                surface_type=zero_day_status.surface_type,
+                channel_count=zero_day_status.channel_count,
+            )
+
         update_sql = """
         UPDATE dbo.ACM_Runs
         SET EquipName = ?,
@@ -97,11 +269,20 @@ def write_run_metadata(
             RefitRequested = ?,
             KeptColumns = ?,
             ErrorMessage = ?
+        """
+        if include_zero_day:
+            update_sql += """
+            , ZeroDayScoringActive = ?,
+            ZeroDayStatus = ?,
+            ZeroDaySurfaceType = ?,
+            ZeroDayChannelCount = ?
+            """
+        update_sql += """
         WHERE RunID = ?
         """
         
         # Prepare record (note: RunID is last for WHERE clause)
-        record = (
+        record_parts = [
             equip_name,
             completed_at,
             duration_seconds,
@@ -116,8 +297,18 @@ def write_run_metadata(
             refit_requested,
             kept_columns,
             error_message,
-            run_id
-        )
+        ]
+        if include_zero_day and normalized_zero_day is not None:
+            record_parts.extend(
+                [
+                    bool(normalized_zero_day.scoring_active),
+                    normalized_zero_day.status,
+                    normalized_zero_day.surface_type,
+                    int(normalized_zero_day.channel_count),
+                ]
+            )
+        record_parts.append(run_id)
+        record = tuple(record_parts)
         
         # Execute update
         with sql_client.cursor() as cur:
@@ -191,12 +382,25 @@ def serialize_run_exception(exc: Exception) -> str:
         return '{"type":"Exception","message":"<serialization failed>"}'
 
 
-def finalize_noop_run(sql_client: Any, run_id: Optional[str], logger: Any = Console) -> None:
+def finalize_noop_run(
+    sql_client: Any,
+    run_id: Optional[str],
+    logger: Any = Console,
+    zero_day_status: Optional[ZeroDayRunStatus] = None,
+    equip_id: Optional[int] = None,
+) -> None:
     """
     Finalize a run as NOOP with zero row counts.
     """
     if not sql_client or not run_id:
         return
+    write_zero_day_run_status(
+        sql_client=sql_client,
+        run_id=run_id,
+        zero_day_status=zero_day_status,
+        equip_id=equip_id,
+        logger=logger,
+    )
     sql_client.finalize_run(
         run_id=run_id,
         outcome="NOOP",
@@ -461,6 +665,7 @@ def emit_batch_summary(
     degradations: Optional[List[str]] = None,
     refit_requested: bool = False,
     timer: Optional[Any] = None,
+    zero_day_status: Optional[ZeroDayRunStatus] = None,
 ) -> None:
     """
     Emit consolidated batch summary and timing logs (best-effort).
@@ -542,6 +747,18 @@ def emit_batch_summary(
 
         _deg = ", ".join(degradations) if degradations else "none"
         _refit = "yes" if refit_requested else "no"
+        _zero_day = "status=?"
+        if zero_day_status is not None:
+            _z = build_zero_day_run_status(
+                scoring_active=zero_day_status.scoring_active,
+                status=zero_day_status.status,
+                surface_type=zero_day_status.surface_type,
+                channel_count=zero_day_status.channel_count,
+            )
+            _zero_day = (
+                f"status={_z.status}  active={'yes' if _z.scoring_active else 'no'}  "
+                f"surface={_z.surface_type}  channels={_z.channel_count}"
+            )
 
         console.info(
             f"Batch summary | {_eq} | RunID={_rid} | [{_ws}-{_we}] | outcome={_out} | "
@@ -550,6 +767,7 @@ def emit_batch_summary(
             f"episodes=[{_ep_str}] | "
             f"RUL=[{_rul_str}] | "
             f"regime=[{_regime_str}] | drift={_drift_str} | "
+            f"zero_day=[{_zero_day}] | "
             f"model=[{_model_str}] | "
             f"data={_scored} scored, {_trained} trained | "
             f"refit={_refit} | degraded=[{_deg}]",
@@ -591,6 +809,7 @@ def finalize_run_with_metadata(
     record_health_score_fn: Optional[Any] = None,
     record_error_fn: Optional[Any] = None,
     logger: Any = Console,
+    zero_day_status: Optional[ZeroDayRunStatus] = None,
 ) -> None:
     """
     Finalize ACM run metadata + status and close SQL/output resources (best-effort).
@@ -647,6 +866,7 @@ def finalize_run_with_metadata(
             refit_requested=bool(refit_requested),
             kept_columns=",".join(getattr(meta, "kept_cols", [])) if meta is not None else "",
             error_message=err_json if outcome in ("FAIL", "DEGRADED") else None,
+            zero_day_status=zero_day_status,
         )
 
         sql_client.finalize_run(
@@ -730,6 +950,7 @@ class PipelineTeardownState:
     record_batch_processed_fn: Optional[Any]
     record_health_score_fn: Optional[Any]
     record_error_fn: Optional[Any]
+    zero_day_status: Optional[ZeroDayRunStatus]
     span_ctx: Optional[Any]
     root_span: Optional[Any]
     close_run_span_fn: Any
@@ -757,6 +978,7 @@ def finalize_pipeline_teardown(state: PipelineTeardownState) -> None:
         degradations=state.degradations,
         refit_requested=state.refit_requested,
         timer=state.timer,
+        zero_day_status=state.zero_day_status,
     )
 
     finalize_run_with_metadata(
@@ -785,6 +1007,7 @@ def finalize_pipeline_teardown(state: PipelineTeardownState) -> None:
         record_health_score_fn=state.record_health_score_fn,
         record_error_fn=state.record_error_fn,
         logger=state.console,
+        zero_day_status=state.zero_day_status,
     )
 
     state.close_run_span_fn(
@@ -796,6 +1019,5 @@ def finalize_pipeline_teardown(state: PipelineTeardownState) -> None:
     )
 
     state.shutdown_run_observability_fn(state.observability_enabled)
-
 
 

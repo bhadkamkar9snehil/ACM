@@ -29,7 +29,11 @@ import logging
 logger = logging.getLogger(__name__)
 
 # v11.3.3: Import contamination filter for consistent filtering
-from core.fuse import CalibrationContaminationFilter, ContaminationFilterResult
+from core.fuse import (
+    CalibrationContaminationFilter,
+    ContaminationFilterResult,
+    resolve_contamination_filter_policy,
+)
 
 
 class AdaptiveThresholdCalculator:
@@ -418,10 +422,31 @@ class AdaptiveThresholdCalculator:
         return float(warn_threshold)
 
 
+def build_threshold_calculator_from_config(
+    cfg: Dict[str, Any],
+    baseline_contamination_verdict: str = "unknown",
+) -> AdaptiveThresholdCalculator:
+    """
+    Build the adaptive-threshold calculator with verdict-aware filter policy.
+    """
+    adaptive_cfg = cfg.get("thresholds", {}).get("adaptive", {})
+    filter_cfg = resolve_contamination_filter_policy(
+        thresholds_cfg=cfg.get("thresholds", {}),
+        baseline_contamination_verdict=baseline_contamination_verdict,
+    )
+    return AdaptiveThresholdCalculator(
+        min_samples=int(adaptive_cfg.get("min_samples", 100)),
+        contamination_filter_enabled=bool(filter_cfg.get("enabled", False)),
+        contamination_filter_method=str(filter_cfg.get("method", "iterative_mad")),
+        contamination_filter_z_threshold=float(filter_cfg.get("z_threshold", 4.0)),
+    )
+
+
 def calculate_thresholds_from_config(
     train_fused_z: Union[np.ndarray, pd.Series],
     cfg: dict,
-    regime_labels: Optional[Union[np.ndarray, pd.Series]] = None
+    regime_labels: Optional[Union[np.ndarray, pd.Series]] = None,
+    baseline_contamination_verdict: str = "unknown",
 ) -> Dict[str, Union[float, Dict[int, float]]]:
     """
     Convenience function to calculate thresholds from config dict.
@@ -451,11 +476,13 @@ def calculate_thresholds_from_config(
 
     method = adaptive_cfg.get('method', 'quantile')
     confidence = adaptive_cfg.get('confidence', 0.997)
-    min_samples = adaptive_cfg.get('min_samples', 100)
     fallback = adaptive_cfg.get('fallback_threshold', 3.0)
     
     # Calculate thresholds
-    calc = AdaptiveThresholdCalculator(min_samples=min_samples)
+    calc = build_threshold_calculator_from_config(
+        cfg=cfg,
+        baseline_contamination_verdict=baseline_contamination_verdict,
+    )
     
     regime_input = regime_labels
     
@@ -497,7 +524,8 @@ def calculate_and_persist_thresholds(
     output_manager: Optional[Any],
     train_index: Optional[pd.Index] = None,
     regime_labels: Optional[np.ndarray] = None,
-    regime_quality_ok: bool = False
+    regime_quality_ok: bool = False,
+    baseline_contamination_verdict: str = "unknown",
 ) -> Dict[str, Any]:
     """
     Calculate adaptive thresholds and persist to SQL.
@@ -529,7 +557,8 @@ def calculate_and_persist_thresholds(
         threshold_results = calculate_thresholds_from_config(
             train_fused_z=fused_scores,
             cfg=cfg,
-            regime_labels=use_regime_labels
+            regime_labels=use_regime_labels,
+            baseline_contamination_verdict=baseline_contamination_verdict,
         )
         
         # Store in SQL via OutputManager if available
@@ -607,6 +636,7 @@ def maybe_update_adaptive_thresholds(
     output_manager: Optional[Any],
     coldstart_complete: bool,
     regime_quality_ok: bool,
+    baseline_contamination_verdict: str = "unknown",
     logger: Any,
 ) -> bool:
     """
@@ -637,6 +667,7 @@ def maybe_update_adaptive_thresholds(
         train_index=train_data.index,
         regime_labels=regime_labels_for_thresh,
         regime_quality_ok=regime_quality_ok,
+        baseline_contamination_verdict=baseline_contamination_verdict,
     )
     cfg._thresholds_calculated = True
     logger.info(f"Threshold: updated at run {run_count}", component="THRESHOLD")

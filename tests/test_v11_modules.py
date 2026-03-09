@@ -379,6 +379,30 @@ class TestRefactorHelpers:
         )
         assert updated is False
 
+    def test_build_threshold_calculator_from_config_is_verdict_aware(self):
+        """Adaptive threshold calculator should only filter downstream when baseline was suspect."""
+        from core.adaptive_thresholds import build_threshold_calculator_from_config
+
+        cfg = {
+            "thresholds": {
+                "adaptive": {"min_samples": 75},
+                "contamination_filter": {
+                    "enabled": True,
+                    "method": "hybrid",
+                    "z_threshold": 5.0,
+                },
+            }
+        }
+
+        calc_clean = build_threshold_calculator_from_config(cfg, baseline_contamination_verdict="ok")
+        calc_suspect = build_threshold_calculator_from_config(cfg, baseline_contamination_verdict="suspect")
+
+        assert calc_clean.min_samples == 75
+        assert calc_clean.contamination_filter_enabled is False
+        assert calc_suspect.contamination_filter_enabled is True
+        assert calc_suspect.contamination_filter_method == "hybrid"
+        assert calc_suspect.contamination_filter_z_threshold == pytest.approx(5.0)
+
     def test_load_and_validate_data_stage_returns_noop_when_coldstart_incomplete(self, monkeypatch):
         """Data load stage helper should finalize NOOP and stop pipeline when coldstart is incomplete."""
         from core import smart_coldstart as sc
@@ -392,9 +416,14 @@ class TestRefactorHelpers:
 
         monkeypatch.setattr(sc, "SmartColdstart", _ColdstartManager)
         finalize_calls = []
+        log_calls = []
 
         def _finalize_noop(**kwargs):
             finalize_calls.append(kwargs)
+
+        class _Logger:
+            def info(self, message, **kwargs):
+                log_calls.append((message, kwargs))
 
         out = sc.load_and_validate_data_stage(
             sql_client=object(),
@@ -412,11 +441,43 @@ class TestRefactorHelpers:
             record_coldstart_fn=lambda equip: None,
             refit_requested=False,
             run_id="r1",
+            logger=_Logger(),
         )
 
         assert out.should_continue is False
         assert out.coldstart_complete is False
         assert len(finalize_calls) == 1
+        assert finalize_calls[0]["zero_day_status"].status == "inactive_no_data"
+        assert finalize_calls[0]["zero_day_status"].scoring_active is False
+        assert len(log_calls) == 1
+        assert "zero-day scoring inactive on this run" in log_calls[0][0]
+        assert log_calls[0][1]["component"] == "COLDSTART"
+        assert log_calls[0][1]["noop_reason"] == "SCORING_NO_DATA"
+        assert log_calls[0][1]["zero_day_scoring_active"] is False
+
+    def test_build_noop_observability_distinguishes_coldstart_deferred(self):
+        """Coldstart defer should explicitly say scoring is inactive, not merely delayed."""
+        from core import smart_coldstart as sc
+
+        message, fields = sc.build_noop_observability("COLDSTART_DEFERRED")
+
+        assert "coldstart deferred" in message.lower()
+        assert "zero-day scoring is inactive on this run" in message.lower()
+        assert fields["noop_reason"] == "COLDSTART_DEFERRED"
+        assert fields["zero_day_scoring_active"] is False
+        assert fields["legacy_fit_ready"] is False
+
+    def test_zero_day_status_from_noop_reason_maps_known_reasons(self):
+        """NOOP reasons should map to stable persisted day-0 run statuses."""
+        from core.run_metadata_writer import zero_day_status_from_noop_reason
+
+        no_data = zero_day_status_from_noop_reason("SCORING_NO_DATA")
+        coldstart = zero_day_status_from_noop_reason("COLDSTART_DEFERRED")
+
+        assert no_data.status == "inactive_no_data"
+        assert no_data.scoring_active is False
+        assert coldstart.status == "inactive_coldstart_deferred"
+        assert coldstart.scoring_active is False
 
     def test_load_and_validate_data_stage_success_path_sets_dedup_counts(self, monkeypatch):
         """Data load stage helper should normalize, deduplicate, validate, and continue when data is ready."""
@@ -1780,6 +1841,172 @@ class TestRefactorHelpers:
         assert out.regime_basis_hash is None
         assert out.regime_model is None
 
+    def test_regime_module_no_longer_exports_classify_tag(self):
+        """Active regime logic should not expose the old tag-taxonomy helper."""
+        from core import regimes
+
+        assert not hasattr(regimes, "_classify_tag")
+
+    def test_select_tag_agnostic_numeric_surface_prefers_variable_generic_columns(self):
+        """Surface selector should work on generic names without PCA or taxonomy metadata."""
+        from core import regimes
+
+        idx = pd.date_range("2026-01-01", periods=4, freq="h")
+        train = pd.DataFrame(
+            {
+                "sensor_1_avg": [1.0, 2.0, 3.0, 4.0],
+                "sensor_2_avg": [0.0, 10.0, 0.0, 10.0],
+                "sensor_3_avg": [5.0, 5.0, 5.0, 5.0],
+                "text_tag": ["a", "b", "c", "d"],
+            },
+            index=idx,
+        )
+        score = pd.DataFrame(
+            {
+                "sensor_1_avg": [1.5, 2.5],
+                "sensor_2_avg": [5.0, 7.5],
+                "sensor_3_avg": [5.0, 5.0],
+                "text_tag": ["x", "y"],
+            },
+            index=idx[:2],
+        )
+
+        cols, train_numeric, score_numeric, meta = regimes.select_tag_agnostic_numeric_surface(train, score, cfg={})
+
+        assert cols == ["sensor_2_avg", "sensor_1_avg"]
+        assert list(train_numeric.columns) == cols
+        assert list(score_numeric.columns) == cols
+        assert meta["surface_type"] == "tag_agnostic_numeric"
+        assert meta["selected_count"] == 2
+        assert meta["dropped_low_iqr_count"] >= 1
+
+    def test_select_tag_agnostic_numeric_surface_respects_config_thresholds(self):
+        """Surface selector should honor runtime config for max_cols and validity thresholds."""
+        from core import regimes
+
+        idx = pd.date_range("2026-01-01", periods=5, freq="h")
+        train = pd.DataFrame(
+            {
+                "sensor_1_avg": [1.0, 2.0, 3.0, 4.0, 5.0],
+                "sensor_2_avg": [0.0, 10.0, 0.0, 10.0, 0.0],
+                "sensor_3_avg": [1.0, np.nan, np.nan, np.nan, 5.0],
+            },
+            index=idx,
+        )
+        score = pd.DataFrame(
+            {
+                "sensor_1_avg": [1.5, 2.5],
+                "sensor_2_avg": [5.0, 7.5],
+                "sensor_3_avg": [1.5, 2.5],
+            },
+            index=idx[:2],
+        )
+
+        cols, train_numeric, score_numeric, meta = regimes.select_tag_agnostic_numeric_surface(
+            train,
+            score,
+            cfg={
+                "regimes": {
+                    "feature_basis": {
+                        "max_cols": 1,
+                        "min_valid_fraction": 0.60,
+                        "min_iqr": 1e-6,
+                    }
+                }
+            },
+        )
+
+        assert cols == ["sensor_2_avg"]
+        assert list(train_numeric.columns) == cols
+        assert list(score_numeric.columns) == cols
+        assert meta["max_cols"] == 1
+        assert meta["min_valid_fraction"] == 0.60
+        assert meta["truncated"] is True
+
+    def test_build_feature_basis_uses_tag_agnostic_surface_and_ignores_pca_fallback(self):
+        """Regime basis should come from shared numeric surface, not naming heuristics or PCA fallback."""
+        from core import regimes
+
+        idx = pd.date_range("2026-01-01", periods=4, freq="h")
+        train_features = pd.DataFrame({"feat": [0.1, 0.2, 0.3, 0.4]}, index=idx)
+        score_features = pd.DataFrame({"feat": [0.15, 0.25]}, index=idx[:2])
+        raw_train = pd.DataFrame(
+            {
+                "sensor_1_avg": [1.0, 2.0, 3.0, 4.0],
+                "sensor_2_avg": [0.0, 10.0, 0.0, 10.0],
+                "sensor_3_avg": [5.0, 5.0, 5.0, 5.0],
+            },
+            index=idx,
+        )
+        raw_score = pd.DataFrame(
+            {
+                "sensor_1_avg": [1.5, 2.5],
+                "sensor_2_avg": [6.0, 8.0],
+                "sensor_3_avg": [5.0, 5.0],
+            },
+            index=idx[:2],
+        )
+
+        class _BoomScaler:
+            def transform(self, _):
+                raise AssertionError("PCA fallback should not be used")
+
+        pca_detector = type("PcaDetector", (), {"pca": object(), "scaler": _BoomScaler()})()
+
+        basis_train, basis_score, meta = regimes.build_feature_basis(
+            train_features=train_features,
+            score_features=score_features,
+            raw_train=raw_train,
+            raw_score=raw_score,
+            pca_detector=pca_detector,
+            cfg={},
+        )
+
+        assert list(basis_train.columns) == ["sensor_2_avg", "sensor_1_avg"]
+        assert list(basis_score.columns) == ["sensor_2_avg", "sensor_1_avg"]
+        assert meta["feature_surface_type"] == "tag_agnostic_numeric"
+        assert meta["n_pca"] == 0
+        assert meta["raw_tags"] == ["sensor_2_avg", "sensor_1_avg"]
+
+    def test_build_regime_feature_basis_stage_invalidates_cached_model_on_version_mismatch(self, monkeypatch):
+        """Cached regime models should refit when the basis contract version changes."""
+        from core import regimes
+
+        idx = pd.date_range("2026-01-01", periods=3, freq="h")
+        train = pd.DataFrame({"a": [1.0, 2.0, 3.0]}, index=idx)
+        score = pd.DataFrame({"a": [1.5, 2.5]}, index=idx[:2])
+        basis_train = pd.DataFrame({"sensor_1_avg": [0.1, 0.2, 0.3]}, index=idx)
+        basis_score = pd.DataFrame({"sensor_1_avg": [0.15, 0.25]}, index=idx[:2])
+
+        def _build_feature_basis(**kwargs):
+            return basis_train, basis_score, {"source": "ok"}
+
+        monkeypatch.setattr(regimes, "build_feature_basis", _build_feature_basis)
+        regime_model = type(
+            "M",
+            (),
+            {"feature_columns": ["sensor_1_avg"], "meta": {"model_version": "4.0"}},
+        )()
+
+        class _Logger:
+            def warn(self, *args, **kwargs):
+                pass
+
+        out = regimes.build_regime_feature_basis_stage(
+            train_features=train,
+            score_features=score,
+            raw_train=train,
+            raw_score=score,
+            pca_detector=None,
+            cfg={"regimes": {"method": "hdbscan"}},
+            regime_model=regime_model,
+            equip="FD_FAN",
+            logger=_Logger(),
+        )
+
+        assert out.regime_basis_train.equals(basis_train)
+        assert out.regime_model is None
+
     def test_apply_transient_state_labels_no_regime_label(self):
         """Transient helper should no-op when regime_label column is absent."""
         from core.regimes import apply_transient_state_labels
@@ -1789,6 +2016,346 @@ class TestRefactorHelpers:
         out_frame, counts = apply_transient_state_labels(frame=frame, score_data=score_data, cfg={})
         assert out_frame.equals(frame)
         assert counts == {}
+
+    def test_detect_transient_states_handles_generic_numeric_columns(self):
+        """Transient detection should work on generic numeric names without taxonomy metadata."""
+        from core.regimes import detect_transient_states
+
+        idx = pd.date_range("2026-01-01", periods=5, freq="h")
+        data = pd.DataFrame(
+            {
+                "sensor_1_avg": [1.0, 1.2, 1.8, 2.6, 2.7],
+                "sensor_2_avg": [5.0, 5.1, 5.0, 5.4, 5.5],
+            },
+            index=idx,
+        )
+        regime_labels = np.array([0, 0, 0, 1, 1])
+
+        states = detect_transient_states(data=data, regime_labels=regime_labels, cfg={})
+
+        assert len(states) == len(data)
+        assert set(states.tolist()) <= {"steady", "transient", "startup", "shutdown", "trip"}
+
+    def test_select_ewm_monitoring_surface_keeps_all_eligible_generic_channels(self):
+        """EWM monitoring surface should keep every eligible generic raw channel without a regime cap."""
+        from core import regimes
+
+        idx = pd.date_range("2026-01-01", periods=6, freq="h")
+        train = pd.DataFrame(
+            {
+                f"sensor_{i:02d}_avg": np.linspace(float(i), float(i + 5), len(idx))
+                for i in range(30)
+            },
+            index=idx,
+        )
+        train["constant_sensor"] = 1.0
+        score = pd.DataFrame(
+            {
+                f"sensor_{i:02d}_avg": np.linspace(float(i) + 0.5, float(i) + 2.5, 3)
+                for i in range(30)
+            },
+            index=idx[:3],
+        )
+        score.loc[idx[0], "sensor_00_avg"] = np.nan
+
+        cols, train_numeric, score_numeric, meta = regimes.select_ewm_monitoring_surface(
+            train,
+            score,
+            cfg={},
+        )
+
+        assert len(cols) == 30
+        assert "constant_sensor" not in cols
+        assert list(train_numeric.columns) == cols
+        assert list(score_numeric.columns) == cols
+        assert bool(pd.isna(score_numeric["sensor_00_avg"].iloc[0]))
+        assert meta["surface_type"] == "ewm_monitoring_raw_numeric"
+        assert meta["selected_count"] == 30
+        assert meta["max_cols"] == 0
+        assert meta["truncated"] is False
+
+    def test_select_ewm_monitoring_surface_respects_surface_config(self):
+        """EWM monitoring surface should honor its dedicated config thresholds."""
+        from core import regimes
+
+        idx = pd.date_range("2026-01-01", periods=5, freq="h")
+        train = pd.DataFrame(
+            {
+                "sensor_1_avg": [1.0, 2.0, 3.0, 4.0, 5.0],
+                "sensor_2_avg": [0.0, 10.0, 0.0, 10.0, 0.0],
+                "sensor_3_avg": [1.0, np.nan, np.nan, np.nan, 5.0],
+                "sensor_4_avg": [7.0, 7.0, 7.0, 7.0, 7.0],
+            },
+            index=idx,
+        )
+        score = pd.DataFrame(
+            {
+                "sensor_1_avg": [1.5, 2.5],
+                "sensor_2_avg": [5.0, 7.5],
+                "sensor_3_avg": [1.5, 2.5],
+                "sensor_4_avg": [7.0, 7.0],
+            },
+            index=idx[:2],
+        )
+
+        cols, train_numeric, score_numeric, meta = regimes.select_ewm_monitoring_surface(
+            train,
+            score,
+            cfg={
+                "models": {
+                    "ewm_baseline": {
+                        "surface": {
+                            "min_valid_fraction": 0.80,
+                            "min_iqr": 1e-6,
+                        }
+                    }
+                }
+            },
+        )
+
+        assert cols == ["sensor_2_avg", "sensor_1_avg"]
+        assert list(train_numeric.columns) == cols
+        assert list(score_numeric.columns) == cols
+        assert meta["surface_type"] == "ewm_monitoring_raw_numeric"
+        assert meta["min_valid_fraction"] == 0.80
+
+    def test_ewm_save_skips_without_state_version_column(self, monkeypatch):
+        """EWM persistence must not reuse legacy schema without StateVersion."""
+        from core.ewm_baseline import EWMBaselineManager, _SensorState
+
+        manager = EWMBaselineManager(equip_id=5010)
+        manager._state[(-1, "sensor_1_avg")] = _SensorState(mean_fast=1.0, mean_slow=1.0, n_samples=5)
+
+        monkeypatch.setattr(manager, "_has_state_version_column", lambda sql_client: False)
+        called = {"upsert": False}
+
+        def _boom(*args, **kwargs):
+            called["upsert"] = True
+            raise AssertionError("save_to_sql should skip when StateVersion column is missing")
+
+        monkeypatch.setattr(manager, "_upsert_rows", _boom)
+
+        assert manager.save_to_sql(object()) == 0
+        assert called["upsert"] is False
+
+    def test_ewm_save_persists_state_version_two(self, monkeypatch):
+        """EWM save path should stamp the explicit monitoring-surface state version."""
+        from core.ewm_baseline import EWM_STATE_VERSION, EWMBaselineManager, _SensorState
+
+        manager = EWMBaselineManager(equip_id=5010)
+        manager._state[(-1, "sensor_1_avg")] = _SensorState(
+            mean_fast=1.0,
+            var_fast=0.5,
+            mean_slow=1.2,
+            var_slow=0.7,
+            n_samples=12,
+        )
+
+        monkeypatch.setattr(manager, "_has_state_version_column", lambda sql_client: True)
+        captured = {}
+
+        def _capture(sql_client, df):
+            captured["df"] = df.copy()
+            return len(df)
+
+        monkeypatch.setattr(manager, "_upsert_rows", _capture)
+
+        assert manager.save_to_sql(object()) == 1
+        assert int(captured["df"]["StateVersion"].iloc[0]) == EWM_STATE_VERSION
+        assert captured["df"]["SensorName"].iloc[0] == "sensor_1_avg"
+
+    def test_ewm_load_skips_without_state_version_column(self, monkeypatch):
+        """EWM load path should ignore legacy schema until the versioning migration is applied."""
+        from core.ewm_baseline import EWMBaselineManager
+
+        manager = EWMBaselineManager(equip_id=5010)
+        monkeypatch.setattr(manager, "_has_state_version_column", lambda sql_client: False)
+
+        assert manager.load_from_sql(object()) == 0
+
+    def test_online_pca_binner_warms_then_assigns_generic_channels(self):
+        """OnlinePCABinner should become active on generic raw channels without tag metadata."""
+        from core.regime_binner import OnlinePCABinner
+
+        idx = pd.date_range("2026-01-01", periods=6, freq="h")
+        df = pd.DataFrame(
+            {
+                "sensor_00_avg": [0.0, 1.0, 2.0, 3.0, 4.0, 5.0],
+                "sensor_01_avg": [0.0, 0.5, 1.0, 1.5, 2.0, 2.5],
+                "sensor_02_avg": [5.0, 4.2, 3.4, 2.6, 1.8, 1.0],
+            },
+            index=idx,
+        )
+
+        binner = OnlinePCABinner(n_bins=3, min_rows_for_assignment=5, history_limit=64)
+        binner.observe_batch(df.iloc[:3])
+        early = binner.assign_batch(df.iloc[:3])
+        assert np.all(early == -1)
+
+        seen_before = binner._n_rows_seen
+        binner.observe_batch(df.iloc[3:])
+        assigned = binner.assign_batch(df)
+
+        assert binner.sensor_cols == ["sensor_00_avg", "sensor_01_avg", "sensor_02_avg"]
+        assert binner._n_rows_seen > seen_before
+        assert np.any(assigned >= 0)
+        assert set(assigned[assigned >= 0].tolist()) <= {0, 1, 2}
+
+        seen_after = binner._n_rows_seen
+        _ = binner.assign_batch(df.iloc[:2])
+        assert binner._n_rows_seen == seen_after
+
+    def test_online_pca_binner_load_skips_legacy_control_variable_state(self):
+        """Legacy control-variable JSON should be discarded rather than reinterpreted."""
+        from core.regime_binner import OnlinePCABinner
+
+        class _Cursor:
+            def __init__(self, state_json):
+                self._state_json = state_json
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def execute(self, query, params):
+                self.description = [("StateJson",)]
+
+            def fetchone(self):
+                return (self._state_json,)
+
+        class _Conn:
+            def __init__(self, state_json):
+                self._state_json = state_json
+
+            def cursor(self):
+                return _Cursor(self._state_json)
+
+        legacy_json = '{"control_vars": ["power_output"], "n_bins": 3, "n_seen": 25, "edges": {"power_output": [1.0, 2.0]}}'
+        sql_client = type("SQLClient", (), {"conn": _Conn(legacy_json)})()
+
+        binner = OnlinePCABinner()
+        assert binner.load_from_sql(sql_client, equip_id=5010) is False
+        assert binner.sensor_cols == []
+
+    def test_online_pca_binner_sql_round_trip_preserves_remap_state(self):
+        """OnlinePCABinner should persist/load its tag-agnostic latent state on the existing SQL table."""
+        from core.regime_binner import ONLINE_PCA_BINNER_TYPE, OnlinePCABinner
+
+        class _Cursor:
+            def __init__(self, conn):
+                self._conn = conn
+                self.description = []
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def execute(self, query, params):
+                sql = " ".join(str(query).split()).upper()
+                if "MERGE ACM_REGIMEBINNERSTATE" in sql:
+                    self._conn.state_json = params[1]
+                elif "SELECT STATEJSON FROM ACM_REGIMEBINNERSTATE" in sql:
+                    self.description = [("StateJson",)]
+                else:
+                    raise AssertionError(f"Unexpected SQL in test: {query}")
+
+            def fetchone(self):
+                if self._conn.state_json is None:
+                    return None
+                return (self._conn.state_json,)
+
+        class _Conn:
+            def __init__(self):
+                self.state_json = None
+                self.commits = 0
+
+            def cursor(self):
+                return _Cursor(self)
+
+            def commit(self):
+                self.commits += 1
+
+        idx = pd.date_range("2026-01-01", periods=8, freq="h")
+        df = pd.DataFrame(
+            {
+                "sensor_00_avg": np.linspace(0.0, 7.0, len(idx)),
+                "sensor_01_avg": np.linspace(1.0, 4.5, len(idx)),
+                "sensor_02_avg": np.linspace(8.0, 2.0, len(idx)),
+            },
+            index=idx,
+        )
+        sql_client = type("SQLClient", (), {"conn": _Conn()})()
+
+        binner = OnlinePCABinner(n_bins=3, min_rows_for_assignment=5, history_limit=64)
+        binner.observe_batch(df)
+        binner.mark_remapped()
+        assert binner.save_to_sql(sql_client, equip_id=5010) is True
+        assert sql_client.conn.commits == 1
+        assert ONLINE_PCA_BINNER_TYPE in sql_client.conn.state_json
+
+        restored = OnlinePCABinner()
+        assert restored.load_from_sql(sql_client, equip_id=5010) is True
+        assert restored.sensor_cols == ["sensor_00_avg", "sensor_01_avg", "sensor_02_avg"]
+        assert restored.can_assign_fallback is False
+        assigned = restored.assign_batch(df)
+        assert np.any(assigned >= 0)
+        assert set(assigned[assigned >= 0].tolist()) <= {0, 1, 2}
+
+    def test_online_pca_binner_align_to_surface_invalidates_incompatible_state(self):
+        """Persisted proxy state must be rebuilt cold when the monitoring surface changes."""
+        from core.regime_binner import OnlinePCABinner
+
+        idx = pd.date_range("2026-01-01", periods=8, freq="h")
+        df = pd.DataFrame(
+            {
+                "sensor_00_avg": np.linspace(0.0, 7.0, len(idx)),
+                "sensor_01_avg": np.linspace(1.0, 4.5, len(idx)),
+                "sensor_02_avg": np.linspace(8.0, 2.0, len(idx)),
+            },
+            index=idx,
+        )
+
+        binner = OnlinePCABinner(n_bins=3, min_rows_for_assignment=5, history_limit=64)
+        binner.observe_batch(df)
+        assert binner.is_ready
+        assert np.any(binner.assign_batch(df) >= 0)
+
+        kept = binner.align_to_surface(["sensor_00_avg", "sensor_03_avg"])
+
+        assert kept is False
+        assert binner.sensor_cols == ["sensor_00_avg", "sensor_03_avg"]
+        assert binner.is_ready is False
+        assert binner._n_rows_seen == 0
+        assert np.all(binner.assign_batch(df[["sensor_00_avg"]]) == -1)
+
+    def test_online_pca_binner_align_to_surface_keeps_compatible_state(self):
+        """Compatible monitoring surfaces should preserve latent proxy state."""
+        from core.regime_binner import OnlinePCABinner
+
+        idx = pd.date_range("2026-01-01", periods=8, freq="h")
+        df = pd.DataFrame(
+            {
+                "sensor_00_avg": np.linspace(0.0, 7.0, len(idx)),
+                "sensor_01_avg": np.linspace(1.0, 4.5, len(idx)),
+                "sensor_02_avg": np.linspace(8.0, 2.0, len(idx)),
+            },
+            index=idx,
+        )
+
+        binner = OnlinePCABinner(n_bins=3, min_rows_for_assignment=5, history_limit=64)
+        binner.observe_batch(df)
+        seen = binner._n_rows_seen
+        history_len = len(binner._pc1_history)
+
+        kept = binner.align_to_surface(["sensor_00_avg", "sensor_01_avg", "sensor_02_avg"])
+
+        assert kept is True
+        assert binner._n_rows_seen == seen
+        assert len(binner._pc1_history) == history_len
 
     def test_run_regime_labeling_stage_returns_labels_and_records_regime(self, monkeypatch):
         """Regime labeling stage helper should return labels and emit current regime metric."""
@@ -3005,6 +3572,42 @@ class TestRefactorHelpers:
         assert sql.calls[0]["rows_read"] == 0
         assert sql.calls[0]["rows_written"] == 0
 
+    def test_finalize_noop_run_writes_zero_day_status_when_provided(self, monkeypatch):
+        """NOOP helper should persist day-0 status before final SQL finalization."""
+        from core import run_metadata_writer as rmw
+
+        class _SQL:
+            def __init__(self):
+                self.calls = []
+
+            def finalize_run(self, **kwargs):
+                self.calls.append(kwargs)
+
+        captured = {}
+
+        def _capture(**kwargs):
+            captured.update(kwargs)
+            return True
+
+        monkeypatch.setattr(rmw, "write_zero_day_run_status", _capture)
+
+        sql = _SQL()
+        status = rmw.build_zero_day_run_status(
+            scoring_active=False,
+            status="inactive_no_data",
+        )
+        rmw.finalize_noop_run(
+            sql_client=sql,
+            run_id="r1",
+            zero_day_status=status,
+            equip_id=5010,
+        )
+
+        assert captured["run_id"] == "r1"
+        assert captured["zero_day_status"].status == "inactive_no_data"
+        assert captured["equip_id"] == 5010
+        assert sql.calls[0]["outcome"] == "NOOP"
+
     def test_finalize_noop_run_skips_without_run_id(self):
         """NOOP finalization helper should no-op when run_id is missing."""
         from core.run_metadata_writer import finalize_noop_run
@@ -3070,6 +3673,7 @@ class TestRefactorHelpers:
                 record_batch_processed_fn=None,
                 record_health_score_fn=None,
                 record_error_fn=None,
+                zero_day_status=None,
                 span_ctx=None,
                 root_span=None,
                 close_run_span_fn=_close_run_span_fn,
@@ -3082,15 +3686,124 @@ class TestRefactorHelpers:
         assert calls[2] == "close_span"
         assert calls[3] == ("shutdown", True)
 
-    def test_apply_contamination_filter_config_sets_defaults(self):
-        """Calibration config helper should always set contamination_filter with defaults."""
+    def test_write_run_metadata_includes_zero_day_fields_when_columns_exist(self, monkeypatch):
+        """ACM_Runs metadata write should persist explicit day-0 status when migration 017 exists."""
+        from core import run_metadata_writer as rmw
+
+        class _Cursor:
+            def __init__(self, conn):
+                self.conn = conn
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def execute(self, query, params):
+                self.conn.query = query
+                self.conn.params = params
+
+        class _Conn:
+            def __init__(self):
+                self.query = None
+                self.params = None
+                self.commits = 0
+
+            def cursor(self):
+                return _Cursor(self)
+
+            def commit(self):
+                self.commits += 1
+
+            def rollback(self):
+                pass
+
+        sql_client = type("SQL", (), {"conn": _Conn(), "cursor": lambda self=None: sql_client.conn.cursor()})()
+        monkeypatch.setattr(rmw, "_acm_runs_has_zero_day_columns", lambda sql_client: True)
+
+        ok = rmw.write_run_metadata(
+            sql_client=sql_client,
+            run_id="r1",
+            equip_id=5010,
+            equip_name="WFA_TURBINE_10",
+            started_at=datetime(2026, 3, 9, 10, 0, 0),
+            completed_at=datetime(2026, 3, 9, 10, 5, 0),
+            config_signature="sig",
+            train_row_count=100,
+            score_row_count=50,
+            episode_count=2,
+            health_status="ALERT",
+            avg_health_index=25.0,
+            min_health_index=10.0,
+            max_fused_z=6.5,
+            data_quality_score=99.0,
+            refit_requested=False,
+            kept_columns="sensor_1_avg,sensor_2_avg",
+            error_message=None,
+            zero_day_status=rmw.build_zero_day_run_status(
+                scoring_active=True,
+                status="active_hdbscan",
+                surface_type="ewm_monitoring_raw_numeric",
+                channel_count=17,
+            ),
+        )
+
+        assert ok is True
+        assert "ZeroDayStatus" in sql_client.conn.query
+        assert "ZeroDayChannelCount" in sql_client.conn.query
+        assert "active_hdbscan" in sql_client.conn.params
+        assert "ewm_monitoring_raw_numeric" in sql_client.conn.params
+        assert 17 in sql_client.conn.params
+        assert sql_client.conn.commits == 1
+
+    def test_apply_contamination_filter_config_disables_filter_for_clean_baseline(self):
+        """Calibration helper should disable downstream filtering when baseline is clean."""
+        from core.fuse import apply_contamination_filter_config
+
+        cfg = {"clip_z": 8.0}
+        out = apply_contamination_filter_config(
+            self_tune_cfg=cfg,
+            thresholds_cfg={},
+            baseline_contamination_verdict="ok",
+        )
+        assert out is cfg
+        assert "contamination_filter" in cfg
+        assert cfg["contamination_filter"]["method"] == "iterative_mad"
+        assert cfg["contamination_filter"]["enabled"] is False
+
+    def test_apply_contamination_filter_config_respects_config_for_suspect_baseline(self):
+        """Calibration helper should keep configured filter settings for suspect baselines."""
+        from core.fuse import apply_contamination_filter_config
+
+        cfg = {"clip_z": 8.0}
+        out = apply_contamination_filter_config(
+            self_tune_cfg=cfg,
+            thresholds_cfg={
+                "contamination_filter": {
+                    "enabled": True,
+                    "method": "hybrid",
+                    "z_threshold": 5.0,
+                    "max_iterations": 7,
+                    "min_retained_ratio": 0.8,
+                }
+            },
+            baseline_contamination_verdict="suspect",
+        )
+        assert out is cfg
+        assert cfg["contamination_filter"]["enabled"] is True
+        assert cfg["contamination_filter"]["method"] == "hybrid"
+        assert cfg["contamination_filter"]["z_threshold"] == pytest.approx(5.0)
+        assert cfg["contamination_filter"]["max_iterations"] == 7
+        assert cfg["contamination_filter"]["min_retained_ratio"] == pytest.approx(0.8)
+
+    def test_apply_contamination_filter_config_keeps_filter_when_verdict_unknown(self):
+        """Calibration helper should stay conservative when no baseline verdict exists."""
         from core.fuse import apply_contamination_filter_config
 
         cfg = {"clip_z": 8.0}
         out = apply_contamination_filter_config(self_tune_cfg=cfg, thresholds_cfg={})
         assert out is cfg
-        assert "contamination_filter" in cfg
-        assert cfg["contamination_filter"]["method"] == "iterative_mad"
         assert cfg["contamination_filter"]["enabled"] is True
 
     def test_choose_pca_cache_for_calibration_length_match(self):
@@ -3300,7 +4013,10 @@ class TestRefactorHelpers:
                 omr_raw=np.array([0.6, 0.7, 0.8, 0.9]),
             ), None
 
+        captured = {"self_tune_cfg": None}
+
         def _calibrate_all_detectors_fn(**kwargs):
+            captured["self_tune_cfg"] = kwargs["self_tune_cfg"]
             score_frame = kwargs["score_frame"].copy()
             score_frame["ar1_z"] = score_frame["ar1_raw"]
             score_frame["pca_spe_z"] = score_frame["pca_spe"]
@@ -3368,6 +4084,7 @@ class TestRefactorHelpers:
             output_manager=out,
             logger=_Logger(),
             equip="FD_FAN",
+            baseline_contamination_verdict="ok",
         )
 
         assert isinstance(result.frame, pd.DataFrame)
@@ -3378,6 +4095,7 @@ class TestRefactorHelpers:
         assert persisted["called"] is True
         assert out.df_writes >= 1
         assert out.summary_writes == 1
+        assert captured["self_tune_cfg"]["contamination_filter"]["enabled"] is False
 
     def test_apply_fusion_result_and_record_metrics_updates_frames(self):
         """Fusion result helper should apply fused columns and emit detector metrics."""
@@ -3491,7 +4209,10 @@ class TestRefactorHelpers:
         def _section_fn(name):
             return _Section(name)
 
+        forwarded = {"calibration_verdict": None, "adaptive_verdict": None}
+
         def _run_calibration_stage(**kwargs):
+            forwarded["calibration_verdict"] = kwargs["baseline_contamination_verdict"]
             out_frame = kwargs["frame"].copy()
             out_frame["ar1_z"] = [0.3, 0.4]
             out_train = kwargs["train"].copy()
@@ -3527,6 +4248,7 @@ class TestRefactorHelpers:
         threshold_calls = {"called": False}
         def _maybe_update_adaptive_thresholds_fn(**kwargs):
             threshold_calls["called"] = True
+            forwarded["adaptive_verdict"] = kwargs["baseline_contamination_verdict"]
 
         def _run_regime_postprocess_stage_fn(**kwargs):
             out_frame = kwargs["frame"].copy()
@@ -3572,6 +4294,7 @@ class TestRefactorHelpers:
             sql_client=object(),
             run_id="r1",
             cached_manifest={},
+            baseline_contamination_verdict="suspect",
         )
 
         assert "fused" in result.frame.columns
@@ -3582,6 +4305,8 @@ class TestRefactorHelpers:
         assert result.use_per_regime is True
         assert threshold_calls["called"] is True
         assert auto_tune_calls["called"] is True
+        assert forwarded["calibration_verdict"] == "suspect"
+        assert forwarded["adaptive_verdict"] == "suspect"
         assert sections == ["calibrate", "fusion", "thresholds.adaptive", "regimes.postprocess"]
 
     def test_run_feature_preparation_stage_orchestrates_pipeline(self, monkeypatch):

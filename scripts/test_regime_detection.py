@@ -166,7 +166,7 @@ def load_raw_data(sql_client: SQLClient, equip: str, days: int = 30, use_all: bo
 def build_regime_basis(df: pd.DataFrame, cfg: dict) -> tuple:
     """
     Build regime basis from raw data.
-    Uses only OPERATING variables (not condition/health indicators).
+    Uses a tag-agnostic numeric surface selected from the observed data.
     """
     # Find timestamp column
     ts_col = None
@@ -179,44 +179,18 @@ def build_regime_basis(df: pd.DataFrame, cfg: dict) -> tuple:
         df = df.set_index(pd.to_datetime(df[ts_col]))
         df = df.drop(columns=[ts_col], errors='ignore')
     
-    # Get numeric columns only
-    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-    Console.info(f"Found {len(numeric_cols)} numeric columns", component="REGIME_TEST")
-    
-    # Filter to OPERATING variables using tag taxonomy
-    operating_cols = []
-    condition_cols = []
-    
-    for col in numeric_cols:
-        col_lower = col.lower()
-        
-        # Check if it's an operating variable
-        is_operating = any(kw in col_lower for kw in regimes.OPERATING_TAG_KEYWORDS)
-        is_condition = any(kw in col_lower for kw in regimes.CONDITION_TAG_KEYWORDS)
-        
-        if is_operating and not is_condition:
-            operating_cols.append(col)
-        elif is_condition:
-            condition_cols.append(col)
-    
-    Console.info(f"Operating variables: {len(operating_cols)}", component="REGIME_TEST")
-    Console.info(f"Condition variables (excluded): {len(condition_cols)}", component="REGIME_TEST")
-    
-    if len(operating_cols) < 2:
-        Console.warn(f"Only {len(operating_cols)} operating cols found, using all numeric", component="REGIME_TEST")
-        operating_cols = numeric_cols[:20]  # Limit to avoid memory issues
-    
-    # Build basis DataFrame
-    basis = df[operating_cols].copy()
-    
-    # Handle missing values
-    basis = basis.ffill().bfill()
-    basis = basis.fillna(0)
-    
-    # Remove constant columns
-    non_const = basis.columns[basis.std() > 1e-6]
-    basis = basis[non_const]
-    
+    selected_cols, train_numeric, _, surface_meta = regimes.select_tag_agnostic_numeric_surface(df, df, cfg=cfg)
+    Console.info(
+        f"Selected {len(selected_cols)} tag-agnostic numeric columns from "
+        f"{surface_meta.get('candidate_count', 0)} candidates",
+        component="REGIME_TEST"
+    )
+
+    if len(selected_cols) < 2:
+        raise ValueError("Need at least 2 tag-agnostic numeric columns for regime test basis")
+
+    basis = train_numeric.ffill().bfill().fillna(train_numeric.median(axis=0, numeric_only=True)).fillna(0.0)
+
     Console.info(f"Regime basis: {basis.shape[0]} rows x {basis.shape[1]} features", component="REGIME_TEST")
     Console.info(f"Features: {list(basis.columns)[:10]}{'...' if len(basis.columns) > 10 else ''}", component="REGIME_TEST")
     
@@ -225,7 +199,7 @@ def build_regime_basis(df: pd.DataFrame, cfg: dict) -> tuple:
     basis_train = basis.iloc[:split_idx]
     basis_score = basis.iloc[split_idx:]
     
-    return basis_train, basis_score, operating_cols
+    return basis_train, basis_score, selected_cols
 
 
 def run_regime_detection(equip: str, days: int = 30, force_refit: bool = False, use_all: bool = False):

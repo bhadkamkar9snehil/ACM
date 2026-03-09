@@ -1378,30 +1378,51 @@ def persist_threshold_artifacts(
 def apply_contamination_filter_config(
     self_tune_cfg: Dict[str, Any],
     thresholds_cfg: Optional[Dict[str, Any]],
+    baseline_contamination_verdict: str = "unknown",
 ) -> Dict[str, Any]:
     """
     Apply contamination-filter settings into calibration self-tune config.
 
     Mutates and returns self_tune_cfg to preserve existing runtime behavior.
     """
-    contam_filter_cfg = (thresholds_cfg or {}).get("contamination_filter", {})
-    if contam_filter_cfg:
-        self_tune_cfg["contamination_filter"] = {
-            "enabled": contam_filter_cfg.get("enabled", True),
-            "method": contam_filter_cfg.get("method", "iterative_mad"),
-            "z_threshold": float(contam_filter_cfg.get("z_threshold", 4.0)),
-            "max_iterations": int(contam_filter_cfg.get("max_iterations", 10)),
-            "min_retained_ratio": float(contam_filter_cfg.get("min_retained_ratio", 0.70)),
-        }
-    else:
-        self_tune_cfg["contamination_filter"] = {
-            "enabled": True,
-            "method": "iterative_mad",
-            "z_threshold": 4.0,
-            "max_iterations": 10,
-            "min_retained_ratio": 0.70,
-        }
+    self_tune_cfg["contamination_filter"] = resolve_contamination_filter_policy(
+        thresholds_cfg=thresholds_cfg,
+        baseline_contamination_verdict=baseline_contamination_verdict,
+    )
     return self_tune_cfg
+
+
+def resolve_contamination_filter_policy(
+    thresholds_cfg: Optional[Dict[str, Any]],
+    baseline_contamination_verdict: str = "unknown",
+) -> Dict[str, Any]:
+    """
+    Resolve the effective contamination-filter policy for downstream consumers.
+
+    Clean baselines should not be filtered a second time during calibration or
+    adaptive-threshold fitting. Suspect or contaminated baselines retain the
+    configured downstream filter, if enabled.
+    """
+    contam_filter_cfg = dict((thresholds_cfg or {}).get("contamination_filter", {}) or {})
+    configured_enabled = bool(contam_filter_cfg.get("enabled", True))
+    verdict = str(baseline_contamination_verdict or "ok").strip().lower()
+
+    if verdict == "ok":
+        effective_enabled = False
+    elif verdict in {"suspect", "contaminated"}:
+        effective_enabled = configured_enabled
+    else:
+        effective_enabled = configured_enabled
+
+    return {
+        "enabled": effective_enabled,
+        "method": contam_filter_cfg.get("method", "iterative_mad"),
+        "z_threshold": float(contam_filter_cfg.get("z_threshold", 4.0)),
+        "max_iterations": int(contam_filter_cfg.get("max_iterations", 10)),
+        "min_retained_ratio": float(contam_filter_cfg.get("min_retained_ratio", 0.70)),
+        "configured_enabled": configured_enabled,
+        "baseline_contamination_verdict": verdict,
+    }
 
 
 def choose_pca_cache_for_calibration(
@@ -1592,6 +1613,7 @@ def run_calibration_stage(
     output_manager: Optional[Any] = None,
     logger: Any = Console,
     equip: str = "",
+    baseline_contamination_verdict: str = "unknown",
 ) -> CalibrationStageResult:
     """
     Run calibration stage end-to-end while keeping behavior parity with acm.py.
@@ -1609,6 +1631,7 @@ def run_calibration_stage(
     apply_contamination_filter_config(
         self_tune_cfg=self_tune_cfg,
         thresholds_cfg=(cfg or {}).get("thresholds", {}),
+        baseline_contamination_verdict=baseline_contamination_verdict,
     )
 
     pca_cached_for_train = choose_pca_cache_for_calibration(
@@ -2522,12 +2545,13 @@ class FusionResult:
 
 
 DEFAULT_WEIGHTS = {
-    "pca_spe_z": 0.30,
-    "pca_t2_z": 0.20,
-    "ar1_z": 0.20,
-    "iforest_z": 0.15,
+    "pca_spe_z": 0.28,
+    "pca_t2_z": 0.18,
+    "ar1_z": 0.18,
+    "iforest_z": 0.14,
     "gmm_z": 0.05,
-    "omr_z": 0.10,
+    "omr_z": 0.09,
+    "ewm_z": 0.08,   # v11.16.0: EWM zero-day baseline (always-on from observation 2)
 }
 
 
@@ -2712,7 +2736,7 @@ def apply_fusion_result_and_record_metrics(
     detector_scores = {
         "fused_z": float(fusion_result.fused_scores[-1]) if len(fusion_result.fused_scores) > 0 else 0.0
     }
-    for det in ["ar1_z", "pca_spe_z", "pca_t2_z", "iforest_z", "gmm_z", "omr_z"]:
+    for det in ["ar1_z", "pca_spe_z", "pca_t2_z", "iforest_z", "gmm_z", "omr_z", "ewm_z"]:
         if det in frame.columns:
             detector_scores[det] = float(frame[det].iloc[-1])
 
@@ -2826,6 +2850,7 @@ def run_health_stage(
     sql_client: Any,
     run_id: Optional[str],
     cached_manifest: Optional[Dict[str, Any]],
+    baseline_contamination_verdict: str = "unknown",
     score_all_detectors_fn: Optional[Any] = None,
     calibrate_all_detectors_fn: Optional[Any] = None,
     persist_calibration_params_fn: Optional[Any] = None,
@@ -2880,6 +2905,7 @@ def run_health_stage(
             output_manager=output_manager,
             logger=logger,
             equip=equip,
+            baseline_contamination_verdict=baseline_contamination_verdict,
         )
         frame = calibration_result.frame
         train_frame = calibration_result.train_frame
@@ -2918,6 +2944,7 @@ def run_health_stage(
             output_manager=output_manager,
             coldstart_complete=coldstart_complete,
             regime_quality_ok=regime_quality_ok,
+            baseline_contamination_verdict=baseline_contamination_verdict,
             logger=logger,
         )
 
@@ -2957,4 +2984,3 @@ def run_health_stage(
         quality_ok=quality_ok,
         use_per_regime=use_per_regime,
     )
-

@@ -1,23 +1,25 @@
 {
-  "generated_at": "2026-03-08T07:09:10+00:00",
-  "module_count": 41,
+  "generated_at": "2026-03-09T10:46:37+00:00",
+  "module_count": 43,
   "modules": [
     {
       "module_name": "core.acm",
       "source_path": "core/acm.py",
-      "symbol_count": 4,
-      "core_import_count": 16,
+      "symbol_count": 5,
+      "core_import_count": 18,
       "core_imports": [
         "core",
         "core.adaptive_thresholds",
         "core.detector_orchestrator",
         "core.episode_culprits_writer",
+        "core.ewm_baseline",
         "core.fast_features",
         "core.model_lifecycle",
         "core.model_persistence",
         "core.observability",
         "core.output_manager",
         "core.pipeline_types",
+        "core.regime_binner",
         "core.resource_monitor",
         "core.run_metadata_writer",
         "core.seasonality",
@@ -99,7 +101,7 @@
     {
       "module_name": "core.detector_orchestrator",
       "source_path": "core/detector_orchestrator.py",
-      "symbol_count": 13,
+      "symbol_count": 14,
       "core_import_count": 5,
       "core_imports": [
         "core",
@@ -122,6 +124,15 @@
       "module_name": "core.episode_culprits_writer",
       "source_path": "core/episode_culprits_writer.py",
       "symbol_count": 4,
+      "core_import_count": 1,
+      "core_imports": [
+        "core.observability"
+      ]
+    },
+    {
+      "module_name": "core.ewm_baseline",
+      "source_path": "core/ewm_baseline.py",
+      "symbol_count": 19,
       "core_import_count": 1,
       "core_imports": [
         "core.observability"
@@ -315,9 +326,18 @@
       "core_imports": []
     },
     {
+      "module_name": "core.regime_binner",
+      "source_path": "core/regime_binner.py",
+      "symbol_count": 16,
+      "core_import_count": 1,
+      "core_imports": [
+        "core.observability"
+      ]
+    },
+    {
       "module_name": "core.regimes",
       "source_path": "core/regimes.py",
-      "symbol_count": 55,
+      "symbol_count": 56,
       "core_import_count": 1,
       "core_imports": [
         "core.observability"
@@ -344,7 +364,7 @@
     {
       "module_name": "core.run_metadata_writer",
       "source_path": "core/run_metadata_writer.py",
-      "symbol_count": 12,
+      "symbol_count": 18,
       "core_import_count": 1,
       "core_imports": [
         "core.observability"
@@ -369,10 +389,11 @@
     {
       "module_name": "core.smart_coldstart",
       "source_path": "core/smart_coldstart.py",
-      "symbol_count": 18,
-      "core_import_count": 1,
+      "symbol_count": 19,
+      "core_import_count": 2,
       "core_imports": [
-        "core.observability"
+        "core.observability",
+        "core.run_metadata_writer"
       ]
     },
     {

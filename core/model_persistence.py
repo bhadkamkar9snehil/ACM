@@ -1697,6 +1697,7 @@ def run_model_persistence_and_lifecycle_stage(
     load_model_state_safe_fn: Optional[Any] = None,
     logger: Any = Console,
     save_trained_models_fn: Any = save_trained_models,
+    baseline_contamination_verdict: str = "unknown",
 ) -> "ModelPersistenceStageResult":
     """
     Persist trained models and update lifecycle state for the current run.
@@ -1744,6 +1745,7 @@ def run_model_persistence_and_lifecycle_stage(
             score_out=score_out,
             regime_quality_ok=regime_quality_ok,
             logger=logger,
+            baseline_contamination_verdict=baseline_contamination_verdict,
         )
 
     if model_state_out is None:
@@ -1814,6 +1816,7 @@ def run_model_adaptation_and_persistence_stage(
     update_and_persist_model_lifecycle_fn: Optional[Any] = None,
     load_model_state_safe_fn: Optional[Any] = None,
     force_retrain_requested: bool = False,
+    baseline_contamination_verdict: str = "unknown",
 ) -> ModelAdaptationPersistenceResult:
     """
     Execute auto-retrain decision and model persistence/lifecycle stages.
@@ -1881,6 +1884,7 @@ def run_model_adaptation_and_persistence_stage(
             update_and_persist_model_lifecycle_fn=update_and_persist_model_lifecycle_fn,
             load_model_state_safe_fn=load_model_state_safe_fn,
             logger=logger,
+            baseline_contamination_verdict=baseline_contamination_verdict,
         )
 
     return ModelAdaptationPersistenceResult(

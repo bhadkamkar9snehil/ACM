@@ -17,6 +17,7 @@ from typing import Optional, Tuple, Dict, Any, Callable
 from dataclasses import dataclass
 import pandas as pd
 from core.observability import Console
+from core.run_metadata_writer import zero_day_status_from_noop_reason
 
 
 def classify_noop_reason(
@@ -54,6 +55,45 @@ def classify_noop_reason(
     return "UNKNOWN_NOOP"
 
 
+def build_noop_observability(reason: str) -> Tuple[str, Dict[str, Any]]:
+    """
+    Build an operator-facing NOOP message with explicit scoring semantics.
+
+    This keeps two situations distinct:
+    - `COLDSTART_DEFERRED`: insufficient history, so this run does not score at all
+    - `SCORING_NO_DATA`: models may exist, but there is no new historian window to score
+    """
+    normalized = str(reason or "UNKNOWN_NOOP").strip().upper() or "UNKNOWN_NOOP"
+
+    if normalized == "SCORING_NO_DATA":
+        return (
+            "NOOP - no new data in historian window (models exist); zero-day scoring inactive on this run",
+            {
+                "noop_reason": normalized,
+                "zero_day_scoring_active": False,
+                "legacy_fit_ready": True,
+            },
+        )
+
+    if normalized == "COLDSTART_DEFERRED":
+        return (
+            "NOOP - coldstart deferred; insufficient history for legacy detector fit and zero-day scoring is inactive on this run",
+            {
+                "noop_reason": normalized,
+                "zero_day_scoring_active": False,
+                "legacy_fit_ready": False,
+            },
+        )
+
+    return (
+        "NOOP - load stage stopped before scoring",
+        {
+            "noop_reason": normalized,
+            "zero_day_scoring_active": False,
+        },
+    )
+
+
 @dataclass
 class DataLoadStageResult:
     """Result bundle for load-data stage orchestration."""
@@ -62,6 +102,7 @@ class DataLoadStageResult:
     meta: Optional[Any]
     coldstart_complete: bool
     should_continue: bool
+    noop_reason: Optional[str] = None
 
 
 def load_and_validate_data_stage(
@@ -112,20 +153,22 @@ def load_and_validate_data_stage(
             meta=meta,
             coldstart_complete=coldstart_complete,
         )
-        if reason == "SCORING_NO_DATA":
-            logger.info("NOOP - no new data in historian window (models exist)", component="COLDSTART")
-        else:
-            logger.info(
-                "Coldstart deferred - insufficient history for training, will retry next run",
-                component="COLDSTART",
-            )
-        finalize_noop_run_fn(sql_client=sql_client, run_id=run_id, logger=logger)
+        noop_message, noop_fields = build_noop_observability(reason)
+        logger.info(noop_message, component="COLDSTART", **noop_fields)
+        finalize_noop_run_fn(
+            sql_client=sql_client,
+            run_id=run_id,
+            logger=logger,
+            zero_day_status=zero_day_status_from_noop_reason(reason),
+            equip_id=equip_id,
+        )
         return DataLoadStageResult(
             train=train,
             score=score,
             meta=meta,
             coldstart_complete=coldstart_complete,
             should_continue=False,
+            noop_reason=reason,
         )
 
     record_coldstart_fn(equip)
@@ -159,13 +202,20 @@ def load_and_validate_data_stage(
             equip=equip,
             run_id=run_id,
         )
-        finalize_noop_run_fn(sql_client=sql_client, run_id=run_id, logger=logger)
+        finalize_noop_run_fn(
+            sql_client=sql_client,
+            run_id=run_id,
+            logger=logger,
+            zero_day_status=zero_day_status_from_noop_reason("SCORING_NO_DATA"),
+            equip_id=equip_id,
+        )
         return DataLoadStageResult(
             train=train,
             score=score,
             meta=meta,
             coldstart_complete=coldstart_complete,
             should_continue=False,
+            noop_reason="SCORING_NO_DATA",
         )
 
     logger.info(
@@ -181,6 +231,7 @@ def load_and_validate_data_stage(
         meta=meta,
         coldstart_complete=coldstart_complete,
         should_continue=True,
+        noop_reason=None,
     )
 
 

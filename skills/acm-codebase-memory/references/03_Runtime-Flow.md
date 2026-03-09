@@ -1,6 +1,7 @@
 ---
 type: reference
-generated_at: 2026-03-08T07:09:10+00:00
+auto-updated: true
+generated_at: 2026-03-09T10:46:37+00:00
 ---
 
 # Runtime Flow
@@ -26,5 +27,6 @@ Main high-level sequence:
 16. write run metadata and finalize run
 
 Read next:
+- [[knowledge/Pipeline-Stages]] — detailed per-stage breakdown with owners and line numbers
 - [[01_Modules]]
 - [[04_Outputs-and-Status]]

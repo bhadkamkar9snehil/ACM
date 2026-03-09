@@ -17,9 +17,69 @@ Release Management:
 - Production deployments use specific tags (never merge commits)
 """
 
-__version__ = "11.16.3"
+__version__ = "11.17.0"
 __version_date__ = "2026-03-09"
 __version_author__ = "ACM Development Team"
+
+# v11.17.0 (2026-03-09) — Zero-day EWM system, OnlinePCABinner, baseline contamination gate
+#
+# Major new capability tier: ACM now monitors from observation 2 with no domain knowledge,
+# uses a data-driven online regime proxy before HDBSCAN convergence, and self-evaluates
+# training data quality to block promotion when learning from faults.
+#
+# 1. core/ewm_baseline.py (NEW): EWMBaselineManager — dual-rate EWM (α_fast=0.05,
+#    α_slow=0.005) zero-day detector. Vectorised per-(regime,sensor) score/update.
+#    Freeze logic: P50<0.35 AND P95<1.5 = baseline chasing fault → hold.
+#    SQL: ACM_EWMBaseline (migration 014). State versioned (EWM_STATE_VERSION=2).
+#
+# 2. core/regime_binner.py (NEW): OnlinePCABinner — tag-agnostic online regime proxy.
+#    EWM covariance + power-iteration PC1 → percentile bins → integer regime IDs.
+#    Works on any sensor naming (sensor_N_avg or named). SQL: ACM_RegimeBinnerState
+#    (migration 015). Replaces ControlVariableBinner entirely. Phase 3 remap:
+#    HDBSCAN cluster IDs replace binner IDs after first stable convergence.
+#
+# 3. core/detector_orchestrator.py: assess_baseline_contamination() — model
+#    self-evaluates training data quality post-fit. Rate >40% + block >20%
+#    → verdict=contaminated. Config-driven thresholds (models.baseline_contamination.*).
+#
+# 4. core/model_lifecycle.py: contaminated verdict gates LEARNING→CONVERGED
+#    promotion. Model stays LEARNING until a cleaner training window is available.
+#    suspect verdict allows promotion but flags calibration for stricter filtering.
+#
+# 5. core/fuse.py: resolve_contamination_filter_policy() — verdict-aware calibration
+#    filter. Clean baseline (ok) → filter disabled (no double-filtering). Suspect /
+#    contaminated → filter as configured. ewm_z added to DEFAULT_WEIGHTS (0.08);
+#    all 7 weights rebalanced to sum=1.0.
+#
+# 6. core/adaptive_thresholds.py: build_threshold_calculator_from_config() —
+#    verdict-aware threshold calculator. Threads baseline_contamination_verdict
+#    through calculate_thresholds_from_config() and calculate_and_persist_thresholds().
+#
+# 7. core/run_metadata_writer.py: ZeroDayRunStatus dataclass + write_zero_day_run_status()
+#    persists per-run day-0 status to ACM_Runs (migration 017). Graceful skip if
+#    schema not yet migrated.
+#
+# 8. core/acm.py: EWM scoring wired on explicit raw numeric surface (not detector
+#    feature frame). OnlinePCABinner as HDBSCAN fallback. Phase 3 remap logic.
+#    baseline_contamination_verdict threaded to health stage, calibration, thresholds.
+#
+# 9. core/regimes.py: tag-agnostic numeric surface selector. _classify_tag() removed
+#    from active paths. REGIME_MODEL_VERSION=5.0 invalidates naming-dependent cache.
+#
+# 10. SQL migrations: 014 (ACM_EWMBaseline), 015 (ACM_RegimeBinnerState),
+#     016 (EWM StateVersion column), 017 (ACM_Runs ZeroDay columns).
+#
+# 11. configs/config_table.csv: EWM, contamination, binner, surface params added.
+#     Fusion weights rebalanced. Synced to SQL via populate_acm_config.py.
+#
+# 12. Infrastructure: CLAUDE.md, scripts/acm_session_start.py, tools/mcp_sql_server.py,
+#     .claude/skills (bug-fix-plan, commit-changelog, log-triage), docs/ClaudePlan_01.md.
+#
+# 13. tests/test_v11_modules.py: 24 new tests covering zero-day status, OnlinePCABinner
+#     SQL round-trip/remap, EWM state versioning, contamination filter policy,
+#     tag-agnostic surface selector, verdict-aware threshold calculator.
+#
+# Co-Authored-By: Claude Sonnet 4.6
 
 # v11.16.3 (2026-03-09) — Fix refit-every-batch feedback loop for LEARNING models
 #

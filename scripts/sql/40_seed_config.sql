@@ -4,6 +4,11 @@
 -- Populates ACM_Config table with equipment-specific configurations
 -- from existing YAML config files.
 --
+-- NOTE:
+-- - `configs/config_table.csv` is the canonical source of config truth.
+-- - This script is a convenience seed for empty environments and must stay
+--   aligned with the active runtime contract.
+--
 -- Structure:
 --   EquipID = 0: Global defaults (applies to all equipment unless overridden)
 --   EquipID > 0: Equipment-specific overrides (FK to Equipments table)
@@ -116,12 +121,14 @@ VALUES
 -- Fusion weights (active detectors only)
 INSERT INTO ACM_Config (EquipID, Category, ParamPath, ParamValue, ValueType, UpdatedBy, ChangeReason)
 VALUES
-    (0, 'fusion', 'fusion.weights.ar1_z', '0.20', 'float', 'SYSTEM', 'Initial seed'),
-    (0, 'fusion', 'fusion.weights.iforest_z', '0.15', 'float', 'SYSTEM', 'Initial seed'),
+    (0, 'fusion', 'fusion.weights.ar1_z', '0.18', 'float', 'SYSTEM', 'Initial seed'),
+    (0, 'fusion', 'fusion.weights.iforest_z', '0.14', 'float', 'SYSTEM', 'Initial seed'),
     (0, 'fusion', 'fusion.weights.gmm_z', '0.05', 'float', 'SYSTEM', 'Initial seed'),
-    (0, 'fusion', 'fusion.weights.pca_spe_z', '0.30', 'float', 'SYSTEM', 'Initial seed'),
-    (0, 'fusion', 'fusion.weights.pca_t2_z', '0.20', 'float', 'SYSTEM', 'Initial seed'),
-    (0, 'fusion', 'fusion.weights.omr_z', '0.10', 'float', 'SYSTEM', 'Initial seed'),
+    (0, 'fusion', 'fusion.weights.pca_spe_z', '0.28', 'float', 'SYSTEM', 'Initial seed'),
+    (0, 'fusion', 'fusion.weights.pca_t2_z', '0.18', 'float', 'SYSTEM', 'Initial seed'),
+    (0, 'fusion', 'fusion.weights.omr_z', '0.09', 'float', 'SYSTEM', 'Initial seed'),
+    (0, 'fusion', 'fusion.weights.ewm_z', '0.08', 'float', 'SYSTEM', 'Initial seed'),
+    (0, 'fusion', 'fusion.omr_correlation_disable_threshold', '0.95', 'float', 'SYSTEM', 'Initial seed'),
     
     (0, 'fusion', 'fusion.cooldown', '10', 'int', 'SYSTEM', 'Initial seed'),
     (0, 'fusion', 'fusion.min_silent_gap', '10', 'int', 'SYSTEM', 'Initial seed'),
@@ -135,8 +142,35 @@ VALUES
     (0, 'thresholds', 'thresholds.q', '0.98', 'float', 'SYSTEM', 'Initial seed'),
     (0, 'thresholds', 'thresholds.self_tune.enabled', 'true', 'bool', 'SYSTEM', 'Initial seed'),
     (0, 'thresholds', 'thresholds.self_tune.target_fp_rate', '0.001', 'float', 'SYSTEM', 'Initial seed'),
-    (0, 'thresholds', 'thresholds.alert', '0.85', 'float', 'SYSTEM', 'Initial seed'),
-    (0, 'thresholds', 'thresholds.warn', '0.70', 'float', 'SYSTEM', 'Initial seed');
+    (0, 'thresholds', 'thresholds.alert', '3.0', 'float', 'SYSTEM', 'Initial seed'),
+    (0, 'thresholds', 'thresholds.warn', '1.5', 'float', 'SYSTEM', 'Initial seed'),
+    (0, 'thresholds', 'thresholds.contamination_filter.enabled', 'true', 'bool', 'SYSTEM', 'Initial seed'),
+    (0, 'thresholds', 'thresholds.contamination_filter.method', 'iterative_mad', 'string', 'SYSTEM', 'Initial seed'),
+    (0, 'thresholds', 'thresholds.contamination_filter.z_threshold', '4.0', 'float', 'SYSTEM', 'Initial seed'),
+    (0, 'thresholds', 'thresholds.contamination_filter.max_iterations', '10', 'int', 'SYSTEM', 'Initial seed'),
+    (0, 'thresholds', 'thresholds.contamination_filter.min_retained_ratio', '0.70', 'float', 'SYSTEM', 'Initial seed');
+
+-- Baseline contamination self-assessment
+INSERT INTO ACM_Config (EquipID, Category, ParamPath, ParamValue, ValueType, UpdatedBy, ChangeReason)
+VALUES
+    (0, 'models', 'models.baseline_contamination.alert_z', '3.0', 'float', 'SYSTEM', 'Initial seed'),
+    (0, 'models', 'models.baseline_contamination.suspect_rate', '0.15', 'float', 'SYSTEM', 'Initial seed'),
+    (0, 'models', 'models.baseline_contamination.contaminated_rate', '0.40', 'float', 'SYSTEM', 'Initial seed'),
+    (0, 'models', 'models.baseline_contamination.sustained_block_threshold', '0.20', 'float', 'SYSTEM', 'Initial seed');
+
+-- Zero-day EWM baseline and online regime proxy
+INSERT INTO ACM_Config (EquipID, Category, ParamPath, ParamValue, ValueType, UpdatedBy, ChangeReason)
+VALUES
+    (0, 'models', 'models.ewm_baseline.enabled', 'true', 'bool', 'SYSTEM', 'Initial seed'),
+    (0, 'models', 'models.ewm_baseline.alpha_fast', '0.05', 'float', 'SYSTEM', 'Initial seed'),
+    (0, 'models', 'models.ewm_baseline.alpha_slow', '0.005', 'float', 'SYSTEM', 'Initial seed'),
+    (0, 'models', 'models.ewm_baseline.anomaly_z', '3.0', 'float', 'SYSTEM', 'Initial seed'),
+    (0, 'models', 'models.ewm_baseline.n_bins', '3', 'int', 'SYSTEM', 'Initial seed'),
+    (0, 'models', 'models.ewm_baseline.min_rows_for_assignment', '20', 'int', 'SYSTEM', 'Initial seed'),
+    (0, 'models', 'models.ewm_baseline.proxy_alpha', '0.05', 'float', 'SYSTEM', 'Initial seed'),
+    (0, 'models', 'models.ewm_baseline.proxy_history_limit', '512', 'int', 'SYSTEM', 'Initial seed'),
+    (0, 'models', 'models.ewm_baseline.surface.min_valid_fraction', '0.60', 'float', 'SYSTEM', 'Initial seed'),
+    (0, 'models', 'models.ewm_baseline.surface.min_iqr', '0.000001', 'float', 'SYSTEM', 'Initial seed');
 
 -- River (online learning) configuration
 INSERT INTO ACM_Config (EquipID, Category, ParamPath, ParamValue, ValueType, UpdatedBy, ChangeReason)
@@ -156,7 +190,9 @@ VALUES
     (0, 'regimes', 'regimes.auto_k.pca_dim', '20', 'int', 'SYSTEM', 'Initial seed'),
     (0, 'regimes', 'regimes.auto_k.sil_sample', '4000', 'int', 'SYSTEM', 'Initial seed'),
     (0, 'regimes', 'regimes.auto_k.random_state', '17', 'int', 'SYSTEM', 'Initial seed'),
-    (0, 'regimes', 'regimes.feature_basis.n_pca_components', '3', 'int', 'SYSTEM', 'Initial seed');
+    (0, 'regimes', 'regimes.feature_basis.max_cols', '24', 'int', 'SYSTEM', 'Initial seed'),
+    (0, 'regimes', 'regimes.feature_basis.min_valid_fraction', '0.60', 'float', 'SYSTEM', 'Initial seed'),
+    (0, 'regimes', 'regimes.feature_basis.min_iqr', '0.000001', 'float', 'SYSTEM', 'Initial seed');
 
 -- Output configuration
 INSERT INTO ACM_Config (EquipID, Category, ParamPath, ParamValue, ValueType, UpdatedBy, ChangeReason)
@@ -202,4 +238,3 @@ ORDER BY ParamPath;
 
 PRINT 'ACM Config seeded successfully. Run verification queries above to confirm.';
 GO
-
