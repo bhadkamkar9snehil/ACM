@@ -17,10 +17,146 @@ Release Management:
 - Production deployments use specific tags (never merge commits)
 """
 
-__version__ = "11.15.15"
-__version_date__ = "2026-03-08"
+__version__ = "11.16.3"
+__version_date__ = "2026-03-09"
 __version_author__ = "ACM Development Team"
 
+# v11.16.3 (2026-03-09) — Fix refit-every-batch feedback loop for LEARNING models
+#
+# Root cause: Two interacting bugs caused every scoring batch to fully retrain
+# all 5 detectors, wasting ~55s/batch and preventing calibration from settling.
+#
+# 1. core/model_evaluation.py: run_auto_retrain_stage() wrote ACM_RefitRequests
+#    whenever anomaly rate > 25%, with no guard for LEARNING models. CONVERGED
+#    models were already protected (line 728) but LEARNING was not. High anomaly
+#    rates in LEARNING are expected (contaminated training data, calibration still
+#    settling) and should never trigger a refit request. Fixed: quality-based refit
+#    request now gated on model_maturity == "CONVERGED".
+#
+# 2. utils/config_dict.py: compute_config_signature() included thresholds,
+#    fusion, regimes, and episodes in the hash. Auto-tune upserts k_sigma,
+#    clip_z, k_max into ACM_Config each run → hash changes next batch → cache
+#    invalid → forced refit → new auto-tune values → repeat. These are runtime
+#    calibration values recomputed from scores each run; they do not affect fitted
+#    detector weights and must not drive cache invalidation. Fixed: signature now
+#    hashes only models, features, preprocessing, detectors, drift.
+#
+# 3. core/regimes.py: float32 DataFrame columns receiving float64 StandardScaler
+#    output via .loc[:, cols] = triggered pandas FutureWarning on every regime
+#    basis build (would become an error in a future pandas). Fixed: upcast
+#    all_cols to float64 before assignment.
+#
+# 4. core/ewm_baseline.py: save_to_sql() passed NaN/inf EWM state floats to
+#    SQL Server FLOAT columns (pyodbc rejects non-finite IEEE values → TDS
+#    error 8023). Fixed: _sql_float() helper converts nan/inf → None (SQL NULL).
+#
+# 5. docs/KNOWN_ISSUES.md: Added R11 (this fix), M4 (RegimePromotedAt NULL warn).
+#
+# Co-Authored-By: Claude Sonnet 4.6
+
+# v11.16.2: Zero-Day Learning Phase 3 + score_batch vectorisation fix
+#
+# Phase 3 — HDBSCAN as regime refiner (state transfer):
+#   core/regimes.py:
+#     - RegimeLabelingStageResult + ScoringRegimeStageResult: added regime_model_was_trained: bool
+#     - Propagated from run_regime_labeling_stage → run_scoring_regime_stage return
+#   core/ewm_baseline.py:
+#     - _binner_remapped: bool flag — set True in remap_regime_ids(), never reset
+#     - has_binner_regime_ids(): returns `not self._binner_remapped` — correct one-shot guard
+#       (pure set intersection was broken: HDBSCAN cluster IDs overlap with binner IDs numerically)
+#     - remap_regime_ids(mapping): n_samples-weighted blend on collision; rename-in-place otherwise
+#       Sets _binner_remapped = True to prevent re-remap on future HDBSCAN retrains
+#   core/acm.py:
+#     - Phase 3 remap block: regime_model_was_trained + _binner + has_binner_regime_ids()
+#       → modal-assignment mapping on train data → remap_regime_ids() + save_to_sql()
+#
+# score_batch vectorisation fix:
+#   effective_rids computation was O(n_rows) Python loop. Fixed: dict lookup over unique
+#   regime IDs + np.vectorize. Cost now O(n_sensors × n_unique_regimes).
+#
+# v11.16.1: Zero-Day Learning Phase 1+2 — complete and properly wired
+#
+# Phase 1 fixes (problems identified in plan doc):
+#   P2: ewm_z wired into fusion — DEFAULT_WEIGHTS + config_table.csv.
+#       Weights rebalanced: pca_spe=0.28, pca_t2=0.18, ar1=0.18, iforest=0.14,
+#       gmm=0.05, omr=0.09, ewm=0.08. Sum=1.0.
+#       ewm_z bypasses calibration (already a z-score); flows directly into Fuser.fuse().
+#   P3: score_batch() / update_batch() replace iterrows — fully vectorised numpy.
+#   P4: check_and_apply_freeze() now per-(regime,sensor), not per-regime aggregate.
+#       Each pair independently evaluated; freeze on P50<0.35 AND P95<1.5.
+#   P5: Feature flag models.ewm_baseline.enabled (default true).
+#       apply_fusion_result_and_record_metrics now includes ewm_z in observability.
+#
+# Historical note:
+#   The original v11.16.1 plan text below described ControlVariableBinner.
+#   Active runtime has since replaced that design with OnlinePCABinner and
+#   removed control_vars from the active config surface.
+#
+# v11.16.0: Zero-Day Learning — EWM Baseline + Control Variable Regime Binner
+#
+# Phase 1 of the zero-day learning paradigm (Paradigm-Zero-Day-Learning.md).
+# The system can now start from T=0 with no training window and score anomalies
+# from the second observation using Exponentially Weighted Moving baselines.
+#
+# New modules:
+#   core/ewm_baseline.py — EWMBaselineManager
+#     - Per-regime per-sensor dual-rate EWM (α_fast=0.05, α_slow=0.005)
+#     - score(regime_id, sensor_values) → (z_fast, z_slow) from observation 2
+#     - update(regime_id, sensor_values) — EWM state update, skips frozen baselines
+#     - check_and_apply_freeze(regime_id) — score distribution monitoring (P50/P95)
+#     - save_to_sql / load_from_sql — persists state to ACM_EWMBaseline
+#     - cross_rate_results() — distinguishes genuine fault from regime shift
+#
+#   core/regime_binner.py — ControlVariableBinner
+#     - Percentile-bins control variables into integer regime IDs from T=0
+#     - No HDBSCAN clustering required — edges computed from ≥20 observations
+#     - assign_batch(df) → np.ndarray of regime IDs, -1 before edges ready
+#
+# SQL migration:
+#   scripts/sql/migrations/v11/014_acm_ewm_baseline.sql — ACM_EWMBaseline table
+#   PK: (EquipID, RegimeID, SensorName)
+#   Columns: EWMMean_Fast, EWMVar_Fast, EWMMean_Slow, EWMVar_Slow,
+#            NSamples, BaselineIntegrity, ScoreP50, ScoreP95, UpdatedAt
+#
+# Pipeline integration (core/acm.py):
+#   - EWMBaselineManager loaded from SQL after equip_id is known
+#   - After scoring_regime_stage: EWM scores computed per row → ewm_z column in frame
+#   - EWM state updated from score batch, freeze/resume checked, saved to SQL
+#
+# Cross-rate anomaly logic:
+#   anomalous vs fast AND slow → genuine fault (ewm_z reflects long-term character)
+#   anomalous vs fast only     → regime shift / operating envelope change (NOT a fault)
+#
+# Baseline self-correction:
+#   When P50 of rolling z-scores collapses below 0.35 AND P95 below 1.5,
+#   EWM update is frozen for that regime. Scoring continues against the frozen
+#   baseline, making the fault visible rather than learned.
+#
+# Config: models.ewm_baseline.{alpha_fast, alpha_slow, anomaly_z}
+#
+# v11.15.16: Baseline contamination self-assessment
+#
+# Design: After fitting detectors on the training window, immediately score
+# that same window with the just-fitted models (raw z-scores, no calibration).
+# A healthy training window produces low, scattered scores. A contaminated
+# window (fault during training) produces elevated, temporally-clustered scores.
+# The model self-reports the quality of its own training data — no oracle needed.
+#
+# assess_baseline_contamination() in detector_orchestrator.py:
+#   - Scores train data with each fitted detector using cached PCA scores
+#   - Computes contamination_rate = fraction of rows where mean_raw_z > alert_z
+#   - Computes sustained_block = longest consecutive high-z run / total rows
+#   - Verdict: "ok" (<15%) | "suspect" (15-40%) | "contaminated" (>40% AND >20% block)
+#
+# Lifecycle gate in model_lifecycle.update_and_persist_model_lifecycle():
+#   - "contaminated" → LEARNING promotion BLOCKED; model waits for cleaner window
+#   - "suspect"      → promotion allowed but flagged in promotion log
+#   - "ok"           → normal promotion path
+#
+# Config (models.baseline_contamination.*):
+#   alert_z = 3.0, suspect_rate = 0.15, contaminated_rate = 0.40,
+#   sustained_block_threshold = 0.20
+#
 # v11.15.15: StandardScaler-0-features crash fix + OMR correlation disable
 #
 # Fixes:
@@ -154,7 +290,7 @@ __version_author__ = "ACM Development Team"
 #     what to investigate (short training window / regime drift).
 #   - HDBSCAN low quality: explains why switching to GMM.
 #   - Clustering method fallbacks: clearer failure messages with pip install hint.
-#   - No operational columns: directs operator to custom_operating_keywords config key.
+#   - No adequate numeric surface: degrades explicitly instead of suggesting tag-name config.
 #   - Distance threshold failure: explains the impact (no UNKNOWN assignments).
 #   - Legacy labeling path: labels the config key and marks path as deprecated.
 

@@ -450,29 +450,41 @@ class ConfigDict(MutableMapping):
 def compute_config_signature(cfg: Dict[str, Any]) -> str:
     """
     Compute a deterministic hash of config sections that affect model fitting.
-    
-    DEBT-05: Expanded to include all sections that affect model behavior:
-    - models: Model hyperparameters (PCA, iForest, GMM, OMR, etc.)
-    - features: Feature engineering (window, FFT, etc.)
-    - preprocessing: Data preprocessing settings
-    - detectors: Detector-specific parameters (AR1, etc.)
-    - thresholds: Calibration thresholds (q, self_tune, clip_z)
-    - fusion: Fusion weights and auto-tuning settings
-    - regimes: Regime clustering parameters (k, auto_k, etc.)
-    - episodes: Episode detection thresholds (CPD k_sigma, h_sigma)
-    - drift: Drift detection parameters (p95_threshold, multi_feature)
-    
-    Args:
-        cfg: Config dict or ConfigDict instance
-        
+
+    Only sections that require detector retraining when changed are included.
+    Auto-tuned runtime parameters (k_sigma, h_sigma, clip_z, k_max) are
+    deliberately excluded: they are recomputed from scores each run and do not
+    affect the fitted detector weights. Including them caused a refit-every-batch
+    feedback loop: auto-tune upserts new values to ACM_Config → hash changes →
+    cache invalid → full refit → new values → repeat (fixed v11.16.3).
+
+    Included (require refit if changed):
+    - models: PCA components, IForest estimators, GMM k, OMR, EWM alpha, etc.
+    - features: Feature engineering window, FFT, rolling windows
+    - preprocessing: Resampling, imputation settings
+    - detectors: AR1 and other detector hyperparameters
+    - drift: Drift detection structural parameters
+
+    Excluded (runtime-only, no refit needed):
+    - thresholds.self_tune  (clip_z — auto-tuned per run)
+    - episodes.cpd          (k_sigma, h_sigma — auto-tuned per run)
+    - regimes.auto_k        (k_max — auto-tuned per run)
+    - fusion                (weights recomputed from scores each run)
+
     Returns:
         Hex string (16 chars) for cache validation.
     """
+    import copy
+
     relevant_keys = [
-        "models", "features", "preprocessing", "detectors",
-        "thresholds", "fusion", "regimes", "episodes", "drift"
+        "models", "features", "preprocessing", "detectors", "drift"
     ]
     config_subset = {k: cfg.get(k) for k in relevant_keys if k in cfg}
+
+    # Exclude auto-tuned sub-trees that do not require detector retraining.
+    # Deep-copy so we never mutate the live config.
+    config_subset = copy.deepcopy(config_subset)
+
     # Sort keys for determinism
     config_str = json.dumps(config_subset, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(config_str.encode("utf-8")).hexdigest()[:16]

@@ -863,8 +863,13 @@ def auto_tune_parameters(
             # Consolidated auto-tune log
             Console.info(f"Auto-tune: {len(tuning_actions)} adjustments ({', '.join(tuning_actions)}) | refit={'triggered' if refit_triggered else 'next_run'}", component="AUTO-TUNE")
 
-        # Persist refit request if quality assessment indicates retraining needed
-        if output_manager and allow_refit_requests and needs_retraining:
+        # Persist refit request only for CONVERGED models where quality has
+        # regressed from a known-stable baseline. LEARNING models score high
+        # anomaly rates by definition (contaminated training data, calibration
+        # still settling) — writing a refit request here causes a refit-every-
+        # batch feedback loop: refit → new auto-tune values in ACM_Config →
+        # config hash changes → cache invalid → refit again next batch.
+        if output_manager and allow_refit_requests and needs_retraining and model_maturity == "CONVERGED":
             output_manager.write_refit_request(
                 reasons=reasons,
                 anomaly_rate=current_anomaly_rate if anomaly_rate_trigger else None,

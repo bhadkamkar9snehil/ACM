@@ -41,7 +41,7 @@ try:
 except Exception:  # pragma: no cover - scipy optional in some deployments
     _median_filter = None
 
-REGIME_MODEL_VERSION = "4.0"  # v11.4.0: RAW SENSORS ONLY - removed health-state features
+REGIME_MODEL_VERSION = "5.0"  # v11.16.x: tag-agnostic regime surface replaces taxonomy-based basis
 
 # v11.3.1: DEPRECATED - UNKNOWN_REGIME_LABEL (-1) is no longer produced
 # Equipment is ALWAYS in some physical operating state. Instead of UNKNOWN:
@@ -53,39 +53,10 @@ REGIME_MODEL_VERSION = "4.0"  # v11.4.0: RAW SENSORS ONLY - removed health-state
 # check for -1, but new code should never produce it.
 UNKNOWN_REGIME_LABEL = -1  # DEPRECATED: Do not produce this value
 
-# OPERATING_TAG_KEYWORDS: Variables that define the operating mode/regime
-# These represent controllable or process-driven operating conditions
-OPERATING_TAG_KEYWORDS = [
-    # Speed/rotation
-    "speed", "rpm", "frequency", "hz", "vfd",
-    # Load/power
-    "load", "power", "torque", "kw", "mw",
-    # Process variables
-    "flow", "pressure", "discharge", "suction", "differential",
-    # Control positions
-    "valve", "guide_vane", "igv", "damper", "position",
-    # Electrical (primary, not secondary effects)
-    "current", "voltage", "amps",
-    # Ambient/inlet conditions (environmental, not machine health)
-    "ambient", "inlet_temp", "inlet_pressure", "atmospheric",
-]
-
-# CONDITION_TAG_KEYWORDS: Variables that indicate machine health/condition
-# These should NEVER be used for regime clustering - they are health indicators
-CONDITION_TAG_KEYWORDS = [
-    # Bearing health
-    "bearing", "brg", "journal",
-    # Winding/electrical health
-    "winding", "stator", "rotor",
-    # Vibration (always condition, never operating mode)
-    "vibration", "vib", "velocity", "acceleration", "displacement",
-    # Oil/lubrication health
-    "oil_temp", "oil_pressure", "debris", "particle", "contamination",
-    # Thermal degradation indicators
-    "exhaust", "hot_spot", "thermal",
-    # Acoustic/ultrasonic
-    "acoustic", "ultrasonic", "noise",
-]
+# Tag-agnostic surface defaults for early regime/context inference.
+_DEFAULT_SURFACE_MAX_COLS = 24
+_DEFAULT_SURFACE_MIN_VALID_FRACTION = 0.60
+_DEFAULT_SURFACE_MIN_IQR = 1e-6
 
 # v11.4.0: HEALTH-STATE FEATURES REMOVED FROM REGIME CLUSTERING
 # Regime clustering now uses RAW SENSOR VALUES ONLY.
@@ -511,49 +482,154 @@ def _compute_training_distances(
     return threshold, distances
 
 
-def _classify_tag(col_name: str, cfg: Optional[Dict[str, Any]] = None) -> str:
+def select_tag_agnostic_numeric_surface(
+    train_df: pd.DataFrame,
+    score_df: pd.DataFrame,
+    cfg: Optional[Dict[str, Any]] = None,
+    *,
+    max_cols: Optional[int] = None,
+    min_valid_fraction: Optional[float] = None,
+    min_iqr: Optional[float] = None,
+) -> Tuple[List[str], pd.DataFrame, pd.DataFrame, Dict[str, Any]]:
     """
-    Classify a sensor tag as 'operating' or 'condition' based on taxonomy.
-    
-    v11.1.6 FIX #1: Explicit tag classification to prevent regime contamination.
-    
-    Args:
-        col_name: Column/tag name to classify
-        cfg: Optional config with custom keyword overrides
-    
-    Returns:
-        'operating' if tag represents operating mode variable
-        'condition' if tag represents health/condition indicator
-        'unknown' if cannot be classified
+    Select a deterministic, tag-agnostic numeric surface shared by train and score.
+
+    Selection policy:
+    1. Keep columns present in both frames with numeric dtype in at least one frame.
+    2. Require minimum finite fraction on the train frame.
+    3. Rank remaining columns by train-frame IQR (descending, then name).
+    4. Keep the top-N columns.
+
+    The returned frames are numeric-only and coerced to float with inf -> NaN.
+    Filling happens in the caller because different call sites may want different
+    imputation semantics.
     """
-    col_lower = col_name.lower()
-    
-    # Get custom keywords from config if provided
     basis_cfg = _cfg_get(cfg or {}, "regimes.feature_basis", {}) or {}
-    custom_operating = basis_cfg.get("custom_operating_keywords", [])
-    custom_condition = basis_cfg.get("custom_condition_keywords", [])
-    
-    # Check custom condition keywords FIRST (explicit exclusions take priority)
-    for kw in custom_condition:
-        if kw.lower() in col_lower:
-            return "condition"
-    
-    # Check default condition keywords
-    for kw in CONDITION_TAG_KEYWORDS:
-        if kw in col_lower:
-            return "condition"
-    
-    # Check custom operating keywords
-    for kw in custom_operating:
-        if kw.lower() in col_lower:
-            return "operating"
-    
-    # Check default operating keywords
-    for kw in OPERATING_TAG_KEYWORDS:
-        if kw in col_lower:
-            return "operating"
-    
-    return "unknown"
+    resolved_max_cols = (
+        int(max_cols)
+        if max_cols is not None
+        else int(basis_cfg.get("max_cols", _DEFAULT_SURFACE_MAX_COLS))
+    )
+    resolved_min_valid_fraction = (
+        float(min_valid_fraction)
+        if min_valid_fraction is not None
+        else float(basis_cfg.get("min_valid_fraction", _DEFAULT_SURFACE_MIN_VALID_FRACTION))
+    )
+    resolved_min_iqr = (
+        float(min_iqr)
+        if min_iqr is not None
+        else float(basis_cfg.get("min_iqr", _DEFAULT_SURFACE_MIN_IQR))
+    )
+
+    common_cols = [col for col in train_df.columns if col in score_df.columns]
+    numeric_cols = [
+        col for col in common_cols
+        if pd.api.types.is_numeric_dtype(train_df[col]) or pd.api.types.is_numeric_dtype(score_df[col])
+    ]
+
+    if not numeric_cols:
+        empty = pd.DataFrame(index=train_df.index), pd.DataFrame(index=score_df.index)
+        return [], empty[0], empty[1], {
+            "surface_type": "tag_agnostic_numeric",
+            "candidate_count": 0,
+            "selected_count": 0,
+            "min_valid_fraction": resolved_min_valid_fraction,
+            "min_iqr": resolved_min_iqr,
+            "max_cols": resolved_max_cols,
+        }
+
+    train_numeric = (
+        train_df.reindex(columns=numeric_cols)
+        .apply(pd.to_numeric, errors="coerce")
+        .replace([np.inf, -np.inf], np.nan)
+    )
+    score_numeric = (
+        score_df.reindex(columns=numeric_cols)
+        .apply(pd.to_numeric, errors="coerce")
+        .replace([np.inf, -np.inf], np.nan)
+    )
+
+    valid_fraction = train_numeric.notna().mean(axis=0)
+    valid_cols = [
+        col for col in numeric_cols
+        if float(valid_fraction.get(col, 0.0)) >= resolved_min_valid_fraction
+    ]
+
+    if not valid_cols:
+        return [], train_numeric.iloc[:, 0:0], score_numeric.iloc[:, 0:0], {
+            "surface_type": "tag_agnostic_numeric",
+            "candidate_count": len(numeric_cols),
+            "selected_count": 0,
+            "dropped_low_valid_count": len(numeric_cols),
+            "dropped_low_iqr_count": 0,
+            "min_valid_fraction": resolved_min_valid_fraction,
+            "min_iqr": resolved_min_iqr,
+            "max_cols": resolved_max_cols,
+        }
+
+    iqr = train_numeric[valid_cols].quantile(0.75) - train_numeric[valid_cols].quantile(0.25)
+    iqr = iqr.astype(float).replace([np.inf, -np.inf], np.nan)
+    variable_cols = [
+        col for col in valid_cols
+        if np.isfinite(iqr.get(col, np.nan)) and float(iqr[col]) > resolved_min_iqr
+    ]
+    ranked_cols = sorted(variable_cols, key=lambda col: (-float(iqr[col]), col))
+    selected_cols = ranked_cols[:resolved_max_cols] if resolved_max_cols > 0 else ranked_cols
+
+    meta = {
+        "surface_type": "tag_agnostic_numeric",
+        "candidate_count": len(numeric_cols),
+        "selected_count": len(selected_cols),
+        "dropped_low_valid_count": len(numeric_cols) - len(valid_cols),
+        "dropped_low_iqr_count": len(valid_cols) - len(variable_cols),
+        "min_valid_fraction": resolved_min_valid_fraction,
+        "min_iqr": resolved_min_iqr,
+        "max_cols": resolved_max_cols,
+        "truncated": len(selected_cols) < len(ranked_cols),
+        "selected_cols": list(selected_cols),
+        "selection_metric": "train_iqr",
+    }
+    if selected_cols:
+        meta["selected_iqr"] = {col: float(iqr[col]) for col in selected_cols}
+
+    return selected_cols, train_numeric.reindex(columns=selected_cols), score_numeric.reindex(columns=selected_cols), meta
+
+
+def select_ewm_monitoring_surface(
+    train_df: pd.DataFrame,
+    score_df: pd.DataFrame,
+    cfg: Optional[Dict[str, Any]] = None,
+) -> Tuple[List[str], pd.DataFrame, pd.DataFrame, Dict[str, Any]]:
+    """
+    Select the explicit day-0 monitoring surface for EWM.
+
+    Current contract:
+    - raw numeric channels only
+    - shared between train and score
+    - tag-agnostic
+    - no truncation cap by default (monitor every eligible channel)
+
+    Missing values are preserved so score/update paths can skip non-finite rows
+    rather than learn from imputed observations.
+    """
+    ewm_cfg = _cfg_get(cfg or {}, "models.ewm_baseline.surface", {}) or {}
+    min_valid_fraction = float(
+        ewm_cfg.get("min_valid_fraction", _DEFAULT_SURFACE_MIN_VALID_FRACTION)
+    )
+    min_iqr = float(ewm_cfg.get("min_iqr", _DEFAULT_SURFACE_MIN_IQR))
+    selected_cols, train_numeric, score_numeric, meta = select_tag_agnostic_numeric_surface(
+        train_df,
+        score_df,
+        cfg=cfg,
+        max_cols=0,
+        min_valid_fraction=min_valid_fraction,
+        min_iqr=min_iqr,
+    )
+    meta = dict(meta)
+    meta["surface_type"] = "ewm_monitoring_raw_numeric"
+    meta["channel_semantics"] = "raw_numeric"
+    meta["max_cols"] = 0
+    return selected_cols, train_numeric, score_numeric, meta
 
 
 def _compute_basis_signature(feature_columns: List[str], scaler_mean: Optional[List[float]], 
@@ -588,189 +664,82 @@ def build_feature_basis(
     cfg: Dict[str, Any],
 ) -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, Any]]:
     """Construct a compact feature matrix for regime clustering.
-    
-    v11.1.6 CRITICAL FIXES:
-    - FIX #1: Uses tag taxonomy to EXCLUDE condition indicators (bearing, winding, vibration)
-    - FIX #2: Applies uniform scaling to ENTIRE basis (PCA + raw), not partial
-    - FIX #8: Computes basis_signature for cache invalidation
-    
-    RULE R1: Regime clustering inputs = operating variables ONLY
-    RULE R2: Condition variables are for health scoring, NEVER regime definition
+
+    The active basis is tag-agnostic: it uses a deterministic numeric surface
+    selected from raw train/score data without any tag taxonomy or manual sensor
+    list. If no adequate raw surface exists, the caller should degrade rather
+    than silently switch to a semantically unrelated fallback.
     """
-    basis_cfg = _cfg_get(cfg, "regimes.feature_basis", {})
-    n_pca = int(basis_cfg.get("n_pca_components", 3))
-    raw_tags_cfg = basis_cfg.get("raw_tags", []) or []
-    
-    # v10.1.0: New mode to use raw sensors for operationally-meaningful regimes
-    use_raw_sensors = bool(basis_cfg.get("use_raw_sensors", True))  # Default ON
-    
-    # v11.1.6 FIX #1: Use taxonomy-based classification instead of simple keyword match
-    # The old approach included "bearing" and "winding" which are CONDITION indicators!
-    strict_operating_only = bool(basis_cfg.get("strict_operating_only", True))  # Default ON
+    _ = pca_detector  # Deliberately unused in the tag-agnostic path.
 
-    train_parts: List[pd.DataFrame] = []
-    score_parts: List[pd.DataFrame] = []
-    used_raw_tags: List[str] = []
-    excluded_condition_tags: List[str] = []  # Track what we excluded for logging
-    n_pca_used = 0
-    pca_variance_ratio: Optional[float] = None
-    pca_variance_vector: List[float] = []
+    if raw_train is None or raw_score is None:
+        raise ValueError("raw_train/raw_score are required for tag-agnostic regime basis construction")
 
-    # v10.1.0: Prioritize raw sensor data for regime clustering if available
-    if use_raw_sensors and raw_train is not None and raw_score is not None:
-        # v11.1.6 FIX #1: Use taxonomy-based classification
-        available_operational = []
-        for col in raw_train.columns:
-            tag_class = _classify_tag(col, cfg)
-            
-            if tag_class == "condition":
-                # NEVER include condition indicators in regime basis
-                excluded_condition_tags.append(col)
-            elif tag_class == "operating":
-                available_operational.append(col)
-            elif not strict_operating_only:
-                # Unknown tags included only if strict mode is off
-                available_operational.append(col)
-        
-        # Log excluded condition tags (important for transparency)
-        if excluded_condition_tags:
-            Console.info(
-                f"Excluded {len(excluded_condition_tags)} condition indicators from regime basis: "
-                f"{excluded_condition_tags[:5]}{'...' if len(excluded_condition_tags) > 5 else ''}",
-                component="REGIME", excluded_count=len(excluded_condition_tags)
-            )
-        
-        # Also include any explicitly configured raw_tags (but warn if they're condition tags)
-        for tag in raw_tags_cfg:
-            if tag in raw_train.columns and tag not in available_operational:
-                tag_class = _classify_tag(tag, cfg)
-                if tag_class == "condition":
-                    Console.warn(
-                        f"Configured raw_tag '{tag}' is a condition indicator - excluding from regime basis. "
-                        f"Use custom_operating_keywords to override if this is intentional.",
-                        component="REGIME", tag=tag
-                    )
-                else:
-                    available_operational.append(tag)
-        
-        if available_operational:
-            Console.info(f"Using {len(available_operational)} raw operational sensors for regime clustering: {available_operational[:5]}{'...' if len(available_operational) > 5 else ''}", component="REGIME")
-            used_raw_tags = available_operational
-            train_raw = raw_train.reindex(train_features.index)[available_operational].astype(float).ffill().bfill().fillna(0.0)
-            score_raw = raw_score.reindex(score_features.index)[available_operational].astype(float).ffill().bfill().fillna(0.0)
-            train_parts.append(train_raw)
-            score_parts.append(score_raw)
-        else:
-            Console.warn(
-            "No operational sensor columns matched OPERATING_TAG_KEYWORDS for regime basis. "
-            "Falling back to PCA features for regime clustering. "
-            "Add custom keywords via regimes.feature_basis.custom_operating_keywords in ACM_Config.",
-            component="REGIME",
-            available_cols=len(raw_train.columns) if raw_train is not None else 0,
+    aligned_train = raw_train.reindex(train_features.index)
+    aligned_score = raw_score.reindex(score_features.index)
+    selected_cols, train_numeric, score_numeric, surface_meta = select_tag_agnostic_numeric_surface(
+        aligned_train,
+        aligned_score,
+        cfg=cfg,
+    )
+
+    if not selected_cols:
+        raise ValueError(
+            "No adequate tag-agnostic numeric regime surface found "
+            f"(candidates={surface_meta.get('candidate_count', 0)}, "
+            f"dropped_low_valid={surface_meta.get('dropped_low_valid_count', 0)}, "
+            f"dropped_low_iqr={surface_meta.get('dropped_low_iqr_count', 0)})"
         )
 
-    # Only use PCA features if raw sensors not available or insufficient
-    if not train_parts and pca_detector is not None and getattr(pca_detector, "pca", None) is not None:
-        keep_cols = getattr(pca_detector, "keep_cols", list(train_features.columns))
-        train_subset = train_features.reindex(columns=keep_cols).fillna(0.0)
-        score_subset = score_features.reindex(columns=keep_cols).fillna(0.0)
-        try:
-            train_scaled = pca_detector.scaler.transform(train_subset.to_numpy(dtype=float, copy=False))
-            score_scaled = pca_detector.scaler.transform(score_subset.to_numpy(dtype=float, copy=False))
-            train_scores = pca_detector.pca.transform(train_scaled)
-            score_scores = pca_detector.pca.transform(score_scaled)
-            n_pca_available = train_scores.shape[1]
-            n_pca_used = max(0, min(n_pca, n_pca_available))
-            if n_pca_used > 0:
-                variance_ratio = getattr(pca_detector.pca, "explained_variance_ratio_", None)
-                if variance_ratio is not None:
-                    pca_variance_vector = [float(x) for x in variance_ratio[:n_pca_used]]
-                    pca_variance_ratio = float(np.sum(pca_variance_vector))
-                    
-                    # FIX #5: Validate PCA variance for numerical stability
-                    if not np.isfinite(pca_variance_ratio) or pca_variance_ratio < 0 or pca_variance_ratio > 1.0:
-                        Console.warn(f"PCA variance ratio out of bounds: {pca_variance_ratio}. Resetting to NaN.", component="REGIME", variance_ratio=pca_variance_ratio, n_components=n_pca_used)
-                        pca_variance_ratio = float("nan")
-                        pca_variance_vector = []  # Use empty list instead of None
-                    elif any(not np.isfinite(v) for v in pca_variance_vector):
-                        Console.warn("PCA variance vector contains non-finite values. Check numerical stability.", component="REGIME", n_components=n_pca_used)
-                        
-                cols = [f"PCA_{i+1}" for i in range(n_pca_used)]
-                train_parts.append(pd.DataFrame(train_scores[:, :n_pca_used], index=train_features.index, columns=cols))
-                score_parts.append(pd.DataFrame(score_scores[:, :n_pca_used], index=score_features.index, columns=cols))
-        except Exception:
-            n_pca_used = 0
+    if surface_meta.get("truncated"):
+        Console.info(
+            f"Regime basis selected top {len(selected_cols)} tag-agnostic numeric columns "
+            f"from {surface_meta.get('candidate_count', len(selected_cols))} candidates",
+            component="REGIME",
+            selected_count=len(selected_cols),
+            candidate_count=surface_meta.get("candidate_count", len(selected_cols)),
+        )
+    else:
+        Console.info(
+            f"Regime basis using {len(selected_cols)} tag-agnostic numeric columns: "
+            f"{selected_cols[:5]}{'...' if len(selected_cols) > 5 else ''}",
+            component="REGIME",
+        )
 
-    # Legacy raw_tags handling (when use_raw_sensors=False)
-    if not use_raw_sensors and raw_train is not None and raw_score is not None:
-        available_tags = [tag for tag in raw_tags_cfg if tag in raw_train.columns]
-        if available_tags:
-            used_raw_tags = available_tags
-            train_raw = raw_train.reindex(train_features.index)[available_tags].astype(float).ffill().bfill().fillna(0.0)
-            score_raw = raw_score.reindex(score_features.index)[available_tags].astype(float).ffill().bfill().fillna(0.0)
-            train_parts.append(train_raw)
-            score_parts.append(score_raw)
+    fill_values = train_numeric.median(axis=0, numeric_only=True)
+    train_basis = train_numeric.ffill().bfill().fillna(fill_values).fillna(0.0)
+    score_basis = score_numeric.ffill().bfill().fillna(fill_values).fillna(0.0)
 
-    if not train_parts:
-        fallback_cols = train_features.columns[:max(1, min(5, train_features.shape[1]))]
-        train_parts.append(train_features[fallback_cols].fillna(0.0))
-        score_parts.append(score_features[fallback_cols].fillna(0.0))
-
-    train_basis = pd.concat(train_parts, axis=1)
-    score_basis = pd.concat(score_parts, axis=1)
-    train_basis = train_basis.ffill().bfill().fillna(0.0)
-    score_basis = score_basis.ffill().bfill().fillna(0.0)
-
-    # v11.1.6 FIX #2: Apply UNIFORM scaling to the ENTIRE basis (PCA + raw)
-    # Previously, only raw columns were scaled while PCA columns were left as-is.
-    # This caused clustering to be dominated by whichever subspace had larger variance.
-    # Now we scale ALL columns uniformly to give equal weight to all features.
-    all_cols = list(train_basis.columns)
+    all_cols = list(selected_cols)
     basis_scaler: StandardScaler = StandardScaler()
     basis_scaler.fit(train_basis[all_cols].values)
-    train_basis.loc[:, all_cols] = basis_scaler.transform(train_basis[all_cols].values)
-    score_basis.loc[:, all_cols] = basis_scaler.transform(score_basis[all_cols].values)
+    train_basis = train_basis.astype({c: "float64" for c in all_cols})
+    score_basis = score_basis.astype({c: "float64" for c in all_cols})
+    train_basis[all_cols] = basis_scaler.transform(train_basis[all_cols].values)
+    score_basis[all_cols] = basis_scaler.transform(score_basis[all_cols].values)
 
-    # Compute basis signature for cache invalidation (FIX #8)
     mean_vec_list: Optional[List[float]] = None
     var_vec_list: Optional[List[float]] = None
     if hasattr(basis_scaler, 'mean_') and basis_scaler.mean_ is not None:
         mean_vec_list = [float(x) for x in basis_scaler.mean_]
     if hasattr(basis_scaler, 'var_') and basis_scaler.var_ is not None:
         var_vec_list = [float(x) for x in basis_scaler.var_]
-    basis_signature = _compute_basis_signature(all_cols, mean_vec_list, var_vec_list, n_pca_used)
+    basis_signature = _compute_basis_signature(all_cols, mean_vec_list, var_vec_list, 0)
 
     meta = {
-        "n_pca": n_pca_used,
-        "raw_tags": used_raw_tags,
-        "excluded_condition_tags": excluded_condition_tags,  # v11.1.6: Track excluded tags
+        "n_pca": 0,
+        "raw_tags": list(selected_cols),
         "fallback_cols": list(train_basis.columns),
-        "basis_normalized": True,  # v11.1.6: Always True now (uniform scaling)
-        "basis_signature": basis_signature,  # v11.1.6 FIX #8: For cache invalidation
+        "basis_normalized": True,
+        "basis_signature": basis_signature,
+        "feature_surface_type": "tag_agnostic_numeric",
+        "surface_meta": surface_meta,
     }
-    # Store scaler parameters for reproducibility
     if hasattr(basis_scaler, 'mean_'):
         meta["basis_scaler_mean"] = mean_vec_list
     if hasattr(basis_scaler, 'var_'):
         meta["basis_scaler_var"] = var_vec_list
-    meta["basis_scaler_cols"] = all_cols  # v11.1.6: All columns are now scaled
-    if pca_variance_ratio is not None:
-        meta["pca_variance_ratio"] = pca_variance_ratio
-        meta["pca_variance_vector"] = pca_variance_vector
-        variance_min = float(basis_cfg.get("pca_variance_min", 0.85))
-        meta["pca_variance_min"] = variance_min
-        
-        # FIX #5: Document that PCA variance is computed BEFORE non-PCA columns are scaled
-        # The PCA components come from pca_detector which uses its own scaler
-        # Non-PCA columns (raw sensors) are scaled separately via basis_scaler
-        # This is intentional: PCA variance reflects original feature space explanation
-        meta["pca_variance_note"] = "PCA variance computed on pre-scaled features by pca_detector"
-        
-        if pca_variance_ratio < variance_min:
-            Console.warn(
-                f"PCA variance coverage {pca_variance_ratio:.3f} below target {variance_min:.3f}.",
-                component="REGIME", variance_ratio=pca_variance_ratio, variance_min=variance_min, n_pca=n_pca_used
-            )
+    meta["basis_scaler_cols"] = all_cols
     return train_basis, score_basis, meta
 
 
@@ -3017,40 +2986,30 @@ def detect_transient_states(
     clip_pct = float(transient_cfg.get("clip_percentile", 99.0))
     sensor_weights_cfg = transient_cfg.get("sensor_weights", {}) or {}
 
-    # FIX #5: Transient detection should ONLY use operating variables
-    # Condition indicators (bearing temps, vibration, winding temps) measure HEALTH,
-    # not operating state transitions. Using them would conflate fault signatures
-    # with normal startup/shutdown dynamics.
-    all_numeric_cols = data.select_dtypes(include=[np.number]).columns.tolist()
-    
-    # Filter to operating variables only using tag taxonomy
-    numeric_cols = [
-        col for col in all_numeric_cols
-        if _classify_tag(col) == "operating"
-    ]
-    
+    numeric_cols, data_numeric, _, surface_meta = select_tag_agnostic_numeric_surface(
+        data,
+        data,
+        cfg=cfg,
+    )
+
     if not numeric_cols:
-        # Fallback: if no operating variables found, use all numeric but warn
         Console.warn(
-            "No operating-variable columns identified for transient detection; "
-            "falling back to all numeric columns. Consider adding operating keywords "
-            "(speed, rpm, load, flow, pressure, power) to sensor names.",
+            "No adequate tag-agnostic numeric columns for transient detection; "
+            "defaulting all rows to steady state",
             component="TRANSIENT",
-            all_numeric=len(all_numeric_cols)
+            n_columns=len(data.columns) if hasattr(data, "columns") else 0,
+            n_samples=n_samples,
+            candidate_count=surface_meta.get("candidate_count", 0),
         )
-        numeric_cols = all_numeric_cols
-    else:
-        excluded_count = len(all_numeric_cols) - len(numeric_cols)
-        if excluded_count > 0:
-            Console.info(
-                f"Using {len(numeric_cols)} operating-variable columns for transient detection; "
-                f"excluded {excluded_count} condition-indicator columns",
-                component="TRANSIENT"
-            )
-    
-    if not numeric_cols:
-        Console.warn("No numeric columns for ROC calculation", component="TRANSIENT", n_columns=len(data.columns) if hasattr(data, 'columns') else 0, n_samples=n_samples)
         return default_states
+
+    if surface_meta.get("truncated"):
+        Console.info(
+            f"Transient detection using top {len(numeric_cols)} variable numeric columns",
+            component="TRANSIENT",
+            selected_count=len(numeric_cols),
+            candidate_count=surface_meta.get("candidate_count", len(numeric_cols)),
+        )
 
     # FIX #8: Validate sensor_weights_cfg keys match available columns
     # and document why absolute values are used
@@ -3081,7 +3040,8 @@ def detect_transient_states(
         Console.warn("Invalid weights detected; falling back to uniform weights", component="TRANSIENT", n_sensors=len(numeric_cols))
     weights /= weights.sum()
 
-    data_numeric = data[numeric_cols].apply(pd.to_numeric, errors="coerce").ffill().bfill()
+    fill_values = data_numeric.median(axis=0, numeric_only=True)
+    data_numeric = data_numeric.ffill().bfill().fillna(fill_values).fillna(0.0)
 
     # PERF-OPT: Vectorized ROC calculation instead of column-by-column loop
     # Compute diff and baseline for all columns at once using numpy
@@ -3127,10 +3087,12 @@ def detect_transient_states(
     high_mask = (roc_values >= roc_threshold_high) & ~trip_mask
 
     def _dilate(mask: np.ndarray, width: int) -> np.ndarray:
-        if width <= 0:
+        if width <= 0 or mask.size == 0:
             return mask
+        width = int(width)
         kernel = np.ones(2 * width + 1, dtype=int)
-        return np.convolve(mask.astype(int), kernel, mode="same") > 0
+        padded = np.pad(mask.astype(int), (width, width), mode="constant")
+        return np.convolve(padded, kernel, mode="valid") > 0
 
     base_transient = regime_changes | high_mask | trip_mask
     transient_mask = _dilate(base_transient, transition_lag)
@@ -3251,16 +3213,23 @@ def build_regime_feature_basis_stage(
         )
         degraded = True
 
+    cached_model_meta = getattr(regime_model, "meta", {}) if regime_model is not None else {}
+    cached_model_version = cached_model_meta.get("model_version") if isinstance(cached_model_meta, dict) else None
+    version_mismatch = cached_model_version is not None and cached_model_version != REGIME_MODEL_VERSION
+
     if regime_model is not None and (
         regime_basis_train is None
         or regime_model.feature_columns != list(regime_basis_train.columns)
+        or version_mismatch
     ):
         logger.warn(
-            "Cached regime model has different feature columns; will refit.",
+            "Cached regime model is incompatible with the active basis contract; will refit.",
             component="REGIME",
             equip=equip,
             cached_cols=regime_model.feature_columns[:5] if regime_model.feature_columns else [],
             current_cols=list(regime_basis_train.columns)[:5] if regime_basis_train is not None else [],
+            cached_model_version=cached_model_version,
+            current_model_version=REGIME_MODEL_VERSION,
         )
         regime_model = None
 
@@ -3285,6 +3254,7 @@ class RegimeLabelingStageResult:
     regime_quality_ok: bool
     regime_state_version: int
     regime_loaded_from_state: bool
+    regime_model_was_trained: bool = False
 
 
 def run_regime_labeling_stage(
@@ -3400,6 +3370,7 @@ def run_regime_labeling_stage(
         regime_quality_ok=regime_quality_ok,
         regime_state_version=regime_state_version,
         regime_loaded_from_state=regime_loaded_from_state,
+        regime_model_was_trained=regime_model_was_trained,
     )
 
 
@@ -3417,6 +3388,7 @@ class ScoringRegimeStageResult:
     regime_loaded_from_state: bool
     degraded_regime_basis: bool
     current_model_maturity: Optional[str]
+    regime_model_was_trained: bool = False
 
 
 def run_scoring_regime_stage(
@@ -3543,6 +3515,7 @@ def run_scoring_regime_stage(
         regime_loaded_from_state=regime_loaded_from_state,
         degraded_regime_basis=basis_result.degraded,
         current_model_maturity=current_model_maturity,
+        regime_model_was_trained=regime_labeling_result.regime_model_was_trained,
     )
 
 
@@ -3745,6 +3718,3 @@ def write_regime_definitions_for_audit(
             error=str(e)[:200],
         )
         return 0
-
-
-
