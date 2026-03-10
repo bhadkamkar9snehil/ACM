@@ -511,6 +511,7 @@ _config = _Config()
 _tracer: Optional[Any] = None
 _meter: Optional[Any] = None
 _loki_pusher: Optional["_LokiPusher"] = None
+_sql_run_log_sink: Optional["_SqlRunLogSink"] = None
 _pyroscope_enabled: bool = False
 _pyroscope_pusher: Optional["_PyroscopePusher"] = None
 _initialized: bool = False
@@ -1010,6 +1011,9 @@ def shutdown() -> None:
         _loki_pusher.close()
         _loki_pusher = None
 
+    if _sql_run_log_sink:
+        _sql_run_log_sink.close()
+
 
 # =============================================================================
 # PROFILING HELPERS
@@ -1035,8 +1039,18 @@ def init_run_observability(
     equip: str,
     equip_id: int = 0,
     logger: Optional[Any] = None,
+    sql_client: Optional[Any] = None,
 ) -> None:
-    """Initialize run observability and profiling with non-fatal error handling."""
+    """Initialize run observability and profiling with non-fatal error handling.
+
+    Args:
+        equip: Equipment name.
+        equip_id: Equipment database ID.
+        logger: Logger instance (defaults to Console).
+        sql_client: Live SQLClient for ACM_RunLogs sink. If provided, all
+            Console.info/warn/error/ok/debug calls will be written to SQL in
+            addition to Loki.  Safe to call again later via set_sql_log_client().
+    """
     log = logger if logger is not None else Console
     try:
         init(
@@ -1059,6 +1073,8 @@ def init_run_observability(
                 error_type=type(e).__name__,
                 error=str(e)[:200],
             )
+    if sql_client is not None:
+        set_sql_log_client(sql_client)
 
 
 def stop_profiling() -> None:
@@ -1299,6 +1315,20 @@ class Console:
         _loki_pusher.log(level, message, component=str(component) if component else None, **context)
 
     @staticmethod
+    def _send_event_to_sql_log(event: Dict[str, Any]) -> None:
+        """Write a normalized event payload to ACM_RunLogs (non-blocking)."""
+        if not _sql_run_log_sink:
+            return
+        message = str(event.get("event", "")).strip()
+        if not message or all(c in "=-_*#~" for c in message):
+            return
+        level = str(event.get("level", "info"))
+        component = event.get("component")
+        run_id = str(event.get("run_id") or _config.run_id or "")
+        equip_id = int(event.get("equip_id") or _config.equip_id or 0)
+        _sql_run_log_sink.log(level, message, component, run_id, equip_id)
+
+    @staticmethod
     def _render_console_event(level: str, level_color: str, event: Dict[str, Any]) -> None:
         """Render a normalized event payload to console."""
         try:
@@ -1336,7 +1366,8 @@ class Console:
         event = _process_event_with_structlog(raw_event)
         Console._render_console_event("DEBUG", _Colors.DEBUG, event)
         Console._send_event_to_loki(event)
-    
+        Console._send_event_to_sql_log(event)
+
     @staticmethod
     def info(message: str, component: Optional[str] = None, skip_loki: bool = False, **kwargs) -> None:
         """Info message. Standard operational logging."""
@@ -1345,7 +1376,8 @@ class Console:
         Console._render_console_event("INFO", _Colors.INFO, event)
         if not skip_loki:
             Console._send_event_to_loki(event)
-    
+        Console._send_event_to_sql_log(event)
+
     @staticmethod
     def warn(message: str, component: Optional[str] = None, **kwargs) -> None:
         """Warning message. Something unexpected but not fatal."""
@@ -1353,9 +1385,10 @@ class Console:
         event = _process_event_with_structlog(raw_event)
         Console._render_console_event("WARN", _Colors.WARN, event)
         Console._send_event_to_loki(event)
-    
+        Console._send_event_to_sql_log(event)
+
     warning = warn
-    
+
     @staticmethod
     def error(message: str, component: Optional[str] = None, **kwargs) -> None:
         """Error message. Something failed."""
@@ -1363,7 +1396,8 @@ class Console:
         event = _process_event_with_structlog(raw_event)
         Console._render_console_event("ERROR", _Colors.ERROR, event)
         Console._send_event_to_loki(event)
-    
+        Console._send_event_to_sql_log(event)
+
     @staticmethod
     def ok(message: str, component: Optional[str] = None, **kwargs) -> None:
         """Success message (green). Logs as level=info with tag=success to Loki."""
@@ -1373,6 +1407,7 @@ class Console:
         kwargs.pop("level", None)  # Avoid conflict
         event["tag"] = "success"
         Console._send_event_to_loki(event)
+        Console._send_event_to_sql_log(event)
     
     @staticmethod
     def status(message: str) -> None:
@@ -2288,6 +2323,109 @@ OTEL_AVAILABLE = OTEL_AVAILABLE if "OTEL_AVAILABLE" in dir() else False
 import json
 import urllib.request
 import urllib.error
+
+
+# =============================================================================
+# SQL RUN LOG SINK
+# =============================================================================
+
+class _SqlRunLogSink:
+    """Batched, thread-safe writer of Console log records to ACM_RunLogs.
+
+    Mirrors the pattern of _LokiPusher: enqueue log tuples, flush in the
+    background every few seconds.  Failures are swallowed so a SQL hiccup
+    never breaks the pipeline.
+
+    ACM_RunLogs schema:
+        ID         bigint IDENTITY (auto)
+        RunID      uniqueidentifier  -- NULL-able
+        EquipID    int               -- NULL-able
+        LoggedAt   datetime2 NOT NULL
+        Level      nvarchar(16) NOT NULL
+        Component  nvarchar(64)
+        Message    nvarchar(MAX) NOT NULL
+        CreatedAt  datetime2 NOT NULL
+    """
+
+    _INSERT_SQL = (
+        "INSERT INTO dbo.ACM_RunLogs "
+        "(RunID, EquipID, LoggedAt, Level, Component, Message, CreatedAt) "
+        "VALUES (?, ?, ?, ?, ?, ?, GETUTCDATE())"
+    )
+    _MAX_MESSAGE = 4000   # truncate runaway log lines
+    _MAX_COMPONENT = 64
+
+    def __init__(self, sql_client: Any, batch_size: int = 200, flush_interval_s: float = 10.0) -> None:
+        self._sql = sql_client
+        self._batch_size = max(1, batch_size)
+        self._flush_interval_s = max(1.0, flush_interval_s)
+        self._queue: queue.Queue = queue.Queue(maxsize=20000)
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._flush_loop, daemon=True, name="acm-sql-log-sink")
+        self._thread.start()
+
+    # ------------------------------------------------------------------
+    def log(self, level: str, message: str, component: Optional[str], run_id: str, equip_id: int) -> None:
+        """Enqueue a log record (non-blocking; drops if queue full)."""
+        try:
+            now = datetime.utcnow()
+            rid: Optional[str] = run_id if run_id and run_id != "unknown" else None
+            eid: Optional[int] = equip_id if equip_id else None
+            lvl = level.upper()[:16]
+            comp = component[:self._MAX_COMPONENT] if component else None
+            msg = message[:self._MAX_MESSAGE] if message else ""
+            self._queue.put_nowait((rid, eid, now, lvl, comp, msg))
+        except queue.Full:
+            pass
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------------
+    def _flush_loop(self) -> None:
+        while not self._stop.is_set():
+            self._stop.wait(self._flush_interval_s)
+            self._flush()
+
+    def _flush(self) -> None:
+        rows = []
+        try:
+            while len(rows) < self._batch_size:
+                rows.append(self._queue.get_nowait())
+        except queue.Empty:
+            pass
+        if not rows:
+            return
+        try:
+            cur = self._sql.conn.cursor()
+            cur.fast_executemany = True
+            cur.executemany(self._INSERT_SQL, rows)
+            self._sql.conn.commit()
+        except Exception:
+            # Silently discard — log sink must never crash the pipeline
+            pass
+
+    def close(self) -> None:
+        self._stop.set()
+        self._flush()
+
+
+def set_sql_log_client(sql_client: Any) -> None:
+    """Register the live SQLClient so Console logs are written to ACM_RunLogs.
+
+    Call this once after SQL is confirmed reachable (e.g. in core/acm.py after
+    connect_acm_sql_failfast succeeds).  Safe to call multiple times; only the
+    first non-None client is used.
+    """
+    global _sql_run_log_sink
+    if sql_client is None:
+        return
+    if _sql_run_log_sink is not None:
+        return  # already set
+    try:
+        _sql_run_log_sink = _SqlRunLogSink(sql_client)
+    except Exception:
+        pass
+
 
 class _LokiPusher:
     """Push logs to Loki using native push API (not OTLP).
@@ -3344,6 +3482,7 @@ __all__ = [
     "record_disk_io",
     "record_section_resources",
     "log_timer",
+    "set_sql_log_client",
     "init_run_observability",
     "start_profiling",
     "stop_profiling",

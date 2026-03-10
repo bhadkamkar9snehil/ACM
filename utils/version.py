@@ -17,9 +17,30 @@ Release Management:
 - Production deployments use specific tags (never merge commits)
 """
 
-__version__ = "11.17.1"
+__version__ = "11.17.2"
 __version_date__ = "2026-03-10"
 __version_author__ = "ACM Development Team"
+
+# v11.17.2 (2026-03-10) — Wire ACM_RunLogs SQL sink: Console logs now persisted to SQL
+#
+# Root cause: core/observability.py accepted sql_client in init() but silently dropped it —
+# no SQL sink was ever constructed. ACM_RunLogs table existed and was empty every run.
+# Console.info/warn/error/ok/debug all routed only to Loki; nothing reached ACM_RunLogs.
+#
+# 1. core/observability.py: Added _SqlRunLogSink class — batched, thread-safe background
+#    writer to ACM_RunLogs (INSERT RunID, EquipID, LoggedAt, Level, Component, Message).
+#    Batch size 200, flush every 10s, queue cap 20k. Failures swallowed so SQL hiccup
+#    never kills the pipeline. Module-level _sql_run_log_sink variable + set_sql_log_client()
+#    function for one-time registration. _send_event_to_sql_log() static helper wired into
+#    Console.debug/info/warn/error/ok. shutdown() now calls sink.close() to flush on exit.
+#    init_run_observability() gains optional sql_client param, calls set_sql_log_client().
+#    set_sql_log_client added to __all__.
+#
+# 2. core/acm.py: Calls set_sql_log_client(sql_client) immediately after
+#    connect_acm_sql_failfast() returns. All Console calls from that point forward
+#    are written to ACM_RunLogs in addition to Loki.
+#
+# Co-Authored-By: Claude Sonnet 4.6
 
 # v11.17.1 (2026-03-10) — EWM bulk-MERGE: 2,132 round-trips → 5 (~25s → <1s per batch)
 #

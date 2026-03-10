@@ -90,6 +90,7 @@ from core.observability import (
     start_run_span,
     shutdown_run_observability,
     init_run_observability,
+    set_sql_log_client,
 )
 
 from core.sql_client import (
@@ -254,6 +255,7 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
     # Fail-fast SQL connect: ACM is SQL-only and must abort if SQL is down.
     # ========================================================================
     sql_client = connect_acm_sql_failfast(cfg={}, logger=Console)
+    set_sql_log_client(sql_client)
 
     with T.section("startup"):
         bootstrap = bootstrap_acm_run_state(
