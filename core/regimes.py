@@ -57,6 +57,8 @@ UNKNOWN_REGIME_LABEL = -1  # DEPRECATED: Do not produce this value
 _DEFAULT_SURFACE_MAX_COLS = 24
 _DEFAULT_SURFACE_MIN_VALID_FRACTION = 0.60
 _DEFAULT_SURFACE_MIN_IQR = 1e-6
+_DEFAULT_TRANSIENT_HIGH_Z = 3.0
+_DEFAULT_TRANSIENT_TRIP_Z = 5.0
 
 # v11.4.0: HEALTH-STATE FEATURES REMOVED FROM REGIME CLUSTERING
 # Regime clustering now uses RAW SENSOR VALUES ONLY.
@@ -1259,7 +1261,7 @@ def fit_regime_model(
                         basis_meta["ensemble_fallback"] = "gmm"
                         basis_meta["ensemble_gmm_converged"] = bool(fallback_gmm.converged_)
                         Console.info(
-                            f"ENSEMBLE: GMM fallback fitted with k={best_k} for noise point assignment",
+                            f"Noise assignment: fitted GMM(k={best_k}) to reassign HDBSCAN noise points to nearest cluster",
                             component="REGIME"
                         )
                     except Exception as gmm_e:
@@ -1728,10 +1730,12 @@ def predict_regime_with_confidence(
                     confidence[is_novel] = 0.3
                 
                 n_novel = int(np.sum(is_novel))
-                Console.info(
-                    f"HDBSCAN: {n_novel}/{n_samples} points classified as novel (sparse/outlier region). "
-                    "Assigned to nearest cluster. High novel counts may indicate the training window "
-                    "did not cover the full operating envelope.",
+                novel_pct = 100.0 * n_novel / n_samples if n_samples > 0 else 0.0
+                _novel_log = Console.warn if novel_pct >= 25.0 else Console.info
+                _novel_log(
+                    f"HDBSCAN: {n_novel}/{n_samples} ({novel_pct:.1f}%) score points are outside the training envelope (novel). "
+                    + ("Regime-indexed calibration thresholds may be unreliable — consider widening the training window. " if novel_pct >= 25.0 else "")
+                    + "Assigned to nearest cluster.",
                     component="REGIME",
                 )
             
@@ -2969,7 +2973,7 @@ def detect_transient_states(
     regime_labels: np.ndarray,
     cfg: Optional[Dict[str, Any]] = None,
 ) -> np.ndarray:
-    """Classify transient regimes using weighted ROC and a state machine."""
+    """Classify asset-agnostic transient states from normalized change intensity."""
 
     transient_cfg = (cfg or {}).get("regimes", {}).get("transient_detection", {})
 
@@ -2980,11 +2984,24 @@ def detect_transient_states(
         return default_states
 
     roc_window = int(transient_cfg.get("roc_window", 5))
-    roc_threshold_high = float(transient_cfg.get("roc_threshold_high", 3.0))
-    roc_threshold_trip = float(transient_cfg.get("roc_threshold_trip", 5.0))
+    roc_threshold_high = float(transient_cfg.get("roc_threshold_high", _DEFAULT_TRANSIENT_HIGH_Z))
+    roc_threshold_trip = float(transient_cfg.get("roc_threshold_trip", _DEFAULT_TRANSIENT_TRIP_Z))
     transition_lag = int(transient_cfg.get("transition_lag", 3))
     clip_pct = float(transient_cfg.get("clip_percentile", 99.0))
     sensor_weights_cfg = transient_cfg.get("sensor_weights", {}) or {}
+
+    if roc_threshold_high < 1.0 or roc_threshold_trip < 1.0:
+        Console.warn(
+            "Legacy transient thresholds detected for the asset-agnostic transient index; "
+            "using conservative normalized defaults until ACM_Config is refreshed",
+            component="TRANSIENT",
+            configured_high=roc_threshold_high,
+            configured_trip=roc_threshold_trip,
+            applied_high=_DEFAULT_TRANSIENT_HIGH_Z,
+            applied_trip=_DEFAULT_TRANSIENT_TRIP_Z,
+        )
+        roc_threshold_high = _DEFAULT_TRANSIENT_HIGH_Z
+        roc_threshold_trip = _DEFAULT_TRANSIENT_TRIP_Z
 
     numeric_cols, data_numeric, _, surface_meta = select_tag_agnostic_numeric_surface(
         data,
@@ -3043,48 +3060,56 @@ def detect_transient_states(
     fill_values = data_numeric.median(axis=0, numeric_only=True)
     data_numeric = data_numeric.ffill().bfill().fillna(fill_values).fillna(0.0)
 
-    # PERF-OPT: Vectorized ROC calculation instead of column-by-column loop
-    # Compute diff and baseline for all columns at once using numpy
-    data_values = data_numeric.values  # (n_samples, n_cols)
-    
-    # Vectorized diff: shifted values subtracted from current
-    diff_abs = np.abs(np.diff(data_values, axis=0, prepend=data_values[:1]))
-    
-    # Baseline: shifted absolute values with floor
-    baseline = np.abs(np.roll(data_values, 1, axis=0))
-    baseline[0] = baseline[1] if len(baseline) > 1 else 1e-9
-    baseline = np.clip(baseline, 1e-9, None)
-    
-    # ROC: rate of change
-    roc_matrix = diff_abs / baseline
-    roc_matrix = np.where(np.isfinite(roc_matrix), roc_matrix, np.nan)
-    
-    # Clip to percentile if needed
+    # Asset-agnostic transient semantics are limited to change intensity.
+    # We do not infer startup/shutdown direction from generic sensor names.
+    data_values = data_numeric.to_numpy(dtype=float, copy=False)
+    diff_values = np.diff(data_values, axis=0, prepend=data_values[:1])
+    diff_abs = np.abs(diff_values)
+
+    min_scale = float(surface_meta.get("min_iqr", _DEFAULT_SURFACE_MIN_IQR) or _DEFAULT_SURFACE_MIN_IQR)
+    level_q25 = np.nanpercentile(data_values, 25, axis=0)
+    level_q75 = np.nanpercentile(data_values, 75, axis=0)
+    level_iqr = level_q75 - level_q25
+    diff_q25 = np.nanpercentile(diff_abs, 25, axis=0)
+    diff_q75 = np.nanpercentile(diff_abs, 75, axis=0)
+    diff_iqr = diff_q75 - diff_q25
+
+    scale = np.where(
+        np.isfinite(diff_iqr) & (diff_iqr > min_scale),
+        diff_iqr,
+        np.where(
+            np.isfinite(level_iqr) & (level_iqr > min_scale),
+            level_iqr,
+            1.0,
+        ),
+    )
+    change_matrix = diff_abs / scale
+    change_matrix = np.where(np.isfinite(change_matrix), change_matrix, np.nan)
+
     if clip_pct < 100.0:
         try:
-            upper = np.nanpercentile(roc_matrix, clip_pct)
-            roc_matrix = np.clip(roc_matrix, None, upper)
+            upper = np.nanpercentile(change_matrix, clip_pct)
+            change_matrix = np.clip(change_matrix, None, upper)
         except Exception:
             pass
-    
-    # Apply weights and sum across columns
-    weighted_roc = np.nansum(roc_matrix * weights[np.newaxis, :], axis=1)
-    
-    # Fill NaN and smooth
-    aggregate_roc = pd.Series(weighted_roc).ffill().bfill().fillna(0.0)
-    aggregate_roc_smooth = aggregate_roc.rolling(window=max(2, roc_window), min_periods=1).mean()
+
+    aggregate_change = np.nansum(change_matrix * weights[np.newaxis, :], axis=1)
+    aggregate_change = pd.Series(aggregate_change).ffill().bfill().fillna(0.0)
+    aggregate_change_smooth = aggregate_change.rolling(window=max(2, roc_window), min_periods=1).mean()
 
     regime_changes = np.zeros(n_samples, dtype=bool)
     if len(regime_labels) == n_samples:
         diffs = np.diff(regime_labels.astype(int), prepend=regime_labels[0])
         regime_changes = diffs != 0
 
-    roc_values = aggregate_roc_smooth.to_numpy(dtype=float)
-    trend_window = max(roc_window, 5)
-    trend = pd.Series(roc_values).diff().rolling(window=trend_window, min_periods=1).mean().to_numpy()
+    change_values = aggregate_change_smooth.to_numpy(dtype=float)
+    change_center = float(np.nanmedian(change_values))
+    change_mad = float(np.nanmedian(np.abs(change_values - change_center)))
+    change_scale = max(change_mad * 1.4826, 1e-6)
+    change_score = np.maximum((change_values - change_center) / change_scale, 0.0)
 
-    trip_mask = roc_values >= roc_threshold_trip
-    high_mask = (roc_values >= roc_threshold_high) & ~trip_mask
+    trip_mask = change_score >= roc_threshold_trip
+    high_mask = (change_score >= roc_threshold_high) & ~trip_mask
 
     def _dilate(mask: np.ndarray, width: int) -> np.ndarray:
         if width <= 0 or mask.size == 0:
@@ -3094,17 +3119,13 @@ def detect_transient_states(
         padded = np.pad(mask.astype(int), (width, width), mode="constant")
         return np.convolve(padded, kernel, mode="valid") > 0
 
-    base_transient = regime_changes | high_mask | trip_mask
-    transient_mask = _dilate(base_transient, transition_lag)
-    trip_mask = _dilate(trip_mask, transition_lag)
-    high_mask = _dilate(high_mask, transition_lag)
+    boundary_mask = _dilate(regime_changes, max(1, transition_lag))
+    base_transient = boundary_mask | high_mask | trip_mask
+    transient_mask = _dilate(base_transient, max(1, transition_lag))
+    trip_mask = _dilate(trip_mask, max(1, transition_lag // 2))
 
     states = np.full(n_samples, "steady", dtype=object)
     states[transient_mask] = "transient"
-    startup_mask = high_mask & (trend >= 0)
-    shutdown_mask = high_mask & ~startup_mask
-    states[startup_mask] = "startup"
-    states[shutdown_mask] = "shutdown"
     states[trip_mask] = "trip"
 
     state_counts = pd.Series(states).value_counts().to_dict()
@@ -3348,7 +3369,7 @@ def run_regime_labeling_stage(
         )
         regime_state_version = new_state.state_version
         logger.info(
-            f"Regime state: saved_v{regime_state_version} | K={new_state.n_clusters}",
+            f"Regime state saved v{regime_state_version}: K={new_state.n_clusters} → ACM_RegimeState",
             component="REGIME_STATE",
         )
 
@@ -3580,11 +3601,11 @@ def run_regime_postprocess_stage(
         logger=logger,
     )
 
-    state_counts = frame["regime_state"].value_counts().to_dict() if "regime_state" in frame.columns else {}
+    regime_assigned = frame["regime_label"].notna().sum() if "regime_label" in frame.columns else 0
     quality_notes = list(regime_model.meta.get("quality_notes", [])) if regime_model is not None else []
     notes_str = f" | notes={quality_notes}" if (not regime_quality_ok and quality_notes) else ""
     logger.info(
-        f"Regime: quality_ok={regime_quality_ok}{notes_str} | states={state_counts} | transient={transient_counts}",
+        f"Regime quality: {'OK' if regime_quality_ok else 'FAIL'}{notes_str} | assigned={regime_assigned} | transient={transient_counts}",
         component="REGIME",
     )
 
@@ -3649,11 +3670,7 @@ def write_regime_occupancy_and_transitions(
             if transitions:
                 transition_count = output_manager.write_regime_transitions(transitions)
 
-        if occupancy_count > 0 or transition_count > 0:
-            logger.info(
-                f"Regime analysis: occupancy={occupancy_count} | transitions={transition_count}",
-                component="REGIME",
-            )
+        # OUTPUT lines for ACM_RegimeOccupancy / ACM_RegimeTransitions already confirm the writes; no duplicate log here.
     except Exception as e:
         logger.warn(
             f"Regime occupancy/transitions write failed: {e}",
@@ -3707,8 +3724,7 @@ def write_regime_definitions_for_audit(
             )
 
         regime_defs_count = output_manager.write_regime_definitions(regime_defs, version=regime_state_version)
-        if regime_defs_count > 0:
-            logger.info(f"Wrote {regime_defs_count} regime definitions for audit", component="REGIME")
+        # SQL insert confirmation from OUTPUT component is sufficient; no duplicate log here.
         return regime_defs_count
     except Exception as e:
         logger.warn(

@@ -1216,10 +1216,7 @@ def run_persistence_stage_service(
                     equip=equip,
                     max_total_rows=max_total_rows,
                 )
-                logger.info(
-                    f"Analytics: tables={persist_result.analytics_table_count}",
-                    component="OUTPUTS",
-                )
+                # analytics_builder already logs "Generated analytics tables (SQL written: N)"
 
     artifact_rows_written = output_manager._write_sql_artifacts(
         frame=scores_df,

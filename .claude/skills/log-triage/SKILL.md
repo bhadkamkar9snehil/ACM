@@ -11,7 +11,39 @@ Activated when the user says: "check logs", "what's wrong", "look at the logs", 
 
 ## STEP 1 — Find the log
 
-If the user did not paste the log or give a path, find the latest log file:
+**PREFERRED: Query ACM_RunLogs directly (v11.17.2+)**
+
+ACM now writes all Console.info/warn/error logs to `ACM_RunLogs` in real time.
+Query SQL first — it is faster, filterable, and always current:
+
+```sql
+-- Most recent run's logs for a specific equipment
+SELECT rl.LoggedAt, rl.Level, rl.Component, rl.Message
+FROM ACM_RunLogs rl
+JOIN ACM_Runs r ON r.RunID = rl.RunID
+WHERE r.EquipID = <equip_id>
+  AND r.RunID = (SELECT TOP 1 RunID FROM ACM_Runs WHERE EquipID = <equip_id> ORDER BY StartedAt DESC)
+ORDER BY rl.LoggedAt ASC
+
+-- Or: last N log lines across all equipment
+SELECT TOP 200 LoggedAt, Level, Component, LEFT(Message, 120) AS Message
+FROM ACM_RunLogs
+ORDER BY LoggedAt DESC
+
+-- Errors and warnings only
+SELECT LoggedAt, Level, Component, Message
+FROM ACM_RunLogs
+WHERE Level IN ('ERROR', 'WARNING')
+ORDER BY LoggedAt DESC
+
+-- Specific run by RunID
+SELECT LoggedAt, Level, Component, Message
+FROM ACM_RunLogs
+WHERE RunID = '<run-id>'
+ORDER BY LoggedAt ASC
+```
+
+**FALLBACK: Log files** (only if ACM_RunLogs is empty or run predates v11.17.2)
 
 ```powershell
 powershell -Command "Get-ChildItem logs -Filter *.log | Sort-Object LastWriteTime -Descending | Select-Object -First 5 | Format-Table Name, LastWriteTime, Length"

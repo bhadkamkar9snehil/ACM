@@ -17,9 +17,43 @@ Release Management:
 - Production deployments use specific tags (never merge commits)
 """
 
-__version__ = "11.17.3"
+__version__ = "11.17.4"
 __version_date__ = "2026-03-10"
 __version_author__ = "ACM Development Team"
+
+# v11.17.4 (2026-03-10) — Log quality: remove redundancy, fix misleading messages, add RUN START/END
+#
+# Full audit of ACM_RunLogs output from a live run; identified and fixed 6 categories of issues.
+#
+# 1. core/acm.py: Added RUN START line (run_id, equip, batch, tick, date range) emitted after
+#    bootstrap completes. Added RUN END line (outcome, elapsed, max_fused_z, episodes,
+#    rows_written) emitted before teardown. Fixed elapsed calc to use datetime.now() (not
+#    utcnow); derived max_fused_z from frame["fused"] which is always in scope.
+#
+# 2. core/model_persistence.py: Removed redundant "Loaded from SQL ModelRegistry successfully"
+#    (MODEL component) — MODEL-SQL already logs "[OK] Loaded N/N models" with full detail.
+#    Changed "Load result: models=True, manifest=True" to "Models loaded: OK/MISSING (...)"
+#    for clarity.
+#
+# 3. core/regimes.py: Removed "Regime analysis: occupancy=N | transitions=N" (duplicated the
+#    two OUTPUT SQL-insert lines). Removed "Wrote N regime definitions for audit" (duplicated
+#    OUTPUT line). Merged redundant REGIME_STATE save lines into one clearer message.
+#    Fixed "states={'healthy': N}" label to "assigned=N" (healthy was wrong — it means
+#    regime-assigned, not anomaly-free). Fixed "ENSEMBLE: GMM fallback" to clearer "Noise
+#    assignment: fitted GMM(k=N) to reassign HDBSCAN noise points". Novel-point log now
+#    upgrades to WARNING when novel% >= 25%, adds actionable message about threshold tuning.
+#
+# 4. core/ewm_baseline.py: Fixed misleading "EWM state saved: rows=0" emitted immediately
+#    after a save-failed WARNING (contradicted the failure). Now: success path logs at DEBUG
+#    only when rows > 0; failure path explains in-memory retention and cold-start risk.
+#
+# 5. core/output_manager_services.py: Removed "Analytics: tables=N" (OUTPUTS component) —
+#    analytics_builder already logs "Generated analytics tables (SQL written: N)".
+#
+# 6. .claude/skills/log-triage/SKILL.md: Updated Step 1 to query ACM_RunLogs directly
+#    (preferred) with ready-to-use SQL patterns; log file reading demoted to fallback.
+#
+# Co-Authored-By: Claude Sonnet 4.6
 
 # v11.17.3 (2026-03-10) — ACM_RunLogs: LoggedAt now uses GETDATE() (local server time)
 #

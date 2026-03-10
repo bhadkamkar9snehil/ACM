@@ -276,6 +276,13 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
     logging_cfg = cfg.get("logging") or {}
     _configure_logging(logging_cfg, args)
 
+    Console.info(
+        f"RUN START: run_id={run_id} equip={equip} equip_id={equip_id} "
+        f"batch={run_count} tick={getattr(args, 'tick_minutes', '?')}min "
+        f"range={win_start} → {win_end}",
+        component="RUN",
+    )
+
     runtime_policy = resolve_runtime_policy(args=args)
     force_retraining = runtime_policy.force_retraining
     
@@ -875,6 +882,15 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
                 equip=equip,
                 run_id=run_id,
             )
+
+        _elapsed_s = (datetime.now() - run_start_time).total_seconds() if run_start_time else 0
+        _max_z = f"{float(frame['fused'].abs().max()):.2f}" if frame is not None and "fused" in frame.columns and len(frame) > 0 else "?"
+        _ep_count = len(episodes) if episodes is not None else 0
+        Console.info(
+            f"RUN END: outcome={outcome} elapsed={_elapsed_s:.0f}s "
+            f"max_fused_z={_max_z} episodes={_ep_count} rows_written={rows_written}",
+            component="RUN",
+        )
 
     except Exception as e:
         # Capture error for finalization (must be 'FAIL' to match Runs table constraint).

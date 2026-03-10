@@ -492,10 +492,11 @@ class EWMBaselineManager:
             return 0
 
         written = self._upsert_rows(sql_client, pd.DataFrame(rows))
-        Console.debug(
-            f"EWM state saved: equip={self.equip_id} rows={written}",
-            component="EWM_BASELINE",
-        )
+        if written > 0:
+            Console.debug(
+                f"EWM state persisted: equip={self.equip_id} rows={written} → ACM_EWMBaseline",
+                component="EWM_BASELINE",
+            )
         return written
 
     def load_from_sql(self, sql_client) -> int:
@@ -711,5 +712,8 @@ VALUES
             sql_client.conn.commit()
             return written
         except Exception as exc:
-            Console.warn(f"EWM save failed: {exc}", component="EWM_BASELINE")
+            Console.warn(
+                f"EWM state NOT persisted to SQL: {exc} — in-memory state retained for this process; next cold-start will use stale SQL baseline",
+                component="EWM_BASELINE",
+            )
             return 0

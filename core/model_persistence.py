@@ -880,7 +880,6 @@ class ModelVersionManager:
                 sql_models, sql_manifest = result
                 if span_context and hasattr(span_context, '_span') and span_context._span:
                     span_context._span.set_attribute("acm.models_loaded", len(sql_models))
-                Console.info(f"[OK] Loaded from SQL ModelRegistry successfully", component="MODEL")
                 return sql_models, sql_manifest
             else:
                 Console.warn(f"Failed to load models from SQL ModelRegistry", component="MODEL", equipment=self.equip, equip_id=self.equip_id, version=version)
@@ -1326,7 +1325,7 @@ def load_cached_models_with_validation(
             equip_id=equip_id
         )
         cached_models, cached_manifest = model_manager.load_models()
-        Console.info(f"Load result: models={bool(cached_models)}, manifest={bool(cached_manifest)}", component="MODEL-LOAD")
+        Console.info(f"Models loaded: {'OK' if cached_models and cached_manifest else 'MISSING'} (models={bool(cached_models)}, manifest={bool(cached_manifest)})", component="MODEL-LOAD")
 
         if cached_models and cached_manifest:
             # v11.7.0 FIX: Validate manifest-model consistency
