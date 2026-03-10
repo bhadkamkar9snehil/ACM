@@ -18,32 +18,33 @@ _Resolved items stay for 30 days, then are archived to `docs/ACM_ARCHITECTURE_DE
 - **Status:** Open
 - **Impact:** Known faults unmonitored: T11 transformer failure (Jul 2023), T21 hydraulic + gearbox (Aug–Oct 2023)
 - **Fix:** `python scripts/sql_batch_runner.py --equip WFA_TURBINE_11 WFA_TURBINE_21 --tick-minutes 1440 --start-from-beginning --max-batches 50`
-- **Prerequisite:** Deploy the tag-agnostic regime-path changes before replaying the assets
+- **Prerequisite:** Current validation environment already has the zero-day rollout prerequisites applied; other environments still need migrations 016/017 and refreshed `ACM_Config`
 
 ### H2 — T10 health plateau (post-fault faults invisible)
 - **Status:** Open
 - **Root cause:** Model retrained on degraded data after Feb 2023 generator bearing failure → "sick" became new healthy baseline → health stuck at ~51% flat → post-fault hydraulic (Sep) and gearbox (Oct) faults missed
-- **Fix:** Apply the tag-agnostic regime-path changes, then `--start-from-beginning` for T10
-- **Prerequisite:** Deploy the regime-path changes in `core/regimes.py`
+- **Fix:** Replay `WFA_TURBINE_10` from the beginning on the latest `v11.17.x` runtime and evaluate post-fault sensitivity using the new transient contract and zero-day persistence path
+- **Prerequisite:** Current validation environment already has the tag-agnostic regime path, migration 016, migration 017, and refreshed `ACM_Config`
+- **Note:** The latest successful `T10` replay confirmed the zero-day overlay is active, but it predated the final transient fix and therefore does not yet close the plateau question
 
-### H4 — EWM persistence requires SQL migration 016 for cross-run continuity
-- **Status:** Open
-- **Impact:** The runtime now scores EWM on the explicit raw monitoring surface, but persisted EWM state is skipped until `ACM_EWMBaseline.StateVersion` exists. Runs still work, but zero-day EWM continuity is in-memory only until migration 016 is applied.
+### H4 — EWM persistence continuity must be verified after migration 016 rollout
+- **Status:** Validate in current environment
+- **Impact:** The code now expects `ACM_EWMBaseline.StateVersion = 2`. Migration 016 has been applied in the current validation environment, but persisted continuity still needs SQL verification across repeat runs.
 - **Root cause:** The new monitoring-surface contract intentionally ignores legacy pre-versioned rows.
-- **Fix:** Apply `scripts/sql/migrations/v11/016_acm_ewm_baseline_state_version.sql` before relying on persisted EWM continuity.
+- **Fix:** Verify that new rows are written with `StateVersion = 2` and reused correctly on subsequent runs; any other environment still needs `scripts/sql/migrations/v11/016_acm_ewm_baseline_state_version.sql`
 - **Files:** `core/ewm_baseline.py`, `scripts/sql/migrations/v11/016_acm_ewm_baseline_state_version.sql`
 
 ### H5 — Online regime proxy continuity depends on reusing ACM_RegimeBinnerState
-- **Status:** Monitor after rollout
+- **Status:** Validate in current environment
 - **Impact:** The runtime now uses `OnlinePCABinner` as the day-0 regime proxy, but continuity depends on `ACM_RegimeBinnerState` containing the new `binner_type = "OnlinePCABinner"` payload. Legacy JSON is intentionally discarded.
-- **Fix:** Verify `ACM_RegimeBinnerState` rows repopulate under the new runtime and delete obsolete legacy rows during rollout if operators want a clean state table.
+- **Fix:** Verify `ACM_RegimeBinnerState` rows repopulate under the new runtime, confirm `binner_type = "OnlinePCABinner"`, and delete obsolete legacy rows if operators want a clean state table.
 - **Files:** `core/regime_binner.py`, `scripts/sql/migrations/v11/015_acm_regime_binner_state.sql`
 
-### H6 — Explicit day-0 run observability requires SQL migration 017
-- **Status:** Open
-- **Impact:** The runtime now persists zero-day run status to `ACM_Runs` when the new columns exist, but until migration 017 is applied operators still cannot query `ZeroDayStatus` or `ZeroDayChannelCount` directly from run rows.
-- **Root cause:** `ACM_RunLogs` is not a trustworthy live operator surface, so the new contract intentionally writes day-0 status to `ACM_Runs` instead of inventing another fallback sink.
-- **Fix:** Apply `scripts/sql/migrations/v11/017_acm_runs_zero_day_status.sql`
+### H6 — Explicit day-0 run observability must be verified after migration 017 rollout
+- **Status:** Validate in current environment
+- **Impact:** Migration 017 has been applied in the current validation environment, and `ACM_RunLogs` is now live again, but `ACM_Runs` still needs to be checked to confirm `ZeroDayStatus`, `ZeroDaySurfaceType`, and `ZeroDayChannelCount` are actually being written during fresh runs.
+- **Root cause:** Day-0 observability now spans two SQL surfaces with different roles: `ACM_RunLogs` for detailed trace and `ACM_Runs` for explicit per-run summary. The remaining work is validation, not sink restoration.
+- **Fix:** Validate both `ACM_Runs` and `ACM_RunLogs` after the next replay; any other environment still needs `scripts/sql/migrations/v11/017_acm_runs_zero_day_status.sql`
 - **Files:** `core/run_metadata_writer.py`, `core/acm.py`, `core/smart_coldstart.py`, `scripts/sql/migrations/v11/017_acm_runs_zero_day_status.sql`
 
 ---
@@ -51,7 +52,7 @@ _Resolved items stay for 30 days, then are archived to `docs/ACM_ARCHITECTURE_DE
 ## MEDIUM (workaround exists or low urgency)
 
 ### M1 — Per-regime alert thresholds not implemented
-- **Status:** Open — planned for v11.17.x
+- **Status:** Open — next planned slice after replay validation
 - **Impact:** Global `thresholds.alert_z = 3.0` applies to all regimes. Equipment with different noise levels per operating mode will have false alerts or missed detections.
 - **Design:** `ACM_RegimeThresholds` table, per-regime P99 threshold from `ACM_Scores_Wide` history
 - **Workaround:** Global threshold is conservative; acceptable for now
@@ -86,6 +87,14 @@ _Resolved items stay for 30 days, then are archived to `docs/ACM_ARCHITECTURE_DE
   (chunk_size=500). 2,132 rows → 5 round-trips. `itertuples` replaces `iterrows` for
   record extraction. Semantics identical; expected save time <1s.
 - **Files:** `core/ewm_baseline.py` (`_upsert_rows`, `_UPSERT_CHUNK_SIZE`, `_MERGE_TEMPLATE`)
+
+### R13 — ACM_RunLogs SQL sink silent / timestamping broken (v11.17.2-v11.17.3, 2026-03-10)
+- **Was:** `ACM_Runs` summary rows existed, but `ACM_RunLogs` could remain empty because the live SQL log sink was not wired into the active runtime. Follow-up timestamp handling also needed to align with SQL Server time semantics.
+- **Fixed in:** `v11.17.2-v11.17.3`
+  - `core.observability.py`: restored the batched `_SqlRunLogSink` path so `Console` records persist to `ACM_RunLogs`
+  - `core.acm.py`: active runtime now treats SQL run logs as the primary log destination again
+  - SQL insert now uses `GETDATE()` for `LoggedAt` / `CreatedAt`
+- **Files:** `core/observability.py`, `core/acm.py`
 
 ### R11 — Refit-every-batch loop for LEARNING models (v11.16.3, 2026-03-09)
 - **Was:** Two interacting bugs caused every scoring batch to fully retrain all 5 detectors:
@@ -136,6 +145,10 @@ _Resolved items stay for 30 days, then are archived to `docs/ACM_ARCHITECTURE_DE
 - **Was:** `ControlVariableBinner` assumed manually meaningful control-variable columns and was disabled in runtime because that design was incompatible with ACM's asset-agnostic intent.
 - **Fixed in:** v11.16.x — `core/regime_binner.py` now provides `OnlinePCABinner`, a persisted tag-agnostic online latent regime proxy, and `core/acm.py` uses it before mature HDBSCAN labels exist
 
+### R11 — Asset-agnostic transient labels overclassified startup/shutdown/trip (v11.17.x, 2026-03-10)
+- **Was:** After removing tag taxonomy, transient detection still reused legacy sub-unit thresholds and direction-like labels (`startup`, `shutdown`) on a generic numeric surface. On `WFA_TURBINE_10`, this labeled most rows as startup/shutdown/trip despite otherwise healthy regime output.
+- **Fixed in:** v11.17.x — transient scoring now uses a normalized change-intensity index, rejects legacy sub-unit thresholds with a compatibility warning, and limits the active asset-agnostic runtime contract to `steady`, `transient`, and `trip`
+
 ---
 
 ## Diagnostic Quick Reference
@@ -153,8 +166,27 @@ SELECT EquipID, JSON_VALUE(StateJson,'$.binner_type') AS BinnerType,
     JSON_VALUE(StateJson,'$.n_batches') AS NBatches
 FROM ACM_RegimeBinnerState ORDER BY EquipID
 
+-- Check day-0 run observability (H6 tracking)
+SELECT TOP 20 StartedAt, CompletedAt, ZeroDayScoringActive, ZeroDayStatus,
+    ZeroDaySurfaceType, ZeroDayChannelCount, HealthStatus, MaxFusedZ
+FROM ACM_Runs
+WHERE EquipID = 5010
+ORDER BY StartedAt DESC
+
+-- Check live SQL trace is present (H6 tracking)
+SELECT TOP 50 LoggedAt, Level, Component, Message
+FROM ACM_RunLogs
+WHERE EquipID = 5010
+ORDER BY LoggedAt DESC
+
 -- EWM baseline health
 SELECT EquipID, RegimeID, COUNT(*) AS NSensors,
     SUM(CASE WHEN BaselineIntegrity='frozen' THEN 1 ELSE 0 END) AS NFrozen
 FROM ACM_EWMBaseline GROUP BY EquipID, RegimeID ORDER BY EquipID, RegimeID
+
+-- Check EWM state version continuity (H4 tracking)
+SELECT TOP 20 EquipID, RegimeID, SensorName, StateVersion, BaselineIntegrity, UpdatedAt
+FROM ACM_EWMBaseline
+WHERE EquipID = 5010
+ORDER BY UpdatedAt DESC
 ```

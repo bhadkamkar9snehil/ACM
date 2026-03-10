@@ -13,6 +13,7 @@ ACM uses a modern observability stack built on open standards, deployed entirely
 | **Logs** | structlog | Grafana Loki | 3100 | Structured JSON logs |
 | **CPU Profiling** | yappi + HTTP API | Grafana Pyroscope | 4040 | CPU flamegraphs |
 | **Memory Profiling** | tracemalloc + HTTP API | Grafana Pyroscope | 4040 | Memory allocation flamegraphs |
+| **Image Rendering** | Grafana remote renderer | Grafana Image Renderer | internal | Dashboard/panel image export |
 
 ## Architecture
 
@@ -80,6 +81,61 @@ You should see:
 [SUCCESS] [OTEL] Profiling -> http://localhost:4040
 ```
 
+## Main Dashboards
+
+The three primary ACM dashboards now treat SQL-native ACM observability as
+first-class runtime truth alongside Loki/Prometheus.
+
+### ACM — Complete Picture
+
+File: `acm_master_complete.json`
+
+Use this dashboard for one equipment at a time. The operations and log sections
+now show:
+
+- recent `ACM_Runs` with `ZeroDayStatus`, `ZeroDaySurfaceType`,
+  `ZeroDayChannelCount`, `DataQualityScore`, `MaxFusedZ`, and per-run SQL
+  warning/error counts from `ACM_RunLogs`
+- zero-day status mix for the selected equipment over the active time range
+- warning/error pressure by run
+- side-by-side Loki logs and SQL-native latest-run log tail
+
+### ACM — Fleet Overview
+
+File: `acm_fleet_overview.json`
+
+Use this dashboard to answer fleet-level operational questions. The current
+status and run sections now show:
+
+- per-equipment current health with latest `ZeroDayStatus`, channel count, and
+  24-hour SQL warning/error pressure
+- richer recent run history for all equipment
+- a dedicated zero-day coverage row summarizing latest HDBSCAN / online proxy /
+  global fallback usage across the fleet
+- fleet-wide warnings/errors by equipment
+
+### ACM — Observability
+
+File: `acm_observability.json`
+
+Use this dashboard to understand pipeline behavior rather than asset condition.
+It now promotes ACM-native SQL surfaces instead of relying on Loki alone:
+
+- recent `ACM_Runs` with zero-day fields and per-run SQL warning/error counts
+- top-line stats for zero-day active runs, HDBSCAN runs, SQL warnings, and SQL
+  errors
+- SQL write visibility for `ACM_RunLogs`, `ACM_EWMBaseline`, and
+  `ACM_RegimeBinnerState`
+- recent SQL run-log tail plus SQL log-volume breakdowns by component and
+  equipment
+
+Operational rule:
+
+- use `ACM_Runs` for durable run summary and explicit zero-day state
+- use `ACM_RunLogs` for ordered SQL trace, warnings, and failure context
+- use Loki/Prometheus/Tempo/Pyroscope for infrastructure and cross-system
+  telemetry
+
 ## Installation
 
 ### Base (Required)
@@ -109,6 +165,13 @@ pip install -e ".[observability]"
 | `acm-loki` | grafana/loki:3.3.2 | 3100 | Log aggregation |
 | `acm-prometheus` | prom/prometheus:v2.54.1 | 9090 | Metrics storage |
 | `acm-pyroscope` | grafana/pyroscope:1.16.0 | 4040, 4041 | Profiling |
+| `acm-grafana-renderer` | grafana/grafana-image-renderer:4.0.17 | internal | Remote dashboard and panel image rendering |
+
+Grafana image export:
+
+- ACM now uses Grafana's supported remote renderer service rather than the deprecated in-process image renderer plugin.
+- The Docker stack wires Grafana to `acm-grafana-renderer` with `GF_RENDERING_SERVER_URL`, `GF_RENDERING_CALLBACK_URL`, and a shared renderer auth token.
+- If image export still fails after updating the stack, restart the observability stack with `docker compose up -d` from `install/observability`.
 
 ## Configuration Files
 
@@ -695,6 +758,19 @@ Seq  Component  Level   Message Pattern
 27   RUN        INFO    Finalized RunID={uuid} outcome=NOOP rows_in=0 rows_out=0
 28   OUTPUT     INFO    Finalized: 0 files, 0 SQL ops, 0 total rows, 0.000s avg write
 ```
+
+### SQL Observability Surfaces
+
+Current runtime uses two SQL observability surfaces with different roles:
+
+- `ACM_RunLogs`: detailed ordered trace from the live `Console` SQL sink
+- `ACM_Runs`: durable per-run summary, outcome, and explicit zero-day status
+
+As of `v11.17.2-v11.17.3`, the `ACM_RunLogs` sink is active again through the batched
+SQL writer in `core.observability.py`. Operators should use:
+
+- `ACM_RunLogs` to inspect sequencing, warnings, and failure traces
+- `ACM_Runs` to inspect run outcome and day-0 summary fields such as `ZeroDayStatus`
 
 ### Loki Query Examples
 

@@ -12,6 +12,7 @@ This directory contains configuration files for the complete Grafana observabili
 | **Loki** | acm-loki | 3100 | Log aggregation |
 | **Prometheus** | acm-prometheus | 9090 | Metrics storage |
 | **Pyroscope** | acm-pyroscope | 4040 | Continuous profiling |
+| **Image Renderer** | acm-grafana-renderer | internal only | Dashboard and panel image export |
 
 ## Quick Start
 
@@ -42,6 +43,7 @@ acm-prometheus   Up (healthy)     0.0.0.0:9090->9090/tcp
 acm-loki         Up (healthy)     0.0.0.0:3100->3100/tcp
 acm-pyroscope    Up (healthy)     0.0.0.0:4040->4040/tcp
 acm-tempo        Up (healthy)     0.0.0.0:3200->3200/tcp
+acm-grafana-renderer Up          8081/tcp
 ```
 
 ### Step 3: Access Grafana
@@ -56,6 +58,11 @@ Datasources are auto-provisioned via `provisioning/datasources/datasources.yaml`
 - **Loki** (loki-ds) - Log aggregation
 - **Pyroscope** (pyroscope-ds) - Continuous profiling
 - **MSSQL** (mssql-ds) - SQL Server for ACM business data
+
+Grafana image export:
+- Dashboard and panel image export now uses the supported remote renderer service.
+- If Grafana still shows "Image renderer plugin not installed", restart the stack with `docker compose up -d`.
+- The renderer is internal to the Docker network; no extra host port is required.
 
 ## Dashboard Folder Structure & Tagging Philosophy
 

@@ -100,6 +100,20 @@ python scripts/sql_batch_runner.py --equip FD_FAN --tick-minutes 60 --max-coldst
 [SUCCESS] FD_FAN: Completed - 17497 batch(es) processed
 ```
 
+### Final Summary Contract
+
+At the end of each equipment run, the batch runner now emits:
+
+- runner outcome: `status`, `coldstart_complete`, `batches_processed`, `elapsed`, `note`
+- latest ACM run metadata: `RunID`, source table, ACM run window, ACM duration
+- ACM health metrics: `health_status`, `avg_health`, `min_health`, `max_fused_z`, `data_quality`, `refit_requested`
+- zero-day metrics: `active`, `status`, `surface`, `channels`
+- key output counts: scores, health timeline, regime timeline, episodes, hotspots, forecast outputs
+- SQL log counts: total `ACM_RunLogs`, warnings, errors
+
+The intent is that the batch runner final summary should be sufficient for operator review
+without requiring immediate manual SQL inspection after every replay.
+
 ## Configuration Requirements
 
 ### ACM_Config Settings
