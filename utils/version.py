@@ -17,9 +17,30 @@ Release Management:
 - Production deployments use specific tags (never merge commits)
 """
 
-__version__ = "11.17.5"
+__version__ = "11.17.6"
 __version_date__ = "2026-03-10"
 __version_author__ = "ACM Development Team"
+
+# v11.17.6 (2026-03-10) — Fix EWM SQL persist failure and binner state never written
+#
+# Two zero-day state-persistence bugs found via ACM_RunLogs contract validation.
+#
+# 1. core/ewm_baseline.py: _UPSERT_CHUNK_SIZE was 500. With 13 columns, each chunk
+#    sent 500 x 13 = 6,500 parameters -- exceeding SQL Server's hard limit of 2,100
+#    per statement. ODBC returned '07002 COUNT field incorrect'. EWM state was silently
+#    lost every batch; cold-start always loaded stale SQL baseline. Fixed to 161
+#    (floor(2100 / 13)), keeping each chunk to 2,093 parameters. Comment updated to
+#    document the SQL Server limit and recalculation rule if _UPSERT_COLS grows.
+#
+# 2. core/acm.py: OnlinePCABinner.save_to_sql() was only called in the binner fallback
+#    path (HDBSCAN not ready) and the remap path (first stable HDBSCAN fit). When
+#    HDBSCAN was available from batch 1 (cached models), the binner ran align_to_surface
+#    and accumulated PCA state in memory but never wrote it to ACM_RegimeBinnerState.
+#    Cold-start always restarted the binner from scratch. Fixed by adding
+#    _binner.save_to_sql() at the end of the HDBSCAN branch (guarded by _binner is not
+#    None). The method is a no-op if the binner is not yet fitted.
+#
+# Co-Authored-By: Claude Sonnet 4.6
 
 # v11.17.5 (2026-03-10) — Remove duplicate REGIME_STATE log from model_persistence.py
 #

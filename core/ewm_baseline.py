@@ -643,9 +643,10 @@ class EWMBaselineManager:
         if len(state._score_history) > _SCORE_HISTORY_WINDOW * 2:
             state._score_history = state._score_history[-_SCORE_HISTORY_WINDOW:]
 
-    # Maximum rows per VALUES clause. 500 rows × 13 cols = 6,500 params —
-    # well within pyodbc's 32,767-parameter limit and SQL Server's VALUES limit.
-    _UPSERT_CHUNK_SIZE = 500
+    # Maximum rows per VALUES clause. SQL Server hard limit is 2,100 parameters
+    # per statement. With 13 columns: floor(2100 / 13) = 161 rows per chunk.
+    # If _UPSERT_COLS grows, recalculate: floor(2100 / len(_UPSERT_COLS)).
+    _UPSERT_CHUNK_SIZE = 161
 
     _UPSERT_COLS = [
         "EquipID", "RegimeID", "SensorName", "StateVersion",
