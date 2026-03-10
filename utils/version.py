@@ -17,9 +17,22 @@ Release Management:
 - Production deployments use specific tags (never merge commits)
 """
 
-__version__ = "11.17.2"
+__version__ = "11.17.3"
 __version_date__ = "2026-03-10"
 __version_author__ = "ACM Development Team"
+
+# v11.17.3 (2026-03-10) — ACM_RunLogs: LoggedAt now uses GETDATE() (local server time)
+#
+# Root cause: _SqlRunLogSink.log() captured datetime.utcnow() in Python and passed it
+# as a parameter for LoggedAt. SQL Server stores it as UTC, so queries showed times
+# ~5:30 behind wall clock (IST = UTC+5:30). CreatedAt used GETDATE() so the two columns
+# disagreed on timezone convention, making the table confusing to query.
+#
+# 1. core/observability.py: _INSERT_SQL now uses GETDATE() for both LoggedAt and
+#    CreatedAt (SQL Server local time, consistent with all other ACM tables).
+#    datetime.utcnow() call removed from log(); tuple is now (rid, eid, lvl, comp, msg).
+#
+# Co-Authored-By: Claude Sonnet 4.6
 
 # v11.17.2 (2026-03-10) — Wire ACM_RunLogs SQL sink: Console logs now persisted to SQL
 #

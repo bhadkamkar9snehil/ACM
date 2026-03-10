@@ -2350,7 +2350,7 @@ class _SqlRunLogSink:
     _INSERT_SQL = (
         "INSERT INTO dbo.ACM_RunLogs "
         "(RunID, EquipID, LoggedAt, Level, Component, Message, CreatedAt) "
-        "VALUES (?, ?, ?, ?, ?, ?, GETUTCDATE())"
+        "VALUES (?, ?, GETDATE(), ?, ?, ?, GETDATE())"
     )
     _MAX_MESSAGE = 4000   # truncate runaway log lines
     _MAX_COMPONENT = 64
@@ -2368,13 +2368,12 @@ class _SqlRunLogSink:
     def log(self, level: str, message: str, component: Optional[str], run_id: str, equip_id: int) -> None:
         """Enqueue a log record (non-blocking; drops if queue full)."""
         try:
-            now = datetime.utcnow()
             rid: Optional[str] = run_id if run_id and run_id != "unknown" else None
             eid: Optional[int] = equip_id if equip_id else None
             lvl = level.upper()[:16]
             comp = component[:self._MAX_COMPONENT] if component else None
             msg = message[:self._MAX_MESSAGE] if message else ""
-            self._queue.put_nowait((rid, eid, now, lvl, comp, msg))
+            self._queue.put_nowait((rid, eid, lvl, comp, msg))
         except queue.Full:
             pass
         except Exception:
