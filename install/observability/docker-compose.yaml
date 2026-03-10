@@ -73,8 +73,7 @@ services:
       - GF_FEATURE_TOGGLES_ENABLE=panelTitleSearch grpcServer renderAuthJWT refactorVariablesTimeRange faroDatasourceSelector enableDatagridEditing externalServiceAccounts dashboardNewLayouts pdfTables canvasPanelPanZoom alertingSaveStateCompressed sqlExpressions queryLibrary savedQueriesRBAC dashboardTemplates alertRuleRestore azureMonitorLogsBuilderEditor logsPanelControls interactiveLearning newGauge newVizSuggestions vizPresets preventPanelChromeOverflow newPanelPadding transformationsEmptyPlaceholder
     volumes:
       - grafana-data:/var/lib/grafana
-      - ./provisioning:/etc/grafana/provisioning:ro
-      - ./dashboards:/etc/grafana/dashboards:ro
+      - ./provisioning/datasources:/etc/grafana/provisioning/datasources:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
