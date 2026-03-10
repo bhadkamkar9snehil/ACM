@@ -2034,7 +2034,57 @@ class TestRefactorHelpers:
         states = detect_transient_states(data=data, regime_labels=regime_labels, cfg={})
 
         assert len(states) == len(data)
-        assert set(states.tolist()) <= {"steady", "transient", "startup", "shutdown", "trip"}
+        assert set(states.tolist()) <= {"steady", "transient", "trip"}
+
+    def test_detect_transient_states_marks_step_change_without_labeling_full_batch_trip(self):
+        """A sharp operating change should create a bounded transient window, not a near-all-trip batch."""
+        from core.regimes import detect_transient_states
+
+        idx = pd.date_range("2026-01-01", periods=40, freq="h")
+        data = pd.DataFrame(
+            {
+                "sensor_1_avg": np.r_[np.ones(20), np.full(20, 3.5)],
+                "sensor_2_avg": np.r_[np.full(20, 2.0), np.full(20, 2.8)],
+                "sensor_3_avg": np.r_[np.linspace(10.0, 10.3, 20), np.linspace(12.0, 12.2, 20)],
+            },
+            index=idx,
+        )
+        regime_labels = np.array([0] * 20 + [1] * 20)
+
+        states = detect_transient_states(data=data, regime_labels=regime_labels, cfg={})
+        counts = pd.Series(states).value_counts().to_dict()
+
+        assert counts.get("trip", 0) < 12
+        assert counts.get("steady", 0) > counts.get("trip", 0)
+        assert counts.get("transient", 0) > 0
+
+    def test_detect_transient_states_ignores_legacy_low_thresholds_for_normalized_index(self):
+        """Legacy sub-unit thresholds should be upgraded to conservative normalized defaults."""
+        from core.regimes import detect_transient_states
+
+        idx = pd.date_range("2026-01-01", periods=24, freq="h")
+        data = pd.DataFrame(
+            {
+                "sensor_1_avg": np.linspace(1.0, 2.0, len(idx)),
+                "sensor_2_avg": np.linspace(5.0, 5.5, len(idx)),
+            },
+            index=idx,
+        )
+        regime_labels = np.zeros(len(idx), dtype=int)
+        cfg = {
+            "regimes": {
+                "transient_detection": {
+                    "roc_threshold_high": 0.15,
+                    "roc_threshold_trip": 0.30,
+                }
+            }
+        }
+
+        states = detect_transient_states(data=data, regime_labels=regime_labels, cfg=cfg)
+        counts = pd.Series(states).value_counts().to_dict()
+
+        assert counts.get("trip", 0) == 0
+        assert counts.get("steady", 0) >= len(idx) - 4
 
     def test_select_ewm_monitoring_surface_keeps_all_eligible_generic_channels(self):
         """EWM monitoring surface should keep every eligible generic raw channel without a regime cap."""

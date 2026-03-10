@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 import scripts.sql_batch_runner as sql_batch_runner_module
-from scripts.sql_batch_runner import BatchProcessingResult, SQLBatchRunner
+from scripts.sql_batch_runner import BatchProcessingResult, RunInspectionSummary, SQLBatchRunner
 
 
 class _DummyCursor:
@@ -242,6 +242,91 @@ def test_process_equipment_emits_final_summary_on_success(tmp_path, monkeypatch)
         "Final summary | status=SUCCESS" in msg and "batches_processed=2" in msg and "note=batches_processed" in msg
         for _, msg in messages
     )
+
+
+def test_process_equipment_emits_acm_derived_summary_details_when_available(tmp_path, monkeypatch):
+    runner = _make_runner(tmp_path)
+    messages = []
+
+    class _ConsoleCapture:
+        @staticmethod
+        def header(msg, **kwargs):
+            messages.append(("header", msg))
+
+        @staticmethod
+        def info(msg, **kwargs):
+            messages.append(("info", msg))
+
+        @staticmethod
+        def ok(msg, **kwargs):
+            messages.append(("ok", msg))
+
+        @staticmethod
+        def warn(msg, **kwargs):
+            messages.append(("warn", msg))
+
+        @staticmethod
+        def error(msg, **kwargs):
+            messages.append(("error", msg))
+
+        @staticmethod
+        def status(msg, **kwargs):
+            messages.append(("status", msg))
+
+    monkeypatch.setattr(sql_batch_runner_module, "Console", _ConsoleCapture)
+    runner._test_sql_connection = lambda: True  # type: ignore[method-assign]
+    runner._load_progress = lambda: {}  # type: ignore[method-assign]
+    runner._get_equip_id = lambda equip_name: 5010  # type: ignore[method-assign]
+    runner._log_historian_overview = lambda equip_name: True  # type: ignore[method-assign]
+    runner._process_coldstart = lambda equip_name, dry_run=False: (True, None)  # type: ignore[method-assign]
+    runner._process_batches = lambda equip_name, start_from=None, dry_run=False, resume=False: BatchProcessingResult(  # type: ignore[method-assign]
+        completed=14,
+        attempted=14,
+        failed=False,
+    )
+    runner._inspect_last_run_outputs = lambda equip_name: RunInspectionSummary(  # type: ignore[method-assign]
+        run_id="run-123",
+        run_source="ACM_Runs",
+        started_at=datetime(2026, 3, 10, 0, 0, 0),
+        completed_at=datetime(2026, 3, 10, 0, 20, 34),
+        duration_seconds=1234,
+        train_row_count=500,
+        score_row_count=1781,
+        episode_count=3,
+        health_status="HEALTHY",
+        avg_health_index=96.2,
+        min_health_index=88.4,
+        max_fused_z=2.37,
+        data_quality_score=99.1,
+        refit_requested=False,
+        zero_day_scoring_active=True,
+        zero_day_status="active_hdbscan",
+        zero_day_surface_type="raw_numeric",
+        zero_day_channel_count=79,
+        forecast_outputs_required=False,
+        table_counts={
+            "ACM_Scores_Wide": 1781,
+            "ACM_HealthTimeline": 1781,
+            "ACM_RegimeTimeline": 1781,
+            "ACM_SensorHotspots": 12,
+            "ACM_HealthForecast": 0,
+            "ACM_FailureForecast": 0,
+            "ACM_RUL": 0,
+        },
+        run_log_total=245,
+        run_log_warn=7,
+        run_log_error=0,
+    )
+
+    success = runner.process_equipment("WFA_TURBINE_10")
+
+    assert success is True
+    assert any("Final summary | status=SUCCESS" in msg for _, msg in messages)
+    assert any("ACM run | run_id=run-123" in msg for _, msg in messages)
+    assert any("ACM metrics | train_rows=500 | score_rows=1781 | health_status=HEALTHY" in msg for _, msg in messages)
+    assert any("Zero-day | active=yes | status=active_hdbscan | surface=raw_numeric | channels=79" in msg for _, msg in messages)
+    assert any("Outputs | scores=1781 | health_timeline=1781 | regime_timeline=1781 | episodes=3" in msg for _, msg in messages)
+    assert any("Logs | run_logs=245 | warnings=7 | errors=0" in msg for _, msg in messages)
 
 
 def test_process_equipment_emits_final_summary_on_exception(tmp_path, monkeypatch):

@@ -192,7 +192,10 @@ VALUES
     (0, 'regimes', 'regimes.auto_k.random_state', '17', 'int', 'SYSTEM', 'Initial seed'),
     (0, 'regimes', 'regimes.feature_basis.max_cols', '24', 'int', 'SYSTEM', 'Initial seed'),
     (0, 'regimes', 'regimes.feature_basis.min_valid_fraction', '0.60', 'float', 'SYSTEM', 'Initial seed'),
-    (0, 'regimes', 'regimes.feature_basis.min_iqr', '0.000001', 'float', 'SYSTEM', 'Initial seed');
+    (0, 'regimes', 'regimes.feature_basis.min_iqr', '0.000001', 'float', 'SYSTEM', 'Initial seed'),
+    (0, 'regimes', 'regimes.transient_detection.roc_window', '10', 'int', 'SYSTEM', 'Initial seed'),
+    (0, 'regimes', 'regimes.transient_detection.roc_threshold_high', '3.0', 'float', 'SYSTEM', 'Initial seed'),
+    (0, 'regimes', 'regimes.transient_detection.roc_threshold_trip', '5.0', 'float', 'SYSTEM', 'Initial seed');
 
 -- Output configuration
 INSERT INTO ACM_Config (EquipID, Category, ParamPath, ParamValue, ValueType, UpdatedBy, ChangeReason)

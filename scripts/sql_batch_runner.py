@@ -29,7 +29,7 @@ import textwrap
 import os
 import math
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, List, Dict, Optional, Tuple
@@ -135,6 +135,35 @@ class BatchProcessingResult:
     failed: bool
 
 
+@dataclass(frozen=True)
+class RunInspectionSummary:
+    """Structured summary of the latest ACM run for an equipment."""
+
+    run_id: Optional[str]
+    run_source: str = "unknown"
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    duration_seconds: Optional[int] = None
+    train_row_count: Optional[int] = None
+    score_row_count: Optional[int] = None
+    episode_count: Optional[int] = None
+    health_status: Optional[str] = None
+    avg_health_index: Optional[float] = None
+    min_health_index: Optional[float] = None
+    max_fused_z: Optional[float] = None
+    data_quality_score: Optional[float] = None
+    refit_requested: Optional[bool] = None
+    zero_day_scoring_active: Optional[bool] = None
+    zero_day_status: Optional[str] = None
+    zero_day_surface_type: Optional[str] = None
+    zero_day_channel_count: Optional[int] = None
+    forecast_outputs_required: bool = False
+    table_counts: Dict[str, int] = field(default_factory=dict)
+    run_log_total: Optional[int] = None
+    run_log_warn: Optional[int] = None
+    run_log_error: Optional[int] = None
+
+
 class SQLBatchRunner:
     """Manages continuous batch processing from SQL historian."""
 
@@ -161,6 +190,7 @@ class SQLBatchRunner:
         self.progress_file = artifact_root / ".sql_batch_progress.json"
         self.max_batches = max_batches
         self.start_from_beginning = start_from_beginning
+        self._latest_run_inspection: Dict[str, RunInspectionSummary] = {}
 
     def _log_historian_overview(self, equip_name: str) -> bool:
         """Preflight: Log historian table coverage and return True when data exists.
@@ -585,7 +615,7 @@ class SQLBatchRunner:
         except Exception as e:
             Console.warn(f"Failed to delete models for EquipID={equip_id}: {e}", component="RESET", equip_id=equip_id, error=str(e), error_type=type(e).__name__)
 
-    def _inspect_last_run_outputs(self, equip_name: str) -> None:
+    def _inspect_last_run_outputs(self, equip_name: str) -> Optional[RunInspectionSummary]:
         """
         Lightweight QA: after a batch run, report row counts in key tables for
         the last RunID for this equipment so a dev can spot anomalies.
@@ -594,7 +624,7 @@ class SQLBatchRunner:
             equip_id = self._get_equip_id(equip_name)
             if not equip_id:
                 Console.warn(f"EquipID not found for {equip_name}, skipping output inspection", component="QA", equipment=equip_name)
-                return
+                return None
             with self._get_sql_connection() as conn:
                 cur = conn.cursor()
                 # Prefer deriving the latest RunID from freshly written forecast tables
@@ -665,9 +695,11 @@ class SQLBatchRunner:
                     row = cur.fetchone()
                     if not row:
                         Console.warn(f"No ACM_Runs entry found for EquipID={equip_id}, skipping inspection", component="QA", equip_id=equip_id)
-                        return
+                        return None
                     run_id, started_at, completed_at = row[0], row[1], row[2]
                     run_source = "ACM_Runs"
+
+                run_id_str = str(run_id) if run_id is not None else None
 
                 # If we derived from forecast tables, try to enrich with window from ACM_Runs
                 if started_at is None or completed_at is None:
@@ -685,7 +717,7 @@ class SQLBatchRunner:
                 Console.info(
                     f"Inspecting outputs for EquipID={equip_id}, RunID={run_id} (from {run_source}), "
                     f"window=[{started_at},{completed_at})",
-                    component="QA", equip_id=equip_id, run_id=str(run_id)
+                    component="QA", equip_id=equip_id, run_id=run_id_str
                 )
                 forecast_outputs_required = self._should_expect_forecast_outputs(equip_id, run_id)
                 if not forecast_outputs_required:
@@ -693,8 +725,62 @@ class SQLBatchRunner:
                         "Forecast/RUL outputs are optional for this run; zero-row checks are informational only.",
                         component="QA",
                         equip_id=equip_id,
-                        run_id=str(run_id),
+                        run_id=run_id_str,
                     )
+                runs_columns: Dict[str, Any] = {}
+                try:
+                    cur.execute(
+                        """
+                        SELECT COLUMN_NAME
+                        FROM INFORMATION_SCHEMA.COLUMNS
+                        WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'ACM_Runs'
+                        """
+                    )
+                    available_columns = {str(row[0]) for row in cur.fetchall()}
+                    wanted_columns = [
+                        "StartedAt",
+                        "CompletedAt",
+                        "DurationSeconds",
+                        "TrainRowCount",
+                        "ScoreRowCount",
+                        "EpisodeCount",
+                        "HealthStatus",
+                        "AvgHealthIndex",
+                        "MinHealthIndex",
+                        "MaxFusedZ",
+                        "DataQualityScore",
+                        "RefitRequested",
+                        "ZeroDayScoringActive",
+                        "ZeroDayStatus",
+                        "ZeroDaySurfaceType",
+                        "ZeroDayChannelCount",
+                    ]
+                    selected_columns = [col for col in wanted_columns if col in available_columns]
+                    if selected_columns:
+                        select_sql = (
+                            "SELECT TOP 1 "
+                            + ", ".join(selected_columns)
+                            + " FROM dbo.ACM_Runs WHERE RunID = ?"
+                        )
+                        cur.execute(select_sql, (run_id,))
+                        meta_row = cur.fetchone()
+                        if meta_row:
+                            runs_columns = {
+                                col: meta_row[idx]
+                                for idx, col in enumerate(selected_columns)
+                            }
+                            started_at = runs_columns.get("StartedAt", started_at)
+                            completed_at = runs_columns.get("CompletedAt", completed_at)
+                except Exception as meta_err:
+                    Console.warn(
+                        f"Could not load ACM_Runs metadata for summary: {meta_err}",
+                        component="QA",
+                        equip_id=equip_id,
+                        run_id=run_id_str,
+                        error_type=type(meta_err).__name__,
+                    )
+
+                table_counts: Dict[str, int] = {}
                 tables_to_check: List[Tuple[str, bool, bool]] = [
                     # (table, has_run_id, critical)
                     ("ACM_Scores_Wide", True, True),
@@ -738,6 +824,7 @@ class SQLBatchRunner:
                             )
                         cnt_row = cur.fetchone()
                         count_val = int(cnt_row[0]) if cnt_row else 0
+                        table_counts[table_name] = count_val
                         Console.info(
                             f"{table_name}: {count_val} row(s) for EquipID={equip_id} "
                             f"{'(RunID scoped)' if has_run else ''}",
@@ -834,8 +921,68 @@ class SQLBatchRunner:
                 except Exception as e:
                     Console.warn(f"QA check for Hotspot Ranking failed: {e}", component="QA")
 
+                run_log_total = None
+                run_log_warn = None
+                run_log_error = None
+                try:
+                    cur.execute(
+                        """
+                        IF OBJECT_ID('dbo.ACM_RunLogs', 'U') IS NOT NULL
+                            SELECT
+                                COUNT(*) AS TotalLogs,
+                                SUM(CASE WHEN UPPER(Level) IN ('WARN', 'WARNING') THEN 1 ELSE 0 END) AS WarnLogs,
+                                SUM(CASE WHEN UPPER(Level) = 'ERROR' THEN 1 ELSE 0 END) AS ErrorLogs
+                            FROM dbo.ACM_RunLogs
+                            WHERE RunID = ?
+                        ELSE
+                            SELECT 0, 0, 0
+                        """,
+                        (run_id,),
+                    )
+                    log_row = cur.fetchone()
+                    if log_row:
+                        run_log_total = int(log_row[0] or 0)
+                        run_log_warn = int(log_row[1] or 0)
+                        run_log_error = int(log_row[2] or 0)
+                except Exception as log_err:
+                    Console.warn(
+                        f"Could not inspect ACM_RunLogs for summary: {log_err}",
+                        component="QA",
+                        equip_id=equip_id,
+                        run_id=run_id_str,
+                        error_type=type(log_err).__name__,
+                    )
+
+                summary = RunInspectionSummary(
+                    run_id=run_id_str,
+                    run_source=str(run_source or "unknown"),
+                    started_at=started_at,
+                    completed_at=completed_at,
+                    duration_seconds=int(runs_columns["DurationSeconds"]) if runs_columns.get("DurationSeconds") is not None else None,
+                    train_row_count=int(runs_columns["TrainRowCount"]) if runs_columns.get("TrainRowCount") is not None else None,
+                    score_row_count=int(runs_columns["ScoreRowCount"]) if runs_columns.get("ScoreRowCount") is not None else None,
+                    episode_count=int(runs_columns["EpisodeCount"]) if runs_columns.get("EpisodeCount") is not None else None,
+                    health_status=str(runs_columns["HealthStatus"]) if runs_columns.get("HealthStatus") is not None else None,
+                    avg_health_index=float(runs_columns["AvgHealthIndex"]) if runs_columns.get("AvgHealthIndex") is not None else None,
+                    min_health_index=float(runs_columns["MinHealthIndex"]) if runs_columns.get("MinHealthIndex") is not None else None,
+                    max_fused_z=float(runs_columns["MaxFusedZ"]) if runs_columns.get("MaxFusedZ") is not None else None,
+                    data_quality_score=float(runs_columns["DataQualityScore"]) if runs_columns.get("DataQualityScore") is not None else None,
+                    refit_requested=bool(runs_columns["RefitRequested"]) if runs_columns.get("RefitRequested") is not None else None,
+                    zero_day_scoring_active=bool(runs_columns["ZeroDayScoringActive"]) if runs_columns.get("ZeroDayScoringActive") is not None else None,
+                    zero_day_status=str(runs_columns["ZeroDayStatus"]) if runs_columns.get("ZeroDayStatus") is not None else None,
+                    zero_day_surface_type=str(runs_columns["ZeroDaySurfaceType"]) if runs_columns.get("ZeroDaySurfaceType") is not None else None,
+                    zero_day_channel_count=int(runs_columns["ZeroDayChannelCount"]) if runs_columns.get("ZeroDayChannelCount") is not None else None,
+                    forecast_outputs_required=forecast_outputs_required,
+                    table_counts=table_counts,
+                    run_log_total=run_log_total,
+                    run_log_warn=run_log_warn,
+                    run_log_error=run_log_error,
+                )
+                self._latest_run_inspection[equip_name] = summary
+                return summary
         except Exception as e:
             Console.error(f"Output inspection failed for {equip_name}: {e}", component="QA", equipment=equip_name, error=str(e), error_type=type(e).__name__)
+        return None
 
     def _reset_progress_to_beginning(self, equip_id: int, equip_name: Optional[str] = None) -> None:
         """Clear SQL and local progress state to force restart from earliest EntryDateTime."""
@@ -1411,6 +1558,7 @@ class SQLBatchRunner:
         batches_processed: int,
         elapsed_seconds: float,
         note: str,
+        inspection: Optional[RunInspectionSummary] = None,
     ) -> None:
         """Emit a single end-of-run summary line for this equipment."""
         elapsed_total = max(int(elapsed_seconds), 0)
@@ -1418,6 +1566,29 @@ class SQLBatchRunner:
         elapsed_remainder = elapsed_total % 60
         status = "SUCCESS" if success else "FAIL"
         log_fn = Console.ok if success else Console.error
+
+        def _fmt_dt(value: Optional[datetime]) -> str:
+            if value is None:
+                return "?"
+            try:
+                return value.strftime("%Y-%m-%d %H:%M:%S")
+            except Exception:
+                return str(value)
+
+        def _fmt_float(value: Optional[float], digits: int = 1) -> str:
+            if value is None:
+                return "?"
+            return f"{float(value):.{digits}f}"
+
+        def _fmt_int(value: Optional[int]) -> str:
+            if value is None:
+                return "?"
+            return str(int(value))
+
+        def _fmt_bool(value: Optional[bool]) -> str:
+            if value is None:
+                return "?"
+            return "yes" if bool(value) else "no"
 
         Console.status("\n" + "-" * 60)
         log_fn(
@@ -1433,6 +1604,62 @@ class SQLBatchRunner:
             elapsed_seconds=elapsed_remainder,
             note=note,
         )
+        if inspection is not None and inspection.run_id:
+            episode_display = inspection.episode_count
+            if episode_display is None:
+                episode_display = inspection.table_counts.get("ACM_EpisodeDiagnostics")
+            Console.info(
+                f"{equip_name}: ACM run | run_id={inspection.run_id} | source={inspection.run_source} "
+                f"| window=[{_fmt_dt(inspection.started_at)} -> {_fmt_dt(inspection.completed_at)}] "
+                f"| duration_s={_fmt_int(inspection.duration_seconds)}",
+                component="SUMMARY",
+                equipment=equip_name,
+                run_id=inspection.run_id,
+            )
+            Console.info(
+                f"{equip_name}: ACM metrics | train_rows={_fmt_int(inspection.train_row_count)} "
+                f"| score_rows={_fmt_int(inspection.score_row_count)} "
+                f"| health_status={inspection.health_status or '?'} "
+                f"| avg_health={_fmt_float(inspection.avg_health_index)} "
+                f"| min_health={_fmt_float(inspection.min_health_index)} "
+                f"| max_fused_z={_fmt_float(inspection.max_fused_z, digits=2)} "
+                f"| data_quality={_fmt_float(inspection.data_quality_score)} "
+                f"| refit_requested={_fmt_bool(inspection.refit_requested)}",
+                component="SUMMARY",
+                equipment=equip_name,
+                run_id=inspection.run_id,
+            )
+            Console.info(
+                f"{equip_name}: Zero-day | active={_fmt_bool(inspection.zero_day_scoring_active)} "
+                f"| status={inspection.zero_day_status or '?'} "
+                f"| surface={inspection.zero_day_surface_type or '?'} "
+                f"| channels={_fmt_int(inspection.zero_day_channel_count)}",
+                component="SUMMARY",
+                equipment=equip_name,
+                run_id=inspection.run_id,
+            )
+            Console.info(
+                f"{equip_name}: Outputs | scores={inspection.table_counts.get('ACM_Scores_Wide', '?')} "
+                f"| health_timeline={inspection.table_counts.get('ACM_HealthTimeline', '?')} "
+                f"| regime_timeline={inspection.table_counts.get('ACM_RegimeTimeline', '?')} "
+                f"| episodes={_fmt_int(episode_display)} "
+                f"| hotspots={inspection.table_counts.get('ACM_SensorHotspots', '?')} "
+                f"| forecast_required={'yes' if inspection.forecast_outputs_required else 'no'} "
+                f"| health_forecast={inspection.table_counts.get('ACM_HealthForecast', '?')} "
+                f"| failure_forecast={inspection.table_counts.get('ACM_FailureForecast', '?')} "
+                f"| rul={inspection.table_counts.get('ACM_RUL', '?')}",
+                component="SUMMARY",
+                equipment=equip_name,
+                run_id=inspection.run_id,
+            )
+            Console.info(
+                f"{equip_name}: Logs | run_logs={_fmt_int(inspection.run_log_total)} "
+                f"| warnings={_fmt_int(inspection.run_log_warn)} "
+                f"| errors={_fmt_int(inspection.run_log_error)}",
+                component="SUMMARY",
+                equipment=equip_name,
+                run_id=inspection.run_id,
+            )
         Console.status("-" * 60)
 
     def process_equipment(self, equip_name: str, *, dry_run: bool = False,
@@ -1598,6 +1825,9 @@ class SQLBatchRunner:
             raise
         finally:
             elapsed_time = time.time() - start_time
+            inspection = self._latest_run_inspection.get(equip_name)
+            if inspection is None and (coldstart_completed_for_summary or batches_processed_for_summary > 0):
+                inspection = self._inspect_last_run_outputs(equip_name)
             self._emit_equipment_summary(
                 equip_name,
                 success=result,
@@ -1605,6 +1835,7 @@ class SQLBatchRunner:
                 batches_processed=batches_processed_for_summary,
                 elapsed_seconds=elapsed_time,
                 note=final_note,
+                inspection=inspection,
             )
 
 
