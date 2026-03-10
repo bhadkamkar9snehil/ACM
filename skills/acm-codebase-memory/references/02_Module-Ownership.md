@@ -7,7 +7,7 @@ type: agent-memory
 | Module | Symbols | Core Imports |
 |---|---:|---:|
 | `[core.acm]` | 5 | 18 |
-| `[core.adaptive_thresholds]` | 12 | 1 |
+| `[core.adaptive_thresholds]` | 13 | 1 |
 | `[core.analytics_builder]` | 15 | 1 |
 | `[core.ar1_detector]` | 6 | 1 |
 | `[core.confidence]` | 11 | 1 |
@@ -22,14 +22,14 @@ type: agent-memory
 | `[core.failure_probability]` | 18 | 0 |
 | `[core.fast_features]` | 36 | 1 |
 | `[core.forecast_engine]` | 29 | 11 |
-| `[core.fuse]` | 48 | 1 |
+| `[core.fuse]` | 49 | 1 |
 | `[core.health_tracker]` | 13 | 1 |
 | `[core.metrics]` | 14 | 1 |
 | `[core.model_evaluation]` | 15 | 1 |
 | `[core.model_lifecycle]` | 21 | 1 |
 | `[core.model_persistence]` | 41 | 1 |
 | `[core.multivariate_forecast]` | 11 | 1 |
-| `[core.observability]` | 110 | 0 |
+| `[core.observability]` | 118 | 0 |
 | `[core.omr]` | 19 | 0 |
 | `[core.outliers]` | 12 | 1 |
 | `[core.output_artifacts]` | 2 | 1 |

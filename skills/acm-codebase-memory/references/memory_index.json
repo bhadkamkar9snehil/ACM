@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-03-09T10:46:37+00:00",
+  "generated_at": "2026-03-10T07:07:17+00:00",
   "module_count": 43,
   "modules": [
     {
@@ -31,7 +31,7 @@
     {
       "module_name": "core.adaptive_thresholds",
       "source_path": "core/adaptive_thresholds.py",
-      "symbol_count": 12,
+      "symbol_count": 13,
       "core_import_count": 1,
       "core_imports": [
         "core.fuse"
@@ -176,7 +176,7 @@
     {
       "module_name": "core.fuse",
       "source_path": "core/fuse.py",
-      "symbol_count": 48,
+      "symbol_count": 49,
       "core_import_count": 1,
       "core_imports": [
         "core.observability"
@@ -239,7 +239,7 @@
     {
       "module_name": "core.observability",
       "source_path": "core/observability.py",
-      "symbol_count": 110,
+      "symbol_count": 118,
       "core_import_count": 0,
       "core_imports": []
     },
