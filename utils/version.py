@@ -17,9 +17,17 @@ Release Management:
 - Production deployments use specific tags (never merge commits)
 """
 
-__version__ = "11.17.4"
+__version__ = "11.17.5"
 __version_date__ = "2026-03-10"
 __version_author__ = "ACM Development Team"
+
+# v11.17.5 (2026-03-10) — Remove duplicate REGIME_STATE log from model_persistence.py
+#
+# 1. core/model_persistence.py: Removed "Saved state v{N} to ACM_RegimeState (EquipID={N})"
+#    from save_regime_state(). The richer log in regimes.py already reports this with K= cluster
+#    count. Root cause: two separate log lines with identical meaning emitted every save.
+#
+# Co-Authored-By: Claude Sonnet 4.6
 
 # v11.17.4 (2026-03-10) — Log quality: remove redundancy, fix misleading messages, add RUN START/END
 #

@@ -302,7 +302,6 @@ def save_regime_state(state: RegimeState, equip: str, sql_client=None) -> None:
         if not sql_client.conn.autocommit:
             sql_client.conn.commit()
         
-        Console.info(f"Saved state v{state.state_version} to ACM_RegimeState (EquipID={state.equip_id})", component="REGIME_STATE")
     except Exception as e:
         Console.warn(f"Failed to save state to SQL: {e}", component="REGIME_STATE", equip_id=state.equip_id, state_version=state.state_version, error_type=type(e).__name__, error=str(e)[:200])
 
