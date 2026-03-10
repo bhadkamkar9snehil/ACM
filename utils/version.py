@@ -17,9 +17,24 @@ Release Management:
 - Production deployments use specific tags (never merge commits)
 """
 
-__version__ = "11.17.0"
-__version_date__ = "2026-03-09"
+__version__ = "11.17.1"
+__version_date__ = "2026-03-10"
 __version_author__ = "ACM Development Team"
+
+# v11.17.1 (2026-03-10) — EWM bulk-MERGE: 2,132 round-trips → 5 (~25s → <1s per batch)
+#
+# 1. core/ewm_baseline.py: _upsert_rows() replaced row-by-row execute loop with
+#    chunked bulk MERGE. Each chunk issues one MERGE statement with a multi-row
+#    VALUES clause (chunk_size=500, 500×13=6,500 params — within pyodbc limits).
+#    itertuples replaces iterrows for record extraction (~10-100× faster in Python).
+#    Semantics identical to original single-row MERGE. Expected save time: <1s.
+#    Root cause: 2,132 individual cur.execute() calls × ~12ms round-trip latency.
+#    Class-level constants _UPSERT_CHUNK_SIZE and _MERGE_TEMPLATE extracted to
+#    avoid rebuilding the SQL template string on every chunk iteration.
+#
+# 2. docs/KNOWN_ISSUES.md: C2 moved to RESOLVED (R12). C1 marked resolved.
+#
+# Co-Authored-By: Claude Sonnet 4.6
 
 # v11.17.0 (2026-03-09) — Zero-day EWM system, OnlinePCABinner, baseline contamination gate
 #

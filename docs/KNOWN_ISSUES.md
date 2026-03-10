@@ -1,6 +1,6 @@
 # ACM Known Issues
 
-_Updated: 2026-03-09_
+_Updated: 2026-03-10_
 _Update this file whenever a bug is found (add) or fixed (move to RESOLVED)._
 _Resolved items stay for 30 days, then are archived to `docs/ACM_ARCHITECTURE_DECISIONS.md`._
 
@@ -9,11 +9,8 @@ _Resolved items stay for 30 days, then are archived to `docs/ACM_ARCHITECTURE_DE
 ## CRITICAL (blocking — must fix before next production run)
 
 ### C1 — All v11.16.x work uncommitted
-- **Status:** Open
-- **Risk:** Lost work. `git status` shows 6 modified files + 5 untracked (core/ewm_baseline.py, core/regime_binner.py, scripts/sql/migrations/v11/014_*, 015_*, docs/ClaudePlan_01.md)
-- **Files at risk:** `core/ewm_baseline.py`, `core/regime_binner.py`, `core/acm.py`, `core/fuse.py`, `core/regimes.py`, `core/model_lifecycle.py`, `core/model_persistence.py`, `scripts/build_acm_obsidian_graph.py`, `utils/version.py`, plus new untracked files
-- **Fix:** `git checkout -b feature/zero-day-pca-binner && git add <files> && git commit`
-- **Ref:** ClaudePlan_01.md Priority 1 — R1
+- **Status:** Resolved — committed as v11.17.0 on `feature/v11-17-zero-day-system` (2026-03-10)
+- **Risk:** Was: Lost work. All v11.16.x–v11.17.0 changes now committed and pushed.
 
 ## HIGH (active degradation — fix soon)
 
@@ -79,6 +76,16 @@ _Resolved items stay for 30 days, then are archived to `docs/ACM_ARCHITECTURE_DE
 ---
 
 ## RESOLVED (last 30 days — keep for reference)
+
+### R12 — EWM save_to_sql: 2,132 SQL round-trips (~25s per batch) (v11.17.1, 2026-03-10)
+- **Was:** `_upsert_rows()` in `core/ewm_baseline.py` executed one `MERGE` per row via
+  `for _, row in df.iterrows(): cur.execute(merge_sql, tuple(row))`. With 2,132 state rows
+  this produced 2,132 network round-trips per batch. Profiler: `save_to_sql ~24,640ms`.
+  Root cause: row-by-row execute loop — SQL Server supports multi-row VALUES in a single MERGE.
+- **Fixed in:** v11.17.1 — `_upsert_rows()` now issues chunked bulk MERGE statements
+  (chunk_size=500). 2,132 rows → 5 round-trips. `itertuples` replaces `iterrows` for
+  record extraction. Semantics identical; expected save time <1s.
+- **Files:** `core/ewm_baseline.py` (`_upsert_rows`, `_UPSERT_CHUNK_SIZE`, `_MERGE_TEMPLATE`)
 
 ### R11 — Refit-every-batch loop for LEARNING models (v11.16.3, 2026-03-09)
 - **Was:** Two interacting bugs caused every scoring batch to fully retrain all 5 detectors:

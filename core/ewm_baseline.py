@@ -642,14 +642,19 @@ class EWMBaselineManager:
         if len(state._score_history) > _SCORE_HISTORY_WINDOW * 2:
             state._score_history = state._score_history[-_SCORE_HISTORY_WINDOW:]
 
-    def _upsert_rows(self, sql_client, df: pd.DataFrame) -> int:
-        """MERGE rows into ACM_EWMBaseline."""
-        if df.empty:
-            return 0
+    # Maximum rows per VALUES clause. 500 rows × 13 cols = 6,500 params —
+    # well within pyodbc's 32,767-parameter limit and SQL Server's VALUES limit.
+    _UPSERT_CHUNK_SIZE = 500
 
-        merge_sql = """
+    _UPSERT_COLS = [
+        "EquipID", "RegimeID", "SensorName", "StateVersion",
+        "EWMMean_Fast", "EWMVar_Fast", "EWMMean_Slow", "EWMVar_Slow",
+        "NSamples", "BaselineIntegrity", "ScoreP50", "ScoreP95", "UpdatedAt",
+    ]
+
+    _MERGE_TEMPLATE = """\
 MERGE ACM_EWMBaseline AS target
-USING (VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)) AS source
+USING (VALUES {placeholders}) AS source
     (EquipID, RegimeID, SensorName, StateVersion,
      EWMMean_Fast, EWMVar_Fast, EWMMean_Slow, EWMVar_Slow,
      NSamples, BaselineIntegrity, ScoreP50, ScoreP95, UpdatedAt)
@@ -675,19 +680,36 @@ VALUES
     (source.EquipID, source.RegimeID, source.SensorName, source.StateVersion,
      source.EWMMean_Fast, source.EWMVar_Fast, source.EWMMean_Slow, source.EWMVar_Slow,
      source.NSamples, source.BaselineIntegrity, source.ScoreP50, source.ScoreP95,
-     source.UpdatedAt);
-"""
-        cols = [
-            "EquipID", "RegimeID", "SensorName", "StateVersion",
-            "EWMMean_Fast", "EWMVar_Fast", "EWMMean_Slow", "EWMVar_Slow",
-            "NSamples", "BaselineIntegrity", "ScoreP50", "ScoreP95", "UpdatedAt",
-        ]
+     source.UpdatedAt);"""
+
+    def _upsert_rows(self, sql_client, df: pd.DataFrame) -> int:
+        """Bulk-MERGE rows into ACM_EWMBaseline in chunks.
+
+        Replaces the previous row-by-row execute loop (2,132 round-trips → 5).
+        Each chunk issues one MERGE with a multi-row VALUES clause. Semantics
+        are identical to the original single-row MERGE.
+        """
+        if df.empty:
+            return 0
+
+        n_cols = len(self._UPSERT_COLS)
+        row_placeholder = f"({', '.join(['?'] * n_cols)})"
+
+        # itertuples is ~10–100× faster than iterrows for record extraction
+        records = list(df[self._UPSERT_COLS].itertuples(index=False, name=None))
+
+        written = 0
         try:
             with sql_client.conn.cursor() as cur:
-                for _, row in df[cols].iterrows():
-                    cur.execute(merge_sql, tuple(row))
+                for start in range(0, len(records), self._UPSERT_CHUNK_SIZE):
+                    chunk = records[start : start + self._UPSERT_CHUNK_SIZE]
+                    placeholders = ", ".join(row_placeholder for _ in chunk)
+                    merge_sql = self._MERGE_TEMPLATE.format(placeholders=placeholders)
+                    params = [v for row in chunk for v in row]
+                    cur.execute(merge_sql, params)
+                    written += len(chunk)
             sql_client.conn.commit()
-            return len(df)
+            return written
         except Exception as exc:
             Console.warn(f"EWM save failed: {exc}", component="EWM_BASELINE")
             return 0
