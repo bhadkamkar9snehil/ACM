@@ -653,6 +653,7 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
                         )
                         Console.info("EWM using HDBSCAN regimes", component="EWM_BASELINE")
                         if _binner is not None:
+                            _binner.observe_batch(_ewm_score_numeric)
                             _binner.save_to_sql(sql_client, equip_id)
                     elif _binner is not None and _binner.can_assign_fallback:
                         # Feed binner with the explicit day-0 monitoring surface so edges refine over time.

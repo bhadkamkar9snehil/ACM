@@ -19,7 +19,7 @@ services:
   # Receives OTLP from Python apps and routes to backends
   # ============================================================================
   alloy:
-    image: grafana/alloy:v1.13.2
+    image: grafana/alloy:v1.14.0
     container_name: acm-alloy
     command:
       - "run"
@@ -41,10 +41,13 @@ services:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/9099'"]
+      # HTTP probe via bash /dev/tcp — wget/curl not available in the alloy image.
+      # TCP-only check misses goroutine deadlocks (the v1.13.x WAL GC bug): port appears
+      # open but the HTTP handler is frozen. This sends a real GET and checks for "ready".
+      test: ["CMD-SHELL", "bash -c 'echo -e \"GET /-/ready HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n\" > /dev/tcp/localhost/9099'"]
       interval: 30s
-      timeout: 10s
-      retries: 5
+      timeout: 5s
+      retries: 3
       start_period: 30s
 
   # ============================================================================
@@ -61,6 +64,10 @@ services:
       - GF_AUTH_ANONYMOUS_ENABLED=false
       - GF_USERS_ALLOW_SIGN_UP=false
       - GF_INSTALL_PLUGINS=grafana-pyroscope-datasource
+      # Use the supported remote image renderer service instead of the deprecated plugin.
+      - GF_RENDERING_SERVER_URL=http://renderer:8081/render
+      - GF_RENDERING_CALLBACK_URL=http://grafana:3000/
+      - GF_RENDERING_RENDERER_TOKEN=acm-renderer-token-v1
       # Grafana 12.4.0 — all Public Preview feature toggles
       # Source: https://grafana.com/docs/grafana/v12.4/setup-grafana/configure-grafana/feature-toggles/
       - GF_FEATURE_TOGGLES_ENABLE=panelTitleSearch grpcServer renderAuthJWT refactorVariablesTimeRange faroDatasourceSelector enableDatagridEditing externalServiceAccounts dashboardNewLayouts pdfTables canvasPanelPanZoom alertingSaveStateCompressed sqlExpressions queryLibrary savedQueriesRBAC dashboardTemplates alertRuleRestore azureMonitorLogsBuilderEditor logsPanelControls interactiveLearning newGauge newVizSuggestions vizPresets preventPanelChromeOverflow newPanelPadding transformationsEmptyPlaceholder
@@ -72,13 +79,15 @@ services:
       - "host.docker.internal:host-gateway"
     depends_on:
       tempo:
-        condition: service_healthy
+        condition: service_started
       loki:
-        condition: service_healthy
+        condition: service_started
       prometheus:
         condition: service_healthy
       pyroscope:
-        condition: service_started  # Pyroscope is optional, don't block on its healthcheck
+        condition: service_started
+      renderer:
+        condition: service_started
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/api/health"]
@@ -86,6 +95,19 @@ services:
       timeout: 10s
       retries: 5
       start_period: 60s
+
+  # ============================================================================
+  # Grafana Image Renderer - Remote rendering service for dashboard/panel exports
+  # ============================================================================
+  renderer:
+    # Grafana recommends remote rendering. Pin a secure renderer release instead
+    # of using the deprecated in-process plugin path.
+    image: grafana/grafana-image-renderer:latest
+    container_name: acm-grafana-renderer
+    environment:
+      - AUTH_TOKEN=acm-renderer-token-v1
+      - ENABLE_METRICS=true
+    restart: unless-stopped
 
   # ============================================================================
   # Grafana Tempo - Distributed Tracing

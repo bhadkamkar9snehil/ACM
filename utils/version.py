@@ -17,9 +17,21 @@ Release Management:
 - Production deployments use specific tags (never merge commits)
 """
 
-__version__ = "11.17.6"
+__version__ = "11.17.7"
 __version_date__ = "2026-03-10"
 __version_author__ = "ACM Development Team"
+
+# v11.17.7 (2026-03-10) — Fix binner observe_batch() never called in HDBSCAN path
+#
+# Root cause: the v11.17.6 fix added _binner.save_to_sql() to the HDBSCAN branch, but
+# save_to_sql() guards on `_mean is None` and returns False silently when the binner has
+# not yet observed any data. observe_batch() is what accumulates _mean, _cov, and
+# _dominant_vector. Without it, the binner never fits, _mean stays None, and
+# ACM_RegimeBinnerState remains permanently empty when HDBSCAN is active.
+# Fixed by adding _binner.observe_batch(_ewm_score_numeric) before save_to_sql() in the
+# HDBSCAN branch, matching the pattern already used in the binner-fallback branch.
+#
+# Co-Authored-By: Claude Sonnet 4.6
 
 # v11.17.6 (2026-03-10) — Fix EWM SQL persist failure and binner state never written
 #

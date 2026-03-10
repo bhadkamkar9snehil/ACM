@@ -113,3 +113,20 @@ loki.write "default" {
     app    = "acm",
   }
 }
+
+// ============================================================================
+// HOST MACHINE METRICS (windows_exporter)
+// Scrapes CPU, memory, disk, network from the Windows host via windows_exporter.
+// windows_exporter must be installed on the host (port 9182).
+// Install: msiexec /i windows_exporter-0.31.3-amd64.msi /quiet ENABLED_COLLECTORS=cpu,memory,logical_disk,net,os,process,system LISTEN_PORT=9182
+// Download: https://github.com/prometheus-community/windows_exporter/releases/tag/v0.31.3
+// host.docker.internal resolves to the Windows host from inside Docker.
+// ============================================================================
+prometheus.scrape "windows_host" {
+  targets = [{"__address__" = "host.docker.internal:9182"}]
+  scrape_interval = "30s"
+  scrape_timeout  = "10s"
+  metrics_path    = "/metrics"
+
+  forward_to = [prometheus.remote_write.default.receiver]
+}

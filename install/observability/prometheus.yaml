@@ -24,6 +24,12 @@ scrape_configs:
       - targets: ['acm-alloy:9099']
     metrics_path: /metrics
 
+  # Scrape Grafana image renderer metrics to make export/render failures visible.
+  - job_name: 'grafana_image_renderer'
+    static_configs:
+      - targets: ['renderer:8081']
+    metrics_path: /metrics
+
   # Scrape ACM Python app metrics (if exposed)
   # Uncomment if you add a metrics endpoint to ACM
   # - job_name: 'acm'
