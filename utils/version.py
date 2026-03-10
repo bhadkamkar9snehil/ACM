@@ -17,9 +17,45 @@ Release Management:
 - Production deployments use specific tags (never merge commits)
 """
 
-__version__ = "11.17.7"
+__version__ = "11.17.8"
 __version_date__ = "2026-03-10"
 __version_author__ = "ACM Development Team"
+
+# v11.17.8 (2026-03-10) — Review fixes: Codex Polars fallback, PromotionCriteria drift, per-regime thresholds
+#
+# Corrected five issues introduced by Codex on the zero-day branch:
+#
+# 1. core/fast_features.py: Reverted try/except Polars import and _require_polars() lazy
+#    accessor back to hard `import polars as pl`. Polars is a non-negotiable hard dependency;
+#    optional-import pattern violates CLAUDE.md and creates silent partial-import state.
+#    All pl_mod. references restored to pl.
+#
+# 2. core/model_lifecycle.py: Reverted PromotionCriteria field defaults and from_config()
+#    fallbacks to match config_table.csv (0.15/0.60/3/200). Codex raised them to 0.40/0.75/5/400
+#    claiming "conservative fallbacks", but config_table.csv still holds the correct values.
+#    Divergence would silently double promotion criteria for any code path using bare
+#    PromotionCriteria() without config, indefinitely stalling LEARNING->CONVERGED.
+#
+# 3. core/state_manager.py: Removed useless try/except pyodbc import. pyodbc is never
+#    called directly in this module (only referenced in docstrings). Hard import or no
+#    import — a silent None binding adds nothing.
+#
+# 4. core/output_manager.py: Removed dead branch in _prepare_dataframe_for_sql().
+#    The `"_sql_engine" not in self.__dict__` check was always False because
+#    _get_sql_engine() (called in the branch body) creates and assigns _sql_engine
+#    before the branch body could run its datetime coercion logic.
+#
+# 5. configs/config_table.csv: Changed per_regime_thresholds ValueType from 'dict'
+#    (not a valid ACM_Config ValueType) to 'string'. populate_acm_config.py re-run.
+#
+# Accepted from Codex without change:
+# - core/observability.py: pad_event -> pad_event_to (structlog deprecation fix)
+# - core/output_sql_core.py: pd.Timestamp.utcnow() -> pd.Timestamp.now(tz="UTC") (pandas 2.x)
+# - core/sql_client.py: pyodbc lazy import with _require_pyodbc() (SQL connectivity only)
+# - core/regimes.py: per-regime health threshold overrides + _parse_per_regime_thresholds()
+# - tests/test_v11_modules.py: test_update_health_labels_applies_per_regime_threshold_overrides
+#
+# Co-Authored-By: Claude Sonnet 4.6
 
 # v11.17.7 (2026-03-10) — Fix binner observe_batch() never called in HDBSCAN path
 #

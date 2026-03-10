@@ -36,7 +36,7 @@
         "iconColor": "#FF9830",
         "name": "Threshold Crossings",
         "rawQuery": true,
-        "rawSql": "SELECT Timestamp AS time, Detector + ' crossed ' + Direction + ' at Z=' + CAST(ROUND(ZScore,2) AS nvarchar(20)) AS text, 'THRESHOLD' AS tags\nFROM ACM_ThresholdCrossings\nWHERE EquipID = $equipment\n  AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY Timestamp ASC",
+        "rawSql": "SELECT Timestamp AS time,\n  'Fused Z crossed alert threshold (Z=' + CAST(ROUND(fused,2) AS nvarchar(20)) + ')' AS text,\n  'THRESHOLD' AS tags\nFROM dbo.ACM_Scores_Wide\nWHERE EquipID = $equipment\n  AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\n  AND fused >= 3.0\nORDER BY Timestamp ASC",
         "type": "table"
       },
       {
@@ -405,11 +405,11 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT COUNT(*) AS TotalEpisodes\nFROM dbo.ACM_Episodes\nWHERE EquipID = $equipment\n  AND RunID = (SELECT TOP 1 RunID FROM dbo.ACM_Runs WHERE EquipID = $equipment ORDER BY StartedAt DESC)",
+          "rawSql": "SELECT COUNT(*) AS TotalEpisodes\nFROM dbo.ACM_Episodes\nWHERE EquipID = $equipment\n  AND StartTime BETWEEN $__timeFrom() AND $__timeTo()",
           "refId": "A"
         }
       ],
-      "title": "Episodes (Latest Run)",
+      "title": "Episodes (Time Range)",
       "type": "stat"
     },
     {
@@ -417,102 +417,43 @@
         "type": "mssql",
         "uid": "${datasource}"
       },
-      "description": "Current defect status and severity",
+      "description": "Worst active defect from latest run. Reads ACM_SensorDefects — the detector with the highest ViolationPct that has ActiveDefect=1. Shows severity: LOW/MEDIUM/HIGH/CRITICAL.",
       "fieldConfig": {
         "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
+          "color": { "mode": "thresholds" },
           "mappings": [
-            {
-              "options": {
-                "HEALTHY": {
-                  "color": "#73BF69",
-                  "index": 0,
-                  "text": "\u2705 HEALTHY"
-                }
-              },
-              "type": "value"
-            },
-            {
-              "options": {
-                "DEGRADED": {
-                  "color": "#FADE2A",
-                  "index": 1,
-                  "text": "\u26a0\ufe0f DEGRADED"
-                }
-              },
-              "type": "value"
-            },
-            {
-              "options": {
-                "FAULT": {
-                  "color": "#FF9830",
-                  "index": 2,
-                  "text": "\ud83d\udd36 FAULT"
-                }
-              },
-              "type": "value"
-            },
-            {
-              "options": {
-                "CRITICAL": {
-                  "color": "#C4162A",
-                  "index": 3,
-                  "text": "\ud83d\udd34 CRITICAL"
-                }
-              },
-              "type": "value"
-            }
+            { "options": { "LOW":      { "color": "#FADE2A", "index": 0, "text": "LOW" } },      "type": "value" },
+            { "options": { "MEDIUM":   { "color": "#FF9830", "index": 1, "text": "MEDIUM" } },   "type": "value" },
+            { "options": { "HIGH":     { "color": "#E02F44", "index": 2, "text": "HIGH" } },     "type": "value" },
+            { "options": { "CRITICAL": { "color": "#C4162A", "index": 3, "text": "CRITICAL" } }, "type": "value" },
+            { "options": { "":         { "color": "#73BF69", "index": 4, "text": "NONE" } },     "type": "value" }
           ],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
         },
         "overrides": []
       },
-      "gridPos": {
-        "h": 3,
-        "w": 3,
-        "x": 10,
-        "y": 1
-      },
+      "gridPos": { "h": 3, "w": 3, "x": 10, "y": 1 },
       "id": 6,
       "options": {
         "colorMode": "background",
         "graphMode": "none",
         "justifyMode": "center",
         "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
         "textMode": "value_and_name",
         "wideLayout": true
       },
       "targets": [
         {
-          "datasource": {
-            "type": "mssql",
-            "uid": "${datasource}"
-          },
+          "datasource": { "type": "mssql", "uid": "${datasource}" },
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT TOP 1 HealthZone AS Status\nFROM dbo.ACM_HealthTimeline\nWHERE EquipID = $equipment\nORDER BY Timestamp DESC",
+          "rawSql": "SELECT TOP 1 ISNULL(Severity, '') AS Severity\nFROM dbo.ACM_SensorDefects\nWHERE EquipID = $equipment\n  AND ActiveDefect = 1\n  AND RunID = (SELECT TOP 1 RunID FROM dbo.ACM_Runs WHERE EquipID = $equipment ORDER BY StartedAt DESC)\nORDER BY\n  CASE Severity WHEN 'CRITICAL' THEN 0 WHEN 'HIGH' THEN 1 WHEN 'MEDIUM' THEN 2 WHEN 'LOW' THEN 3 ELSE 4 END ASC",
           "refId": "A"
         }
       ],
-      "title": "Defect Status",
+      "title": "Active Defect Severity",
       "type": "stat"
     },
     {
@@ -815,7 +756,7 @@
         "type": "mssql",
         "uid": "${datasource}"
       },
-      "description": "Detector z-scores over time. mhal_z removed (deprecated v9.1.0, 0% data). Detectors with <5% data coverage show as sparse spikes only — gaps are intentional NULLs not missing data. Dashed lines = WARN (1.5σ) and ALERT (3.0σ) thresholds.",
+      "description": "6 active detector z-scores from ACM_Scores_Wide. AR1/PCA-T2/GMM/OMR fire every timestep; PCA-SPE/IForest are sparse (batch-scored, show as spikes). EWM (7th detector, v11.16.0) is fused into the score but not yet persisted to ACM_Scores_Wide — see output_manager.py write_scores(). Dashed lines = WARN (1.5) and ALERT (3.0) thresholds.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -918,14 +859,6 @@
             ]
           },
           {
-            "matcher": { "id": "byName", "options": "cusum_z" },
-            "properties": [
-              { "id": "displayName", "value": "CUSUM" },
-              { "id": "color", "value": { "fixedColor": "#C4162A", "mode": "fixed" } },
-              { "id": "custom.lineWidth", "value": 2 }
-            ]
-          },
-          {
             "matcher": { "id": "byName", "options": "omr_z" },
             "properties": [
               { "id": "displayName", "value": "OMR" },
@@ -967,11 +900,11 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT\n  Timestamp AS time,\n  NULLIF(ar1_z,    -8) AS ar1_z,\n  NULLIF(pca_spe_z,-8) AS pca_spe_z,\n  NULLIF(pca_t2_z, -8) AS pca_t2_z,\n  NULLIF(iforest_z,-8) AS iforest_z,\n  NULLIF(gmm_z,    -8) AS gmm_z,\n  NULLIF(cusum_z,  -8) AS cusum_z,\n  NULLIF(omr_z,    -8) AS omr_z\nFROM dbo.ACM_Scores_Wide\nWHERE EquipID = $equipment\n  AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY Timestamp ASC",
+          "rawSql": "SELECT\n  Timestamp AS time,\n  NULLIF(ar1_z,    -8) AS ar1_z,\n  NULLIF(pca_spe_z,-8) AS pca_spe_z,\n  NULLIF(pca_t2_z, -8) AS pca_t2_z,\n  NULLIF(iforest_z,-8) AS iforest_z,\n  NULLIF(gmm_z,    -8) AS gmm_z,\n  NULLIF(omr_z,    -8) AS omr_z\nFROM dbo.ACM_Scores_Wide\nWHERE EquipID = $equipment\n  AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY Timestamp ASC",
           "refId": "A"
         }
       ],
-      "title": "Detector Z-Scores (AR1, PCA-T\u00b2, GMM, CUSUM, OMR + sparse IForest/PCA-SPE)",
+      "title": "Detector Z-Scores (All Persisted Detector Signals)",
       "type": "timeseries"
     },
     {
@@ -1343,12 +1276,204 @@
     },
     {
       "collapsed": false,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 24
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 24 },
+      "id": 18,
+      "title": "\ud83c\udf0a EWM ZERO-DAY BASELINE",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "mssql", "uid": "${datasource}" },
+      "description": "EWM is the 7th detector — always-on from observation 2, no training required. It tracks slow long-term drift from the equipment's day-0 sensor character using dual exponential moving averages (alpha_fast=0.05 ~20 batches, alpha_slow=0.005 ~200 batches). z_slow = slow EWM diverging from fast = genuine sustained drift, not transient noise. This is NOT the same as the 6 model-gated detectors — it fires before any model exists and is the only sentinel during COLDSTART.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "#73BF69", "value": null },
+              { "color": "#FF9830", "value": 1 },
+              { "color": "#C4162A", "value": 3 }
+            ]
+          },
+          "unit": "short",
+          "decimals": 0,
+          "min": 0
+        },
+        "overrides": []
       },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 25 },
+      "id": 18001,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "value_and_name",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "datasource": { "type": "mssql", "uid": "${datasource}" },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  COUNT(*) AS TotalSensors,\n  SUM(CASE WHEN BaselineIntegrity='frozen' THEN 1 ELSE 0 END) AS FrozenSensors,\n  SUM(CASE WHEN BaselineIntegrity='ok' THEN 1 ELSE 0 END) AS ActiveSensors\nFROM dbo.ACM_EWMBaseline\nWHERE EquipID = $equipment",
+          "refId": "A"
+        }
+      ],
+      "title": "EWM Sensor Coverage",
+      "transformations": [],
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "mssql", "uid": "${datasource}" },
+      "description": "EWM baseline health per regime. ScoreP50 = median z_slow across sensors (normal operation). ScoreP95 = 95th percentile z_slow. Frozen sensors (BaselineIntegrity=frozen) are excluded from scoring — their slow variance is too low to be informative.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "align": "auto",
+            "cellOptions": { "type": "auto" },
+            "filterable": true,
+            "inspect": false
+          }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "ScoreP50" },
+            "properties": [
+              { "id": "custom.cellOptions", "value": { "type": "gauge", "mode": "basic" } },
+              { "id": "min", "value": 0 },
+              { "id": "max", "value": 5 },
+              { "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 1.5 }, { "color": "red", "value": 3 }] } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "ScoreP95" },
+            "properties": [
+              { "id": "custom.cellOptions", "value": { "type": "gauge", "mode": "basic" } },
+              { "id": "min", "value": 0 },
+              { "id": "max", "value": 8 },
+              { "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 1.5 }, { "color": "red", "value": 3 }] } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "BaselineIntegrity" },
+            "properties": [
+              { "id": "custom.cellOptions", "value": { "type": "color-background", "mode": "basic" } },
+              { "id": "mappings", "value": [
+                { "type": "value", "options": { "ok":     { "color": "#73BF69", "index": 0, "text": "active" } } },
+                { "type": "value", "options": { "frozen": { "color": "#6E9FFF", "index": 1, "text": "frozen (flat sensor)" } } }
+              ]}
+            ]
+          }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 18, "x": 6, "y": 25 },
+      "id": 18002,
+      "options": { "showHeader": true, "cellHeight": "sm", "footer": { "show": false, "reducer": ["sum"], "countRows": false } },
+      "targets": [
+        {
+          "datasource": { "type": "mssql", "uid": "${datasource}" },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  RegimeID,\n  COUNT(*) AS NSensors,\n  SUM(CASE WHEN BaselineIntegrity='frozen' THEN 1 ELSE 0 END) AS NFrozen,\n  ROUND(AVG(ScoreP50), 3) AS ScoreP50,\n  ROUND(AVG(ScoreP95), 3) AS ScoreP95,\n  MAX(NSamples) AS MaxSamples\nFROM dbo.ACM_EWMBaseline\nWHERE EquipID = $equipment\nGROUP BY RegimeID\nORDER BY RegimeID ASC",
+          "refId": "A"
+        }
+      ],
+      "title": "EWM Baseline Health by Regime",
+      "type": "table"
+    },
+    {
+      "datasource": { "type": "mssql", "uid": "${datasource}" },
+      "description": "Top sensors by EWM P95 z_slow score — highest values indicate sensors whose long-term behaviour has drifted most from their day-0 baseline. These are the sensors EWM is most actively flagging.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "continuous-GrYlRd" },
+          "custom": {
+            "axisBorderShow": false,
+            "axisLabel": "EWM P95 z_slow",
+            "axisPlacement": "auto",
+            "fillOpacity": 80,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "lineWidth": 1
+          },
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 29 },
+      "id": 18003,
+      "options": {
+        "orientation": "horizontal",
+        "showValue": "auto",
+        "barWidth": 0.85,
+        "groupWidth": 0.7,
+        "stacking": "none",
+        "tooltip": { "mode": "single", "sort": "none" },
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": false },
+        "xTickLabelRotation": 0,
+        "xTickLabelMaxLength": 30
+      },
+      "targets": [
+        {
+          "datasource": { "type": "mssql", "uid": "${datasource}" },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT TOP 20\n  SensorName,\n  ROUND(ScoreP95, 3) AS ScoreP95\nFROM dbo.ACM_EWMBaseline\nWHERE EquipID = $equipment\n  AND BaselineIntegrity = 'ok'\nORDER BY ScoreP95 DESC",
+          "refId": "A"
+        }
+      ],
+      "title": "Top 20 Sensors by EWM P95 Drift Score",
+      "type": "barchart"
+    },
+    {
+      "datasource": { "type": "mssql", "uid": "${datasource}" },
+      "description": "EWM-sourced episodes from ACM_Episodes where PrimaryDetector = 'ewm_z'. These fire independently of the model-gated detectors — they represent zero-day drift detections that happened even before HDBSCAN had enough data to cluster.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "align": "auto", "cellOptions": { "type": "auto" }, "filterable": true }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Severity" },
+            "properties": [
+              { "id": "custom.cellOptions", "value": { "type": "color-background", "mode": "basic" } },
+              { "id": "mappings", "value": [
+                { "type": "value", "options": { "LOW":      { "color": "#FADE2A", "index": 0 } } },
+                { "type": "value", "options": { "MEDIUM":   { "color": "#FF9830", "index": 1 } } },
+                { "type": "value", "options": { "HIGH":     { "color": "#E02F44", "index": 2 } } },
+                { "type": "value", "options": { "CRITICAL": { "color": "#C4162A", "index": 3 } } }
+              ]}
+            ]
+          }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 29 },
+      "id": 18004,
+      "options": { "showHeader": true, "cellHeight": "sm", "footer": { "show": false, "reducer": ["sum"], "countRows": false } },
+      "targets": [
+        {
+          "datasource": { "type": "mssql", "uid": "${datasource}" },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT TOP 30\n  CONVERT(varchar(16), StartTime, 120) AS StartTime,\n  CONVERT(varchar(16), EndTime, 120) AS EndTime,\n  ROUND(DurationHours, 2) AS DurationHours,\n  Severity\nFROM dbo.ACM_Episodes\nWHERE EquipID = $equipment\n  AND PrimaryDetector = 'ewm_z'\n  AND StartTime BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY StartTime DESC",
+          "refId": "A"
+        }
+      ],
+      "title": "EWM Zero-Day Episodes (Time Range)",
+      "type": "table"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 37 },
       "id": 20,
       "title": "\ud83c\udf00 OPERATING REGIMES",
       "type": "row"
@@ -1358,115 +1483,95 @@
         "type": "mssql",
         "uid": "${datasource}"
       },
-      "description": "Regime label over time \u2014 each band = distinct operating mode",
+      "description": "Regime label (integer) over time as a step line. -1 = UNKNOWN/novel. IsNovel = 1 marks rows where the model rejected regime assignment. Use this to see how many distinct operating modes the equipment visits and when transitions happen.",
       "fieldConfig": {
         "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
+          "color": { "mode": "palette-classic" },
           "custom": {
-            "fillOpacity": 70,
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "Regime ID",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
             "insertNulls": false,
-            "lineWidth": 0,
-            "spanNulls": false
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": 3600000,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
           },
-          "mappings": [
-            {
-              "options": {
-                "-1": {
-                  "color": "#7B61FF",
-                  "index": 0,
-                  "text": "UNKNOWN"
-                }
-              },
-              "type": "value"
-            },
-            {
-              "options": {
-                "0": {
-                  "color": "#73BF69",
-                  "index": 1,
-                  "text": "Regime 0"
-                }
-              },
-              "type": "value"
-            },
-            {
-              "options": {
-                "1": {
-                  "color": "#FADE2A",
-                  "index": 2,
-                  "text": "Regime 1"
-                }
-              },
-              "type": "value"
-            },
-            {
-              "options": {
-                "2": {
-                  "color": "#FF9830",
-                  "index": 3,
-                  "text": "Regime 2"
-                }
-              },
-              "type": "value"
-            },
-            {
-              "options": {
-                "3": {
-                  "color": "#5794F2",
-                  "index": 4,
-                  "text": "Regime 3"
-                }
-              },
-              "type": "value"
-            }
-          ]
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
+          "unit": "short"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "RegimeLabel" },
+            "properties": [
+              { "id": "displayName", "value": "Regime ID" },
+              { "id": "color", "value": { "fixedColor": "#5794F2", "mode": "fixed" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "IsNovel" },
+            "properties": [
+              { "id": "displayName", "value": "Novel (unassigned)" },
+              { "id": "color", "value": { "fixedColor": "#C4162A", "mode": "fixed" } },
+              { "id": "custom.drawStyle", "value": "bars" },
+              { "id": "custom.fillOpacity", "value": 60 },
+              { "id": "custom.lineWidth", "value": 0 },
+              { "id": "custom.axisPlacement", "value": "right" },
+              { "id": "custom.axisLabel", "value": "Novel" },
+              { "id": "max", "value": 1 },
+              { "id": "min", "value": 0 }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "AssignmentConfidence" },
+            "properties": [
+              { "id": "displayName", "value": "Assignment Confidence" },
+              { "id": "color", "value": { "fixedColor": "#73BF69", "mode": "fixed" } },
+              { "id": "custom.lineWidth", "value": 1 },
+              { "id": "custom.lineStyle", "value": { "dash": [4, 4], "fill": "dash" } },
+              { "id": "custom.axisPlacement", "value": "right" },
+              { "id": "custom.axisLabel", "value": "Confidence" },
+              { "id": "max", "value": 1 },
+              { "id": "min", "value": 0 }
+            ]
+          }
+        ]
       },
-      "gridPos": {
-        "h": 6,
-        "w": 14,
-        "x": 0,
-        "y": 25
-      },
+      "gridPos": { "h": 6, "w": 14, "x": 0, "y": 25 },
       "id": 21,
       "options": {
-        "alignValue": "left",
         "legend": {
+          "calcs": ["lastNotNull"],
           "displayMode": "list",
           "placement": "bottom",
           "showLegend": true
         },
-        "mergeValues": true,
-        "rowHeight": 0.9,
-        "showValue": "auto",
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
+        "tooltip": { "mode": "multi", "sort": "none" }
       },
       "targets": [
         {
-          "datasource": {
-            "type": "mssql",
-            "uid": "${datasource}"
-          },
+          "datasource": { "type": "mssql", "uid": "${datasource}" },
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT Timestamp AS time, RegimeLabel AS value\nFROM ACM_RegimeTimeline\nWHERE EquipID = $equipment\n  AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY Timestamp ASC",
+          "rawSql": "SELECT\n  Timestamp AS time,\n  CAST(RegimeLabel AS int) AS RegimeLabel,\n  CAST(IsNovel AS float) AS IsNovel,\n  NULLIF(AssignmentConfidence, -1) AS AssignmentConfidence\nFROM dbo.ACM_RegimeTimeline\nWHERE EquipID = $equipment\n  AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY Timestamp ASC",
           "refId": "A"
         }
       ],
-      "title": "Regime Timeline (State Timeline)",
-      "type": "state-timeline"
+      "title": "Regime Timeline",
+      "type": "timeseries"
     },
     {
       "datasource": {

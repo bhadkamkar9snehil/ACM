@@ -40,8 +40,16 @@ except Exception:  # pragma: no cover - optional for SQL-only utility paths
 
 try:
     import pyodbc
+    _PYODBC_IMPORT_ERROR: Optional[Exception] = None
 except Exception as e:
-    raise SystemExit("pyodbc is required. Install with: pip install pyodbc") from e
+    pyodbc = None  # type: ignore[assignment]
+    _PYODBC_IMPORT_ERROR = e
+
+
+def _require_pyodbc() -> None:
+    """Raise a runtime dependency error only when SQL connectivity is actually used."""
+    if pyodbc is None:
+        raise RuntimeError("pyodbc is required. Install with: pip install pyodbc") from _PYODBC_IMPORT_ERROR
 
 # Import tracing support (optional)
 try:
@@ -190,6 +198,7 @@ class SQLClient:
         return ";".join(parts)
 
     def connect(self) -> "SQLClient":
+        _require_pyodbc()
         if self.conn is not None:
             return self
         autocommit = str(self.cfg.get("autocommit", "false")).strip().lower() in ("1","true","yes","y")

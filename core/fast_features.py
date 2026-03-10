@@ -1183,7 +1183,6 @@ def build_features_for_pipeline(
     # TRAIN-only fill values prevent leakage to SCORE.
     train_fill_values = train.select_dtypes(include=[np.number]).median().to_dict()
     Console.info(f"Computed {len(train_fill_values)} fill values from training data", component="FEAT")
-
     train_feat = compute_basic_features_pl(
         pl.from_pandas(train),
         window=feat_win,

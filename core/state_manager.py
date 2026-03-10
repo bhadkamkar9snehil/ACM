@@ -21,8 +21,6 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, Optional
-import pyodbc
-
 from core.observability import Console
 
 

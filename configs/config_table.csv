@@ -131,6 +131,7 @@ EquipID,Category,ParamPath,ParamValue,ValueType,LastUpdated,UpdatedBy,ChangeReas
 0,regimes,transient_detection.roc_threshold_trip,5.0,float,2026-03-10 00:00:00,CODEX,v11.17.x: asset-agnostic transient index uses normalized change z-score; conservative default trip threshold,
 0,regimes,health.fused_warn_z,2.5,float,2025-12-11 00:00:00,COPILOT,config_cleanup_middle_ground,
 0,regimes,health.fused_alert_z,4.0,float,2025-12-11 00:00:00,COPILOT,config_cleanup_middle_ground,
+0,regimes,health.per_regime_thresholds,{},string,2026-03-10 00:00:00,CODEX,ZD-TUNE-01: optional per-regime warn/alert override map keyed by regime label,
 0,regimes,normal_identification.enabled,True,bool,2026-01-26 00:00:00,COPILOT,v11.4.0: Enable Normal regime identification using dwell+fused scoring,
 0,regimes,normal_identification.min_dwell_fraction,0.15,float,2026-01-26 00:00:00,COPILOT,v11.4.0: Minimum dwell fraction to consider regime for Normal label,
 0,regimes,normal_identification.max_median_fused,2.0,float,2026-01-26 00:00:00,COPILOT,v11.4.0: Maximum median fused_z to qualify as Normal,

@@ -20,7 +20,7 @@ type: agent-memory
 | `[core.episode_culprits_writer]` | 4 | 1 |
 | `[core.ewm_baseline]` | 19 | 1 |
 | `[core.failure_probability]` | 18 | 0 |
-| `[core.fast_features]` | 36 | 1 |
+| `[core.fast_features]` | 37 | 1 |
 | `[core.forecast_engine]` | 29 | 11 |
 | `[core.fuse]` | 49 | 1 |
 | `[core.health_tracker]` | 13 | 1 |
@@ -35,7 +35,7 @@ type: agent-memory
 | `[core.output_artifacts]` | 2 | 1 |
 | `[core.output_contracts]` | 5 | 0 |
 | `[core.output_dataframe_builders]` | 1 | 0 |
-| `[core.output_manager]` | 104 | 8 |
+| `[core.output_manager]` | 105 | 8 |
 | `[core.output_manager_services]` | 31 | 2 |
 | `[core.output_sql_core]` | 22 | 2 |
 | `[core.pipeline_types]` | 23 | 0 |
@@ -47,5 +47,5 @@ type: agent-memory
 | `[core.seasonality]` | 20 | 0 |
 | `[core.sensor_attribution]` | 30 | 1 |
 | `[core.smart_coldstart]` | 19 | 2 |
-| `[core.sql_client]` | 29 | 0 |
+| `[core.sql_client]` | 30 | 0 |
 | `[core.state_manager]` | 14 | 1 |

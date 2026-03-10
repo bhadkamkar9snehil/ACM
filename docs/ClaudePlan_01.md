@@ -12,6 +12,40 @@ Current runtime note:
 - The active runtime now uses `OnlinePCABinner` as the day-0 regime proxy.
 - The remaining zero-day work is rollout of the EWM state-version migration and cleanup of legacy persisted state.
 
+## Project Tracking Sheet (2026-03-10)
+
+This is the working PM tracker for "what was the plan" and "where are we" at a glance.
+
+### Plan Status Snapshot
+
+| Workstream | Status | Where we are now |
+|---|---|---|
+| Phases 1 to 4 (architecture rewiring) | Done | Live in runtime (`core/regimes.py`, `core/acm.py`, `core/regime_binner.py`) |
+| Phase 5 (state/version invalidation) | Done | `REGIME_MODEL_VERSION = 5.0`, EWM `StateVersion = 2`, migrations 016/017 defined |
+| Phase 6 (tests + rollout acceptance) | In Progress | Core tests exist; acceptance replay validation still pending |
+| Environment readiness | Ready in validation env | Migration 016/017 applied + `ACM_Config` refreshed in current validation environment |
+
+### Master Task Board
+
+Status legend: `Todo`, `In Progress`, `Blocked`, `Done`
+
+| ID | Task | Status | Priority | Dependency | Done When |
+|---|---|---|---|---|---|
+| ZD-VAL-01 | Replay `WFA_TURBINE_10` from start on latest runtime | Todo | P0 | None | Replay validates new transient contract end to end |
+| ZD-VAL-02 | Verify SQL continuity: `ACM_EWMBaseline`, `ACM_RegimeBinnerState`, `ACM_Runs`, `ACM_RunLogs` | Todo | P0 | ZD-VAL-01 | No state/version mismatch and expected run metadata present |
+| ZD-VAL-03 | Replay `WFA_TURBINE_11` | Todo | P0 | ZD-VAL-02 | Replay completes with expected day-0 observability |
+| ZD-VAL-04 | Replay `WFA_TURBINE_21` | Todo | P0 | ZD-VAL-02 | Replay completes with expected day-0 observability |
+| ZD-TUNE-01 | Implement per-regime alert thresholds | In Progress | P1 | ZD-VAL-01/03/04 | Threshold logic merged and validated against replay outputs |
+| ZD-OPS-01 | Publish rollout checklist for other environments | Todo | P1 | ZD-VAL-02 | Runbook exists for migrations/config/state cleanup |
+| ZD-TEST-01 | Close remaining Phase 6 acceptance gaps | In Progress | P1 | ZD-VAL-01..04 | Acceptance checklist signed off with replay evidence |
+
+### Weekly Update Row Template
+
+| Date | Owner | Completed | In Progress | Blockers | Next Decision |
+|---|---|---|---|---|---|
+| 2026-03-10 | Codex + Snehil | SQL replay diagnostics stabilized; ACM_Runs/ACM_RunLogs query pack corrected; baseline warning triage completed | ZD-TUNE-01 per-regime health-threshold rollout | Replay validation for T11/T21 not run (intentionally deferred) | Promote ZD-TUNE-01 to Done after T10 replay shows expected regime-specific states |
+| YYYY-MM-DD | <name> | <items> | <items> | <items> | <go/no-go> |
+
 ## Annotation Summary
 
 ### What This Document Gets Right

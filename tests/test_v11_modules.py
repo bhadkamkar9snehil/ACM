@@ -1765,6 +1765,45 @@ class TestRefactorHelpers:
         assert set(out_frame["regime_state"].unique().tolist()) == {"unknown"}
         assert stats == {}
 
+    def test_update_health_labels_applies_per_regime_threshold_overrides(self):
+        """Per-regime health thresholds should override global warn/alert values when provided."""
+        from core.regimes import update_health_labels
+
+        idx = pd.date_range("2026-01-01", periods=6, freq="h")
+        labels = np.array([0, 0, 1, 1, 1, 2], dtype=int)
+        fused = pd.Series([2.6, 2.7, 3.1, 3.2, 3.3, 4.2], index=idx)
+        cfg = {
+            "regimes": {
+                "health": {
+                    "fused_warn_z": 2.5,
+                    "fused_alert_z": 4.0,
+                    "per_regime_thresholds": {
+                        "0": {"warn": 2.8, "alert": 3.5},
+                        "1": {"warn": 2.9, "alert": 3.0},
+                    },
+                }
+            }
+        }
+
+        class _Model:
+            def __init__(self):
+                self.health_labels = {}
+                self.stats = {}
+                self.meta = {}
+                self.normal_regime_label_ = None
+                self.regime_semantic_labels_ = {}
+
+        model = _Model()
+        stats = update_health_labels(model=model, labels=labels, fused_series=fused, cfg=cfg)
+
+        assert model.health_labels[0] == "healthy"  # 2.65 < per-regime warn 2.8
+        assert model.health_labels[1] == "critical"  # 3.2 >= per-regime alert 3.0
+        assert model.health_labels[2] == "critical"  # 4.2 >= global alert 4.0
+        assert stats[0]["warn_threshold"] == pytest.approx(2.8)
+        assert stats[1]["alert_threshold"] == pytest.approx(3.0)
+        assert stats[2]["warn_threshold"] == pytest.approx(2.5)
+        assert model.meta.get("health_threshold_mode") == "per_regime_overrides"
+
     def test_build_regime_feature_basis_stage_success(self, monkeypatch):
         """Regime basis helper should return basis payload without degradation on success."""
         from core import regimes

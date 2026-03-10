@@ -10,12 +10,12 @@ MaturityState Lifecycle:
 Promotion Criteria (LEARNING -> CONVERGED):
     - Minimum 7 days of training data
     - Regime clustering quality passes metric-specific threshold
-    - Stability ratio >= 0.75 (no regime thrashing)
-    - At least 5 consecutive successful runs
+    - Stability ratio >= 0.60 (no regime thrashing)
+    - At least 3 consecutive successful runs
     - Optional: forecast MAPE and RMSE within acceptable bounds
 
 Regime Quality Metrics and their promotion thresholds:
-    - silhouette  [-1, 1]:  score >= min_silhouette_score (default 0.40)
+    - silhouette  [-1, 1]:  score >= min_silhouette_score (default 0.15)
     - dbcv        [-1, 1]:  score >= min_dbcv_score       (default 0.0)
     - calinski_harabasz [0, inf]: normalised; treat same as silhouette scale only when
                                 < 100 (raw values can be large - use quality_ok flag)
@@ -94,7 +94,7 @@ class PromotionCriteria:
         RMSE < 12 on 0-100 health scale = good prediction accuracy
     """
     min_training_days: int = 7
-    min_silhouette_score: float = 0.15   # For silhouette-scale metrics only. Matches config_table.csv.
+    min_silhouette_score: float = 0.15   # Matches config_table.csv.
     min_dbcv_score: float = 0.0          # For HDBSCAN DBCV/persistence metrics
     min_stability_ratio: float = 0.60   # Matches config_table.csv.
     min_consecutive_runs: int = 3        # Matches config_table.csv.
@@ -114,11 +114,11 @@ class PromotionCriteria:
 
         return cls(
             min_training_days=int(promotion.get("min_training_days", 7)),
-            min_silhouette_score=float(promotion.get("min_silhouette_score", 0.40)),
+            min_silhouette_score=float(promotion.get("min_silhouette_score", 0.15)),
             min_dbcv_score=float(promotion.get("min_dbcv_score", 0.0)),
-            min_stability_ratio=float(promotion.get("min_stability_ratio", 0.75)),
-            min_consecutive_runs=int(promotion.get("min_consecutive_runs", 5)),
-            min_training_rows=int(promotion.get("min_training_rows", 400)),
+            min_stability_ratio=float(promotion.get("min_stability_ratio", 0.60)),
+            min_consecutive_runs=int(promotion.get("min_consecutive_runs", 3)),
+            min_training_rows=int(promotion.get("min_training_rows", 200)),
             max_forecast_mape=float(promotion.get("max_forecast_mape", 35.0)),
             max_forecast_rmse=float(promotion.get("max_forecast_rmse", 12.0)),
         )

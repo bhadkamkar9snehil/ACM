@@ -291,7 +291,7 @@ class SqlWriteEngine:
         out = df.copy()
         run_fallback = self.run_id if self.run_id else "00000000-0000-0000-0000-000000000000"
         equip_fallback = int(self.equip_id) if self.equip_id is not None and int(self.equip_id) > 0 else 0
-        now_utc_naive = pd.Timestamp.utcnow().tz_localize(None)
+        now_utc_naive = pd.Timestamp.now(tz="UTC").tz_localize(None)
 
         if "RunID" not in out.columns:
             out["RunID"] = run_fallback

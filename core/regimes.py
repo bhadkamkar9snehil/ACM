@@ -1804,9 +1804,70 @@ def update_health_labels(
     fused_series: pd.Series | np.ndarray,
     cfg: Dict[str, Any],
 ) -> Dict[int, Dict[str, Any]]:
+    def _parse_per_regime_thresholds(
+        raw_overrides: Any,
+        default_warn: float,
+        default_alert: float,
+    ) -> Dict[int, Tuple[float, float]]:
+        overrides: Dict[int, Tuple[float, float]] = {}
+        if raw_overrides is None:
+            return overrides
+        if not isinstance(raw_overrides, dict):
+            Console.warn(
+                "regimes.health.per_regime_thresholds must be a dict; ignoring overrides",
+                component="REGIME",
+            )
+            return overrides
+
+        for raw_label, raw_thresholds in raw_overrides.items():
+            try:
+                label = int(raw_label)
+            except Exception:
+                Console.warn(
+                    f"Skipping invalid per-regime threshold label: {raw_label}",
+                    component="REGIME",
+                )
+                continue
+            if not isinstance(raw_thresholds, dict):
+                Console.warn(
+                    f"Skipping per-regime threshold for label {label}: expected dict, got {type(raw_thresholds).__name__}",
+                    component="REGIME",
+                )
+                continue
+            warn_raw = raw_thresholds.get("warn", raw_thresholds.get("fused_warn_z", default_warn))
+            alert_raw = raw_thresholds.get("alert", raw_thresholds.get("fused_alert_z", default_alert))
+            try:
+                warn_value = float(warn_raw)
+                alert_value = float(alert_raw)
+            except Exception:
+                Console.warn(
+                    f"Skipping per-regime threshold for label {label}: warn/alert must be numeric",
+                    component="REGIME",
+                )
+                continue
+            if not np.isfinite(warn_value) or not np.isfinite(alert_value):
+                Console.warn(
+                    f"Skipping per-regime threshold for label {label}: warn/alert must be finite",
+                    component="REGIME",
+                )
+                continue
+            if warn_value > alert_value:
+                Console.warn(
+                    f"Skipping per-regime threshold for label {label}: warn ({warn_value}) exceeds alert ({alert_value})",
+                    component="REGIME",
+                )
+                continue
+            overrides[label] = (warn_value, alert_value)
+        return overrides
+
     health_cfg = _cfg_get(cfg, "regimes.health", {})
     warn = float(health_cfg.get("fused_warn_z", 1.5))
     alert = float(health_cfg.get("fused_alert_z", 3.0))
+    per_regime_thresholds = _parse_per_regime_thresholds(
+        health_cfg.get("per_regime_thresholds"),
+        warn,
+        alert,
+    )
 
     labels = np.asarray(labels, dtype=int)
     fused = pd.Series(fused_series).astype(float)
@@ -1868,9 +1929,10 @@ def update_health_labels(
         med = float(np.nanmedian(fused_vals))
         p95 = float(np.nanpercentile(np.abs(fused_vals), 95))
         count = int(mask.sum())
-        if med >= alert:
+        warn_threshold, alert_threshold = per_regime_thresholds.get(int(label), (warn, alert))
+        if med >= alert_threshold:
             state = "critical"
-        elif med >= warn:
+        elif med >= warn_threshold:
             state = "suspect"
         else:
             state = "healthy"
@@ -1882,6 +1944,8 @@ def update_health_labels(
             "p95_abs_fused": p95,
             "count": count,
             "state": state,
+            "warn_threshold": float(warn_threshold),
+            "alert_threshold": float(alert_threshold),
             "dwell_samples": dwell_samples,
             "dwell_seconds": dwell_seconds,
             "avg_dwell_seconds": avg_dwell_seconds,
@@ -1898,6 +1962,12 @@ def update_health_labels(
     if np.isfinite(total_duration_sec):
         model.meta["total_duration_seconds"] = float(total_duration_sec)
     model.meta["total_samples"] = int(len(labels_arr))
+    model.meta["health_threshold_mode"] = "per_regime_overrides" if per_regime_thresholds else "global"
+    if per_regime_thresholds:
+        model.meta["health_threshold_overrides"] = {
+            str(label): {"warn": float(thr[0]), "alert": float(thr[1])}
+            for label, thr in per_regime_thresholds.items()
+        }
     
     # v11.4.0: Identify the "Normal" operating regime using config parameters
     normal_cfg = _cfg_get(cfg, "regimes.normal_identification", {})

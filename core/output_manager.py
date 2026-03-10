@@ -433,7 +433,7 @@ class OutputManager:
 
     def _get_datetime_columns_for_table(self, table_name: Optional[str]) -> set[str]:
         """Return datetime-typed columns from SQL schema for a table."""
-        return self._sql_engine.get_datetime_columns_for_table(table_name)
+        return self._get_sql_engine().get_datetime_columns_for_table(table_name)
 
     @staticmethod
     def _looks_like_datetime_column(col_name: str) -> bool:
@@ -447,7 +447,7 @@ class OutputManager:
         sql_table: Optional[str] = None,
     ) -> pd.DataFrame:
         """Prepare DataFrame for SQL insertion with robust type coercion (SQL Server safe)."""
-        return self._sql_engine.prepare_dataframe_for_sql(df, non_numeric_cols, sql_table)
+        return self._get_sql_engine().prepare_dataframe_for_sql(df, non_numeric_cols, sql_table)
     
     
     def _should_auto_flush(self) -> bool:
@@ -727,11 +727,29 @@ class OutputManager:
 
     def _get_table_columns_for_contract(self, table_name: str) -> set[str]:
         """Resolve and cache table columns for schema-contract enforcement."""
-        return self._sql_engine.get_table_columns_for_contract(table_name)
+        return self._get_sql_engine().get_table_columns_for_contract(table_name)
 
     def _populate_standard_metadata(self, df: pd.DataFrame) -> pd.DataFrame:
         """Populate standard metadata (RunID, EquipID, CreatedAt) during payload generation."""
-        return self._sql_engine.populate_standard_metadata(df)
+        return self._get_sql_engine().populate_standard_metadata(df)
+
+    def _get_sql_engine(self) -> SqlWriteEngine:
+        """Return write engine, lazily creating one for lightweight test/manual construction."""
+        engine = getattr(self, "_sql_engine", None)
+        if engine is None:
+            engine = SqlWriteEngine(
+                sql_client=getattr(self, "sql_client", None),
+                run_id=getattr(self, "run_id", None),
+                equip_id=getattr(self, "equip_id", None),
+                batch_size=int(getattr(self, "batch_size", 5000) or 5000),
+            )
+            self._sql_engine = engine
+        else:
+            # Keep engine identity fields synced when caller mutates manager context.
+            engine.run_id = getattr(self, "run_id", None)
+            equip_id = getattr(self, "equip_id", None)
+            engine.equip_id = int(equip_id) if equip_id is not None else None
+        return cast(SqlWriteEngine, engine)
 
     def audit_allowed_tables_write_integrity(
         self,
