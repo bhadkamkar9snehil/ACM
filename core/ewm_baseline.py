@@ -439,7 +439,7 @@ class EWMBaselineManager:
         n = len(remapped)
         Console.info(
             f"EWM regime remap: equip={self.equip_id} remapped {n} binner regimes "
-            f"→ HDBSCAN clusters. mapping={mapping}",
+            f"-> HDBSCAN clusters. mapping={mapping}",
             component="EWM_BASELINE",
         )
         return remapped
@@ -494,7 +494,7 @@ class EWMBaselineManager:
         written = self._upsert_rows(sql_client, pd.DataFrame(rows))
         if written > 0:
             Console.debug(
-                f"EWM state persisted: equip={self.equip_id} rows={written} → ACM_EWMBaseline",
+                f"EWM state persisted: equip={self.equip_id} rows={written} -> ACM_EWMBaseline",
                 component="EWM_BASELINE",
             )
         return written

@@ -279,7 +279,7 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
     Console.info(
         f"RUN START: run_id={run_id} equip={equip} equip_id={equip_id} "
         f"batch={run_count} tick={getattr(args, 'tick_minutes', '?')}min "
-        f"range={win_start} → {win_end}",
+        f"range={win_start} to {win_end}",
         component="RUN",
     )
 

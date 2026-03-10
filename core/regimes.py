@@ -3369,7 +3369,7 @@ def run_regime_labeling_stage(
         )
         regime_state_version = new_state.state_version
         logger.info(
-            f"Regime state saved v{regime_state_version}: K={new_state.n_clusters} → ACM_RegimeState",
+            f"Regime state saved v{regime_state_version}: K={new_state.n_clusters} -> ACM_RegimeState",
             component="REGIME_STATE",
         )
 
