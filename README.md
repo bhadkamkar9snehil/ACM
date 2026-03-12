@@ -319,6 +319,19 @@ Practical distinction:
 
 ## 10. Running ACM
 
+### 10.0 Agent-run preflight
+
+If you are running ACM from an agent shell in WSL or a mixed Windows/WSL setup, use the
+host-aware runner first:
+
+```powershell
+python scripts/acm_agent_runtime.py doctor
+python scripts/acm_agent_runtime.py pytest tests/test_sql_batch_runner.py -q
+python scripts/acm_agent_runtime.py db-health --equip WFA_TURBINE_10
+```
+
+See `docs/AGENT_RUNTIME_ACCESS.md` for the full workflow.
+
 ### 10.1 Production-like batch mode
 
 ```powershell
