@@ -3486,6 +3486,77 @@ class TestRefactorHelpers:
         assert result.sensor_context is None
         assert record_calls == [("FD_FAN", 3, "info")]
 
+    def test_persist_pipeline_outputs_skips_score_derived_outputs_when_scores_are_suppressed(self):
+        """Score-suppressed frames should not persist score-derived tables or analytics."""
+        from core.output_manager import OutputManager, PersistCoreOutputsResult
+
+        output_manager = OutputManager.__new__(OutputManager)
+        output_manager.equip_id = 5010
+        output_manager.run_id = "run-1"
+        captured = {
+            "scores_rows": None,
+            "episodes_rows": None,
+            "analytics_called": False,
+            "contribution_called": False,
+            "additional_rows": None,
+        }
+
+        def _persist_core_outputs(scores_df, episodes_df):
+            captured["scores_rows"] = len(scores_df)
+            captured["episodes_rows"] = len(episodes_df)
+            return PersistCoreOutputsResult(
+                scores_inserted=0,
+                episodes_inserted=0,
+                episode_count=0,
+            )
+
+        output_manager.persist_core_outputs = _persist_core_outputs
+        output_manager.write_contribution_timeline_from_frame = (
+            lambda **kwargs: captured.__setitem__("contribution_called", True)
+        )
+        output_manager.persist_additional_artifacts = (
+            lambda scores_df, raw_score, seasonal_patterns, max_total_rows=10000:
+            captured.__setitem__("additional_rows", len(scores_df))
+        )
+        output_manager.release_persist_memory = (
+            lambda raw_train, raw_score, iforest_detector=None, omr_detector=None: (None, None)
+        )
+        output_manager.generate_all_analytics_with_context = (
+            lambda **kwargs: captured.__setitem__("analytics_called", True)
+        )
+
+        scores_df = pd.DataFrame(
+            {
+                "fused": [np.nan, np.nan],
+                "ar1_z": [np.nan, np.nan],
+                "regime_label": ["R1", "R1"],
+            }
+        )
+        episodes_df = pd.DataFrame({"episode_id": [1, 2]})
+        result = output_manager.persist_pipeline_outputs(
+            scores_df=scores_df,
+            episodes_df=episodes_df,
+            raw_train=pd.DataFrame({"sensor": [1.0]}),
+            raw_score=pd.DataFrame({"sensor": [1.1]}),
+            iforest_detector=object(),
+            omr_detector=object(),
+            seasonal_patterns={},
+            cfg={},
+            sensor_context={"k": "v"},
+            fusion_weights_used={"ar1_z": 0.7},
+            record_episode_fn=lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("record_episode_fn should not run")),
+            equip="FD_FAN",
+        )
+
+        assert result.rows_written_delta == 0
+        assert result.episode_count == 0
+        assert result.analytics_table_count == 0
+        assert captured["scores_rows"] == 0
+        assert captured["episodes_rows"] == 0
+        assert captured["contribution_called"] is False
+        assert captured["analytics_called"] is False
+        assert captured["additional_rows"] == 0
+
     def test_run_persistence_stage_orchestrates_pipeline_outputs_and_sql_artifacts(self, monkeypatch):
         """Output manager persistence stage should run pipeline outputs and SQL artifact writes in order."""
         from core import output_manager as om_module
@@ -3929,6 +4000,89 @@ class TestRefactorHelpers:
         assert '["comparability_failed"]' in sql_client.conn.params
         assert '["schema_drift"]' in sql_client.conn.params
         assert sql_client.conn.commits == 1
+
+    def test_write_run_metadata_sanitizes_nan_float_fields(self, monkeypatch):
+        """ACM_Runs writes should convert NaN float metrics into NULL-safe parameters."""
+        from core import run_metadata_writer as rmw
+
+        class _Cursor:
+            def __init__(self, conn):
+                self.conn = conn
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def execute(self, query, params):
+                self.conn.query = query
+                self.conn.params = params
+
+        class _Conn:
+            def __init__(self):
+                self.query = None
+                self.params = None
+                self.commits = 0
+
+            def cursor(self):
+                return _Cursor(self)
+
+            def commit(self):
+                self.commits += 1
+
+            def rollback(self):
+                pass
+
+        sql_client = type("SQL", (), {"conn": _Conn(), "cursor": lambda self=None: sql_client.conn.cursor()})()
+        monkeypatch.setattr(rmw, "_acm_runs_has_zero_day_columns", lambda sql_client: False)
+        monkeypatch.setattr(rmw, "_acm_runs_has_representation_columns", lambda sql_client: False)
+
+        ok = rmw.write_run_metadata(
+            sql_client=sql_client,
+            run_id="r1",
+            equip_id=5010,
+            equip_name="WFA_TURBINE_10",
+            started_at=datetime(2026, 3, 9, 10, 0, 0),
+            completed_at=datetime(2026, 3, 9, 10, 5, 0),
+            config_signature="sig",
+            train_row_count=100,
+            score_row_count=50,
+            episode_count=0,
+            health_status="UNKNOWN",
+            avg_health_index=np.nan,
+            min_health_index=np.inf,
+            max_fused_z=-np.inf,
+            data_quality_score=np.nan,
+            refit_requested=False,
+            kept_columns="sensor_1_avg,sensor_2_avg",
+            error_message=None,
+        )
+
+        assert ok is True
+        assert sql_client.conn.params[7] is None
+        assert sql_client.conn.params[8] is None
+        assert sql_client.conn.params[9] is None
+        assert sql_client.conn.params[10] is None
+        assert sql_client.conn.commits == 1
+
+    def test_extract_run_metadata_from_scores_returns_unknown_when_fused_scores_are_nan(self):
+        """Run metadata extraction should degrade cleanly when all fused scores are NaN."""
+        from core import run_metadata_writer as rmw
+
+        scores = pd.DataFrame(
+            {
+                "fused": [np.nan, np.nan],
+                "__health": [np.nan, np.nan],
+            }
+        )
+
+        metadata = rmw.extract_run_metadata_from_scores(scores)
+
+        assert metadata["health_status"] == "UNKNOWN"
+        assert metadata["avg_health_index"] is None
+        assert metadata["min_health_index"] is None
+        assert metadata["max_fused_z"] is None
 
     def test_apply_contamination_filter_config_disables_filter_for_clean_baseline(self):
         """Calibration helper should disable downstream filtering when baseline is clean."""

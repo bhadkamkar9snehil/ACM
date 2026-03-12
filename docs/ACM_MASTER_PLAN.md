@@ -2358,6 +2358,9 @@ Strict repo audit against this plan shows:
 - the implementation is on track through Slice 11, but not beyond it
 - the new representation owners, SQL tables, validation-only authority path, and run-level representation summary projection are all real in code
 - `G2` is now satisfied in code because suppression reasons are persisted in `ACM_RepresentationStatus`, surfaced by `scripts/sql_batch_runner.py`, and projected onto `ACM_Runs`
+- a validation-authority replay on `WFA_TURBINE_10` confirmed that authoritative suppression is activating in runtime, not just in tests
+- that replay also exposed two real hardening gaps which are now fixed in code: score-suppressed runs were still attempting score-derived analytics writes, and `ACM_Runs` writes were still allowing `NaN` float payloads after suppression
+- the target `ACM` database used for replay does not yet have migrations `018` through `022` applied, so missing representation tables and missing `ACM_Runs` representation columns are currently an environment rollout gap, not a code-ownership gap
 - `G1`, `G4`, and `G6` remain open because zero-day replay closure and replay-qualified legacy-owner replacement are not complete
 - the repo is intentionally carrying duplicate owners in shadow/validation mode; this is acceptable until `RG-14`, but only if those owners are treated as transitional
 

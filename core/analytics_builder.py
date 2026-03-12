@@ -331,6 +331,33 @@ class AnalyticsBuilder:
         decline only once they are sustained. Step-change spikes still spike
         the instantaneous score and are preserved in RawHealthIndex.
         """
+        if "fused" not in scores_df.columns:
+            return pd.DataFrame(
+                columns=[
+                    "Timestamp",
+                    "HealthIndex",
+                    "RawHealthIndex",
+                    "QualityFlag",
+                    "HealthZone",
+                    "FusedZ",
+                    "Confidence",
+                ]
+            )
+
+        fused_series = pd.to_numeric(scores_df["fused"], errors="coerce")
+        if fused_series.notna().sum() == 0:
+            return pd.DataFrame(
+                columns=[
+                    "Timestamp",
+                    "HealthIndex",
+                    "RawHealthIndex",
+                    "QualityFlag",
+                    "HealthZone",
+                    "FusedZ",
+                    "Confidence",
+                ]
+            )
+
         # Load config parameters
         health_cfg = cfg.get('health', {})
         smoothing_alpha = health_cfg.get('smoothing_alpha', 0.3)
@@ -343,7 +370,7 @@ class AnalyticsBuilder:
 
         # Instantaneous health: sigmoid of raw fused_z — preserved as RawHealthIndex.
         # Captures acute spikes. Does NOT accumulate gradual drift.
-        raw_health = health_index(scores_df['fused'])
+        raw_health = health_index(fused_series)
 
         # Gradient health: EMA of abs(fused_z) → then sigmoid.
         # Persistent weak elevations accumulate in the EWM before the nonlinearity,
@@ -353,7 +380,7 @@ class AnalyticsBuilder:
         # around zero (normal baseline noise) do NOT cancel each other out.
         # Applying EWM to the signed value would make z=+1 / z=-1 alternation
         # average to EWM≈0 → health≈97%, masking real weak degradation.
-        fused_gradient = scores_df['fused'].abs().ewm(alpha=gradient_alpha, adjust=False).mean()
+        fused_gradient = fused_series.abs().ewm(alpha=gradient_alpha, adjust=False).mean()
         gradient_health = health_index(fused_gradient)
 
         # Post-smooth gradient health for visual noise reduction (display only).
@@ -370,7 +397,7 @@ class AnalyticsBuilder:
         quality_flag[volatile_mask] = 'EXTREME_VOLATILITY'
         
         # Flag extreme anomalies
-        extreme_mask = scores_df['fused'].abs() > extreme_anomaly_z_threshold
+        extreme_mask = fused_series.abs() > extreme_anomaly_z_threshold
         quality_flag[extreme_mask] = 'EXTREME_ANOMALY'
         
         quality_flag.iloc[0] = 'NORMAL'
@@ -411,7 +438,7 @@ class AnalyticsBuilder:
             'RawHealthIndex': raw_health.round(2).values,
             'QualityFlag': quality_flag.astype(str).values,
             'HealthZone': zones.astype(str).values,
-            'FusedZ': scores_df['fused'].round(4).values,
+            'FusedZ': fused_series.round(4).values,
         })
         
         if confidence_values is not None:
@@ -497,6 +524,7 @@ class AnalyticsBuilder:
                 continue
                 
             values = pd.to_numeric(scores_df[detector], errors='coerce').abs()
+            finite_values = values.dropna()
             violations = values > 2.0
             violation_count = int(violations.sum())
             total_points = int(len(values)) if len(values) else 0
@@ -517,10 +545,10 @@ class AnalyticsBuilder:
                 'Severity': severity,
                 'ViolationCount': violation_count,
                 'ViolationPct': round(violation_pct, 2),
-                'MaxZ': round(float(values.max()) if len(values) else 0.0, 4),
-                'AvgZ': round(float(values.mean()) if len(values) else 0.0, 4),
-                'CurrentZ': round(float(values.iloc[-1]) if len(values) else 0.0, 4),
-                'ActiveDefect': bool(violations.iloc[-1]) if len(violations) else False
+                'MaxZ': round(float(finite_values.max()) if len(finite_values) else 0.0, 4),
+                'AvgZ': round(float(finite_values.mean()) if len(finite_values) else 0.0, 4),
+                'CurrentZ': round(float(finite_values.iloc[-1]) if len(finite_values) else 0.0, 4),
+                'ActiveDefect': bool(violations.fillna(False).iloc[-1]) if len(violations) else False
             })
         
         return pd.DataFrame(defect_data).sort_values('ViolationPct', ascending=False)

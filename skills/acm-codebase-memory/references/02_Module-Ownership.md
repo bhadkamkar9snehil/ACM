@@ -40,7 +40,7 @@ type: agent-memory
 | `[core.output_contracts]` | 5 | 0 |
 | `[core.output_dataframe_builders]` | 1 | 0 |
 | `[core.output_manager]` | 106 | 9 |
-| `[core.output_manager_services]` | 32 | 3 |
+| `[core.output_manager_services]` | 33 | 3 |
 | `[core.output_sql_core]` | 22 | 2 |
 | `[core.pipeline_types]` | 23 | 1 |
 | `[core.regime_binner]` | 16 | 1 |
@@ -50,7 +50,7 @@ type: agent-memory
 | `[core.representation_store]` | 10 | 3 |
 | `[core.resource_monitor]` | 27 | 0 |
 | `[core.rul_estimator]` | 9 | 3 |
-| `[core.run_metadata_writer]` | 22 | 1 |
+| `[core.run_metadata_writer]` | 23 | 1 |
 | `[core.schema_drift_manager]` | 6 | 2 |
 | `[core.seasonality]` | 20 | 0 |
 | `[core.sensor_attribution]` | 30 | 1 |

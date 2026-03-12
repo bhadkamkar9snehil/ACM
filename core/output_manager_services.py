@@ -17,6 +17,14 @@ from core.representation_store import persist_representation_artifacts
 from core.sensor_attribution import build_contribution_timeline
 
 
+_SCORE_SIGNAL_COLUMNS = {
+    "fused",
+    "health",
+    "HealthIndex",
+    "RawHealthIndex",
+}
+
+
 def _trend_from_recent(values: List[float]) -> str:
     """Compute coarse trend using first-half vs second-half averages."""
     if len(values) < 3:
@@ -49,6 +57,26 @@ def _write_optional_contract_table(
         required=False,
     )
     return int(result.get("inserted", 0))
+
+
+def _has_authoritative_score_signal(scores_df: Optional[pd.DataFrame]) -> bool:
+    """Return True when a score frame contains any finite score-bearing values."""
+    if scores_df is None or scores_df.empty:
+        return False
+
+    candidate_cols = [
+        col
+        for col in scores_df.columns
+        if col in _SCORE_SIGNAL_COLUMNS or str(col).endswith("_z")
+    ]
+    if not candidate_cols:
+        return False
+
+    for col in candidate_cols:
+        values = pd.to_numeric(scores_df[col], errors="coerce")
+        if values.notna().any():
+            return True
+    return False
 
 
 def load_omr_drift_context_service(output_manager: Any, equip_id: int, lookback_hours: int = 24) -> dict:
@@ -1108,31 +1136,48 @@ def persist_pipeline_outputs_service(
     max_total_rows: int = 10000,
 ) -> Dict[str, Any]:
     """Persist core and optional run artifacts, then release persist-phase memory."""
+    score_outputs_enabled = _has_authoritative_score_signal(scores_df)
+    score_outputs_df = scores_df if score_outputs_enabled else scores_df.iloc[0:0].copy()
+    episodes_for_output = episodes_df
+    if episodes_for_output is None:
+        episodes_for_output = pd.DataFrame()
+    elif not score_outputs_enabled:
+        episodes_for_output = episodes_for_output.iloc[0:0].copy()
+
+    if not score_outputs_enabled:
+        Console.warn(
+            "Skipping score-derived persistence outputs because authoritative score signal is suppressed or unavailable",
+            component="OUTPUT",
+            equip_id=output_manager.equip_id,
+            run_id=output_manager.run_id,
+        )
+
     core = output_manager.persist_core_outputs(
-        scores_df=scores_df,
-        episodes_df=episodes_df,
+        scores_df=score_outputs_df,
+        episodes_df=episodes_for_output,
     )
     if core.episode_count > 0 and record_episode_fn is not None and equip:
         record_episode_fn(equip, count=core.episode_count, severity="info")
 
     # Persist anomaly events to ACM_Anomaly_Events
-    if episodes_df is not None and len(episodes_df) > 0:
+    if len(episodes_for_output) > 0:
         try:
             output_manager.write_anomaly_events(
-                df_events=episodes_df,
+                df_events=episodes_for_output,
                 run_id=output_manager.run_id,
             )
         except Exception as e:
             Console.warn(f"Anomaly events write failed: {e}", component="OUTPUT", error=str(e)[:200])
 
-    output_manager.write_contribution_timeline_from_frame(
-        frame=scores_df,
-        fusion_weights=fusion_weights_used,
-        equip=equip or "",
-    )
+    if score_outputs_enabled:
+        output_manager.write_contribution_timeline_from_frame(
+            frame=scores_df,
+            fusion_weights=fusion_weights_used,
+            equip=equip or "",
+        )
 
     output_manager.persist_additional_artifacts(
-        scores_df=scores_df,
+        scores_df=score_outputs_df,
         raw_score=raw_score,
         seasonal_patterns=seasonal_patterns,
         max_total_rows=max_total_rows,
@@ -1145,13 +1190,16 @@ def persist_pipeline_outputs_service(
         omr_detector=omr_detector,
     )
 
-    analytics_result = output_manager.generate_all_analytics_with_context(
-        scores_df=scores_df,
-        cfg=cfg,
-        sensor_context=sensor_context,
-        fusion_weights_used=fusion_weights_used,
-    )
-    table_count = int(analytics_result.get("sql_tables", 0))
+    if score_outputs_enabled:
+        analytics_result = output_manager.generate_all_analytics_with_context(
+            scores_df=scores_df,
+            cfg=cfg,
+            sensor_context=sensor_context,
+            fusion_weights_used=fusion_weights_used,
+        )
+        table_count = int(analytics_result.get("sql_tables", 0))
+    else:
+        table_count = 0
     sensor_context = None
     gc.collect()
 

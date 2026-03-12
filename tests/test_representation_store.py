@@ -111,3 +111,33 @@ def test_persist_representation_artifacts_writes_all_control_plane_tables() -> N
         "ACM_RepresentationSchemas",
         "ACM_BaselineGovernance",
     }
+
+
+def test_persist_representation_artifacts_warns_when_no_rows_are_written() -> None:
+    result, score = _shadow_result()
+    captured = {"warn": []}
+
+    class _OutputManager:
+        def _can_write_dataframe(self, df, require_healthy_sql=True):
+            return True
+
+        def write_sql_table(self, **kwargs):
+            return {"inserted": 0}
+
+    class _Logger:
+        def info(self, *args, **kwargs):
+            raise AssertionError("info should not be used when nothing is written")
+
+        def warn(self, message, **kwargs):
+            captured["warn"].append((message, kwargs))
+
+    persisted = persist_representation_artifacts(
+        _OutputManager(),
+        result,
+        signal_source_df=score,
+        logger=_Logger(),
+    )
+
+    assert persisted.total_rows == 0
+    assert captured["warn"]
+    assert "produced no SQL rows" in captured["warn"][0][0]

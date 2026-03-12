@@ -45,6 +45,19 @@ class RepresentationRunStatus:
     degraded_reasons_json: str = "[]"
 
 
+def _normalize_optional_float(value: Any) -> Optional[float]:
+    """Convert NaN/Inf-like float inputs into SQL-safe nullable scalars."""
+    if value is None:
+        return None
+    try:
+        normalized = float(value)
+    except Exception:
+        return None
+    if not np.isfinite(normalized):
+        return None
+    return normalized
+
+
 def build_zero_day_run_status(
     *,
     scoring_active: bool,
@@ -410,10 +423,10 @@ def write_run_metadata(
             score_row_count,
             episode_count,
             health_status,
-            float(avg_health_index) if avg_health_index is not None else None,
-            float(min_health_index) if min_health_index is not None else None,
-            float(max_fused_z) if max_fused_z is not None else None,
-            float(data_quality_score) if data_quality_score is not None else None,
+            _normalize_optional_float(avg_health_index),
+            _normalize_optional_float(min_health_index),
+            _normalize_optional_float(max_fused_z),
+            _normalize_optional_float(data_quality_score),
             refit_requested,
             kept_columns,
             error_message,
@@ -562,22 +575,35 @@ def extract_run_metadata_from_scores(scores: pd.DataFrame, per_regime_enabled: b
     metadata = {}
     
     try:
+        if "fused" not in scores.columns:
+            raise ValueError("No fused score column available for run metadata")
+
+        fused = pd.to_numeric(scores["fused"], errors="coerce")
+        if fused.notna().sum() == 0:
+            raise ValueError("No finite fused score values available for run metadata")
+
         # Use precomputed health if available
         if "__health" in scores.columns:
-            health = scores["__health"]
+            health = pd.to_numeric(scores["__health"], errors="coerce")
         else:
             # v10.1.0: Fallback uses softer sigmoid formula
             # OLD: 100/(1+Z^2) was too aggressive
             z_threshold = 5.0
             steepness = 1.5
-            abs_z = np.abs(scores["fused"])
+            abs_z = np.abs(fused)
             normalized = (abs_z - z_threshold / 2) / (z_threshold / 4)
             sigmoid = 1 / (1 + np.exp(-normalized * steepness))
             health = np.clip(100.0 * (1 - sigmoid), 0.0, 100.0)
+
+        health = pd.to_numeric(pd.Series(health, index=scores.index), errors="coerce")
+        health_finite = health.dropna()
+        fused_finite = fused.abs().dropna()
+        if health_finite.empty or fused_finite.empty:
+            raise ValueError("No finite health metrics available for run metadata")
         
-        metadata["avg_health_index"] = float(health.mean())
-        metadata["min_health_index"] = float(health.min())
-        metadata["max_fused_z"] = float(scores["fused"].abs().max())
+        metadata["avg_health_index"] = float(health_finite.mean())
+        metadata["min_health_index"] = float(health_finite.min())
+        metadata["max_fused_z"] = float(fused_finite.max())
         
         # Health status
         metadata["health_status"] = compute_run_health_status(
@@ -1173,4 +1199,3 @@ def finalize_pipeline_teardown(state: PipelineTeardownState) -> None:
     )
 
     state.shutdown_run_observability_fn(state.observability_enabled)
-

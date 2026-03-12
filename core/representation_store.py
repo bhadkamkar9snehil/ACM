@@ -221,8 +221,14 @@ def persist_representation_artifacts(
         ),
     )
 
-    logger.info(
-        "Representation shadow control plane persisted",
+    log_fn = logger.info if int(result.total_rows) > 0 else logger.warn
+    message = (
+        "Representation shadow control plane persisted"
+        if int(result.total_rows) > 0
+        else "Representation shadow control plane produced no SQL rows"
+    )
+    log_fn(
+        message,
         component="REPRESENTATION",
         equip_id=representation_result.equip_id,
         run_id=representation_result.run_id,
