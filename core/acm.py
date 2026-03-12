@@ -98,6 +98,7 @@ from core.sql_client import (
     connect_acm_sql_failfast,
     resolve_runtime_policy,
 )
+from core.representation_pipeline import run_representation_pipeline
 
 # Data utilities: index hygiene and deduplication helpers.
 from core.fast_features import ensure_local_index, deduplicate_index
@@ -385,6 +386,7 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
     quality_ok: bool = False
     use_per_regime: bool = False
     score_regime_labels: Optional[np.ndarray] = None
+    representation_shadow = None
 
     try:
         # ===== Phase 1: Load data from SQL =====
@@ -422,6 +424,28 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
 
         if train is None or score is None:
             raise RuntimeError("Load stage returned no train/score data with should_continue=True")
+
+        with T.section("representation.shadow"):
+            try:
+                representation_shadow = run_representation_pipeline(
+                    train_df=train,
+                    score_df=score,
+                    meta=meta,
+                    cfg=cfg,
+                    equip_id=equip_id,
+                    run_id=run_id,
+                    logger=Console,
+                )
+            except Exception as representation_exc:
+                Console.warn(
+                    "Representation shadow pipeline failed; continuing with legacy runtime authority",
+                    component="REPRESENTATION",
+                    equip_id=equip_id,
+                    run_id=run_id,
+                    error_type=type(representation_exc).__name__,
+                    error=str(representation_exc)[:200],
+                )
+
         T.log("data_split_complete", train_rows=train.shape[0], train_cols=train.shape[1], score_rows=score.shape[0], score_cols=score.shape[1])
         
         # ===== Adaptive rolling baseline (cold-start helper) =====
