@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-03-12T10:44:18+00:00",
+  "generated_at": "2026-03-12T10:56:09+00:00",
   "module_count": 55,
   "modules": [
     {
@@ -451,7 +451,7 @@
     {
       "module_name": "core.run_metadata_writer",
       "source_path": "core/run_metadata_writer.py",
-      "symbol_count": 18,
+      "symbol_count": 22,
       "core_import_count": 1,
       "core_imports": [
         "core.observability"

@@ -43,6 +43,7 @@ from core import regimes, drift, fuse, fast_features
 from core.output_manager import OutputManager
 from core.run_metadata_writer import (
     PipelineTeardownState,
+    build_representation_run_status,
     build_zero_day_run_status,
     finalize_noop_run,
     finalize_pipeline_teardown,
@@ -1140,6 +1141,7 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
                 record_health_score_fn=record_health_score,
                 record_error_fn=record_error,
                 zero_day_status=zero_day_status,
+                representation_status=build_representation_run_status(representation_shadow),
                 span_ctx=_span_ctx,
                 root_span=root_span,
                 close_run_span_fn=close_run_span,

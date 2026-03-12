@@ -50,7 +50,7 @@ type: agent-memory
 | `[core.representation_store]` | 10 | 3 |
 | `[core.resource_monitor]` | 27 | 0 |
 | `[core.rul_estimator]` | 9 | 3 |
-| `[core.run_metadata_writer]` | 18 | 1 |
+| `[core.run_metadata_writer]` | 22 | 1 |
 | `[core.schema_drift_manager]` | 6 | 2 |
 | `[core.seasonality]` | 20 | 0 |
 | `[core.sensor_attribution]` | 30 | 1 |

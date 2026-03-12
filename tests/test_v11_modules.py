@@ -3766,6 +3766,7 @@ class TestRefactorHelpers:
                 record_health_score_fn=None,
                 record_error_fn=None,
                 zero_day_status=None,
+                representation_status=None,
                 span_ctx=None,
                 root_span=None,
                 close_run_span_fn=_close_run_span_fn,
@@ -3847,6 +3848,86 @@ class TestRefactorHelpers:
         assert "active_hdbscan" in sql_client.conn.params
         assert "ewm_monitoring_raw_numeric" in sql_client.conn.params
         assert 17 in sql_client.conn.params
+        assert sql_client.conn.commits == 1
+
+    def test_write_run_metadata_includes_representation_fields_when_columns_exist(self, monkeypatch):
+        """ACM_Runs metadata write should persist representation summary when migration 022 exists."""
+        from core import run_metadata_writer as rmw
+
+        class _Cursor:
+            def __init__(self, conn):
+                self.conn = conn
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def execute(self, query, params):
+                self.conn.query = query
+                self.conn.params = params
+
+        class _Conn:
+            def __init__(self):
+                self.query = None
+                self.params = None
+                self.commits = 0
+
+            def cursor(self):
+                return _Cursor(self)
+
+            def commit(self):
+                self.commits += 1
+
+            def rollback(self):
+                pass
+
+        sql_client = type("SQL", (), {"conn": _Conn(), "cursor": lambda self=None: sql_client.conn.cursor()})()
+        monkeypatch.setattr(rmw, "_acm_runs_has_zero_day_columns", lambda sql_client: False)
+        monkeypatch.setattr(rmw, "_acm_runs_has_representation_columns", lambda sql_client: True)
+
+        ok = rmw.write_run_metadata(
+            sql_client=sql_client,
+            run_id="r1",
+            equip_id=5010,
+            equip_name="WFA_TURBINE_10",
+            started_at=datetime(2026, 3, 9, 10, 0, 0),
+            completed_at=datetime(2026, 3, 9, 10, 5, 0),
+            config_signature="sig",
+            train_row_count=100,
+            score_row_count=50,
+            episode_count=2,
+            health_status="DEGRADED",
+            avg_health_index=25.0,
+            min_health_index=10.0,
+            max_fused_z=6.5,
+            data_quality_score=99.0,
+            refit_requested=False,
+            kept_columns="sensor_1_avg,sensor_2_avg",
+            error_message='{"degraded_steps":["score_suppressed"]}',
+            representation_status=rmw.RepresentationRunStatus(
+                authoritative=True,
+                score_allowed=False,
+                learn_allowed=False,
+                context_label="unknown",
+                runtime_mode="ONLINE_SCORING",
+                schema_compatibility="COMPATIBLE",
+                basis_compatibility="PENDING_REQUALIFICATION",
+                baseline_compatibility="BLOCKED",
+                suppressed_reasons_json='["comparability_failed"]',
+                degraded_reasons_json='["schema_drift"]',
+            ),
+        )
+
+        assert ok is True
+        assert "RepresentationAuthoritative" in sql_client.conn.query
+        assert "RepresentationScoreAllowed" in sql_client.conn.query
+        assert "RepresentationSuppressedReasons" in sql_client.conn.query
+        assert "ONLINE_SCORING" in sql_client.conn.params
+        assert "PENDING_REQUALIFICATION" in sql_client.conn.params
+        assert '["comparability_failed"]' in sql_client.conn.params
+        assert '["schema_drift"]' in sql_client.conn.params
         assert sql_client.conn.commits == 1
 
     def test_apply_contamination_filter_config_disables_filter_for_clean_baseline(self):

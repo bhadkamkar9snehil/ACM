@@ -29,6 +29,22 @@ class ZeroDayRunStatus:
     channel_count: int = 0
 
 
+@dataclass(frozen=True)
+class RepresentationRunStatus:
+    """Operator-facing representation summary persisted per run."""
+
+    authoritative: bool
+    score_allowed: Optional[bool]
+    learn_allowed: Optional[bool]
+    context_label: str = "UNKNOWN"
+    runtime_mode: str = "UNASSESSED"
+    schema_compatibility: str = "PENDING"
+    basis_compatibility: str = "PENDING"
+    baseline_compatibility: str = "PENDING"
+    suppressed_reasons_json: str = "[]"
+    degraded_reasons_json: str = "[]"
+
+
 def build_zero_day_run_status(
     *,
     scoring_active: bool,
@@ -63,6 +79,36 @@ def zero_day_status_from_noop_reason(reason: str) -> ZeroDayRunStatus:
     )
 
 
+def build_representation_run_status(representation_result: Optional[Any]) -> Optional[RepresentationRunStatus]:
+    """Create a normalized run-level representation summary from the pipeline result."""
+    if representation_result is None:
+        return None
+    eligibility = getattr(representation_result, "eligibility", None)
+    compatibility = getattr(representation_result, "compatibility", None)
+    context = getattr(representation_result, "context", None)
+    baseline_governance = getattr(representation_result, "baseline_governance", None)
+    if eligibility is None or compatibility is None or context is None or baseline_governance is None:
+        return None
+    return RepresentationRunStatus(
+        authoritative=bool(getattr(representation_result, "authoritative", False)),
+        score_allowed=getattr(eligibility, "score_allowed", None),
+        learn_allowed=getattr(eligibility, "learn_allowed", None),
+        context_label=str(getattr(context, "context_label", "UNKNOWN") or "UNKNOWN"),
+        runtime_mode=str(getattr(getattr(baseline_governance, "runtime_mode", None), "value", "UNASSESSED") or "UNASSESSED"),
+        schema_compatibility=str(getattr(compatibility, "schema_compatibility", "PENDING") or "PENDING"),
+        basis_compatibility=str(getattr(compatibility, "basis_compatibility", "PENDING") or "PENDING"),
+        baseline_compatibility=str(getattr(compatibility, "baseline_compatibility", "PENDING") or "PENDING"),
+        suppressed_reasons_json=json.dumps(
+            list(getattr(eligibility, "suppressed_reason_codes", ()) or ()),
+            ensure_ascii=True,
+        ),
+        degraded_reasons_json=json.dumps(
+            list(getattr(eligibility, "degraded_reason_codes", ()) or ()),
+            ensure_ascii=True,
+        ),
+    )
+
+
 def _acm_runs_has_zero_day_columns(sql_client: Any) -> bool:
     """Check whether ACM_Runs has the explicit zero-day observability columns."""
     query = """
@@ -94,12 +140,67 @@ def _acm_runs_has_zero_day_columns(sql_client: Any) -> bool:
     return required.issubset(found)
 
 
+def _acm_runs_has_representation_columns(sql_client: Any) -> bool:
+    """Check whether ACM_Runs has the explicit representation-summary columns."""
+    query = """
+        SELECT COLUMN_NAME
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = 'dbo'
+          AND TABLE_NAME = 'ACM_Runs'
+          AND COLUMN_NAME IN (
+              'RepresentationAuthoritative',
+              'RepresentationScoreAllowed',
+              'RepresentationLearnAllowed',
+              'RepresentationContextLabel',
+              'RepresentationRuntimeMode',
+              'RepresentationSchemaCompatibility',
+              'RepresentationBasisCompatibility',
+              'RepresentationBaselineCompatibility',
+              'RepresentationSuppressedReasons',
+              'RepresentationDegradedReasons'
+          )
+    """
+    try:
+        with sql_client.cursor() as cur:
+            cur.execute(query)
+            rows = cur.fetchall()
+    except Exception:
+        return False
+
+    required = {
+        "RepresentationAuthoritative",
+        "RepresentationScoreAllowed",
+        "RepresentationLearnAllowed",
+        "RepresentationContextLabel",
+        "RepresentationRuntimeMode",
+        "RepresentationSchemaCompatibility",
+        "RepresentationBasisCompatibility",
+        "RepresentationBaselineCompatibility",
+        "RepresentationSuppressedReasons",
+        "RepresentationDegradedReasons",
+    }
+    found = {str(row[0]) for row in rows}
+    return required.issubset(found)
+
+
 def _warn_missing_zero_day_columns(logger: Any, run_id: Optional[str], equip_id: Optional[int]) -> None:
     """Warn when migration 017 has not been applied yet."""
     logger.warn(
         "Zero-day run observability skipped because ACM_Runs is missing explicit "
         "zero-day status columns. Apply SQL migration 017 before relying on "
         "persisted day-0 run visibility.",
+        component="RUN_META",
+        run_id=run_id,
+        equip_id=equip_id,
+    )
+
+
+def _warn_missing_representation_columns(logger: Any, run_id: Optional[str], equip_id: Optional[int]) -> None:
+    """Warn when ACM_Runs is missing explicit representation-summary columns."""
+    logger.warn(
+        "Representation run observability skipped because ACM_Runs is missing explicit "
+        "representation summary columns. Apply SQL migration 022 before relying on "
+        "persisted run-level representation visibility.",
         component="RUN_META",
         run_id=run_id,
         equip_id=equip_id,
@@ -198,6 +299,7 @@ def write_run_metadata(
     kept_columns: str,
     error_message: Optional[str] = None,
     zero_day_status: Optional[ZeroDayRunStatus] = None,
+    representation_status: Optional[RepresentationRunStatus] = None,
 ) -> bool:
     """
     Write run metadata to ACM_Runs table.
@@ -242,9 +344,14 @@ def write_run_metadata(
         
         # Build UPDATE statement (row already exists from _sql_start_run)
         include_zero_day = zero_day_status is not None and _acm_runs_has_zero_day_columns(sql_client)
+        include_representation = (
+            representation_status is not None and _acm_runs_has_representation_columns(sql_client)
+        )
         normalized_zero_day = None
         if zero_day_status is not None and not include_zero_day:
             _warn_missing_zero_day_columns(Console, run_id, equip_id)
+        if representation_status is not None and not include_representation:
+            _warn_missing_representation_columns(Console, run_id, equip_id)
         if include_zero_day and zero_day_status is not None:
             normalized_zero_day = build_zero_day_run_status(
                 scoring_active=zero_day_status.scoring_active,
@@ -277,6 +384,19 @@ def write_run_metadata(
             ZeroDaySurfaceType = ?,
             ZeroDayChannelCount = ?
             """
+        if include_representation and representation_status is not None:
+            update_sql += """
+            , RepresentationAuthoritative = ?,
+            RepresentationScoreAllowed = ?,
+            RepresentationLearnAllowed = ?,
+            RepresentationContextLabel = ?,
+            RepresentationRuntimeMode = ?,
+            RepresentationSchemaCompatibility = ?,
+            RepresentationBasisCompatibility = ?,
+            RepresentationBaselineCompatibility = ?,
+            RepresentationSuppressedReasons = ?,
+            RepresentationDegradedReasons = ?
+            """
         update_sql += """
         WHERE RunID = ?
         """
@@ -305,6 +425,21 @@ def write_run_metadata(
                     normalized_zero_day.status,
                     normalized_zero_day.surface_type,
                     int(normalized_zero_day.channel_count),
+                ]
+            )
+        if include_representation and representation_status is not None:
+            record_parts.extend(
+                [
+                    bool(representation_status.authoritative),
+                    representation_status.score_allowed,
+                    representation_status.learn_allowed,
+                    representation_status.context_label,
+                    representation_status.runtime_mode,
+                    representation_status.schema_compatibility,
+                    representation_status.basis_compatibility,
+                    representation_status.baseline_compatibility,
+                    representation_status.suppressed_reasons_json,
+                    representation_status.degraded_reasons_json,
                 ]
             )
         record_parts.append(run_id)
@@ -666,6 +801,7 @@ def emit_batch_summary(
     refit_requested: bool = False,
     timer: Optional[Any] = None,
     zero_day_status: Optional[ZeroDayRunStatus] = None,
+    representation_status: Optional[RepresentationRunStatus] = None,
 ) -> None:
     """
     Emit consolidated batch summary and timing logs (best-effort).
@@ -759,6 +895,18 @@ def emit_batch_summary(
                 f"status={_z.status}  active={'yes' if _z.scoring_active else 'no'}  "
                 f"surface={_z.surface_type}  channels={_z.channel_count}"
             )
+        _representation = "mode=?"
+        if representation_status is not None:
+            _representation = (
+                f"mode={representation_status.runtime_mode}  "
+                f"authoritative={'yes' if representation_status.authoritative else 'no'}  "
+                f"score_allowed={representation_status.score_allowed}  "
+                f"learn_allowed={representation_status.learn_allowed}  "
+                f"context={representation_status.context_label}  "
+                f"schema={representation_status.schema_compatibility}  "
+                f"basis={representation_status.basis_compatibility}  "
+                f"baseline={representation_status.baseline_compatibility}"
+            )
 
         console.info(
             f"Batch summary | {_eq} | RunID={_rid} | [{_ws}-{_we}] | outcome={_out} | "
@@ -768,6 +916,7 @@ def emit_batch_summary(
             f"RUL=[{_rul_str}] | "
             f"regime=[{_regime_str}] | drift={_drift_str} | "
             f"zero_day=[{_zero_day}] | "
+            f"representation=[{_representation}] | "
             f"model=[{_model_str}] | "
             f"data={_scored} scored, {_trained} trained | "
             f"refit={_refit} | degraded=[{_deg}]",
@@ -810,6 +959,7 @@ def finalize_run_with_metadata(
     record_error_fn: Optional[Any] = None,
     logger: Any = Console,
     zero_day_status: Optional[ZeroDayRunStatus] = None,
+    representation_status: Optional[RepresentationRunStatus] = None,
 ) -> None:
     """
     Finalize ACM run metadata + status and close SQL/output resources (best-effort).
@@ -867,6 +1017,7 @@ def finalize_run_with_metadata(
             kept_columns=",".join(getattr(meta, "kept_cols", [])) if meta is not None else "",
             error_message=err_json if outcome in ("FAIL", "DEGRADED") else None,
             zero_day_status=zero_day_status,
+            representation_status=representation_status,
         )
 
         sql_client.finalize_run(
@@ -951,6 +1102,7 @@ class PipelineTeardownState:
     record_health_score_fn: Optional[Any]
     record_error_fn: Optional[Any]
     zero_day_status: Optional[ZeroDayRunStatus]
+    representation_status: Optional[RepresentationRunStatus]
     span_ctx: Optional[Any]
     root_span: Optional[Any]
     close_run_span_fn: Any
@@ -979,6 +1131,7 @@ def finalize_pipeline_teardown(state: PipelineTeardownState) -> None:
         refit_requested=state.refit_requested,
         timer=state.timer,
         zero_day_status=state.zero_day_status,
+        representation_status=state.representation_status,
     )
 
     finalize_run_with_metadata(
@@ -1008,6 +1161,7 @@ def finalize_pipeline_teardown(state: PipelineTeardownState) -> None:
         record_error_fn=state.record_error_fn,
         logger=state.console,
         zero_day_status=state.zero_day_status,
+        representation_status=state.representation_status,
     )
 
     state.close_run_span_fn(
@@ -1019,5 +1173,4 @@ def finalize_pipeline_teardown(state: PipelineTeardownState) -> None:
     )
 
     state.shutdown_run_observability_fn(state.observability_enabled)
-
 
