@@ -49,6 +49,7 @@ from io import BytesIO
 from dataclasses import dataclass, asdict
 import pandas as pd
 import numpy as np
+from core.feature_schema import align_current_features_to_schema
 from core.observability import Console
 
 if TYPE_CHECKING:
@@ -1404,62 +1405,13 @@ def align_current_features_to_cached_manifest(
     Returns:
         (train_aligned, score_aligned, current_sensors, cache_compatible)
     """
-    current_sensors = list(train.columns) if hasattr(train, "columns") else []
-    cached_sensors = list((cached_manifest or {}).get("train_sensors", []) or [])
-
-    if not cached_sensors:
-        return train, score, current_sensors, True
-
-    if set(cached_sensors) != set(current_sensors):
-        common_cols = sorted(set(cached_sensors) & set(current_sensors))
-        missing_in_current = set(cached_sensors) - set(current_sensors)
-        extra_in_current = set(current_sensors) - set(cached_sensors)
-        overlap_ratio = len(common_cols) / len(current_sensors) if current_sensors else 0.0
-
-        logger.info(
-            f"Aligning features: cached={len(cached_sensors)}, current={len(current_sensors)}, "
-            f"common={len(common_cols)}, missing_in_current={len(missing_in_current)}, "
-            f"extra_in_current={len(extra_in_current)}, overlap={overlap_ratio:.1%}",
-            component="MODEL",
-        )
-
-        # Preserve current acm.py behavior: reject cache when current has any
-        # feature that is not in cached schema.
-        if overlap_ratio < 1.0:
-            logger.warn(
-                f"Current data has {len(extra_in_current)} features not in cache - cannot use cached models",
-                component="MODEL",
-                extra_features=list(extra_in_current)[:5],
-            )
-            return train, score, current_sensors, False
-
-        if len(missing_in_current) > 0:
-            logger.warn(
-                f"Using feature subset: {len(missing_in_current)} cached features missing in current data",
-                component="MODEL",
-                missing_features=list(missing_in_current)[:5],
-            )
-            aligned_sensors = common_cols
-            train = train[[c for c in aligned_sensors if c in train.columns]]
-            score = score[[c for c in aligned_sensors if c in score.columns]]
-            current_sensors = aligned_sensors
-            logger.info(
-                f"Features aligned to intersection: train={train.shape}, score={score.shape}",
-                component="MODEL",
-            )
-            return train, score, current_sensors, True
-
-        # Fallback path for set-mismatch with full overlap.
-        aligned_sensors = common_cols
-        train = train[aligned_sensors]
-        score = score[aligned_sensors]
-        current_sensors = aligned_sensors
-        return train, score, current_sensors, True
-
-    # No mismatch, but enforce cached feature ordering.
-    train = train[cached_sensors]
-    score = score[cached_sensors]
-    return train, score, cached_sensors, True
+    return align_current_features_to_schema(
+        train,
+        score,
+        cached_manifest,
+        equip=equip,
+        logger=logger,
+    )
 
 
 def restore_detectors_from_runtime_cache(

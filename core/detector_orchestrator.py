@@ -24,6 +24,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+from core.feature_schema import validate_cached_model_schema
 from core.observability import Console
 from core.ar1_detector import AR1Detector
 from core.omr import OMRDetector
@@ -1026,61 +1027,14 @@ def validate_model_feature_compatibility(
     Returns:
         Tuple of (is_compatible, reason_if_incompatible)
     """
-    if model is None:
-        return False, "Model is None"
-    
-    if cached_manifest is None:
-        # No manifest to validate against - allow but warn
-        Console.warn(
-            f"No manifest for {model_name} validation - assuming compatible",
-            component="MODEL", equip=equip, model_name=model_name
-        )
-        return True, None
-    
-    # Get cached feature columns
-    cached_columns = cached_manifest.get("train_sensors", [])
-    
-    if not cached_columns:
-        # Manifest doesn't have sensor info - allow but warn
-        Console.warn(
-            f"No train_sensors in manifest for {model_name} - assuming compatible",
-            component="MODEL", equip=equip, model_name=model_name
-        )
-        return True, None
-    
-    # Check 1: Column count must match
-    if len(cached_columns) != len(current_columns):
-        reason = f"Column count mismatch: cached={len(cached_columns)}, current={len(current_columns)}"
-        return False, reason
-    
-    # Check 2: Column names must match (order-independent for robustness)
-    cached_set = set(cached_columns)
-    current_set = set(current_columns)
-    
-    if cached_set != current_set:
-        missing_in_current = cached_set - current_set
-        extra_in_current = current_set - cached_set
-        
-        reasons = []
-        if missing_in_current:
-            reasons.append(f"missing: {list(missing_in_current)[:3]}...")
-        if extra_in_current:
-            reasons.append(f"new: {list(extra_in_current)[:3]}...")
-        
-        reason = f"Column mismatch - {'; '.join(reasons)}"
-        return False, reason
-    
-    # Check 3: For order-sensitive models, verify column order matches
-    # This is critical for PCA, IForest, etc. where feature order matters
-    if model_name in ["pca", "iforest", "gmm", "omr", "regime"]:
-        if cached_columns != current_columns:
-            # Find first differing position
-            for i, (c, cur) in enumerate(zip(cached_columns, current_columns)):
-                if c != cur:
-                    reason = f"Column order mismatch at position {i}: cached='{c}', current='{cur}'"
-                    return False, reason
-    
-    return True, None
+    return validate_cached_model_schema(
+        model,
+        model_name,
+        current_columns,
+        cached_manifest,
+        equip=equip,
+        logger=Console,
+    )
 
 
 def rebuild_detectors_from_cache(
