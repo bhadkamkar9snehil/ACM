@@ -36,6 +36,7 @@ from utils.timestamp_utils import (
 )
 
 from core.observability import Console
+from core.time_normalizer import ensure_local_index
 
 # Phase 2 Extraction: Data loading moved to core/data_loader.py
 from core.data_loader import (
@@ -1938,21 +1939,8 @@ class OutputManager:
         )
     
     def _ensure_local_index(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Ensure the DataFrame index is a timezone-naive local DatetimeIndex.
-
-        Simplified policy: treat all timestamps as local time and drop any tz info.
-        """
-        if not isinstance(df.index, pd.DatetimeIndex):
-            df.index = pd.to_datetime(df.index, errors="coerce")
-        else:
-            # If timezone-aware, strip tz information and keep local wall-clock times
-            try:
-                if df.index.tz is not None:
-                    df.index = df.index.tz_localize(None)
-            except Exception:
-                # Fallback: coerce to naive datetimes
-                df.index = pd.to_datetime(df.index, errors="coerce")
-        return df
+        """Backward-compatible shim around core.time_normalizer.ensure_local_index."""
+        return ensure_local_index(df)
 
     def _get_numeric_sensor_columns(
         self,

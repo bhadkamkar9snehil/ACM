@@ -18,6 +18,10 @@ import pandas as pd
 # These are expected when sensors have zero variance (constant values) and produce NaN correlations
 warnings.filterwarnings("ignore", message="invalid value encountered in divide", category=RuntimeWarning)
 from core.observability import Span, Console
+from core.time_normalizer import (
+    deduplicate_index as _deduplicate_index,
+    ensure_local_index as _ensure_local_index,
+)
 
 # Polars is a hard dependency — no fallback
 import polars as pl
@@ -79,29 +83,8 @@ def _apply_fill(df: pl.DataFrame, method: FillMethod = "median", fill_values: Op
 # ========================================================================
 
 def ensure_local_index(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Ensure the DataFrame index is a timezone-naive local DatetimeIndex.
-
-    Simplified policy: treat all timestamps as local time and drop any tz info.
-    This is the canonical function for normalizing timestamp indices throughout ACM.
-    
-    Args:
-        df: DataFrame with any index type
-        
-    Returns:
-        DataFrame with timezone-naive DatetimeIndex
-    """
-    if not isinstance(df.index, pd.DatetimeIndex):
-        df.index = pd.to_datetime(df.index, errors="coerce")
-    else:
-        # If timezone-aware, strip tz information and keep local wall-clock times
-        try:
-            if df.index.tz is not None:
-                df.index = df.index.tz_localize(None)
-        except Exception:
-            # Fallback: coerce to naive datetimes
-            df.index = pd.to_datetime(df.index, errors="coerce")
-    return df
+    """Backward-compatible wrapper around core.time_normalizer.ensure_local_index."""
+    return _ensure_local_index(df)
 
 
 def deduplicate_index(
@@ -109,40 +92,8 @@ def deduplicate_index(
     name: str,
     equip: str = "",
 ) -> Tuple[pd.DataFrame, int]:
-    """
-    Remove duplicate timestamps from DataFrame index, keeping the last occurrence.
-    
-    Args:
-        df: DataFrame with potentially duplicate index
-        name: Dataset name for logging (e.g., "TRAIN", "SCORE")
-        equip: Equipment name for logging context
-    
-    Returns:
-        Tuple of (deduplicated DataFrame, count of duplicates removed)
-    
-    Raises:
-        RuntimeError: If duplicates remain after deduplication (should never happen)
-    """
-    dup_count = df.index.duplicated(keep='last').sum()
-    
-    if dup_count > 0:
-        Console.warn(
-            f"Removing {dup_count} duplicate timestamps from {name} data",
-            component="DATA",
-            equip=equip,
-            duplicates=dup_count,
-            dataset=name,
-        )
-        df = df[~df.index.duplicated(keep='last')].sort_index()
-    
-    # Assert uniqueness after deduplication
-    if not df.index.is_unique:
-        raise RuntimeError(
-            f"[DATA] {name} data still has duplicate timestamps after deduplication! "
-            f"Total: {len(df)}, Unique: {df.index.nunique()}"
-        )
-    
-    return df, dup_count
+    """Backward-compatible wrapper around core.time_normalizer.deduplicate_index."""
+    return _deduplicate_index(df, name, equip)
 
 
 def rolling_median(df: pl.DataFrame, window: int, cols: Optional[List[str]] = None, min_periods: int = 1) -> pl.DataFrame:

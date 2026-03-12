@@ -99,9 +99,7 @@ from core.sql_client import (
     resolve_runtime_policy,
 )
 from core.representation_pipeline import run_representation_pipeline
-
-# Data utilities: index hygiene and deduplication helpers.
-from core.fast_features import ensure_local_index, deduplicate_index
+from core.time_normalizer import deduplicate_index, ensure_local_index
 
 from utils.timer import Timer, enable_timer_metrics  # type: ignore
 from core.resource_monitor import enable_resource_metrics
@@ -155,7 +153,7 @@ def _maybe_log_zero_day_scoring_status(
 
 
 # Backwards-compat breadcrumbs for helpers extracted from this module.
-# _ensure_local_index -> core/fast_features.py::ensure_local_index()
+# _ensure_local_index -> core/time_normalizer.py::ensure_local_index()
 # bootstrap run state -> core/sql_client.py::bootstrap_acm_run_state()
 
 
@@ -164,8 +162,8 @@ def _maybe_log_zero_day_scoring_status(
 # ========================================================================
 # _sql_finalize_run -> sql_client.py::SQLClient.finalize_run()
 # _execute_with_deadlock_retry -> sql_client.py::execute_with_deadlock_retry()
-# _deduplicate_index -> fast_features.py::deduplicate_index()
-# _ensure_local_index -> fast_features.py::ensure_local_index()
+# _deduplicate_index -> time_normalizer.py::deduplicate_index()
+# _ensure_local_index -> time_normalizer.py::ensure_local_index()
 # _score_all_detectors -> detector_orchestrator.py
 # _calibrate_all_detectors -> detector_orchestrator.py
 # _fit_all_detectors -> detector_orchestrator.py

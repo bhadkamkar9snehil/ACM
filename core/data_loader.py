@@ -32,6 +32,13 @@ import numpy as np
 import pandas as pd
 
 from core.observability import Console
+from core.time_normalizer import (
+    check_cadence,
+    coerce_local_and_filter_future,
+    native_cadence_secs,
+    parse_ts_index,
+    resample_df,
+)
 from utils.config_dict import cfg_get as _cfg_get, future_cutoff_ts as _future_cutoff_ts
 
 
@@ -54,122 +61,9 @@ class DataMeta:
     dup_timestamps_removed: int = 0
 
 
-# ============================================================================
-# HELPER FUNCTIONS
-# ============================================================================
-
-
-def parse_ts_index(df: pd.DataFrame, ts_col: str) -> pd.DataFrame:
-    """Parse timestamp column and set as index."""
-    if ts_col not in df.columns:
-        raise ValueError(f"Timestamp column '{ts_col}' not found")
-    df = df.copy()
-    df[ts_col] = pd.to_datetime(df[ts_col], errors='coerce')
-    df = df.set_index(ts_col).sort_index()
-    return df
-
-
-def coerce_local_and_filter_future(
-    df: pd.DataFrame, label: str, now_cutoff: pd.Timestamp
-) -> Tuple[pd.DataFrame, int, int]:
-    """Convert timestamp index to naive local time and drop future rows.
-
-    Returns the sanitized DataFrame along with counts for timezone stripping and
-    future-dated rows that were removed.
-    """
-    tz_stripped = 0
-    if not isinstance(df.index, pd.DatetimeIndex):
-        df.index = pd.to_datetime(df.index, errors="coerce")
-    else:
-        try:
-            if df.index.tz is not None:
-                tz_stripped = len(df)
-                df.index = df.index.tz_localize(None)
-        except Exception:
-            df.index = pd.to_datetime(df.index, errors="coerce")
-
-    # Drop NaT entries created during coercion
-    before_drop = len(df)
-    df = df[~df.index.isna()]
-    if before_drop and len(df) != before_drop:
-        Console.warn(
-            f"Dropped {before_drop - len(df)} rows with invalid timestamps from {label}",
-            component="DATA", label=label, rows_dropped=before_drop - len(df), rows_remaining=len(df)
-        )
-
-    future_mask = df.index > now_cutoff
-    future_rows = int(future_mask.sum())
-    if future_rows:
-        Console.warn(
-            f"Dropping {future_rows} future timestamp row(s) from {label} (cutoff={now_cutoff:%Y-%m-%d %H:%M:%S})",
-            component="DATA", label=label, future_rows=future_rows, cutoff=str(now_cutoff)
-        )
-        df = df[~future_mask]
-
-    return df, tz_stripped, future_rows
-
-
 def infer_numeric_cols(df: pd.DataFrame) -> List[str]:
     """Get list of numeric columns."""
     return df.select_dtypes(include=[np.number]).columns.tolist()
-
-
-def native_cadence_secs(idx: pd.DatetimeIndex) -> float:
-    """Estimate native cadence in seconds."""
-    if len(idx) < 2:
-        return float('inf')
-    diffs = idx.to_series().diff().dropna()
-    # Handle pandas Timedelta median vs numeric
-    med = diffs.median()
-    try:
-        # Timedelta has total_seconds()
-        return float(getattr(med, "total_seconds", lambda: float(med))())
-    except Exception:
-        try:
-            return float(np.median(diffs))
-        except Exception:
-            return float('inf')
-
-
-def check_cadence(idx: pd.DatetimeIndex, sampling_secs: Optional[int], jitter_ratio: float = 0.05) -> bool:
-    """Check if timestamps have regular cadence."""
-    if sampling_secs is None or len(idx) < 2:
-        return True
-    diffs = idx.to_series().diff().dropna()
-    expected = pd.Timedelta(seconds=sampling_secs)
-    tolerance = expected * jitter_ratio
-    return ((diffs - expected).abs() <= tolerance).mean() >= 0.9
-
-
-def resample_df(
-    df: pd.DataFrame,
-    sampling_secs: int,
-    interp_method: str = "linear",
-    strict: bool = False,
-    max_gap_secs: int = 300,
-    max_fill_ratio: float = 0.2
-) -> pd.DataFrame:
-    """Resample DataFrame to regular intervals."""
-    if df.empty:
-        return df
-    if df.index.min() == df.index.max():
-        return df  # single-point; nothing to resample
-    freq = f"{sampling_secs}s"
-    start = df.index.min()
-    end = df.index.max()
-    regular_idx = pd.date_range(start=start, end=end, freq=freq)
-    df_resampled = df.reindex(regular_idx)
-    if interp_method != "none":
-        max_gap_periods = max_gap_secs // sampling_secs
-        # Cast method to Any to satisfy type-checkers across pandas versions
-        df_resampled = df_resampled.interpolate(
-            method=cast(Any, interp_method), limit=max_gap_periods, limit_direction='both'
-        )
-    if strict:
-        fill_ratio = df_resampled.isnull().sum().sum() / (len(df_resampled) * len(df_resampled.columns))
-        if fill_ratio > max_fill_ratio:
-            raise ValueError(f"Too much missing data after resample: {fill_ratio:.1%} > {max_fill_ratio:.1%}")
-    return df_resampled
 
 
 # ============================================================================
