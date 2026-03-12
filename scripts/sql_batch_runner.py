@@ -875,6 +875,103 @@ class SQLBatchRunner:
                         error_type=type(meta_err).__name__,
                     )
 
+                representation_columns: Dict[str, Any] = {}
+                baseline_columns: Dict[str, Any] = {}
+                try:
+                    cur.execute(
+                        """
+                        IF OBJECT_ID('dbo.ACM_RepresentationStatus', 'U') IS NOT NULL
+                            SELECT TOP 1
+                                Authoritative,
+                                ScoreAllowed,
+                                LearnAllowed,
+                                ContextLabel,
+                                SchemaCompatibility,
+                                BasisCompatibility,
+                                BaselineCompatibility,
+                                SuppressedReasonsJson,
+                                DegradedReasonsJson
+                            FROM dbo.ACM_RepresentationStatus
+                            WHERE EquipID = ? AND RunID = ?
+                            ORDER BY [Timestamp] DESC
+                        ELSE
+                            SELECT
+                                CAST(NULL AS BIT),
+                                CAST(NULL AS BIT),
+                                CAST(NULL AS BIT),
+                                CAST(NULL AS NVARCHAR(128)),
+                                CAST(NULL AS NVARCHAR(64)),
+                                CAST(NULL AS NVARCHAR(64)),
+                                CAST(NULL AS NVARCHAR(64)),
+                                CAST(NULL AS NVARCHAR(MAX)),
+                                CAST(NULL AS NVARCHAR(MAX))
+                        """,
+                        (equip_id, run_id),
+                    )
+                    representation_row = cur.fetchone()
+                    if representation_row:
+                        representation_columns = {
+                            "Authoritative": representation_row[0],
+                            "ScoreAllowed": representation_row[1],
+                            "LearnAllowed": representation_row[2],
+                            "ContextLabel": representation_row[3],
+                            "SchemaCompatibility": representation_row[4],
+                            "BasisCompatibility": representation_row[5],
+                            "BaselineCompatibility": representation_row[6],
+                            "SuppressedReasonsJson": representation_row[7],
+                            "DegradedReasonsJson": representation_row[8],
+                        }
+                except Exception as representation_err:
+                    Console.warn(
+                        f"Could not inspect ACM_RepresentationStatus for summary: {representation_err}",
+                        component="QA",
+                        equip_id=equip_id,
+                        run_id=run_id_str,
+                        error_type=type(representation_err).__name__,
+                    )
+
+                try:
+                    cur.execute(
+                        """
+                        IF OBJECT_ID('dbo.ACM_BaselineGovernance', 'U') IS NOT NULL
+                            SELECT TOP 1 RuntimeMode
+                            FROM dbo.ACM_BaselineGovernance
+                            WHERE EquipID = ? AND RunID = ?
+                            ORDER BY [Timestamp] DESC
+                        ELSE
+                            SELECT CAST(NULL AS NVARCHAR(64))
+                        """,
+                        (equip_id, run_id),
+                    )
+                    baseline_row = cur.fetchone()
+                    if baseline_row:
+                        baseline_columns = {"RuntimeMode": baseline_row[0]}
+                except Exception as baseline_err:
+                    Console.warn(
+                        f"Could not inspect ACM_BaselineGovernance for summary: {baseline_err}",
+                        component="QA",
+                        equip_id=equip_id,
+                        run_id=run_id_str,
+                        error_type=type(baseline_err).__name__,
+                    )
+
+                score_outputs_suppressed = (
+                    representation_columns.get("Authoritative") is True
+                    and representation_columns.get("ScoreAllowed") is False
+                )
+                score_derived_tables = {
+                    "ACM_Scores_Wide",
+                    "ACM_HealthTimeline",
+                    "ACM_RegimeTimeline",
+                    "ACM_EpisodeDiagnostics",
+                    "ACM_Episodes",
+                    "ACM_EpisodeMetrics",
+                    "ACM_DetectorCorrelation",
+                    "ACM_DriftController",
+                    "ACM_SensorHotspots",
+                    "ACM_SensorDefects",
+                }
+
                 table_counts: Dict[str, int] = {}
                 tables_to_check: List[Tuple[str, bool, bool]] = [
                     # (table, has_run_id, critical)
@@ -929,7 +1026,24 @@ class SQLBatchRunner:
                             f"{'(RunID scoped)' if has_run else ''}",
                             component="QA", table=table_name, count=count_val, equip_id=equip_id
                         )
-                        if critical and count_val == 0:
+                        if score_outputs_suppressed and table_name in score_derived_tables:
+                            if count_val == 0:
+                                Console.info(
+                                    f"QA expected: {table_name} has 0 rows because authoritative representation suppression disabled score-derived persistence",
+                                    component="QA",
+                                    table=table_name,
+                                    equip_id=equip_id,
+                                    run_id=str(run_id),
+                                )
+                            else:
+                                Console.warn(
+                                    f"QA check failed: {table_name} has {count_val} rows even though authoritative representation suppression should have skipped score-derived persistence",
+                                    component="QA",
+                                    table=table_name,
+                                    equip_id=equip_id,
+                                    run_id=str(run_id),
+                                )
+                        elif critical and count_val == 0:
                             Console.warn(
                                 f"QA check failed: {table_name} has 0 rows for EquipID={equip_id} (RunID scoped)",
                                 component="QA", table=table_name, equip_id=equip_id, run_id=str(run_id)
@@ -1023,8 +1137,6 @@ class SQLBatchRunner:
                 run_log_total = None
                 run_log_warn = None
                 run_log_error = None
-                representation_columns: Dict[str, Any] = {}
-                baseline_columns: Dict[str, Any] = {}
                 try:
                     cur.execute(
                         """
@@ -1052,84 +1164,6 @@ class SQLBatchRunner:
                         equip_id=equip_id,
                         run_id=run_id_str,
                         error_type=type(log_err).__name__,
-                    )
-
-                try:
-                    cur.execute(
-                        """
-                        IF OBJECT_ID('dbo.ACM_RepresentationStatus', 'U') IS NOT NULL
-                            SELECT TOP 1
-                                Authoritative,
-                                ScoreAllowed,
-                                LearnAllowed,
-                                ContextLabel,
-                                SchemaCompatibility,
-                                BasisCompatibility,
-                                BaselineCompatibility,
-                                SuppressedReasonsJson,
-                                DegradedReasonsJson
-                            FROM dbo.ACM_RepresentationStatus
-                            WHERE EquipID = ? AND RunID = ?
-                            ORDER BY [Timestamp] DESC
-                        ELSE
-                            SELECT
-                                CAST(NULL AS BIT),
-                                CAST(NULL AS BIT),
-                                CAST(NULL AS BIT),
-                                CAST(NULL AS NVARCHAR(128)),
-                                CAST(NULL AS NVARCHAR(64)),
-                                CAST(NULL AS NVARCHAR(64)),
-                                CAST(NULL AS NVARCHAR(64)),
-                                CAST(NULL AS NVARCHAR(MAX)),
-                                CAST(NULL AS NVARCHAR(MAX))
-                        """,
-                        (equip_id, run_id),
-                    )
-                    representation_row = cur.fetchone()
-                    if representation_row:
-                        representation_columns = {
-                            "Authoritative": representation_row[0],
-                            "ScoreAllowed": representation_row[1],
-                            "LearnAllowed": representation_row[2],
-                            "ContextLabel": representation_row[3],
-                            "SchemaCompatibility": representation_row[4],
-                            "BasisCompatibility": representation_row[5],
-                            "BaselineCompatibility": representation_row[6],
-                            "SuppressedReasonsJson": representation_row[7],
-                            "DegradedReasonsJson": representation_row[8],
-                        }
-                except Exception as representation_err:
-                    Console.warn(
-                        f"Could not inspect ACM_RepresentationStatus for summary: {representation_err}",
-                        component="QA",
-                        equip_id=equip_id,
-                        run_id=run_id_str,
-                        error_type=type(representation_err).__name__,
-                    )
-
-                try:
-                    cur.execute(
-                        """
-                        IF OBJECT_ID('dbo.ACM_BaselineGovernance', 'U') IS NOT NULL
-                            SELECT TOP 1 RuntimeMode
-                            FROM dbo.ACM_BaselineGovernance
-                            WHERE EquipID = ? AND RunID = ?
-                            ORDER BY [Timestamp] DESC
-                        ELSE
-                            SELECT CAST(NULL AS NVARCHAR(64))
-                        """,
-                        (equip_id, run_id),
-                    )
-                    baseline_row = cur.fetchone()
-                    if baseline_row:
-                        baseline_columns = {"RuntimeMode": baseline_row[0]}
-                except Exception as baseline_err:
-                    Console.warn(
-                        f"Could not inspect ACM_BaselineGovernance for summary: {baseline_err}",
-                        component="QA",
-                        equip_id=equip_id,
-                        run_id=run_id_str,
-                        error_type=type(baseline_err).__name__,
                     )
 
                 summary = RunInspectionSummary(
@@ -1407,7 +1441,7 @@ class SQLBatchRunner:
             is_post_coldstart: If True, coldstart already completed (use online/score-only mode)
 
         Returns:
-            Tuple of (success, outcome) where outcome is 'OK', 'NOOP', or 'FAIL'
+            Tuple of (success, outcome) where outcome is 'OK', 'DEGRADED', 'NOOP', or 'FAIL'
 
         v11.8.0: ADAPTIVE - No mode selection needed
         =============================================
@@ -1488,10 +1522,13 @@ class SQLBatchRunner:
         outcome = "FAIL"
         if process.returncode == 0:
             for line in stdout_text.split('\n'):
+                if 'outcome=DEGRADED' in line:
+                    outcome = "DEGRADED"
+                    break
                 if 'outcome=OK' in line:
                     outcome = "OK"
                     break
-                elif 'outcome=NOOP' in line:
+                if 'outcome=NOOP' in line:
                     outcome = "NOOP"
                     break
             else:
@@ -1517,7 +1554,7 @@ class SQLBatchRunner:
             record_run(equip_name, "FAIL", batch_duration)
             record_error(equip_name, f"Exit code {process.returncode}", "subprocess_failure")
 
-        if success and outcome in ("OK", "NOOP"):
+        if success and outcome in ("OK", "DEGRADED", "NOOP"):
             # After a successful batch, inspect SQL outputs for this equipment
             self._inspect_last_run_outputs(equip_name)
         return success, outcome
@@ -1580,7 +1617,7 @@ class SQLBatchRunner:
                 Console.warn(f"{equip_name}: Deferred (insufficient data), will retry...", component="COLDSTART", equipment=equip_name)
                 continue
 
-            if outcome == "OK":
+            if outcome in ("OK", "DEGRADED"):
                 # Check if coldstart completed
                 is_complete, _, _ = self._check_coldstart_status(equip_name)
                 if is_complete:

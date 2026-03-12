@@ -32,6 +32,7 @@ The **SQL Batch Runner** enables continuous ACM processing directly from the SQL
 - **Replay-safe activation**: Validation authority is only intended for historical replay and other explicit validation runs
 - **Operator inspection**: Final summary now surfaces representation mode, score eligibility, learn eligibility, compatibility state, and suppression reasons from SQL
 - **Fail-fast SQL contract check**: Validation mode now verifies that migrations `018` through `022` are present before it starts processing
+- **Suppression-aware QA**: When authoritative representation sets `score_allowed = false`, the runner now treats zero rows in score-derived tables as expected replay behavior instead of as a QA failure
 
 ## Usage
 
@@ -90,6 +91,13 @@ Validation mode now requires:
 - `ACM_RepresentationSchemas`
 - `ACM_BaselineGovernance`
 - `ACM_Runs` representation summary columns from migration `022`
+
+Validation replay can legitimately end a batch as `DEGRADED` while still being correct.
+The important distinction is:
+
+- `DEGRADED` with authoritative suppression means the governed layer intentionally blocked downstream score authority
+- zero rows in `ACM_Scores_Wide`, `ACM_HealthTimeline`, `ACM_RegimeTimeline`, and episode tables are expected in that case
+- the representation control-plane tables should still be written and inspected
 
 ## Processing Flow
 

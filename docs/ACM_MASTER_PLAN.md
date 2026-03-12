@@ -2360,6 +2360,7 @@ Strict repo audit against this plan shows:
 - `G2` is now satisfied in code because suppression reasons are persisted in `ACM_RepresentationStatus`, surfaced by `scripts/sql_batch_runner.py`, and projected onto `ACM_Runs`
 - a validation-authority replay on `WFA_TURBINE_10` confirmed that authoritative suppression is activating in runtime, not just in tests
 - that replay also exposed two real hardening gaps which are now fixed in code: score-suppressed runs were still attempting score-derived analytics writes, and `ACM_Runs` writes were still allowing `NaN` float payloads after suppression
+- the replay harness now also reflects governed runtime truth more accurately: `DEGRADED` is no longer collapsed to `OK`, coldstart replay can treat governed degraded runs as progress when lifecycle state advances, and QA now treats zero score-derived tables as expected when authoritative representation suppression is active
 - the persistence prep path now also blocks baseline buffer mutation when authoritative representation says `learn_allowed = false`, closing a remaining learning-side-effect hole in validation mode
 - the target `ACM` database used for replay initially lacked migrations `018` through `022`; that rollout gap is now closed, and validation-mode replay prechecks enforce it before processing starts
 - `scripts/sql_batch_runner.py` now has an explicit validation-mode SQL precheck so future replay runs fail fast when the representation SQL contract is missing instead of discovering it mid-run

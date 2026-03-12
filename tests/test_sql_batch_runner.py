@@ -472,6 +472,166 @@ def test_run_acm_batch_passes_representation_authority_cli(tmp_path, monkeypatch
     assert "validation" in captured["cmd"]
 
 
+def test_run_acm_batch_preserves_degraded_outcome_and_still_inspects_outputs(tmp_path, monkeypatch):
+    runner = SQLBatchRunner(
+        sql_conn_string="DRIVER={ODBC Driver 17 for SQL Server};SERVER=.;DATABASE=ACM;Trusted_Connection=yes;",
+        artifact_root=tmp_path,
+        tick_minutes=10,
+        max_coldstart_attempts=2,
+        representation_authority="validation",
+    )
+    inspected = []
+
+    class _FakeProcess:
+        def __init__(self):
+            self.returncode = 0
+            self.stdout = io.StringIO("RUN END: outcome=DEGRADED\n")
+
+        def wait(self):
+            return 0
+
+    monkeypatch.setattr(sql_batch_runner_module, "get_trace_context", lambda: {})
+    monkeypatch.setattr(sql_batch_runner_module.subprocess, "Popen", lambda *args, **kwargs: _FakeProcess())
+    runner._inspect_last_run_outputs = lambda equip_name: inspected.append(equip_name)  # type: ignore[method-assign]
+
+    success, outcome = runner._run_acm_batch("WFA_TURBINE_10")
+
+    assert success is True
+    assert outcome == "DEGRADED"
+    assert inspected == ["WFA_TURBINE_10"]
+
+
+def test_process_coldstart_treats_degraded_run_as_progress(tmp_path):
+    runner = _make_runner(tmp_path)
+    runner._get_data_range = lambda equip_name: (datetime(2024, 1, 1, 0, 0, 0), datetime(2024, 1, 3, 0, 0, 0))  # type: ignore[method-assign]
+    statuses = iter([(False, 0, 500), (True, 500, 500)])
+    runner._check_coldstart_status = lambda equip_name: next(statuses)  # type: ignore[method-assign]
+    runner._run_acm_batch = lambda *args, **kwargs: (True, "DEGRADED")  # type: ignore[method-assign]
+
+    success, last_processed_end = runner._process_coldstart("WFA_TURBINE_10")
+
+    assert success is True
+    assert last_processed_end is not None
+
+
+def test_inspect_outputs_treats_suppressed_score_tables_as_expected(tmp_path, monkeypatch):
+    runner = _make_runner(tmp_path)
+    messages = []
+
+    class _ConsoleCapture:
+        @staticmethod
+        def info(msg, **kwargs):
+            messages.append(("info", msg))
+
+        @staticmethod
+        def warn(msg, **kwargs):
+            messages.append(("warn", msg))
+
+        @staticmethod
+        def error(msg, **kwargs):
+            messages.append(("error", msg))
+
+    monkeypatch.setattr(sql_batch_runner_module, "Console", _ConsoleCapture)
+    runner._get_equip_id = lambda equip_name: 5010  # type: ignore[method-assign]
+    runner._should_expect_forecast_outputs = lambda equip_id, run_id: False  # type: ignore[method-assign]
+
+    class _InterleavedCursor:
+        def __init__(self, responses):
+            self._responses = list(responses)
+
+        def execute(self, query, params=None):
+            _ = (query, params)
+            return self
+
+        def fetchone(self):
+            if not self._responses:
+                return None
+            value = self._responses.pop(0)
+            return value
+
+        def fetchall(self):
+            if not self._responses:
+                return []
+            value = self._responses.pop(0)
+            return list(value)
+
+        def close(self):
+            return None
+
+    class _InterleavedConn:
+        def __init__(self, responses):
+            self.cursor_obj = _InterleavedCursor(responses)
+
+        def cursor(self):
+            return self.cursor_obj
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def close(self):
+            return None
+
+    rows = [
+        ("run-123", datetime(2026, 3, 12, 12, 0, 0), datetime(2026, 3, 12, 12, 10, 0)),
+        [("StartedAt",), ("CompletedAt",), ("ScoreRowCount",)],
+        (datetime(2026, 3, 12, 12, 0, 0), datetime(2026, 3, 12, 12, 10, 0), 1795),
+        (True, False, False, "REGIME_-1", "COMPATIBLE", "INCOMPATIBLE", "PENDING", '["representation_score_suppressed"]', '["representation_score_suppressed"]'),
+        ("ONLINE_SCORING",),
+        (0,),
+        (0,),
+        (0,),
+        (0,),
+        (0,),
+        (0,),
+        (0,),
+        (0,),
+        (3160,),
+        (0,),
+        (63,),
+        (0,),
+        (0,),
+        (0,),
+        (0,),
+        (1,),
+        (2,),
+        (1,),
+        (1,),
+        (3940,),
+        (1,),
+        (0,),
+        (0,),
+        (1,),
+        (79,),
+        (1,),
+        (1,),
+        (0,),
+        [],
+        [],
+        (0, 0, 0),
+    ]
+    runner._get_sql_connection = lambda: _InterleavedConn(rows)  # type: ignore[method-assign]
+
+    summary = runner._inspect_last_run_outputs("WFA_TURBINE_10")
+
+    assert summary is not None
+    assert summary.representation_authoritative is True
+    assert summary.representation_score_allowed is False
+    assert any(
+        "QA expected: ACM_Scores_Wide has 0 rows because authoritative representation suppression disabled score-derived persistence"
+        in msg
+        for level, msg in messages
+        if level == "info"
+    )
+    assert not any(
+        "QA check failed: ACM_Scores_Wide has 0 rows" in msg
+        for level, msg in messages
+        if level == "warn"
+    )
+
+
 def test_process_equipment_emits_final_summary_on_exception(tmp_path, monkeypatch):
     runner = _make_runner(tmp_path)
     messages = []
