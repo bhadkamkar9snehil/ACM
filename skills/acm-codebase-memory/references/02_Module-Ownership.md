@@ -6,7 +6,7 @@ type: agent-memory
 
 | Module | Symbols | Core Imports |
 |---|---:|---:|
-| `[core.acm]` | 5 | 22 |
+| `[core.acm]` | 8 | 22 |
 | `[core.adaptive_thresholds]` | 13 | 1 |
 | `[core.analytics_builder]` | 15 | 1 |
 | `[core.ar1_detector]` | 6 | 1 |

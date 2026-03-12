@@ -1,11 +1,11 @@
 {
-  "generated_at": "2026-03-12T11:32:50+00:00",
+  "generated_at": "2026-03-12T12:53:31+00:00",
   "module_count": 55,
   "modules": [
     {
       "module_name": "core.acm",
       "source_path": "core/acm.py",
-      "symbol_count": 5,
+      "symbol_count": 8,
       "core_import_count": 22,
       "core_imports": [
         "core",

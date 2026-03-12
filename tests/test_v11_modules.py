@@ -351,6 +351,124 @@ class TestAcmEntryPoint:
         assert rc == 0
         assert captured["args"] is args
 
+    def test_representation_blocks_zero_day_scoring_on_structural_blockers(self):
+        """Early zero-day skip should trigger only on authoritative structural blockers."""
+        from core import acm
+        from core.representation_contracts import EligibilityDecision
+
+        representation_result = type(
+            "RepresentationResult",
+            (),
+            {
+                "authoritative": True,
+                "eligibility": EligibilityDecision(
+                    authoritative=True,
+                    score_allowed=False,
+                    learn_allowed=False,
+                    suppressed_reason_codes=("basis_incompatible", "context_unknown"),
+                ),
+            },
+        )()
+
+        assert acm._representation_blocks_zero_day_scoring(representation_result) is True
+
+    def test_representation_blocks_zero_day_scoring_ignores_context_only_precheck(self):
+        """Context-only early suppression should not short-circuit zero-day scoring yet."""
+        from core import acm
+        from core.representation_contracts import EligibilityDecision
+
+        representation_result = type(
+            "RepresentationResult",
+            (),
+            {
+                "authoritative": True,
+                "eligibility": EligibilityDecision(
+                    authoritative=True,
+                    score_allowed=False,
+                    learn_allowed=False,
+                    suppressed_reason_codes=("context_unknown",),
+                ),
+            },
+        )()
+
+        assert acm._representation_blocks_zero_day_scoring(representation_result) is False
+
+    def test_representation_learning_blocked_helper(self):
+        """Learning-block helper should reflect authoritative learn_allowed=False."""
+        from core import acm
+        from core.representation_contracts import EligibilityDecision
+
+        blocked = type(
+            "RepresentationResult",
+            (),
+            {
+                "authoritative": True,
+                "eligibility": EligibilityDecision(
+                    authoritative=True,
+                    score_allowed=True,
+                    learn_allowed=False,
+                ),
+            },
+        )()
+        allowed = type(
+            "RepresentationResult",
+            (),
+            {
+                "authoritative": True,
+                "eligibility": EligibilityDecision(
+                    authoritative=True,
+                    score_allowed=True,
+                    learn_allowed=True,
+                ),
+            },
+        )()
+
+        assert acm._representation_learning_blocked(blocked) is True
+        assert acm._representation_learning_blocked(allowed) is False
+
+    def test_initialize_zero_day_runtime_loads_state_lazily(self, monkeypatch):
+        """Lazy zero-day initializer should load persisted EWM and proxy state only on demand."""
+        from core import acm
+
+        calls = []
+
+        class _FakeEWM:
+            def __init__(self, equip_id, alpha_fast, alpha_slow, anomaly_z):
+                calls.append(("ewm.init", equip_id, alpha_fast, alpha_slow, anomaly_z))
+
+            def load_from_sql(self, sql_client):
+                calls.append(("ewm.load", sql_client))
+
+        class _FakeBinner:
+            def __init__(self, n_bins, min_rows_for_assignment, alpha, history_limit):
+                calls.append(("binner.init", n_bins, min_rows_for_assignment, alpha, history_limit))
+
+            def load_from_sql(self, sql_client, equip_id):
+                calls.append(("binner.load", sql_client, equip_id))
+
+        monkeypatch.setattr(acm, "EWMBaselineManager", _FakeEWM)
+        monkeypatch.setattr(acm, "OnlinePCABinner", _FakeBinner)
+
+        ewm_manager, binner = acm._initialize_zero_day_runtime(
+            ewm_cfg={
+                "alpha_fast": 0.1,
+                "alpha_slow": 0.01,
+                "anomaly_z": 4.0,
+                "n_bins": 4,
+                "min_rows_for_assignment": 7,
+                "proxy_alpha": 0.2,
+                "proxy_history_limit": 128,
+            },
+            sql_client="sql-client",
+            equip_id=5010,
+            enable_binner=True,
+        )
+
+        assert ewm_manager is not None
+        assert binner is not None
+        assert ("ewm.load", "sql-client") in calls
+        assert ("binner.load", "sql-client", 5010) in calls
+
 
 class TestRefactorHelpers:
     """Smoke and behavior checks for newly extracted helper functions."""

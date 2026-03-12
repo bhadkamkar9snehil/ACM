@@ -162,6 +162,79 @@ def _maybe_log_zero_day_scoring_status(
     return True
 
 
+_ZERO_DAY_PRECHECK_BLOCKERS = {
+    "runtime_mode_not_ready",
+    "baseline_formation_scoring_disabled",
+    "schema_break_requalification_required",
+    "no_score_rows",
+    "insufficient_coverage",
+    "stale_inputs",
+    "insufficient_effective_signals",
+    "poor_missingness",
+    "schema_incompatible",
+    "basis_incompatible",
+    "baseline_incompatible",
+    "baseline_not_ready",
+    "baseline_contaminated",
+}
+
+
+def _representation_learning_blocked(representation_result: Optional[Any]) -> bool:
+    """Return True when authoritative representation has disabled learning."""
+    if representation_result is None or not getattr(representation_result, "authoritative", False):
+        return False
+    eligibility = getattr(representation_result, "eligibility", None)
+    return bool(
+        eligibility is not None
+        and getattr(eligibility, "learn_allowed", None) is False
+    )
+
+
+def _representation_blocks_zero_day_scoring(representation_result: Optional[Any]) -> bool:
+    """Return True when authoritative representation already knows zero-day scoring should not run."""
+    if representation_result is None or not getattr(representation_result, "authoritative", False):
+        return False
+    eligibility = getattr(representation_result, "eligibility", None)
+    if eligibility is None or getattr(eligibility, "score_allowed", None) is not False:
+        return False
+
+    reasons = {
+        str(reason).strip()
+        for reason in (getattr(eligibility, "suppressed_reason_codes", ()) or ())
+        if str(reason).strip()
+    }
+    return bool(reasons.intersection(_ZERO_DAY_PRECHECK_BLOCKERS))
+
+
+def _initialize_zero_day_runtime(
+    *,
+    ewm_cfg: Dict[str, Any],
+    sql_client: Any,
+    equip_id: int,
+    enable_binner: bool = True,
+) -> tuple[EWMBaselineManager, Optional[OnlinePCABinner]]:
+    """Lazily load zero-day runtime state only when the path is actually needed."""
+    ewm_manager = EWMBaselineManager(
+        equip_id=equip_id,
+        alpha_fast=float(ewm_cfg.get("alpha_fast", 0.05)),
+        alpha_slow=float(ewm_cfg.get("alpha_slow", 0.005)),
+        anomaly_z=float(ewm_cfg.get("anomaly_z", 3.0)),
+    )
+    ewm_manager.load_from_sql(sql_client)
+
+    binner: Optional[OnlinePCABinner] = None
+    if enable_binner:
+        binner = OnlinePCABinner(
+            n_bins=int(ewm_cfg.get("n_bins", 3)),
+            min_rows_for_assignment=int(ewm_cfg.get("min_rows_for_assignment", 20)),
+            alpha=float(ewm_cfg.get("proxy_alpha", 0.05)),
+            history_limit=int(ewm_cfg.get("proxy_history_limit", 512)),
+        )
+        binner.load_from_sql(sql_client, equip_id)
+
+    return ewm_manager, binner
+
+
 # Backwards-compat breadcrumbs for helpers extracted from this module.
 # _ensure_local_index -> core/time_normalizer.py::ensure_local_index()
 # bootstrap run state -> core/sql_client.py::bootstrap_acm_run_state()
@@ -337,26 +410,11 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
         surface_type="none",
         channel_count=0,
     )
-    ewm_manager = EWMBaselineManager(
-        equip_id=equip_id,
-        alpha_fast=float(_ewm_cfg.get("alpha_fast", 0.05)),
-        alpha_slow=float(_ewm_cfg.get("alpha_slow", 0.005)),
-        anomaly_z=float(_ewm_cfg.get("anomaly_z", 3.0)),
-    )
-    if _ewm_enabled:
-        ewm_manager.load_from_sql(sql_client)
+    ewm_manager: Optional[EWMBaselineManager] = None
 
     # ===== Online day-0 regime proxy =====
     # Asset-agnostic fallback regime source used before mature HDBSCAN labels exist.
     _binner: Optional[OnlinePCABinner] = None
-    if _ewm_enabled:
-        _binner = OnlinePCABinner(
-            n_bins=int(_ewm_cfg.get("n_bins", 3)),
-            min_rows_for_assignment=int(_ewm_cfg.get("min_rows_for_assignment", 20)),
-            alpha=float(_ewm_cfg.get("proxy_alpha", 0.05)),
-            history_limit=int(_ewm_cfg.get("proxy_history_limit", 512)),
-        )
-        _binner.load_from_sql(sql_client, equip_id)
 
     # Update observability context with run_id for trace/metric/log tagging.
     set_acm_context(run_id=run_id, equip_id=equip_id)
@@ -628,7 +686,31 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
         # Scores score data against EWM dual-rate baselines and appends ewm_z to frame.
         # ewm_z = mean z_slow per row (long-term character deviation = genuine fault signal).
         # Feature-flagged: models.ewm_baseline.enabled (default True).
-        if _ewm_enabled:
+        zero_day_learning_blocked = _representation_learning_blocked(representation_shadow)
+        zero_day_scoring_blocked = _representation_blocks_zero_day_scoring(representation_shadow)
+
+        if _ewm_enabled and zero_day_scoring_blocked:
+            zero_day_status = build_zero_day_run_status(
+                scoring_active=False,
+                status="inactive_representation_blocked",
+                surface_type="none",
+                channel_count=0,
+            )
+            Console.info(
+                "Representation authority skipped zero-day scoring path",
+                component="REPRESENTATION",
+                equip_id=equip_id,
+                run_id=run_id,
+            )
+        elif _ewm_enabled:
+            if ewm_manager is None:
+                ewm_manager, _binner = _initialize_zero_day_runtime(
+                    ewm_cfg=_ewm_cfg,
+                    sql_client=sql_client,
+                    equip_id=equip_id,
+                    enable_binner=True,
+                )
+
             if raw_train is None or raw_score is None:
                 zero_day_status = build_zero_day_run_status(
                     scoring_active=False,
@@ -692,13 +774,14 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
                     # up to this point, remap binner regime IDs → HDBSCAN cluster IDs in EWM state
                     # so coldstart history is not orphaned.
                     if (
-                        regime_model_was_trained
+                        not zero_day_learning_blocked
+                        and regime_model_was_trained
                         and _binner is not None
                         and _binner.can_assign_fallback
                         and train_regime_labels is not None
                     ):
                         _binner_train_ids = _binner.assign_batch(_ewm_train_numeric)
-                        if ewm_manager.has_binner_regime_ids(_binner_train_ids):
+                        if ewm_manager is not None and ewm_manager.has_binner_regime_ids(_binner_train_ids):
                             _hdbscan_train_ids = np.asarray(train_regime_labels, dtype=int)
                             _remap: Dict[int, int] = {}
                             for _bid in np.unique(_binner_train_ids):
@@ -736,14 +819,16 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
                             channel_count=len(_ewm_cols),
                         )
                         Console.info("EWM using HDBSCAN regimes", component="EWM_BASELINE")
-                        if _binner is not None:
+                        if _binner is not None and not zero_day_learning_blocked:
                             _binner.observe_batch(_ewm_score_numeric)
                             _binner.save_to_sql(sql_client, equip_id)
                     elif _binner is not None and _binner.can_assign_fallback:
                         # Feed binner with the explicit day-0 monitoring surface so edges refine over time.
-                        _binner.observe_batch(_ewm_score_numeric)
+                        if not zero_day_learning_blocked:
+                            _binner.observe_batch(_ewm_score_numeric)
                         _ewm_rids = _binner.assign_batch(_ewm_score_numeric)
-                        _binner.save_to_sql(sql_client, equip_id)
+                        if not zero_day_learning_blocked:
+                            _binner.save_to_sql(sql_client, equip_id)
                         if np.any(_ewm_rids >= 0):
                             zero_day_status = build_zero_day_run_status(
                                 scoring_active=True,
@@ -778,17 +863,13 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
                         Console.info("EWM using global fallback regime", component="EWM_BASELINE")
 
                     # Score: vectorised, returns pd.Series of fused z_slow per row.
+                    assert ewm_manager is not None
                     _ewm_series = ewm_manager.score_batch(_ewm_rids, _ewm_score_numeric)
                     if frame is not None and len(_ewm_series) == len(frame):
                         frame["ewm_z"] = _ewm_series.values
 
                     # Update EWM state only when representation authority allows learning.
-                    if (
-                        representation_authority_policy.active
-                        and representation_shadow is not None
-                        and representation_shadow.authoritative
-                        and representation_shadow.eligibility.learn_allowed is False
-                    ):
+                    if zero_day_learning_blocked:
                         Console.info(
                             "Representation authority skipped EWM baseline mutation",
                             component="REPRESENTATION",
@@ -801,12 +882,7 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
                         ewm_manager.save_to_sql(sql_client)
 
         # ===== Model adaptation + persistence =====
-        if (
-            representation_authority_policy.active
-            and representation_shadow is not None
-            and representation_shadow.authoritative
-            and representation_shadow.eligibility.learn_allowed is False
-        ):
+        if _representation_learning_blocked(representation_shadow):
             Console.info(
                 "Representation authority skipped model adaptation and lifecycle persistence",
                 component="REPRESENTATION",
