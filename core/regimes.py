@@ -540,6 +540,7 @@ def build_feature_basis(
     raw_score: Optional[pd.DataFrame],
     pca_detector: Optional[Any],
     cfg: Dict[str, Any],
+    basis_contract: Optional[Dict[str, Any]] = None,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, Any]]:
     """Compatibility wrapper; structure encoding now lives in core.structure_encoder."""
     return _structure_build_feature_basis(
@@ -549,6 +550,7 @@ def build_feature_basis(
         raw_score=raw_score,
         pca_detector=pca_detector,
         cfg=cfg,
+        basis_contract=basis_contract,
     )
 
 
@@ -2759,6 +2761,30 @@ class RegimeBasisBuildResult:
     basis_drift_decision: SchemaDriftDecision = field(default_factory=SchemaDriftDecision)
 
 
+def _extract_cached_regime_basis_contract(regime_model: Optional[RegimeModel]) -> Optional[Dict[str, Any]]:
+    """Build a reusable basis contract from a cached regime model, if available."""
+    if regime_model is None:
+        return None
+
+    feature_columns = list(getattr(regime_model, "feature_columns", []) or [])
+    if not feature_columns:
+        return None
+
+    model_meta = getattr(regime_model, "meta", {}) if regime_model is not None else {}
+    if not isinstance(model_meta, dict):
+        model_meta = {}
+
+    return {
+        "raw_tags": list(feature_columns),
+        "feature_columns": list(feature_columns),
+        "basis_signature": model_meta.get("basis_signature"),
+        "basis_scaler_cols": list(model_meta.get("basis_scaler_cols") or feature_columns),
+        "basis_scaler_mean": model_meta.get("basis_scaler_mean"),
+        "basis_scaler_var": model_meta.get("basis_scaler_var"),
+        "basis_fill_values": model_meta.get("basis_fill_values"),
+    }
+
+
 def build_regime_feature_basis_stage(
     *,
     train_features: pd.DataFrame,
@@ -2780,16 +2806,52 @@ def build_regime_feature_basis_stage(
     regime_basis_hash: Optional[int] = None
     degraded = False
     basis_drift_decision = SchemaDriftDecision()
+    cached_basis_contract = _extract_cached_regime_basis_contract(regime_model)
+    log_info = getattr(logger, "info", Console.info)
 
     try:
-        basis_train, basis_score, basis_meta = build_feature_basis(
-            train_features=train_features,
-            score_features=score_features,
-            raw_train=raw_train,
-            raw_score=raw_score,
-            pca_detector=pca_detector,
-            cfg=cfg,
-        )
+        if cached_basis_contract is not None:
+            try:
+                basis_train, basis_score, basis_meta = build_feature_basis(
+                    train_features=train_features,
+                    score_features=score_features,
+                    raw_train=raw_train,
+                    raw_score=raw_score,
+                    pca_detector=pca_detector,
+                    cfg=cfg,
+                    basis_contract=cached_basis_contract,
+                )
+                log_info(
+                    "Reused cached regime basis contract for current batch.",
+                    component="REGIME",
+                    equip=equip,
+                    basis_cols=len(basis_train.columns),
+                    basis_signature=basis_meta.get("basis_signature"),
+                )
+            except Exception as cached_basis_error:
+                logger.warn(
+                    f"Cached regime basis contract could not be reused; falling back to dynamic basis build: {cached_basis_error}",
+                    component="REGIME",
+                    equip=equip,
+                    error=str(cached_basis_error)[:200],
+                )
+                basis_train, basis_score, basis_meta = build_feature_basis(
+                    train_features=train_features,
+                    score_features=score_features,
+                    raw_train=raw_train,
+                    raw_score=raw_score,
+                    pca_detector=pca_detector,
+                    cfg=cfg,
+                )
+        else:
+            basis_train, basis_score, basis_meta = build_feature_basis(
+                train_features=train_features,
+                score_features=score_features,
+                raw_train=raw_train,
+                raw_score=raw_score,
+                pca_detector=pca_detector,
+                cfg=cfg,
+            )
 
         regime_cfg_str = str(cfg.get("regimes", {}))
         schema_str = ",".join(sorted(basis_train.columns)) + "|" + regime_cfg_str
@@ -2808,6 +2870,7 @@ def build_regime_feature_basis_stage(
 
     cached_model_meta = getattr(regime_model, "meta", {}) if regime_model is not None else {}
     cached_model_version = cached_model_meta.get("model_version") if isinstance(cached_model_meta, dict) else None
+    cached_basis_signature = cached_model_meta.get("basis_signature") if isinstance(cached_model_meta, dict) else None
     version_mismatch = cached_model_version is not None and cached_model_version != REGIME_MODEL_VERSION
 
     basis_drift_decision = classify_regime_basis_drift(
@@ -2815,11 +2878,19 @@ def build_regime_feature_basis_stage(
         regime_basis_train=regime_basis_train,
         cached_model_version=cached_model_version,
         current_model_version=REGIME_MODEL_VERSION,
+        cached_basis_signature=cached_basis_signature,
+        current_basis_signature=regime_basis_meta.get("basis_signature") if regime_basis_meta else None,
     )
 
     if regime_model is not None and (
         regime_basis_train is None
         or regime_model.feature_columns != list(regime_basis_train.columns)
+        or (
+            cached_basis_signature
+            and regime_basis_meta
+            and regime_basis_meta.get("basis_signature")
+            and str(cached_basis_signature) != str(regime_basis_meta.get("basis_signature"))
+        )
         or version_mismatch
     ):
         logger.warn(

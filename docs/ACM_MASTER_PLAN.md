@@ -2367,7 +2367,7 @@ Strict repo audit against this plan shows:
 - zero-day runtime is now partially hardened for validation authority: EWM and `OnlinePCABinner` state are lazily initialized instead of being loaded eagerly at run start, structurally blocked authoritative runs can now skip the zero-day scoring path before that state is loaded, and `OnlinePCABinner` mutation/save now stops when governed learning is disabled
 - the latest validation replay also confirms that ACM is still representation-aware rather than representation-first: feature prep, detector scoring, regime labeling, calibration, and fusion still run before authoritative no-score suppression takes effect
 - zero-day replay still carries a legacy influence path deeper than intended: the zero-day scoring path can still execute for some validation runs because authoritative gating is not yet early enough in the overall pipeline, and EWM/binner read-only isolation still needs to expand beyond the structural-blocker cases now covered
-- repeated `basis=INCOMPATIBLE` results across consecutive replay batches now stand out as the most important remaining analytical blocker before `RG-14`; the regime basis contract is not yet stable enough to permit governed online scoring authority
+- repeated `basis=INCOMPATIBLE` results across consecutive replay batches now stand out as the most important remaining analytical blocker before `RG-14`; cached basis-contract reuse is now implemented in code so replay batches can rebuild the active regime basis from the persisted feature columns, fill values, and scaler statistics instead of reselecting a fresh top-IQR surface each time, but replay evidence is still required before this blocker can be closed
 - `ACM_RepresentationSchemas` and `ACM_SignalProfiles` currently behave more like per-run audit tables than the final control-plane shapes described in the target architecture; they are useful now, but they still need registry-style ownership and canonical pipeline sourcing before completion
 - `G1`, `G4`, and `G6` remain open because zero-day replay closure and replay-qualified legacy-owner replacement are not complete
 - the repo is intentionally carrying duplicate owners in shadow/validation mode; this is acceptable until `RG-14`, but only if those owners are treated as transitional
@@ -2401,7 +2401,7 @@ These items are now promoted from implied debt to explicit execution work:
   - lazy EWM / `OnlinePCABinner` initialization is now implemented for structurally blocked validation runs
   - `OnlinePCABinner` observe/save side effects are now blocked when governed learning is disabled
   - remaining work is to stop more of the expensive pre-health path earlier, not to reintroduce eager loading
-- stabilize regime basis ownership so consecutive replay batches stop invalidating the cached regime model for the active basis contract
+- replay-validate the newly landed cached regime basis-contract reuse so consecutive replay batches stop invalidating the cached regime model for the active basis contract
 - tighten operator semantics for authoritative no-score runs so runtime mode, scoreability, and summary language are coherent without needing to inspect logs manually
 - convert representation persistence from “useful per-run audit rows” toward the final contract:
   - `ACM_RepresentationSchemas` should become a schema/basis registry, not just a run-scoped echo table

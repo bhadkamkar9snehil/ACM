@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-03-12T12:53:31+00:00",
+  "generated_at": "2026-03-12T13:16:23+00:00",
   "module_count": 55,
   "modules": [
     {
@@ -388,7 +388,7 @@
     {
       "module_name": "core.regimes",
       "source_path": "core/regimes.py",
-      "symbol_count": 56,
+      "symbol_count": 57,
       "core_import_count": 5,
       "core_imports": [
         "core.context_engine",
@@ -532,7 +532,7 @@
     {
       "module_name": "core.structure_encoder",
       "source_path": "core/structure_encoder.py",
-      "symbol_count": 4,
+      "symbol_count": 6,
       "core_import_count": 1,
       "core_imports": [
         "core.observability"

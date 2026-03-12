@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
+import pytest
 
 from core import regimes
 from core.structure_encoder import (
@@ -105,6 +107,54 @@ def test_structure_encoder_selects_raw_monitoring_surface_for_ewm() -> None:
     assert meta["surface_type"] == "ewm_monitoring_raw_numeric"
     assert meta["channel_semantics"] == "raw_numeric"
     assert meta["max_cols"] == 0
+
+
+def test_structure_encoder_can_reuse_cached_basis_contract() -> None:
+    idx = pd.date_range("2026-01-01", periods=4, freq="h")
+    train_features = pd.DataFrame({"feat": [0.1, 0.2, 0.3, 0.4]}, index=idx)
+    score_features = pd.DataFrame({"feat": [0.15, 0.25]}, index=idx[:2])
+    raw_train = pd.DataFrame(
+        {
+            "sensor_1_avg": [10.0, 11.0, 12.0, 13.0],
+            "sensor_2_avg": [1.0, 3.0, 5.0, 7.0],
+            "sensor_3_avg": [0.0, 100.0, 0.0, 100.0],
+        },
+        index=idx,
+    )
+    raw_score = pd.DataFrame(
+        {
+            "sensor_1_avg": [10.5, 12.5],
+            "sensor_2_avg": [2.0, 6.0],
+            "sensor_3_avg": [100.0, 0.0],
+        },
+        index=idx[:2],
+    )
+    basis_contract = {
+        "raw_tags": ["sensor_1_avg", "sensor_2_avg"],
+        "feature_columns": ["sensor_1_avg", "sensor_2_avg"],
+        "basis_signature": "stable_basis_sig",
+        "basis_scaler_cols": ["sensor_1_avg", "sensor_2_avg"],
+        "basis_scaler_mean": [11.5, 4.0],
+        "basis_scaler_var": [1.25, 5.0],
+        "basis_fill_values": {"sensor_1_avg": 11.5, "sensor_2_avg": 4.0},
+    }
+
+    basis_train, basis_score, meta = build_feature_basis(
+        train_features=train_features,
+        score_features=score_features,
+        raw_train=raw_train,
+        raw_score=raw_score,
+        pca_detector=None,
+        cfg={},
+        basis_contract=basis_contract,
+    )
+
+    assert list(basis_train.columns) == ["sensor_1_avg", "sensor_2_avg"]
+    assert list(basis_score.columns) == ["sensor_1_avg", "sensor_2_avg"]
+    assert meta["basis_contract_reused"] is True
+    assert meta["basis_signature"] == "stable_basis_sig"
+    assert basis_train.loc[idx[0], "sensor_1_avg"] == pytest.approx((10.0 - 11.5) / np.sqrt(1.25))
+    assert basis_train.loc[idx[0], "sensor_2_avg"] == pytest.approx((1.0 - 4.0) / np.sqrt(5.0))
 
 
 def test_regimes_wrappers_delegate_to_structure_encoder() -> None:

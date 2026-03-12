@@ -25,6 +25,37 @@ _DEFAULT_SURFACE_MIN_VALID_FRACTION = 0.60
 _DEFAULT_SURFACE_MIN_IQR = 1e-6
 
 
+def _coerce_numeric_frame(df: pd.DataFrame, columns: List[str]) -> pd.DataFrame:
+    """Return a float-coerced numeric frame for the requested columns."""
+    return (
+        df.reindex(columns=columns)
+        .apply(pd.to_numeric, errors="coerce")
+        .replace([np.inf, -np.inf], np.nan)
+    )
+
+
+def _coerce_contract_series(
+    raw_values: Any,
+    *,
+    columns: List[str],
+    field_name: str,
+) -> Optional[pd.Series]:
+    """Convert persisted basis metadata back to a column-aligned numeric Series."""
+    if raw_values is None:
+        return None
+
+    if isinstance(raw_values, dict):
+        series = pd.Series(raw_values, dtype="float64")
+        return series.reindex(columns)
+
+    values = list(raw_values)
+    if len(values) != len(columns):
+        raise ValueError(
+            f"Basis contract field '{field_name}' has length {len(values)} but expected {len(columns)}"
+        )
+    return pd.Series([float(v) for v in values], index=columns, dtype="float64")
+
+
 def select_tag_agnostic_numeric_surface(
     train_df: pd.DataFrame,
     score_df: pd.DataFrame,
@@ -207,6 +238,7 @@ def build_feature_basis(
     raw_score: Optional[pd.DataFrame],
     pca_detector: Optional[Any],
     cfg: Dict[str, Any],
+    basis_contract: Optional[Dict[str, Any]] = None,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, Any]]:
     """Construct the current compact tag-agnostic basis for regime clustering."""
     _ = pca_detector
@@ -216,11 +248,47 @@ def build_feature_basis(
 
     aligned_train = raw_train.reindex(train_features.index)
     aligned_score = raw_score.reindex(score_features.index)
-    selected_cols, train_numeric, score_numeric, surface_meta = select_tag_agnostic_numeric_surface(
-        aligned_train,
-        aligned_score,
-        cfg=cfg,
+    basis_contract = dict(basis_contract or {})
+    contract_cols = list(
+        basis_contract.get("raw_tags")
+        or basis_contract.get("feature_columns")
+        or basis_contract.get("basis_scaler_cols")
+        or []
     )
+    contract_reused = bool(contract_cols)
+
+    if contract_reused:
+        missing_contract_cols = [
+            col for col in contract_cols if col not in aligned_train.columns or col not in aligned_score.columns
+        ]
+        if missing_contract_cols:
+            raise ValueError(
+                "Cached regime basis contract cannot be applied because required raw tags are missing: "
+                + ", ".join(missing_contract_cols[:5])
+            )
+        selected_cols = list(contract_cols)
+        train_numeric = _coerce_numeric_frame(aligned_train, selected_cols)
+        score_numeric = _coerce_numeric_frame(aligned_score, selected_cols)
+        surface_meta = {
+            "surface_type": "tag_agnostic_numeric",
+            "candidate_count": len(selected_cols),
+            "selected_count": len(selected_cols),
+            "dropped_low_valid_count": 0,
+            "dropped_low_iqr_count": 0,
+            "min_valid_fraction": None,
+            "min_iqr": None,
+            "max_cols": len(selected_cols),
+            "truncated": False,
+            "selected_cols": list(selected_cols),
+            "selection_metric": "cached_basis_contract",
+            "contract_reused": True,
+        }
+    else:
+        selected_cols, train_numeric, score_numeric, surface_meta = select_tag_agnostic_numeric_surface(
+            aligned_train,
+            aligned_score,
+            cfg=cfg,
+        )
 
     if not selected_cols:
         raise ValueError(
@@ -245,25 +313,65 @@ def build_feature_basis(
             component="REGIME",
         )
 
-    fill_values = train_numeric.median(axis=0, numeric_only=True)
+    fill_values = train_numeric.median(axis=0, numeric_only=True).astype("float64")
+    contract_fill_values = _coerce_contract_series(
+        basis_contract.get("basis_fill_values") or basis_contract.get("fill_values"),
+        columns=selected_cols,
+        field_name="basis_fill_values",
+    )
+    if contract_fill_values is not None:
+        fill_values = contract_fill_values.combine_first(fill_values).astype("float64")
     train_basis = train_numeric.ffill().bfill().fillna(fill_values).fillna(0.0)
     score_basis = score_numeric.ffill().bfill().fillna(fill_values).fillna(0.0)
 
     all_cols = list(selected_cols)
-    basis_scaler = StandardScaler()
-    basis_scaler.fit(train_basis[all_cols].values)
     train_basis = train_basis.astype({c: "float64" for c in all_cols})
     score_basis = score_basis.astype({c: "float64" for c in all_cols})
-    train_basis[all_cols] = basis_scaler.transform(train_basis[all_cols].values)
-    score_basis[all_cols] = basis_scaler.transform(score_basis[all_cols].values)
 
-    mean_vec_list: Optional[List[float]] = None
-    var_vec_list: Optional[List[float]] = None
-    if hasattr(basis_scaler, "mean_") and basis_scaler.mean_ is not None:
-        mean_vec_list = [float(x) for x in basis_scaler.mean_]
-    if hasattr(basis_scaler, "var_") and basis_scaler.var_ is not None:
-        var_vec_list = [float(x) for x in basis_scaler.var_]
-    basis_signature = _compute_basis_signature(all_cols, mean_vec_list, var_vec_list, 0)
+    mean_vec_list: Optional[List[float]]
+    var_vec_list: Optional[List[float]]
+    contract_mean = _coerce_contract_series(
+        basis_contract.get("basis_scaler_mean") or basis_contract.get("scaler_mean"),
+        columns=all_cols,
+        field_name="basis_scaler_mean",
+    )
+    contract_var = _coerce_contract_series(
+        basis_contract.get("basis_scaler_var") or basis_contract.get("scaler_var"),
+        columns=all_cols,
+        field_name="basis_scaler_var",
+    )
+    contract_scaler_cols = list(basis_contract.get("basis_scaler_cols") or [])
+
+    if contract_reused and contract_scaler_cols and contract_scaler_cols != all_cols:
+        raise ValueError(
+            "Cached regime basis contract scaler columns do not match active basis columns"
+        )
+
+    if contract_mean is not None or contract_var is not None:
+        if contract_mean is None or contract_var is None:
+            raise ValueError("Cached regime basis contract is missing scaler mean/variance")
+        scaler_var = contract_var.astype("float64").clip(lower=0.0)
+        scaler_scale = scaler_var.pow(0.5).replace(0.0, 1.0).fillna(1.0)
+        train_basis[all_cols] = (train_basis[all_cols] - contract_mean) / scaler_scale
+        score_basis[all_cols] = (score_basis[all_cols] - contract_mean) / scaler_scale
+        mean_vec_list = [float(x) for x in contract_mean.tolist()]
+        var_vec_list = [float(x) for x in scaler_var.tolist()]
+        basis_signature = str(
+            basis_contract.get("basis_signature")
+            or _compute_basis_signature(all_cols, mean_vec_list, var_vec_list, 0)
+        )
+    else:
+        basis_scaler = StandardScaler()
+        basis_scaler.fit(train_basis[all_cols].values)
+        train_basis[all_cols] = basis_scaler.transform(train_basis[all_cols].values)
+        score_basis[all_cols] = basis_scaler.transform(score_basis[all_cols].values)
+        mean_vec_list = None
+        var_vec_list = None
+        if hasattr(basis_scaler, "mean_") and basis_scaler.mean_ is not None:
+            mean_vec_list = [float(x) for x in basis_scaler.mean_]
+        if hasattr(basis_scaler, "var_") and basis_scaler.var_ is not None:
+            var_vec_list = [float(x) for x in basis_scaler.var_]
+        basis_signature = _compute_basis_signature(all_cols, mean_vec_list, var_vec_list, 0)
 
     meta = {
         "n_pca": 0,
@@ -273,10 +381,12 @@ def build_feature_basis(
         "basis_signature": basis_signature,
         "feature_surface_type": "tag_agnostic_numeric",
         "surface_meta": surface_meta,
+        "basis_contract_reused": contract_reused,
+        "basis_fill_values": {col: float(fill_values[col]) for col in all_cols},
     }
-    if hasattr(basis_scaler, "mean_"):
+    if mean_vec_list is not None:
         meta["basis_scaler_mean"] = mean_vec_list
-    if hasattr(basis_scaler, "var_"):
+    if var_vec_list is not None:
         meta["basis_scaler_var"] = var_vec_list
     meta["basis_scaler_cols"] = all_cols
     return train_basis, score_basis, meta

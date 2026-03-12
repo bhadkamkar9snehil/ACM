@@ -104,6 +104,24 @@ def test_classify_regime_basis_drift_detects_incompatible_basis() -> None:
     assert "basis_version_mismatch" in decision.reason_codes
 
 
+def test_classify_regime_basis_drift_detects_signature_mismatch() -> None:
+    basis = pd.DataFrame({"r_a": [0.1, 0.2]})
+    regime_model = type("M", (), {"feature_columns": ["r_a"]})()
+
+    decision = classify_regime_basis_drift(
+        regime_model=regime_model,
+        regime_basis_train=basis,
+        cached_model_version="5.0",
+        current_model_version="5.0",
+        cached_basis_signature="cached_sig",
+        current_basis_signature="current_sig",
+    )
+
+    assert decision.basis_compatibility == "INCOMPATIBLE"
+    assert decision.should_refit is True
+    assert "basis_signature_mismatch" in decision.reason_codes
+
+
 def test_compatibility_status_from_drift_aggregates_fields() -> None:
     feature_decision = classify_feature_schema_drift(
         ["a"],

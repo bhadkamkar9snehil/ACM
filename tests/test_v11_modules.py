@@ -2164,6 +2164,69 @@ class TestRefactorHelpers:
         assert out.regime_basis_train.equals(basis_train)
         assert out.regime_model is None
 
+    def test_build_regime_feature_basis_stage_reuses_cached_basis_contract(self):
+        """Cached regime basis contracts should stabilize replay batches when raw tags remain available."""
+        from core import regimes
+
+        idx = pd.date_range("2026-01-01", periods=4, freq="h")
+        train_features = pd.DataFrame({"feat": [0.1, 0.2, 0.3, 0.4]}, index=idx)
+        score_features = pd.DataFrame({"feat": [0.15, 0.25]}, index=idx[:2])
+        raw_train = pd.DataFrame(
+            {
+                "sensor_1_avg": [10.0, 11.0, 12.0, 13.0],
+                "sensor_2_avg": [1.0, 3.0, 5.0, 7.0],
+                "sensor_3_avg": [0.0, 100.0, 0.0, 100.0],
+            },
+            index=idx,
+        )
+        raw_score = pd.DataFrame(
+            {
+                "sensor_1_avg": [10.5, 12.5],
+                "sensor_2_avg": [2.0, 6.0],
+                "sensor_3_avg": [100.0, 0.0],
+            },
+            index=idx[:2],
+        )
+        regime_model = type(
+            "M",
+            (),
+            {
+                "feature_columns": ["sensor_1_avg", "sensor_2_avg"],
+                "meta": {
+                    "model_version": regimes.REGIME_MODEL_VERSION,
+                    "basis_signature": "stable_basis_sig",
+                    "basis_scaler_cols": ["sensor_1_avg", "sensor_2_avg"],
+                    "basis_scaler_mean": [11.5, 4.0],
+                    "basis_scaler_var": [1.25, 5.0],
+                    "basis_fill_values": {"sensor_1_avg": 11.5, "sensor_2_avg": 4.0},
+                },
+            },
+        )()
+
+        class _Logger:
+            def info(self, *args, **kwargs):
+                pass
+
+            def warn(self, *args, **kwargs):
+                pass
+
+        out = regimes.build_regime_feature_basis_stage(
+            train_features=train_features,
+            score_features=score_features,
+            raw_train=raw_train,
+            raw_score=raw_score,
+            pca_detector=None,
+            cfg={"regimes": {"method": "hdbscan"}},
+            regime_model=regime_model,
+            equip="FD_FAN",
+            logger=_Logger(),
+        )
+
+        assert list(out.regime_basis_train.columns) == ["sensor_1_avg", "sensor_2_avg"]
+        assert out.regime_basis_meta["basis_contract_reused"] is True
+        assert out.basis_drift_decision.basis_compatibility == "COMPATIBLE"
+        assert out.regime_model is regime_model
+
     def test_apply_transient_state_labels_no_regime_label(self):
         """Transient helper should no-op when regime_label column is absent."""
         from core.regimes import apply_transient_state_labels

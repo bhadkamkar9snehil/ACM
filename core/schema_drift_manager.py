@@ -230,6 +230,8 @@ def classify_regime_basis_drift(
     regime_basis_train: Optional[pd.DataFrame],
     cached_model_version: Optional[Any],
     current_model_version: Any,
+    cached_basis_signature: Optional[str] = None,
+    current_basis_signature: Optional[str] = None,
 ) -> SchemaDriftDecision:
     if regime_basis_train is None:
         return SchemaDriftDecision(
@@ -256,6 +258,13 @@ def classify_regime_basis_drift(
     if cached_model_version is not None and cached_model_version != current_model_version:
         incompatible = True
         reason_codes.append("basis_version_mismatch")
+    if (
+        cached_basis_signature
+        and current_basis_signature
+        and str(cached_basis_signature) != str(current_basis_signature)
+    ):
+        incompatible = True
+        reason_codes.append("basis_signature_mismatch")
 
     if incompatible:
         return SchemaDriftDecision(
