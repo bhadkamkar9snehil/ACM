@@ -1,10 +1,16 @@
 from datetime import datetime
+from types import SimpleNamespace
 
 import pandas as pd
 
 from core.data_loader import DataMeta
 from core.representation_contracts import CompatibilityStatus, ContextAssignment, RuntimeMode
-from core.representation_pipeline import enrich_representation_shadow, run_representation_pipeline
+from core.representation_pipeline import (
+    apply_representation_authority,
+    enrich_representation_shadow,
+    resolve_representation_authority_policy,
+    run_representation_pipeline,
+)
 
 
 def _frame(start: str, periods: int, freq: str = "1h") -> pd.DataFrame:
@@ -226,3 +232,50 @@ def test_enrich_representation_shadow_blocks_schema_drift_classes() -> None:
 
     assert updated.eligibility.score_allowed is False
     assert "schema_incompatible" in updated.eligibility.suppressed_reason_codes
+
+
+def test_validation_authority_policy_requires_replay_by_default() -> None:
+    policy = resolve_representation_authority_policy(
+        cfg={"representation": {"authority": {"mode": "validation"}}},
+        args=SimpleNamespace(start_time=None, representation_authority=None),
+    )
+
+    assert policy.mode == "validation"
+    assert policy.active is False
+    assert policy.reason == "validation_requires_replay_or_allow_live_validation"
+
+
+def test_validation_authority_policy_activates_for_historical_replay() -> None:
+    policy = resolve_representation_authority_policy(
+        cfg={"representation": {"authority": {"mode": "validation"}}},
+        args=SimpleNamespace(start_time="2026-01-01T00:00:00", representation_authority=None),
+    )
+
+    assert policy.mode == "validation"
+    assert policy.active is True
+    assert policy.reason == "historical_replay_validation"
+
+
+def test_apply_representation_authority_marks_result_authoritative() -> None:
+    train = _frame("2024-01-01T00:00:00", 3)
+    score = _frame("2024-01-01T03:00:00", 2)
+    result = run_representation_pipeline(
+        train_df=train,
+        score_df=score,
+        meta={"sampling_seconds": 3600.0},
+        cfg={},
+        equip_id=99,
+        run_id="run-authority",
+    )
+
+    updated = apply_representation_authority(
+        result,
+        policy=resolve_representation_authority_policy(
+            cfg={"representation": {"authority": {"mode": "validation"}}},
+            args=SimpleNamespace(start_time="2026-01-01T00:00:00", representation_authority=None),
+        ),
+    )
+
+    assert updated.authoritative is True
+    assert updated.eligibility.authoritative is True
+    assert "validation_authority_active" in updated.notes

@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-03-12T10:08:52+00:00",
+  "generated_at": "2026-03-12T10:22:03+00:00",
   "module_count": 55,
   "modules": [
     {
@@ -221,7 +221,7 @@
     {
       "module_name": "core.fuse",
       "source_path": "core/fuse.py",
-      "symbol_count": 49,
+      "symbol_count": 51,
       "core_import_count": 2,
       "core_imports": [
         "core.observability",
@@ -401,14 +401,14 @@
     {
       "module_name": "core.representation_contracts",
       "source_path": "core/representation_contracts.py",
-      "symbol_count": 13,
+      "symbol_count": 14,
       "core_import_count": 0,
       "core_imports": []
     },
     {
       "module_name": "core.representation_pipeline",
       "source_path": "core/representation_pipeline.py",
-      "symbol_count": 8,
+      "symbol_count": 11,
       "core_import_count": 6,
       "core_imports": [
         "core.baseline_governor",

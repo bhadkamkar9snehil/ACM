@@ -68,6 +68,7 @@ from core.detector_orchestrator import (
 )
 from core.baseline_governor import build_shadow_baseline_governance
 from core.model_persistence import (
+    ModelAdaptationPersistenceResult,
     persist_calibration_params_safe,
     load_manifest_protected_columns,
     run_model_adaptation_and_persistence_stage,
@@ -100,7 +101,12 @@ from core.sql_client import (
     connect_acm_sql_failfast,
     resolve_runtime_policy,
 )
-from core.representation_pipeline import enrich_representation_shadow, run_representation_pipeline
+from core.representation_pipeline import (
+    apply_representation_authority,
+    enrich_representation_shadow,
+    resolve_representation_authority_policy,
+    run_representation_pipeline,
+)
 from core.time_normalizer import deduplicate_index, ensure_local_index
 from core.structure_encoder import select_ewm_monitoring_surface
 
@@ -213,6 +219,11 @@ Note: For automated batch processing, use sql_batch_runner.py instead:
                     help="Set per-module log level overrides (repeatable).")
     ap.add_argument("--start-time", help="Start time for analysis window (ISO format: 2023-10-15T00:00:00)")
     ap.add_argument("--end-time", help="End time for analysis window (ISO format: 2023-11-15T00:00:00)")
+    ap.add_argument(
+        "--representation-authority",
+        choices=["shadow", "validation"],
+        help="Authority mode for the representation layer. Validation mode only activates on replay unless explicitly allowed in config.",
+    )
     return ap
 
 
@@ -287,6 +298,14 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
 
     runtime_policy = resolve_runtime_policy(args=args)
     force_retraining = runtime_policy.force_retraining
+    representation_authority_policy = resolve_representation_authority_policy(cfg=cfg, args=args)
+    Console.info(
+        "Representation authority policy resolved",
+        component="REPRESENTATION",
+        mode=representation_authority_policy.mode,
+        active=representation_authority_policy.active,
+        reason=representation_authority_policy.reason,
+    )
     
     # Set observability context (equipment metadata only).
     set_acm_context(
@@ -389,6 +408,7 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
     score_regime_labels: Optional[np.ndarray] = None
     representation_shadow = None
     representation_store_result = None
+    representation_score_suppressed = False
     ewm_freeze_changes: Optional[Dict[Any, str]] = None
     schema_drift_decision = None
     basis_drift_decision = None
@@ -572,6 +592,38 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
         if scoring_regime_stage.degraded_regime_basis:
             degradations.append("regime_feature_basis")
 
+        if representation_shadow is not None and representation_authority_policy.active:
+            try:
+                representation_shadow = enrich_representation_shadow(
+                    representation_shadow,
+                    cfg=cfg,
+                    compatibility=compatibility_status_from_drift(
+                        feature_schema_drift=schema_drift_decision,
+                        basis_drift=basis_drift_decision,
+                    ),
+                    baseline_governance=build_shadow_baseline_governance(
+                        meta=meta,
+                        coldstart_complete=coldstart_complete,
+                        baseline_contamination_verdict=baseline_contamination_verdict,
+                        refit_requested=refit_requested,
+                    ),
+                    logger=Console,
+                )
+                representation_shadow = apply_representation_authority(
+                    representation_shadow,
+                    policy=representation_authority_policy,
+                    logger=Console,
+                )
+            except Exception as representation_exc:
+                Console.warn(
+                    "Representation authority precheck failed; continuing with legacy runtime authority",
+                    component="REPRESENTATION",
+                    equip_id=equip_id,
+                    run_id=run_id,
+                    error_type=type(representation_exc).__name__,
+                    error=str(representation_exc)[:200],
+                )
+
         # ===== EWM Zero-Day Scoring =====
         # Scores score data against EWM dual-rate baselines and appends ewm_z to frame.
         # ewm_z = mean z_slow per row (long-term character deviation = genuine fault signal).
@@ -730,42 +782,76 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
                     if frame is not None and len(_ewm_series) == len(frame):
                         frame["ewm_z"] = _ewm_series.values
 
-                    # Update EWM state from score batch, then per-sensor freeze check, then save.
-                    ewm_manager.update_batch(_ewm_rids, _ewm_score_numeric)
-                    ewm_freeze_changes = ewm_manager.check_and_apply_freeze()
-                    ewm_manager.save_to_sql(sql_client)
+                    # Update EWM state only when representation authority allows learning.
+                    if (
+                        representation_authority_policy.active
+                        and representation_shadow is not None
+                        and representation_shadow.authoritative
+                        and representation_shadow.eligibility.learn_allowed is False
+                    ):
+                        Console.info(
+                            "Representation authority skipped EWM baseline mutation",
+                            component="REPRESENTATION",
+                            equip_id=equip_id,
+                            run_id=run_id,
+                        )
+                    else:
+                        ewm_manager.update_batch(_ewm_rids, _ewm_score_numeric)
+                        ewm_freeze_changes = ewm_manager.check_and_apply_freeze()
+                        ewm_manager.save_to_sql(sql_client)
 
         # ===== Model adaptation + persistence =====
-        model_stage = run_model_adaptation_and_persistence_stage(
-            section_fn=T.section,
-            cfg=cfg,
-            cached_models=cached_models,
-            cached_manifest=cached_manifest,
-            detectors_just_trained=detectors_just_trained,
-            score_out=score_out,
-            regime_quality_ok=regime_quality_ok,
-            current_model_maturity=current_model_maturity,
-            boolean_only_metrics=list(BOOLEAN_ONLY_METRICS),
-            equip=equip,
-            logger=Console,
-            record_model_refit_fn=record_model_refit,
-            fit_all_detectors_fn=fit_all_detectors,
-            train=train,
-            det_flags=det_flags,
-            output_manager=output_manager,
-            sql_client=sql_client,
-            run_id=run_id,
-            equip_id=equip_id,
-            regime_model=regime_model,
-            detectors=detectors,
-            detector_cache=None,
-            col_meds=col_meds,
-            timing_sections=T.timings if hasattr(T, "timings") else None,
-            model_state=model_state,
-            regime_state_version=regime_state_version,
-            force_retrain_requested=force_retraining,
-            baseline_contamination_verdict=baseline_contamination_verdict,
-        )
+        if (
+            representation_authority_policy.active
+            and representation_shadow is not None
+            and representation_shadow.authoritative
+            and representation_shadow.eligibility.learn_allowed is False
+        ):
+            Console.info(
+                "Representation authority skipped model adaptation and lifecycle persistence",
+                component="REPRESENTATION",
+                equip_id=equip_id,
+                run_id=run_id,
+            )
+            model_stage = ModelAdaptationPersistenceResult(
+                force_retrain=False,
+                cached_models=cached_models,
+                regime_model=regime_model,
+                detectors=detectors,
+                saved_model_version=None,
+                model_state=model_state,
+            )
+        else:
+            model_stage = run_model_adaptation_and_persistence_stage(
+                section_fn=T.section,
+                cfg=cfg,
+                cached_models=cached_models,
+                cached_manifest=cached_manifest,
+                detectors_just_trained=detectors_just_trained,
+                score_out=score_out,
+                regime_quality_ok=regime_quality_ok,
+                current_model_maturity=current_model_maturity,
+                boolean_only_metrics=list(BOOLEAN_ONLY_METRICS),
+                equip=equip,
+                logger=Console,
+                record_model_refit_fn=record_model_refit,
+                fit_all_detectors_fn=fit_all_detectors,
+                train=train,
+                det_flags=det_flags,
+                output_manager=output_manager,
+                sql_client=sql_client,
+                run_id=run_id,
+                equip_id=equip_id,
+                regime_model=regime_model,
+                detectors=detectors,
+                detector_cache=None,
+                col_meds=col_meds,
+                timing_sections=T.timings if hasattr(T, "timings") else None,
+                model_state=model_state,
+                regime_state_version=regime_state_version,
+                force_retrain_requested=force_retraining,
+                baseline_contamination_verdict=baseline_contamination_verdict,
+            )
         cached_models = model_stage.cached_models
         regime_model = model_stage.regime_model
         detectors = model_stage.detectors
@@ -812,6 +898,8 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
             run_id=run_id,
             cached_manifest=cached_manifest,
             baseline_contamination_verdict=baseline_contamination_verdict,
+            representation_result=representation_shadow,
+            representation_authority_active=representation_authority_policy.active,
         )
         frame = health_stage.frame
         train_frame = health_stage.train_frame
@@ -844,6 +932,20 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
                         baseline_governance=baseline_governance,
                         logger=Console,
                     )
+                    representation_shadow = apply_representation_authority(
+                        representation_shadow,
+                        policy=representation_authority_policy,
+                        logger=Console,
+                    )
+                    frame, episodes, representation_score_suppressed = fuse.suppress_representation_scoring(
+                        frame=frame,
+                        episodes=episodes,
+                        representation_result=representation_shadow,
+                        logger=Console,
+                    )
+                    if representation_score_suppressed:
+                        degradations.append("representation_score_suppressed")
+                        quality_ok = False
                 except Exception as representation_exc:
                     Console.warn(
                         "Representation shadow comparability failed; continuing with legacy runtime authority",
@@ -871,24 +973,32 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
                     )
 
         # ===== Phase 8: Drift + episode schema normalization =====
-        drift_stage = drift.run_drift_postprocess_stage(
-            section_fn=T.section,
-            score_data=score,
-            frame=frame,
-            score_out=score_out,
-            episodes=episodes,
-            cfg=cfg,
-            regime_quality_ok=regime_quality_ok,
-            equip=equip,
-            sql_client=sql_client,
-            equip_id=equip_id,
-            output_manager=output_manager,
-            logger=Console,
-            normalize_episodes_schema_fn=fuse.normalize_episodes_schema,
-        )
-        frame = drift_stage.frame
-        score_out = drift_stage.score_out
-        episodes = drift_stage.episodes
+        if representation_score_suppressed:
+            Console.warn(
+                "Representation authority skipped drift postprocess because scoring was suppressed",
+                component="REPRESENTATION",
+                equip_id=equip_id,
+                run_id=run_id,
+            )
+        else:
+            drift_stage = drift.run_drift_postprocess_stage(
+                section_fn=T.section,
+                score_data=score,
+                frame=frame,
+                score_out=score_out,
+                episodes=episodes,
+                cfg=cfg,
+                regime_quality_ok=regime_quality_ok,
+                equip=equip,
+                sql_client=sql_client,
+                equip_id=equip_id,
+                output_manager=output_manager,
+                logger=Console,
+                normalize_episodes_schema_fn=fuse.normalize_episodes_schema,
+            )
+            frame = drift_stage.frame
+            score_out = drift_stage.score_out
+            episodes = drift_stage.episodes
 
         prep_inputs = output_manager.prepare_persistence_inputs(
             section_fn=T.section,

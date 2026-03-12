@@ -20,6 +20,24 @@ import pandas as pd
 from scipy.stats import spearmanr  # type: ignore
 from sklearn.metrics import average_precision_score, roc_curve  # type: ignore
 
+_SUPPRESSED_SCORE_COLUMNS = {
+    "ar1_z",
+    "pca_spe_z",
+    "pca_t2_z",
+    "iforest_z",
+    "gmm_z",
+    "omr_z",
+    "cusum_z",
+    "drift_z",
+    "hst_z",
+    "river_hst_z",
+    "ewm_z",
+    "fused",
+    "health",
+    "HealthIndex",
+    "RawHealthIndex",
+}
+
 
 # =============================================================================
 # CALIBRATION CONTAMINATION FILTER (v11.3.3 - Analytics Audit Finding #6)
@@ -2822,6 +2840,52 @@ class HealthStageResult:
     context_assignment: ContextAssignment = field(default_factory=ContextAssignment)
 
 
+def _representation_learning_blocked(
+    *,
+    representation_result: Optional[Any],
+    representation_authority_active: bool,
+) -> bool:
+    if not representation_authority_active or representation_result is None:
+        return False
+    eligibility = getattr(representation_result, "eligibility", None)
+    if eligibility is None:
+        return False
+    return bool(getattr(representation_result, "authoritative", False) and eligibility.learn_allowed is False)
+
+
+def suppress_representation_scoring(
+    *,
+    frame: pd.DataFrame,
+    episodes: pd.DataFrame,
+    representation_result: Optional[Any],
+    logger: Any = Console,
+) -> tuple[pd.DataFrame, pd.DataFrame, bool]:
+    if representation_result is None:
+        return frame, episodes, False
+    eligibility = getattr(representation_result, "eligibility", None)
+    if eligibility is None:
+        return frame, episodes, False
+    if not bool(getattr(representation_result, "authoritative", False)):
+        return frame, episodes, False
+    if eligibility.score_allowed is not False:
+        return frame, episodes, False
+
+    suppressed_frame = frame.copy()
+    for col in _SUPPRESSED_SCORE_COLUMNS:
+        if col in suppressed_frame.columns:
+            suppressed_frame[col] = np.nan
+
+    suppressed_episodes = episodes.iloc[0:0].copy()
+    logger.warn(
+        "Representation authority suppressed downstream scoring outputs",
+        component="REPRESENTATION",
+        equip_id=getattr(representation_result, "equip_id", None),
+        run_id=getattr(representation_result, "run_id", None),
+        suppressed_reasons=list(getattr(eligibility, "suppressed_reason_codes", ()) or ()),
+    )
+    return suppressed_frame, suppressed_episodes, True
+
+
 def run_health_stage(
     *,
     section_fn: Any,
@@ -2859,6 +2923,8 @@ def run_health_stage(
     maybe_update_adaptive_thresholds_fn: Optional[Any] = None,
     run_regime_postprocess_stage_fn: Optional[Any] = None,
     auto_tune_parameters_fn: Optional[Any] = None,
+    representation_result: Optional[Any] = None,
+    representation_authority_active: bool = False,
 ) -> HealthStageResult:
     """
     Execute post-model health stages in pipeline order.
@@ -2886,6 +2952,11 @@ def run_health_stage(
     if auto_tune_fn is None:
         from core.model_evaluation import auto_tune_parameters as _auto_tune_parameters
         auto_tune_fn = _auto_tune_parameters
+
+    learn_blocked = _representation_learning_blocked(
+        representation_result=representation_result,
+        representation_authority_active=representation_authority_active,
+    )
 
     with section_fn("calibrate"):
         calibration_result = run_calibration_stage(
@@ -2937,18 +3008,26 @@ def run_health_stage(
         episodes = fusion_stage.episodes
         fusion_weights_used = fusion_stage.fusion_weights_used
 
-    with section_fn("thresholds.adaptive"):
-        adaptive_thresholds_fn(
-            train_frame=train_frame,
-            train_data=train,
-            cfg=cfg,
+    if learn_blocked:
+        logger.info(
+            "Representation authority skipped adaptive threshold update",
+            component="REPRESENTATION",
             equip_id=equip_id,
-            output_manager=output_manager,
-            coldstart_complete=coldstart_complete,
-            regime_quality_ok=regime_quality_ok,
-            baseline_contamination_verdict=baseline_contamination_verdict,
-            logger=logger,
+            run_id=run_id,
         )
+    else:
+        with section_fn("thresholds.adaptive"):
+            adaptive_thresholds_fn(
+                train_frame=train_frame,
+                train_data=train,
+                cfg=cfg,
+                equip_id=equip_id,
+                output_manager=output_manager,
+                coldstart_complete=coldstart_complete,
+                regime_quality_ok=regime_quality_ok,
+                baseline_contamination_verdict=baseline_contamination_verdict,
+                logger=logger,
+            )
 
     with section_fn("regimes.postprocess"):
         regime_post = regime_postprocess_fn(
@@ -2963,19 +3042,27 @@ def run_health_stage(
         frame = regime_post.frame
         context_assignment = getattr(regime_post, "context_assignment", ContextAssignment())
 
-    auto_tune_fn(
-        frame=frame,
-        episodes=episodes,
-        score_out=score_out,
-        regime_quality_ok=regime_quality_ok,
-        cfg=cfg,
-        sql_client=sql_client,
-        run_id=run_id,
-        equip_id=equip_id,
-        equip=equip,
-        output_manager=output_manager,
-        cached_manifest=cached_manifest,
-    )
+    if learn_blocked:
+        logger.info(
+            "Representation authority skipped auto tuning",
+            component="REPRESENTATION",
+            equip_id=equip_id,
+            run_id=run_id,
+        )
+    else:
+        auto_tune_fn(
+            frame=frame,
+            episodes=episodes,
+            score_out=score_out,
+            regime_quality_ok=regime_quality_ok,
+            cfg=cfg,
+            sql_client=sql_client,
+            run_id=run_id,
+            equip_id=equip_id,
+            equip=equip,
+            output_manager=output_manager,
+            cached_manifest=cached_manifest,
+        )
 
     return HealthStageResult(
         frame=frame,

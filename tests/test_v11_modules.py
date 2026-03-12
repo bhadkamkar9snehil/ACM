@@ -4418,6 +4418,198 @@ class TestRefactorHelpers:
         assert forwarded["adaptive_verdict"] == "suspect"
         assert sections == ["calibrate", "fusion", "thresholds.adaptive", "regimes.postprocess"]
 
+    def test_run_health_stage_skips_learning_side_effects_when_representation_blocks_learning(self, monkeypatch):
+        """Health stage should skip adaptive thresholds and auto-tune when validation authority blocks learning."""
+        from core import fuse
+        from core.representation_contracts import EligibilityDecision
+
+        idx = pd.date_range("2026-01-01", periods=2, freq="h")
+        train = pd.DataFrame({"a": [1.0, 2.0]}, index=idx)
+        score = pd.DataFrame({"a": [1.5, 2.5]}, index=idx)
+        frame = pd.DataFrame({"ar1_raw": [0.1, 0.2]}, index=idx)
+
+        sections = []
+
+        class _Section:
+            def __init__(self, name):
+                self.name = name
+
+            def __enter__(self):
+                sections.append(self.name)
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        def _section_fn(name):
+            return _Section(name)
+
+        def _run_calibration_stage(**kwargs):
+            out_frame = kwargs["frame"].copy()
+            out_frame["ar1_z"] = [0.3, 0.4]
+            out_train = kwargs["train"].copy()
+            out_train["ar1_z"] = [0.1, 0.2]
+            return type(
+                "CalibrationStageResult",
+                (),
+                {
+                    "frame": out_frame,
+                    "train_frame": out_train,
+                    "spe_p95_train": 1.1,
+                    "t2_p95_train": 2.2,
+                    "quality_ok": True,
+                    "use_per_regime": True,
+                },
+            )()
+
+        def _run_fusion_stage(**kwargs):
+            out_frame = kwargs["frame"].copy()
+            out_frame["fused"] = [1.0, 1.1]
+            out_train = kwargs["train_frame"].copy()
+            out_train["fused"] = [0.8, 0.9]
+            return fuse.FusionStageResult(
+                frame=out_frame,
+                train_frame=out_train,
+                episodes=pd.DataFrame({"episode_id": [1]}),
+                fusion_weights_used={"ar1_z": 1.0},
+            )
+
+        monkeypatch.setattr(fuse, "run_calibration_stage", _run_calibration_stage)
+        monkeypatch.setattr(fuse, "run_fusion_stage", _run_fusion_stage)
+
+        threshold_calls = {"called": False}
+
+        def _maybe_update_adaptive_thresholds_fn(**kwargs):
+            threshold_calls["called"] = True
+
+        def _run_regime_postprocess_stage_fn(**kwargs):
+            return type(
+                "RegimePostprocessResult",
+                (),
+                {
+                    "frame": kwargs["frame"],
+                    "transient_counts": {"steady": 2},
+                    "context_assignment": fuse.ContextAssignment(
+                        context_id="regime:0",
+                        context_label="REGIME_0",
+                        context_confidence=0.7,
+                        context_stability="STABLE",
+                        transition_status="STEADY",
+                        is_novel=False,
+                        is_ambiguous=False,
+                    ),
+                },
+            )()
+
+        auto_tune_calls = {"called": False}
+
+        def _auto_tune_parameters_fn(**kwargs):
+            auto_tune_calls["called"] = True
+
+        representation_result = type(
+            "RepresentationResult",
+            (),
+            {
+                "authoritative": True,
+                "eligibility": EligibilityDecision(
+                    authoritative=True,
+                    score_allowed=False,
+                    learn_allowed=False,
+                    suppressed_reason_codes=("context_unknown",),
+                ),
+            },
+        )()
+
+        result = fuse.run_health_stage(
+            section_fn=_section_fn,
+            train=train,
+            score=score,
+            frame=frame,
+            cfg={},
+            regime_quality_ok=True,
+            train_regime_labels=np.array([0, 0]),
+            score_regime_labels=np.array([0, 1]),
+            pca_train_spe=None,
+            pca_train_t2=None,
+            detectors={"ar1_detector": object(), "pca_detector": None, "iforest_detector": None, "gmm_detector": None, "omr_detector": None},
+            detector_flags={"ar1_enabled": True, "pca_enabled": False, "iforest_enabled": False, "gmm_enabled": False, "omr_enabled": False},
+            cached_calibration_params=None,
+            saved_model_version=1,
+            score_all_detectors_fn=lambda **kwargs: (pd.DataFrame(), None),
+            calibrate_all_detectors_fn=lambda **kwargs: (pd.DataFrame(), {}),
+            persist_calibration_params_fn=lambda *args, **kwargs: True,
+            output_manager=object(),
+            logger=type("L", (), {"info": lambda *a, **k: None, "warn": lambda *a, **k: None})(),
+            equip="FD_FAN",
+            previous_weights=None,
+            omr_contributions_data=None,
+            record_detector_scores_fn=None,
+            record_episode_fn=None,
+            maybe_update_adaptive_thresholds_fn=_maybe_update_adaptive_thresholds_fn,
+            coldstart_complete=True,
+            equip_id=1,
+            run_regime_postprocess_stage_fn=_run_regime_postprocess_stage_fn,
+            regime_model=None,
+            auto_tune_parameters_fn=_auto_tune_parameters_fn,
+            score_out={},
+            sql_client=object(),
+            run_id="r1",
+            cached_manifest={},
+            baseline_contamination_verdict="clear",
+            representation_result=representation_result,
+            representation_authority_active=True,
+        )
+
+        assert result.context_assignment.context_label == "REGIME_0"
+        assert threshold_calls["called"] is False
+        assert auto_tune_calls["called"] is False
+        assert sections == ["calibrate", "fusion", "regimes.postprocess"]
+
+    def test_suppress_representation_scoring_clears_authoritative_scores_and_episodes(self):
+        """Score suppression helper should blank score columns and remove episodes."""
+        from core import fuse
+        from core.representation_contracts import EligibilityDecision
+
+        idx = pd.date_range("2026-01-01", periods=2, freq="h")
+        frame = pd.DataFrame(
+            {
+                "fused": [1.0, 2.0],
+                "ar1_z": [0.4, 0.5],
+                "health": [95.0, 90.0],
+                "regime_label": ["R0", "R0"],
+            },
+            index=idx,
+        )
+        episodes = pd.DataFrame({"episode_id": [1], "peak_fused_z": [2.0]})
+        representation_result = type(
+            "RepresentationResult",
+            (),
+            {
+                "authoritative": True,
+                "run_id": "r1",
+                "equip_id": 1,
+                "eligibility": EligibilityDecision(
+                    authoritative=True,
+                    score_allowed=False,
+                    learn_allowed=False,
+                    suppressed_reason_codes=("context_unknown",),
+                ),
+            },
+        )()
+
+        out_frame, out_episodes, suppressed = fuse.suppress_representation_scoring(
+            frame=frame,
+            episodes=episodes,
+            representation_result=representation_result,
+        )
+
+        assert suppressed is True
+        assert out_frame["fused"].isna().all()
+        assert out_frame["ar1_z"].isna().all()
+        assert out_frame["health"].isna().all()
+        assert out_frame["regime_label"].tolist() == ["R0", "R0"]
+        assert out_episodes.empty
+
     def test_run_feature_preparation_stage_orchestrates_pipeline(self, monkeypatch):
         """Feature preparation stage should orchestrate seasonality, guardrails, build, impute, hash, and refit flag."""
         from core import fast_features

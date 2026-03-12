@@ -15,12 +15,14 @@ from core.representation_contracts import (
     EligibilityDecision,
     ObservationIntegrity,
     OperationalGrades,
+    RepresentationAuthorityPolicy,
     RepresentationPipelineResult,
     RepresentationRefs,
     RuntimeMode,
 )
 from core.signal_profiler import build_signal_profile_summary
 from core.state_builder import build_state_snapshot
+from utils.config_dict import cfg_get as _cfg_get
 
 
 def _integrity_grade(integrity: ObservationIntegrity) -> str:
@@ -90,6 +92,87 @@ def _merge_notes(existing: tuple[str, ...], *new_notes: str) -> tuple[str, ...]:
         merged.append(note_value)
         seen.add(note_value)
     return tuple(merged)
+
+
+def _normalize_authority_mode(raw_mode: Any) -> str:
+    mode = str(raw_mode or "shadow").strip().lower()
+    if mode not in {"shadow", "validation"}:
+        return "shadow"
+    return mode
+
+
+def resolve_representation_authority_policy(
+    *,
+    cfg: dict[str, Any],
+    args: Any | None = None,
+) -> RepresentationAuthorityPolicy:
+    authority_cfg = _cfg_get(cfg or {}, "representation.authority", {}) or {}
+    cli_mode = getattr(args, "representation_authority", None)
+    mode = _normalize_authority_mode(cli_mode or authority_cfg.get("mode", "shadow"))
+    historical_replay = bool(getattr(args, "start_time", None))
+    allow_live_validation = bool(authority_cfg.get("allow_live_validation", False))
+
+    if mode == "validation":
+        if historical_replay:
+            return RepresentationAuthorityPolicy(
+                mode=mode,
+                active=True,
+                reason="historical_replay_validation",
+                historical_replay=True,
+            )
+        if allow_live_validation:
+            return RepresentationAuthorityPolicy(
+                mode=mode,
+                active=True,
+                reason="live_validation_enabled",
+                historical_replay=False,
+            )
+        return RepresentationAuthorityPolicy(
+            mode=mode,
+            active=False,
+            reason="validation_requires_replay_or_allow_live_validation",
+            historical_replay=False,
+        )
+
+    return RepresentationAuthorityPolicy(
+        mode="shadow",
+        active=False,
+        reason="shadow_default",
+        historical_replay=historical_replay,
+    )
+
+
+def apply_representation_authority(
+    result: RepresentationPipelineResult,
+    *,
+    policy: RepresentationAuthorityPolicy,
+    logger: Any = Console,
+) -> RepresentationPipelineResult:
+    if not result.enabled:
+        return result
+    if not policy.active:
+        return result
+
+    updated = replace(
+        result,
+        authoritative=True,
+        eligibility=replace(result.eligibility, authoritative=True),
+        notes=_merge_notes(
+            result.notes,
+            "validation_authority_active",
+            f"authority_policy:{policy.mode}",
+            f"authority_reason:{policy.reason}",
+        ),
+    )
+    logger.info(
+        "Representation validation authority activated",
+        component="REPRESENTATION",
+        equip_id=updated.equip_id,
+        run_id=updated.run_id,
+        mode=policy.mode,
+        reason=policy.reason,
+    )
+    return updated
 
 
 def enrich_representation_shadow(
@@ -223,4 +306,9 @@ def run_representation_pipeline(
     return result
 
 
-__all__ = ["enrich_representation_shadow", "run_representation_pipeline"]
+__all__ = [
+    "apply_representation_authority",
+    "enrich_representation_shadow",
+    "resolve_representation_authority_policy",
+    "run_representation_pipeline",
+]

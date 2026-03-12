@@ -26,7 +26,7 @@ type: agent-memory
 | `[core.fast_features]` | 36 | 2 |
 | `[core.feature_schema]` | 10 | 1 |
 | `[core.forecast_engine]` | 29 | 11 |
-| `[core.fuse]` | 49 | 2 |
+| `[core.fuse]` | 51 | 2 |
 | `[core.health_tracker]` | 13 | 1 |
 | `[core.metrics]` | 14 | 1 |
 | `[core.model_evaluation]` | 15 | 1 |
@@ -45,8 +45,8 @@ type: agent-memory
 | `[core.pipeline_types]` | 23 | 1 |
 | `[core.regime_binner]` | 16 | 1 |
 | `[core.regimes]` | 56 | 5 |
-| `[core.representation_contracts]` | 13 | 0 |
-| `[core.representation_pipeline]` | 8 | 6 |
+| `[core.representation_contracts]` | 14 | 0 |
+| `[core.representation_pipeline]` | 11 | 6 |
 | `[core.representation_store]` | 10 | 3 |
 | `[core.resource_monitor]` | 27 | 0 |
 | `[core.rul_estimator]` | 9 | 3 |

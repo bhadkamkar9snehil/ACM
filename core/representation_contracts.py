@@ -90,6 +90,14 @@ class EligibilityDecision:
 
 
 @dataclass(frozen=True)
+class RepresentationAuthorityPolicy:
+    mode: str = "shadow"
+    active: bool = False
+    reason: str = "shadow_default"
+    historical_replay: bool = False
+
+
+@dataclass(frozen=True)
 class BaselineGovernanceDecision:
     runtime_mode: RuntimeMode
     readiness_state: str
