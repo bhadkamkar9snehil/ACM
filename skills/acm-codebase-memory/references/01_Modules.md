@@ -1,7 +1,7 @@
 ---
 type: index
 auto-updated: true
-generated_at: 2026-03-12T07:54:00+00:00
+generated_at: 2026-03-12T09:35:49+00:00
 ---
 
 # Module Index
@@ -50,6 +50,7 @@ generated_at: 2026-03-12T07:54:00+00:00
 - [[modules/core.resource_monitor]] (core/resource_monitor.py)
 - [[modules/core.rul_estimator]] (core/rul_estimator.py)
 - [[modules/core.run_metadata_writer]] (core/run_metadata_writer.py)
+- [[modules/core.schema_drift_manager]] (core/schema_drift_manager.py)
 - [[modules/core.seasonality]] (core/seasonality.py)
 - [[modules/core.sensor_attribution]] (core/sensor_attribution.py)
 - [[modules/core.signal_profiler]] (core/signal_profiler.py)

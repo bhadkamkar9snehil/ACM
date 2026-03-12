@@ -2324,6 +2324,7 @@ Status as of 2026-03-12:
 - Slice 6 completed: context ownership now routes through `core/context_engine.py`, and regime postprocess emits a shadow typed `ContextAssignment` without changing score authority.
 - Slice 7 completed: shadow comparability now lives in `core/comparability_engine.py`, `core/fuse.py` forwards typed context back to the representation layer, and `core/acm.py` re-evaluates `score_allowed` and `learn_allowed` after postprocess without changing production authority.
 - Slice 8 completed: baseline governance now routes through `core/baseline_governor.py`, the representation layer consumes a first-class shadow `BaselineGovernanceDecision`, and ACM feeds contamination, coldstart, refit, and EWM freeze signals into that contract without changing legacy mutation authority.
+- Slice 9 completed: schema drift now routes through `core/schema_drift_manager.py`, cached-manifest alignment and regime-basis mismatch emit first-class compatibility decisions, and ACM feeds shadow schema/basis compatibility into the representation layer without changing current retrain or fallback authority.
 
 ### Recommended delivery slices
 

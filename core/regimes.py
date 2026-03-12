@@ -41,6 +41,7 @@ from core.context_engine import (
     predict_regime_with_confidence as _context_predict_regime_with_confidence,
 )
 from core.representation_contracts import ContextAssignment
+from core.schema_drift_manager import SchemaDriftDecision, classify_regime_basis_drift
 from core.structure_encoder import (
     _compute_basis_signature as _structure_compute_basis_signature,
     build_feature_basis as _structure_build_feature_basis,
@@ -2755,6 +2756,7 @@ class RegimeBasisBuildResult:
     regime_basis_hash: Optional[int]
     regime_model: Optional[RegimeModel]
     degraded: bool
+    basis_drift_decision: SchemaDriftDecision = field(default_factory=SchemaDriftDecision)
 
 
 def build_regime_feature_basis_stage(
@@ -2777,6 +2779,7 @@ def build_regime_feature_basis_stage(
     regime_basis_meta: Dict[str, Any] = {}
     regime_basis_hash: Optional[int] = None
     degraded = False
+    basis_drift_decision = SchemaDriftDecision()
 
     try:
         basis_train, basis_score, basis_meta = build_feature_basis(
@@ -2807,6 +2810,13 @@ def build_regime_feature_basis_stage(
     cached_model_version = cached_model_meta.get("model_version") if isinstance(cached_model_meta, dict) else None
     version_mismatch = cached_model_version is not None and cached_model_version != REGIME_MODEL_VERSION
 
+    basis_drift_decision = classify_regime_basis_drift(
+        regime_model=regime_model,
+        regime_basis_train=regime_basis_train,
+        cached_model_version=cached_model_version,
+        current_model_version=REGIME_MODEL_VERSION,
+    )
+
     if regime_model is not None and (
         regime_basis_train is None
         or regime_model.feature_columns != list(regime_basis_train.columns)
@@ -2830,6 +2840,7 @@ def build_regime_feature_basis_stage(
         regime_basis_hash=regime_basis_hash,
         regime_model=regime_model,
         degraded=degraded,
+        basis_drift_decision=basis_drift_decision,
     )
 
 
@@ -2978,6 +2989,7 @@ class ScoringRegimeStageResult:
     regime_loaded_from_state: bool
     degraded_regime_basis: bool
     current_model_maturity: Optional[str]
+    basis_drift_decision: SchemaDriftDecision = field(default_factory=SchemaDriftDecision)
     regime_model_was_trained: bool = False
 
 
@@ -3105,6 +3117,7 @@ def run_scoring_regime_stage(
         regime_loaded_from_state=regime_loaded_from_state,
         degraded_regime_basis=basis_result.degraded,
         current_model_maturity=current_model_maturity,
+        basis_drift_decision=basis_result.basis_drift_decision,
         regime_model_was_trained=regime_labeling_result.regime_model_was_trained,
     )
 

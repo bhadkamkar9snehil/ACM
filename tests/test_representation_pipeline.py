@@ -3,7 +3,7 @@ from datetime import datetime
 import pandas as pd
 
 from core.data_loader import DataMeta
-from core.representation_contracts import ContextAssignment, RuntimeMode
+from core.representation_contracts import CompatibilityStatus, ContextAssignment, RuntimeMode
 from core.representation_pipeline import enrich_representation_shadow, run_representation_pipeline
 
 
@@ -188,3 +188,41 @@ def test_enrich_representation_shadow_recomputes_eligibility_from_context() -> N
     assert updated.eligibility.score_allowed is True
     assert updated.eligibility.learn_allowed is False
     assert "comparability_shadow_evaluated" in updated.notes
+
+
+def test_enrich_representation_shadow_blocks_schema_drift_classes() -> None:
+    train = _frame("2024-01-01T00:00:00", 3)
+    score = pd.DataFrame(
+        {
+            "sensor_a": [4.0, 5.0],
+            "sensor_b": [40.0, 50.0],
+        },
+        index=pd.date_range("2024-01-01T03:00:00", periods=2, freq="1h", name="EntryDateTime"),
+    )
+
+    result = run_representation_pipeline(
+        train_df=train,
+        score_df=score,
+        meta={"sampling_seconds": 3600.0},
+        cfg={},
+        equip_id=78,
+        run_id="run-schema-drift",
+    )
+
+    updated = enrich_representation_shadow(
+        result,
+        cfg={},
+        context=ContextAssignment(
+            context_id="regime:2",
+            context_label="REGIME_2",
+            context_confidence=0.9,
+            context_stability="STABLE",
+            transition_status="STEADY",
+            is_novel=False,
+            is_ambiguous=False,
+        ),
+        compatibility=CompatibilityStatus(schema_compatibility="TEMPORARY_TAG_LOSS"),
+    )
+
+    assert updated.eligibility.score_allowed is False
+    assert "schema_incompatible" in updated.eligibility.suppressed_reason_codes

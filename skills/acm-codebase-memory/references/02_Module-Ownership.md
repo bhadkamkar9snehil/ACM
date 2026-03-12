@@ -6,7 +6,7 @@ type: agent-memory
 
 | Module | Symbols | Core Imports |
 |---|---:|---:|
-| `[core.acm]` | 5 | 21 |
+| `[core.acm]` | 5 | 22 |
 | `[core.adaptive_thresholds]` | 13 | 1 |
 | `[core.analytics_builder]` | 15 | 1 |
 | `[core.ar1_detector]` | 6 | 1 |
@@ -44,12 +44,13 @@ type: agent-memory
 | `[core.output_sql_core]` | 22 | 2 |
 | `[core.pipeline_types]` | 23 | 1 |
 | `[core.regime_binner]` | 16 | 1 |
-| `[core.regimes]` | 56 | 4 |
+| `[core.regimes]` | 56 | 5 |
 | `[core.representation_contracts]` | 13 | 0 |
 | `[core.representation_pipeline]` | 8 | 6 |
 | `[core.resource_monitor]` | 27 | 0 |
 | `[core.rul_estimator]` | 9 | 3 |
 | `[core.run_metadata_writer]` | 18 | 1 |
+| `[core.schema_drift_manager]` | 6 | 2 |
 | `[core.seasonality]` | 20 | 0 |
 | `[core.sensor_attribution]` | 30 | 1 |
 | `[core.signal_profiler]` | 9 | 2 |

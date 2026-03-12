@@ -49,7 +49,10 @@ from io import BytesIO
 from dataclasses import dataclass, asdict
 import pandas as pd
 import numpy as np
-from core.feature_schema import align_current_features_to_schema
+from core.schema_drift_manager import (
+    apply_feature_schema_alignment,
+    classify_feature_schema_drift,
+)
 from core.observability import Console
 
 if TYPE_CHECKING:
@@ -1405,13 +1408,34 @@ def align_current_features_to_cached_manifest(
     Returns:
         (train_aligned, score_aligned, current_sensors, cache_compatible)
     """
-    return align_current_features_to_schema(
-        train,
-        score,
-        cached_manifest,
-        equip=equip,
-        logger=logger,
-    )
+    decision = classify_feature_schema_drift(list(train.columns), cached_manifest)
+
+    if decision.operator_summary:
+        logger.info(
+            decision.operator_summary,
+            component="MODEL",
+            equip=equip,
+            schema_compatibility=decision.schema_compatibility,
+            missing_count=len(decision.missing_signals),
+            new_count=len(decision.new_signals),
+        )
+
+    if decision.new_signals:
+        logger.warn(
+            f"Current data has {len(decision.new_signals)} features not in cache - cannot use cached models",
+            component="MODEL",
+            equip=equip,
+            extra_features=list(decision.new_signals)[:5],
+        )
+    elif decision.missing_signals and decision.use_intersection:
+        logger.warn(
+            f"Using feature subset: {len(decision.missing_signals)} cached features missing in current data",
+            component="MODEL",
+            equip=equip,
+            missing_features=list(decision.missing_signals)[:5],
+        )
+
+    return apply_feature_schema_alignment(train, score, decision)
 
 
 def restore_detectors_from_runtime_cache(

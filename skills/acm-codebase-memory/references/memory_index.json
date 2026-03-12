@@ -1,12 +1,12 @@
 {
-  "generated_at": "2026-03-12T07:53:59+00:00",
-  "module_count": 53,
+  "generated_at": "2026-03-12T09:35:49+00:00",
+  "module_count": 54,
   "modules": [
     {
       "module_name": "core.acm",
       "source_path": "core/acm.py",
       "symbol_count": 5,
-      "core_import_count": 21,
+      "core_import_count": 22,
       "core_imports": [
         "core",
         "core.adaptive_thresholds",
@@ -23,6 +23,7 @@
         "core.representation_pipeline",
         "core.resource_monitor",
         "core.run_metadata_writer",
+        "core.schema_drift_manager",
         "core.seasonality",
         "core.sensor_attribution",
         "core.smart_coldstart",
@@ -139,10 +140,10 @@
       "core_imports": [
         "core",
         "core.ar1_detector",
-        "core.feature_schema",
         "core.model_persistence",
         "core.observability",
-        "core.omr"
+        "core.omr",
+        "core.schema_drift_manager"
       ]
     },
     {
@@ -269,8 +270,8 @@
       "symbol_count": 41,
       "core_import_count": 2,
       "core_imports": [
-        "core.feature_schema",
-        "core.observability"
+        "core.observability",
+        "core.schema_drift_manager"
       ]
     },
     {
@@ -387,11 +388,12 @@
       "module_name": "core.regimes",
       "source_path": "core/regimes.py",
       "symbol_count": 56,
-      "core_import_count": 4,
+      "core_import_count": 5,
       "core_imports": [
         "core.context_engine",
         "core.observability",
         "core.representation_contracts",
+        "core.schema_drift_manager",
         "core.structure_encoder"
       ]
     },
@@ -441,6 +443,16 @@
       "core_import_count": 1,
       "core_imports": [
         "core.observability"
+      ]
+    },
+    {
+      "module_name": "core.schema_drift_manager",
+      "source_path": "core/schema_drift_manager.py",
+      "symbol_count": 6,
+      "core_import_count": 2,
+      "core_imports": [
+        "core.feature_schema",
+        "core.representation_contracts"
       ]
     },
     {

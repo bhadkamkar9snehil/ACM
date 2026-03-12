@@ -24,7 +24,11 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from core.feature_schema import validate_cached_model_schema
+from core.schema_drift_manager import (
+    SchemaDriftDecision,
+    classify_feature_schema_drift,
+    validate_cached_model_schema_drift,
+)
 from core.observability import Console
 from core.ar1_detector import AR1Detector
 from core.omr import OMRDetector
@@ -69,6 +73,7 @@ class DetectorInitState:
     baseline_contamination_rate: float = 0.0   # fraction of train rows with raw fused z > alert_z
     baseline_sustained_block: float = 0.0       # longest sustained high-z run / total train rows
     baseline_contamination_verdict: str = "unknown"  # "unknown" | "ok" | "suspect" | "contaminated"
+    schema_drift_decision: Optional[SchemaDriftDecision] = None
 
     def enabled_flags(self) -> Dict[str, bool]:
         """Return detector enabled-flag mapping."""
@@ -646,6 +651,7 @@ def _initialize_detectors_for_run(
     cached_models = None
     cached_manifest = None
     cached_calibration_params = None
+    schema_drift_decision: Optional[SchemaDriftDecision] = None
 
     det_flags = get_detector_enable_flags(cfg)
     ar1_enabled = det_flags["ar1_enabled"]
@@ -676,6 +682,7 @@ def _initialize_detectors_for_run(
         cached_models = cache_restore["cached_models"]
         cached_manifest = cache_restore["cached_manifest"]
         cached_calibration_params = cache_restore["cached_calibration_params"]
+        schema_drift_decision = cache_restore.get("schema_drift_decision")
         ar1_detector = cache_restore["ar1_detector"]
         pca_detector = cache_restore["pca_detector"]
         iforest_detector = cache_restore["iforest_detector"]
@@ -838,6 +845,7 @@ def _initialize_detectors_for_run(
         baseline_contamination_rate=baseline_contamination_rate,
         baseline_sustained_block=baseline_sustained_block,
         baseline_contamination_verdict=baseline_contamination_verdict,
+        schema_drift_decision=schema_drift_decision,
     )
 
 
@@ -862,6 +870,7 @@ def load_and_rebuild_detectors_from_sql_cache(
         cfg=cfg,
         train_columns=current_sensors,
     )
+    schema_drift_decision = classify_feature_schema_drift(current_sensors, cached_manifest)
 
     if cached_models:
         train, score, current_sensors, cache_compatible = align_current_features_to_cached_manifest(
@@ -914,6 +923,7 @@ def load_and_rebuild_detectors_from_sql_cache(
         "cached_models": cached_models,
         "cached_manifest": cached_manifest,
         "cached_calibration_params": cached_calibration_params,
+        "schema_drift_decision": schema_drift_decision,
         "ar1_detector": ar1_detector,
         "pca_detector": pca_detector,
         "iforest_detector": iforest_detector,
@@ -1027,14 +1037,13 @@ def validate_model_feature_compatibility(
     Returns:
         Tuple of (is_compatible, reason_if_incompatible)
     """
-    return validate_cached_model_schema(
+    ok, reason, _ = validate_cached_model_schema_drift(
         model,
         model_name,
         current_columns,
         cached_manifest,
-        equip=equip,
-        logger=Console,
     )
+    return ok, reason
 
 
 def rebuild_detectors_from_cache(

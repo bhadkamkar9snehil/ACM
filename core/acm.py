@@ -72,6 +72,7 @@ from core.model_persistence import (
     load_manifest_protected_columns,
     run_model_adaptation_and_persistence_stage,
 )
+from core.schema_drift_manager import compatibility_status_from_drift
 
 from core.observability import (
     get_tracer,
@@ -388,6 +389,8 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
     score_regime_labels: Optional[np.ndarray] = None
     representation_shadow = None
     ewm_freeze_changes: Optional[Dict[Any, str]] = None
+    schema_drift_decision = None
+    basis_drift_decision = None
 
     try:
         # ===== Phase 1: Load data from SQL =====
@@ -526,6 +529,7 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
         detectors_just_trained = detector_init.detectors_just_trained
         baseline_contamination_verdict = detector_init.baseline_contamination_verdict
         baseline_contamination_rate = detector_init.baseline_contamination_rate
+        schema_drift_decision = detector_init.schema_drift_decision
 
         # ===== Phase 3-5: Regime basis + detector scoring + regime labeling =====
         scoring_regime_stage = regimes.run_scoring_regime_stage(
@@ -563,6 +567,7 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
         regime_loaded_from_state = scoring_regime_stage.regime_loaded_from_state
         current_model_maturity = scoring_regime_stage.current_model_maturity
         regime_model_was_trained = scoring_regime_stage.regime_model_was_trained
+        basis_drift_decision = scoring_regime_stage.basis_drift_decision
         if scoring_regime_stage.degraded_regime_basis:
             degradations.append("regime_feature_basis")
 
@@ -826,10 +831,15 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
                         freeze_changes=ewm_freeze_changes,
                         refit_requested=refit_requested,
                     )
+                    compatibility = compatibility_status_from_drift(
+                        feature_schema_drift=schema_drift_decision,
+                        basis_drift=basis_drift_decision,
+                    )
                     representation_shadow = enrich_representation_shadow(
                         representation_shadow,
                         cfg=cfg,
                         context=getattr(health_stage, "context_assignment", None),
+                        compatibility=compatibility,
                         baseline_governance=baseline_governance,
                         logger=Console,
                     )
