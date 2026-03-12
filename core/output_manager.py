@@ -92,6 +92,7 @@ from core.output_manager_services import (
     run_persistence_stage_service,
     prepare_persistence_inputs_service,
     release_persist_memory_service,
+    write_representation_artifacts_service,
 )
 from core.output_dataframe_builders import build_data_quality_records
 
@@ -1851,6 +1852,19 @@ class OutputManager:
     def write_sensor_correlations_from_raw(self, raw_score: Optional[pd.DataFrame]) -> int:
         """Build sensor correlation matrix from raw sensor frame and persist it."""
         return write_sensor_correlations_from_raw_service(self, raw_score=raw_score)
+
+    def write_representation_artifacts(
+        self,
+        *,
+        representation_result: Any,
+        signal_source_df: Optional[pd.DataFrame] = None,
+    ) -> Any:
+        """Persist shadow representation control-plane artifacts via representation_store."""
+        return write_representation_artifacts_service(
+            self,
+            representation_result=representation_result,
+            signal_source_df=signal_source_df,
+        )
     
     def write_feature_drop_log(self, dropped_features: List[Dict[str, Any]]) -> int:
         """Write dropped features log to ACM_FeatureDropLog."""

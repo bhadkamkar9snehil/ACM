@@ -13,6 +13,7 @@ import numpy as np
 import json
 
 from core.observability import Console
+from core.representation_store import persist_representation_artifacts
 from core.sensor_attribution import build_contribution_timeline
 
 
@@ -1284,3 +1285,17 @@ def prepare_persistence_inputs_service(
         )
 
     return {"sensor_context": sensor_context}
+
+
+def write_representation_artifacts_service(
+    output_manager: Any,
+    *,
+    representation_result: Any,
+    signal_source_df: Optional[pd.DataFrame] = None,
+) -> Any:
+    """Persist shadow representation control-plane artifacts through the new store."""
+    return persist_representation_artifacts(
+        output_manager,
+        representation_result,
+        signal_source_df=signal_source_df,
+    )

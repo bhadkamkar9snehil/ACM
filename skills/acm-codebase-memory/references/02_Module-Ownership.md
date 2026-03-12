@@ -39,14 +39,15 @@ type: agent-memory
 | `[core.output_artifacts]` | 2 | 1 |
 | `[core.output_contracts]` | 5 | 0 |
 | `[core.output_dataframe_builders]` | 1 | 0 |
-| `[core.output_manager]` | 105 | 9 |
-| `[core.output_manager_services]` | 31 | 2 |
+| `[core.output_manager]` | 106 | 9 |
+| `[core.output_manager_services]` | 32 | 3 |
 | `[core.output_sql_core]` | 22 | 2 |
 | `[core.pipeline_types]` | 23 | 1 |
 | `[core.regime_binner]` | 16 | 1 |
 | `[core.regimes]` | 56 | 5 |
 | `[core.representation_contracts]` | 13 | 0 |
 | `[core.representation_pipeline]` | 8 | 6 |
+| `[core.representation_store]` | 10 | 3 |
 | `[core.resource_monitor]` | 27 | 0 |
 | `[core.rul_estimator]` | 9 | 3 |
 | `[core.run_metadata_writer]` | 18 | 1 |

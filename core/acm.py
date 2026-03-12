@@ -388,6 +388,7 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
     use_per_regime: bool = False
     score_regime_labels: Optional[np.ndarray] = None
     representation_shadow = None
+    representation_store_result = None
     ewm_freeze_changes: Optional[Dict[Any, str]] = None
     schema_drift_decision = None
     basis_drift_decision = None
@@ -846,6 +847,22 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
                 except Exception as representation_exc:
                     Console.warn(
                         "Representation shadow comparability failed; continuing with legacy runtime authority",
+                        component="REPRESENTATION",
+                        equip_id=equip_id,
+                        run_id=run_id,
+                        error_type=type(representation_exc).__name__,
+                        error=str(representation_exc)[:200],
+                    )
+        with T.section("representation.shadow.persist"):
+            if representation_shadow is not None and output_manager is not None:
+                try:
+                    representation_store_result = output_manager.write_representation_artifacts(
+                        representation_result=representation_shadow,
+                        signal_source_df=raw_score if raw_score is not None else score,
+                    )
+                except Exception as representation_exc:
+                    Console.warn(
+                        "Representation shadow persistence failed; continuing with legacy runtime authority",
                         component="REPRESENTATION",
                         equip_id=equip_id,
                         run_id=run_id,

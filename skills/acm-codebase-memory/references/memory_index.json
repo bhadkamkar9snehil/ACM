@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-03-12T09:35:49+00:00",
-  "module_count": 54,
+  "generated_at": "2026-03-12T10:08:52+00:00",
+  "module_count": 55,
   "modules": [
     {
       "module_name": "core.acm",
@@ -332,7 +332,7 @@
     {
       "module_name": "core.output_manager",
       "source_path": "core/output_manager.py",
-      "symbol_count": 105,
+      "symbol_count": 106,
       "core_import_count": 9,
       "core_imports": [
         "core.analytics_builder",
@@ -349,10 +349,11 @@
     {
       "module_name": "core.output_manager_services",
       "source_path": "core/output_manager_services.py",
-      "symbol_count": 31,
-      "core_import_count": 2,
+      "symbol_count": 32,
+      "core_import_count": 3,
       "core_imports": [
         "core.observability",
+        "core.representation_store",
         "core.sensor_attribution"
       ]
     },
@@ -416,6 +417,17 @@
         "core.representation_contracts",
         "core.signal_profiler",
         "core.state_builder"
+      ]
+    },
+    {
+      "module_name": "core.representation_store",
+      "source_path": "core/representation_store.py",
+      "symbol_count": 10,
+      "core_import_count": 3,
+      "core_imports": [
+        "core.observability",
+        "core.representation_contracts",
+        "core.signal_profiler"
       ]
     },
     {

@@ -1,7 +1,7 @@
 ---
 type: index
 auto-updated: true
-generated_at: 2026-03-12T09:35:49+00:00
+generated_at: 2026-03-12T10:08:52+00:00
 ---
 
 # Module Index
@@ -47,6 +47,7 @@ generated_at: 2026-03-12T09:35:49+00:00
 - [[modules/core.regimes]] (core/regimes.py)
 - [[modules/core.representation_contracts]] (core/representation_contracts.py)
 - [[modules/core.representation_pipeline]] (core/representation_pipeline.py)
+- [[modules/core.representation_store]] (core/representation_store.py)
 - [[modules/core.resource_monitor]] (core/resource_monitor.py)
 - [[modules/core.rul_estimator]] (core/rul_estimator.py)
 - [[modules/core.run_metadata_writer]] (core/run_metadata_writer.py)

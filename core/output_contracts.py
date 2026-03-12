@@ -62,6 +62,10 @@ ALLOWED_TABLES = {
     "ACM_RefitRequests",
     "ACM_PCA_Metrics",
     "ACM_RunMetadata",
+    "ACM_RepresentationStatus",
+    "ACM_SignalProfiles",
+    "ACM_RepresentationSchemas",
+    "ACM_BaselineGovernance",
     # TIER 5: OPERATIONS & AUDIT
     "ACM_Runs",
     "ACM_RunLogs",
@@ -113,6 +117,10 @@ REPLACE_POLICY_KEYS: Dict[str, Tuple[str, ...]] = {
     "ACM_PCA_Metrics": ("RunID", "EquipID"),
     "ACM_ActiveModels": ("EquipID",),
     "ACM_AdaptiveConfig": ("EquipID", "ConfigKey"),
+    "ACM_RepresentationStatus": ("RunID", "EquipID", "Timestamp"),
+    "ACM_SignalProfiles": ("RunID", "EquipID", "Timestamp", "SignalName"),
+    "ACM_RepresentationSchemas": ("RunID", "EquipID", "Timestamp"),
+    "ACM_BaselineGovernance": ("RunID", "EquipID", "Timestamp"),
 }
 
 
