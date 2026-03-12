@@ -96,3 +96,30 @@ def test_representation_pipeline_handles_empty_score_window() -> None:
     assert result.score_state is None
     assert result.eligibility.score_allowed is False
     assert result.eligibility.suppressed_reason_codes == ("no_score_rows",)
+
+
+def test_representation_pipeline_uses_shared_signal_profiler_summary() -> None:
+    idx = pd.date_range("2024-01-01T00:00:00", periods=4, freq="h", name="EntryDateTime")
+    train = pd.DataFrame(
+        {
+            "good": [1.0, 2.0, 3.0, 4.0],
+            "flat": [5.0, 5.0, 5.0, 5.0],
+            "nullish": [None, None, None, None],
+        },
+        index=idx,
+    )
+    score = train.copy()
+
+    result = run_representation_pipeline(
+        train_df=train,
+        score_df=score,
+        meta={"sampling_seconds": 3600.0},
+        cfg={},
+        equip_id=11,
+        run_id="run-signal-summary",
+    )
+
+    assert result.signal_summary.monitorable_signal_count == 1
+    assert result.signal_summary.weak_signal_count == 1
+    assert result.signal_summary.untrusted_signal_count == 1
+    assert "profiled_numeric_signals" in result.signal_summary.reason_codes

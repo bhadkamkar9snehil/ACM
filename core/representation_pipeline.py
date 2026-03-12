@@ -17,9 +17,9 @@ from core.representation_contracts import (
     RepresentationPipelineResult,
     RepresentationRefs,
     RuntimeMode,
-    SignalProfileSummary,
     StateSnapshot,
 )
+from core.signal_profiler import build_signal_profile_summary
 
 
 def _meta_get(meta: Any, key: str, default: Any = None) -> Any:
@@ -140,37 +140,6 @@ def _build_state_snapshot(
     )
 
 
-def _build_signal_summary(train_df: pd.DataFrame, score_df: pd.DataFrame) -> SignalProfileSummary:
-    basis = score_df if score_df is not None and not score_df.empty else train_df
-    if basis is None or basis.empty:
-        return SignalProfileSummary(
-            monitorable_signal_count=0,
-            weak_signal_count=0,
-            untrusted_signal_count=0,
-            reason_codes=("no_numeric_signals",),
-        )
-
-    numeric = basis.select_dtypes(include=[np.number])
-    if numeric.empty:
-        return SignalProfileSummary(
-            monitorable_signal_count=0,
-            weak_signal_count=0,
-            untrusted_signal_count=0,
-            reason_codes=("no_numeric_signals",),
-        )
-
-    valid_fraction = numeric.notna().mean(axis=0)
-    weak_signal_count = int((valid_fraction < 0.5).sum())
-    monitorable_signal_count = int((valid_fraction >= 0.5).sum())
-    reason_codes = ("shadow_summary_only",)
-    return SignalProfileSummary(
-        monitorable_signal_count=monitorable_signal_count,
-        weak_signal_count=weak_signal_count,
-        untrusted_signal_count=0,
-        reason_codes=reason_codes,
-    )
-
-
 def _resolve_runtime_mode(meta: Any) -> RuntimeMode:
     if bool(_meta_get(meta, "is_coldstart_run", False)):
         return RuntimeMode.BASELINE_FORMATION
@@ -217,7 +186,9 @@ def run_representation_pipeline(
     )
     runtime_mode = _resolve_runtime_mode(meta)
     baseline_governance = _baseline_governance_for_mode(runtime_mode)
-    signal_summary = _build_signal_summary(train_df, score_df)
+    signal_summary = build_signal_profile_summary(
+        score_df if score_df is not None and not score_df.empty else train_df
+    )
     context = ContextAssignment()
     compatibility = CompatibilityStatus()
     eligibility = EligibilityDecision(

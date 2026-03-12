@@ -21,6 +21,7 @@ import json
 import numpy as np
 import pandas as pd
 
+from core.signal_profiler import detect_low_variance_signals
 
 # =============================================================================
 # P1.2 - DataContract
@@ -534,14 +535,19 @@ def run_data_guardrails(
     
     # 2) Low-variance sensor detection on BASELINE
     if len(train.columns):
-        train_stds = train.std(numeric_only=True)
-        low_var = train_stds[train_stds < low_var_threshold]
+        low_var = detect_low_variance_signals(
+            train,
+            low_variance_threshold=low_var_threshold,
+        )
         if len(low_var) > 0:
-            result.low_var_features = list(low_var.index)
+            result.low_var_features = list(low_var)
             preview = ", ".join(result.low_var_features[:10])
             Console.warn(
-                f"{len(low_var)} low-variance sensor(s) in TRAIN (std<{low_var_threshold:g}): {preview}",
-                component="DATA", equip=equip, low_var_count=len(low_var), threshold=low_var_threshold
+                f"{len(result.low_var_features)} low-variance sensor(s) in TRAIN (std<{low_var_threshold:g}): {preview}",
+                component="DATA",
+                equip=equip,
+                low_var_count=len(result.low_var_features),
+                threshold=low_var_threshold,
             )
             # Persist low-variance sensors for future exclusion
             try:
