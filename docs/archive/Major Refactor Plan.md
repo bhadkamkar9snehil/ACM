@@ -1,5 +1,13 @@
 # Major Refactor Plan
 
+Historical reference only.
+
+The canonical ACM system-design and delivery plan is now:
+
+- [../ACM_MASTER_PLAN.md](../ACM_MASTER_PLAN.md)
+
+This archived file remains for historical rationale and detailed background, not as an active planning authority.
+
 
 22 Dec 2025 16:36
 
