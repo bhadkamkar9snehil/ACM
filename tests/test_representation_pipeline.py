@@ -3,8 +3,8 @@ from datetime import datetime
 import pandas as pd
 
 from core.data_loader import DataMeta
-from core.representation_contracts import RuntimeMode
-from core.representation_pipeline import run_representation_pipeline
+from core.representation_contracts import ContextAssignment, RuntimeMode
+from core.representation_pipeline import enrich_representation_shadow, run_representation_pipeline
 
 
 def _frame(start: str, periods: int, freq: str = "1h") -> pd.DataFrame:
@@ -51,9 +51,14 @@ def test_representation_pipeline_builds_shadow_states_from_datameta() -> None:
     assert result.score_state.integrity.observed_rows == 2
     assert result.score_state.integrity.duplicate_rows_removed == 2
     assert result.score_state.integrity.future_rows_dropped == 1
-    assert result.eligibility.score_allowed is True
+    assert result.eligibility.score_allowed is False
+    assert "context_unassessed" in result.eligibility.suppressed_reason_codes
     assert result.baseline_governance.runtime_mode == RuntimeMode.ONLINE_SCORING
-    assert result.notes == ("shadow_mode_not_authoritative", "contracts_slice")
+    assert result.notes == (
+        "shadow_mode_not_authoritative",
+        "contracts_slice",
+        "comparability_shadow_evaluated",
+    )
 
 
 def test_representation_pipeline_uses_coldstart_meta_for_runtime_mode() -> None:
@@ -78,6 +83,8 @@ def test_representation_pipeline_uses_coldstart_meta_for_runtime_mode() -> None:
     assert result.baseline_governance.runtime_mode == RuntimeMode.BASELINE_FORMATION
     assert result.baseline_governance.readiness_state == "FORMING"
     assert result.signal_summary.monitorable_signal_count == 2
+    assert result.eligibility.score_allowed is False
+    assert result.eligibility.learn_allowed is True
 
 
 def test_representation_pipeline_handles_empty_score_window() -> None:
@@ -95,7 +102,7 @@ def test_representation_pipeline_handles_empty_score_window() -> None:
 
     assert result.score_state is None
     assert result.eligibility.score_allowed is False
-    assert result.eligibility.suppressed_reason_codes == ("no_score_rows",)
+    assert "no_score_rows" in result.eligibility.suppressed_reason_codes
 
 
 def test_representation_pipeline_uses_shared_signal_profiler_summary() -> None:
@@ -123,3 +130,42 @@ def test_representation_pipeline_uses_shared_signal_profiler_summary() -> None:
     assert result.signal_summary.weak_signal_count == 1
     assert result.signal_summary.untrusted_signal_count == 1
     assert "profiled_numeric_signals" in result.signal_summary.reason_codes
+
+
+def test_enrich_representation_shadow_recomputes_eligibility_from_context() -> None:
+    train = _frame("2024-01-01T00:00:00", 3)
+    score = pd.DataFrame(
+        {
+            "sensor_a": [4.0, 5.0],
+            "sensor_b": [40.0, 50.0],
+        },
+        index=pd.date_range("2024-01-01T03:00:00", periods=2, freq="1h", name="EntryDateTime"),
+    )
+
+    result = run_representation_pipeline(
+        train_df=train,
+        score_df=score,
+        meta={"sampling_seconds": 3600.0},
+        cfg={},
+        equip_id=77,
+        run_id="run-context",
+    )
+
+    updated = enrich_representation_shadow(
+        result,
+        cfg={},
+        context=ContextAssignment(
+            context_id="regime:2",
+            context_label="REGIME_2",
+            context_confidence=0.9,
+            context_stability="STABLE",
+            transition_status="STEADY",
+            is_novel=False,
+            is_ambiguous=False,
+        ),
+    )
+
+    assert updated.context.context_label == "REGIME_2"
+    assert updated.eligibility.score_allowed is True
+    assert updated.eligibility.learn_allowed is False
+    assert "comparability_shadow_evaluated" in updated.notes

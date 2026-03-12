@@ -98,7 +98,7 @@ from core.sql_client import (
     connect_acm_sql_failfast,
     resolve_runtime_policy,
 )
-from core.representation_pipeline import run_representation_pipeline
+from core.representation_pipeline import enrich_representation_shadow, run_representation_pipeline
 from core.time_normalizer import deduplicate_index, ensure_local_index
 from core.structure_encoder import select_ewm_monitoring_surface
 
@@ -812,6 +812,25 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
         t2_p95_train = health_stage.t2_p95_train
         quality_ok = health_stage.quality_ok
         use_per_regime = health_stage.use_per_regime
+
+        with T.section("representation.shadow.comparability"):
+            if representation_shadow is not None:
+                try:
+                    representation_shadow = enrich_representation_shadow(
+                        representation_shadow,
+                        cfg=cfg,
+                        context=getattr(health_stage, "context_assignment", None),
+                        logger=Console,
+                    )
+                except Exception as representation_exc:
+                    Console.warn(
+                        "Representation shadow comparability failed; continuing with legacy runtime authority",
+                        component="REPRESENTATION",
+                        equip_id=equip_id,
+                        run_id=run_id,
+                        error_type=type(representation_exc).__name__,
+                        error=str(representation_exc)[:200],
+                    )
 
         # ===== Phase 8: Drift + episode schema normalization =====
         drift_stage = drift.run_drift_postprocess_stage(

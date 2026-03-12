@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple, cast
 from core.observability import Console, Span
+from core.representation_contracts import ContextAssignment
 from utils.detector_labels import format_culprit_label
 
 import numpy as np
@@ -2818,6 +2819,7 @@ class HealthStageResult:
     t2_p95_train: float
     quality_ok: bool
     use_per_regime: bool
+    context_assignment: ContextAssignment = field(default_factory=ContextAssignment)
 
 
 def run_health_stage(
@@ -2959,6 +2961,7 @@ def run_health_stage(
             logger=logger,
         )
         frame = regime_post.frame
+        context_assignment = getattr(regime_post, "context_assignment", ContextAssignment())
 
     auto_tune_fn(
         frame=frame,
@@ -2983,4 +2986,5 @@ def run_health_stage(
         t2_p95_train=t2_p95_train,
         quality_ok=quality_ok,
         use_per_regime=use_per_regime,
+        context_assignment=context_assignment,
     )

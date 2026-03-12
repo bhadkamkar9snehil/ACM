@@ -2322,6 +2322,7 @@ Status as of 2026-03-12:
 - Slice 4 completed: governed batch-window state construction now lives in `core/state_builder.py`.
 - Slice 5 completed: the `RG-07` milestone was delivered as two reviewable extractions, `core/structure_encoder.py` and `core/feature_schema.py`, while keeping runtime authority unchanged.
 - Slice 6 completed: context ownership now routes through `core/context_engine.py`, and regime postprocess emits a shadow typed `ContextAssignment` without changing score authority.
+- Slice 7 completed: shadow comparability now lives in `core/comparability_engine.py`, `core/fuse.py` forwards typed context back to the representation layer, and `core/acm.py` re-evaluates `score_allowed` and `learn_allowed` after postprocess without changing production authority.
 
 ### Recommended delivery slices
 

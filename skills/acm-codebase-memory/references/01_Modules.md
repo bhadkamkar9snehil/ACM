@@ -1,7 +1,7 @@
 ---
 type: index
 auto-updated: true
-generated_at: 2026-03-10T13:49:20+00:00
+generated_at: 2026-03-12T07:47:22+00:00
 ---
 
 # Module Index
@@ -10,8 +10,10 @@ generated_at: 2026-03-10T13:49:20+00:00
 - [[modules/core.adaptive_thresholds]] (core/adaptive_thresholds.py)
 - [[modules/core.analytics_builder]] (core/analytics_builder.py)
 - [[modules/core.ar1_detector]] (core/ar1_detector.py)
+- [[modules/core.comparability_engine]] (core/comparability_engine.py)
 - [[modules/core.confidence]] (core/confidence.py)
 - [[modules/core.config_history_writer]] (core/config_history_writer.py)
+- [[modules/core.context_engine]] (core/context_engine.py)
 - [[modules/core.correlation]] (core/correlation.py)
 - [[modules/core.data_loader]] (core/data_loader.py)
 - [[modules/core.degradation_model]] (core/degradation_model.py)
@@ -21,6 +23,7 @@ generated_at: 2026-03-10T13:49:20+00:00
 - [[modules/core.ewm_baseline]] (core/ewm_baseline.py)
 - [[modules/core.failure_probability]] (core/failure_probability.py)
 - [[modules/core.fast_features]] (core/fast_features.py)
+- [[modules/core.feature_schema]] (core/feature_schema.py)
 - [[modules/core.forecast_engine]] (core/forecast_engine.py)
 - [[modules/core.fuse]] (core/fuse.py)
 - [[modules/core.health_tracker]] (core/health_tracker.py)
@@ -41,11 +44,17 @@ generated_at: 2026-03-10T13:49:20+00:00
 - [[modules/core.pipeline_types]] (core/pipeline_types.py)
 - [[modules/core.regime_binner]] (core/regime_binner.py)
 - [[modules/core.regimes]] (core/regimes.py)
+- [[modules/core.representation_contracts]] (core/representation_contracts.py)
+- [[modules/core.representation_pipeline]] (core/representation_pipeline.py)
 - [[modules/core.resource_monitor]] (core/resource_monitor.py)
 - [[modules/core.rul_estimator]] (core/rul_estimator.py)
 - [[modules/core.run_metadata_writer]] (core/run_metadata_writer.py)
 - [[modules/core.seasonality]] (core/seasonality.py)
 - [[modules/core.sensor_attribution]] (core/sensor_attribution.py)
+- [[modules/core.signal_profiler]] (core/signal_profiler.py)
 - [[modules/core.smart_coldstart]] (core/smart_coldstart.py)
 - [[modules/core.sql_client]] (core/sql_client.py)
+- [[modules/core.state_builder]] (core/state_builder.py)
 - [[modules/core.state_manager]] (core/state_manager.py)
+- [[modules/core.structure_encoder]] (core/structure_encoder.py)
+- [[modules/core.time_normalizer]] (core/time_normalizer.py)

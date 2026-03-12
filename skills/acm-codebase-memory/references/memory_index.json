@@ -1,31 +1,33 @@
 {
-  "generated_at": "2026-03-10T13:49:20+00:00",
-  "module_count": 43,
+  "generated_at": "2026-03-12T07:47:22+00:00",
+  "module_count": 52,
   "modules": [
     {
       "module_name": "core.acm",
       "source_path": "core/acm.py",
       "symbol_count": 5,
-      "core_import_count": 18,
+      "core_import_count": 20,
       "core_imports": [
         "core",
         "core.adaptive_thresholds",
         "core.detector_orchestrator",
         "core.episode_culprits_writer",
         "core.ewm_baseline",
-        "core.fast_features",
         "core.model_lifecycle",
         "core.model_persistence",
         "core.observability",
         "core.output_manager",
         "core.pipeline_types",
         "core.regime_binner",
+        "core.representation_pipeline",
         "core.resource_monitor",
         "core.run_metadata_writer",
         "core.seasonality",
         "core.sensor_attribution",
         "core.smart_coldstart",
-        "core.sql_client"
+        "core.sql_client",
+        "core.structure_encoder",
+        "core.time_normalizer"
       ]
     },
     {
@@ -56,6 +58,15 @@
       ]
     },
     {
+      "module_name": "core.comparability_engine",
+      "source_path": "core/comparability_engine.py",
+      "symbol_count": 5,
+      "core_import_count": 1,
+      "core_imports": [
+        "core.representation_contracts"
+      ]
+    },
+    {
       "module_name": "core.confidence",
       "source_path": "core/confidence.py",
       "symbol_count": 11,
@@ -74,6 +85,17 @@
       ]
     },
     {
+      "module_name": "core.context_engine",
+      "source_path": "core/context_engine.py",
+      "symbol_count": 4,
+      "core_import_count": 3,
+      "core_imports": [
+        "core.observability",
+        "core.representation_contracts",
+        "core.structure_encoder"
+      ]
+    },
+    {
       "module_name": "core.correlation",
       "source_path": "core/correlation.py",
       "symbol_count": 7,
@@ -83,10 +105,11 @@
     {
       "module_name": "core.data_loader",
       "source_path": "core/data_loader.py",
-      "symbol_count": 10,
-      "core_import_count": 1,
+      "symbol_count": 5,
+      "core_import_count": 2,
       "core_imports": [
-        "core.observability"
+        "core.observability",
+        "core.time_normalizer"
       ]
     },
     {
@@ -102,10 +125,11 @@
       "module_name": "core.detector_orchestrator",
       "source_path": "core/detector_orchestrator.py",
       "symbol_count": 14,
-      "core_import_count": 5,
+      "core_import_count": 6,
       "core_imports": [
         "core",
         "core.ar1_detector",
+        "core.feature_schema",
         "core.model_persistence",
         "core.observability",
         "core.omr"
@@ -148,7 +172,17 @@
     {
       "module_name": "core.fast_features",
       "source_path": "core/fast_features.py",
-      "symbol_count": 37,
+      "symbol_count": 36,
+      "core_import_count": 2,
+      "core_imports": [
+        "core.observability",
+        "core.time_normalizer"
+      ]
+    },
+    {
+      "module_name": "core.feature_schema",
+      "source_path": "core/feature_schema.py",
+      "symbol_count": 10,
       "core_import_count": 1,
       "core_imports": [
         "core.observability"
@@ -177,9 +211,10 @@
       "module_name": "core.fuse",
       "source_path": "core/fuse.py",
       "symbol_count": 49,
-      "core_import_count": 1,
+      "core_import_count": 2,
       "core_imports": [
-        "core.observability"
+        "core.observability",
+        "core.representation_contracts"
       ]
     },
     {
@@ -222,8 +257,9 @@
       "module_name": "core.model_persistence",
       "source_path": "core/model_persistence.py",
       "symbol_count": 41,
-      "core_import_count": 1,
+      "core_import_count": 2,
       "core_imports": [
+        "core.feature_schema",
         "core.observability"
       ]
     },
@@ -286,7 +322,7 @@
       "module_name": "core.output_manager",
       "source_path": "core/output_manager.py",
       "symbol_count": 105,
-      "core_import_count": 8,
+      "core_import_count": 9,
       "core_imports": [
         "core.analytics_builder",
         "core.data_loader",
@@ -295,7 +331,8 @@
         "core.output_contracts",
         "core.output_dataframe_builders",
         "core.output_manager_services",
-        "core.output_sql_core"
+        "core.output_sql_core",
+        "core.time_normalizer"
       ]
     },
     {
@@ -322,8 +359,10 @@
       "module_name": "core.pipeline_types",
       "source_path": "core/pipeline_types.py",
       "symbol_count": 23,
-      "core_import_count": 0,
-      "core_imports": []
+      "core_import_count": 1,
+      "core_imports": [
+        "core.signal_profiler"
+      ]
     },
     {
       "module_name": "core.regime_binner",
@@ -338,9 +377,32 @@
       "module_name": "core.regimes",
       "source_path": "core/regimes.py",
       "symbol_count": 56,
-      "core_import_count": 1,
+      "core_import_count": 4,
       "core_imports": [
-        "core.observability"
+        "core.context_engine",
+        "core.observability",
+        "core.representation_contracts",
+        "core.structure_encoder"
+      ]
+    },
+    {
+      "module_name": "core.representation_contracts",
+      "source_path": "core/representation_contracts.py",
+      "symbol_count": 13,
+      "core_import_count": 0,
+      "core_imports": []
+    },
+    {
+      "module_name": "core.representation_pipeline",
+      "source_path": "core/representation_pipeline.py",
+      "symbol_count": 11,
+      "core_import_count": 5,
+      "core_imports": [
+        "core.comparability_engine",
+        "core.observability",
+        "core.representation_contracts",
+        "core.signal_profiler",
+        "core.state_builder"
       ]
     },
     {
@@ -387,6 +449,16 @@
       ]
     },
     {
+      "module_name": "core.signal_profiler",
+      "source_path": "core/signal_profiler.py",
+      "symbol_count": 9,
+      "core_import_count": 2,
+      "core_imports": [
+        "core.representation_contracts",
+        "core.time_normalizer"
+      ]
+    },
+    {
       "module_name": "core.smart_coldstart",
       "source_path": "core/smart_coldstart.py",
       "symbol_count": 19,
@@ -404,9 +476,37 @@
       "core_imports": []
     },
     {
+      "module_name": "core.state_builder",
+      "source_path": "core/state_builder.py",
+      "symbol_count": 7,
+      "core_import_count": 2,
+      "core_imports": [
+        "core.representation_contracts",
+        "core.time_normalizer"
+      ]
+    },
+    {
       "module_name": "core.state_manager",
       "source_path": "core/state_manager.py",
       "symbol_count": 14,
+      "core_import_count": 1,
+      "core_imports": [
+        "core.observability"
+      ]
+    },
+    {
+      "module_name": "core.structure_encoder",
+      "source_path": "core/structure_encoder.py",
+      "symbol_count": 4,
+      "core_import_count": 1,
+      "core_imports": [
+        "core.observability"
+      ]
+    },
+    {
+      "module_name": "core.time_normalizer",
+      "source_path": "core/time_normalizer.py",
+      "symbol_count": 7,
       "core_import_count": 1,
       "core_imports": [
         "core.observability"

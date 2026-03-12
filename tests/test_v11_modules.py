@@ -4345,7 +4345,23 @@ class TestRefactorHelpers:
         def _run_regime_postprocess_stage_fn(**kwargs):
             out_frame = kwargs["frame"].copy()
             out_frame["regime_state"] = ["steady", "steady"]
-            return type("RegimePostprocessResult", (), {"frame": out_frame, "transient_counts": {"steady": 2}})()
+            return type(
+                "RegimePostprocessResult",
+                (),
+                {
+                    "frame": out_frame,
+                    "transient_counts": {"steady": 2},
+                    "context_assignment": fuse.ContextAssignment(
+                        context_id="regime:0",
+                        context_label="REGIME_0",
+                        context_confidence=0.7,
+                        context_stability="STABLE",
+                        transition_status="STEADY",
+                        is_novel=False,
+                        is_ambiguous=False,
+                    ),
+                },
+            )()
 
         auto_tune_calls = {"called": False}
         def _auto_tune_parameters_fn(**kwargs):
@@ -4393,6 +4409,7 @@ class TestRefactorHelpers:
         assert "regime_state" in result.frame.columns
         assert result.spe_p95_train == pytest.approx(1.1)
         assert result.t2_p95_train == pytest.approx(2.2)
+        assert result.context_assignment.context_label == "REGIME_0"
         assert result.quality_ok is True
         assert result.use_per_regime is True
         assert threshold_calls["called"] is True
