@@ -44,7 +44,7 @@ type: agent-memory
 | `[core.output_sql_core]` | 22 | 2 |
 | `[core.pipeline_types]` | 23 | 1 |
 | `[core.regime_binner]` | 16 | 1 |
-| `[core.regimes]` | 56 | 5 |
+| `[core.regimes]` | 57 | 5 |
 | `[core.representation_contracts]` | 14 | 0 |
 | `[core.representation_pipeline]` | 11 | 6 |
 | `[core.representation_store]` | 10 | 3 |
@@ -59,5 +59,5 @@ type: agent-memory
 | `[core.sql_client]` | 30 | 0 |
 | `[core.state_builder]` | 7 | 2 |
 | `[core.state_manager]` | 14 | 1 |
-| `[core.structure_encoder]` | 4 | 1 |
+| `[core.structure_encoder]` | 6 | 1 |
 | `[core.time_normalizer]` | 7 | 1 |
