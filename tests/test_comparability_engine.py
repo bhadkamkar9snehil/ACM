@@ -119,6 +119,20 @@ def test_evaluate_eligibility_blocks_schema_incompatibility() -> None:
     assert "schema_incompatible" in decision.suppressed_reason_codes
 
 
+def test_evaluate_eligibility_degrades_suspect_baseline_without_suppressing() -> None:
+    decision = evaluate_eligibility(
+        integrity=_integrity(),
+        context=_context(),
+        compatibility=CompatibilityStatus(),
+        baseline_governance=_baseline(contamination_verdict="SUSPECT"),
+        cfg={},
+    )
+
+    assert decision.score_allowed is True
+    assert "baseline_contamination_suspect" in decision.degraded_reason_codes
+    assert "baseline_contaminated" not in decision.suppressed_reason_codes
+
+
 def test_evaluate_eligibility_blocks_poor_integrity() -> None:
     decision = evaluate_eligibility(
         integrity=_integrity(coverage_ratio=0.40, missingness_grade="POOR", effective_signal_count=0),

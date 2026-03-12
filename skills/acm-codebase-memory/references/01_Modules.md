@@ -1,7 +1,7 @@
 ---
 type: index
 auto-updated: true
-generated_at: 2026-03-12T07:47:22+00:00
+generated_at: 2026-03-12T07:54:00+00:00
 ---
 
 # Module Index
@@ -10,6 +10,7 @@ generated_at: 2026-03-12T07:47:22+00:00
 - [[modules/core.adaptive_thresholds]] (core/adaptive_thresholds.py)
 - [[modules/core.analytics_builder]] (core/analytics_builder.py)
 - [[modules/core.ar1_detector]] (core/ar1_detector.py)
+- [[modules/core.baseline_governor]] (core/baseline_governor.py)
 - [[modules/core.comparability_engine]] (core/comparability_engine.py)
 - [[modules/core.confidence]] (core/confidence.py)
 - [[modules/core.config_history_writer]] (core/config_history_writer.py)

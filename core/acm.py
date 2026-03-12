@@ -66,6 +66,7 @@ from core.detector_orchestrator import (
     fit_all_detectors,
     run_detector_initialization_stage,
 )
+from core.baseline_governor import build_shadow_baseline_governance
 from core.model_persistence import (
     persist_calibration_params_safe,
     load_manifest_protected_columns,
@@ -386,6 +387,7 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
     use_per_regime: bool = False
     score_regime_labels: Optional[np.ndarray] = None
     representation_shadow = None
+    ewm_freeze_changes: Optional[Dict[Any, str]] = None
 
     try:
         # ===== Phase 1: Load data from SQL =====
@@ -433,6 +435,7 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
                     cfg=cfg,
                     equip_id=equip_id,
                     run_id=run_id,
+                    coldstart_complete=coldstart_complete,
                     logger=Console,
                 )
             except Exception as representation_exc:
@@ -723,7 +726,7 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
 
                     # Update EWM state from score batch, then per-sensor freeze check, then save.
                     ewm_manager.update_batch(_ewm_rids, _ewm_score_numeric)
-                    ewm_manager.check_and_apply_freeze()
+                    ewm_freeze_changes = ewm_manager.check_and_apply_freeze()
                     ewm_manager.save_to_sql(sql_client)
 
         # ===== Model adaptation + persistence =====
@@ -816,10 +819,18 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
         with T.section("representation.shadow.comparability"):
             if representation_shadow is not None:
                 try:
+                    baseline_governance = build_shadow_baseline_governance(
+                        meta=meta,
+                        coldstart_complete=coldstart_complete,
+                        baseline_contamination_verdict=baseline_contamination_verdict,
+                        freeze_changes=ewm_freeze_changes,
+                        refit_requested=refit_requested,
+                    )
                     representation_shadow = enrich_representation_shadow(
                         representation_shadow,
                         cfg=cfg,
                         context=getattr(health_stage, "context_assignment", None),
+                        baseline_governance=baseline_governance,
                         logger=Console,
                     )
                 except Exception as representation_exc:

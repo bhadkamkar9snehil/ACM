@@ -6,10 +6,11 @@ type: agent-memory
 
 | Module | Symbols | Core Imports |
 |---|---:|---:|
-| `[core.acm]` | 5 | 20 |
+| `[core.acm]` | 5 | 21 |
 | `[core.adaptive_thresholds]` | 13 | 1 |
 | `[core.analytics_builder]` | 15 | 1 |
 | `[core.ar1_detector]` | 6 | 1 |
+| `[core.baseline_governor]` | 8 | 1 |
 | `[core.comparability_engine]` | 5 | 1 |
 | `[core.confidence]` | 11 | 1 |
 | `[core.config_history_writer]` | 6 | 1 |
@@ -45,7 +46,7 @@ type: agent-memory
 | `[core.regime_binner]` | 16 | 1 |
 | `[core.regimes]` | 56 | 4 |
 | `[core.representation_contracts]` | 13 | 0 |
-| `[core.representation_pipeline]` | 11 | 5 |
+| `[core.representation_pipeline]` | 8 | 6 |
 | `[core.resource_monitor]` | 27 | 0 |
 | `[core.rul_estimator]` | 9 | 3 |
 | `[core.run_metadata_writer]` | 18 | 1 |

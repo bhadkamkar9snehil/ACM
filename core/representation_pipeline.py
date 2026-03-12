@@ -5,6 +5,7 @@ from typing import Any
 
 import pandas as pd
 
+from core.baseline_governor import build_shadow_baseline_governance
 from core.comparability_engine import evaluate_eligibility
 from core.observability import Console
 from core.representation_contracts import (
@@ -22,37 +23,12 @@ from core.signal_profiler import build_signal_profile_summary
 from core.state_builder import build_state_snapshot
 
 
-def _meta_get(meta: Any, key: str, default: Any = None) -> Any:
-    if isinstance(meta, dict):
-        return meta.get(key, default)
-    return getattr(meta, key, default)
-
-
 def _integrity_grade(integrity: ObservationIntegrity) -> str:
     if integrity.coverage_ratio >= 0.95 and integrity.missingness_grade == "GOOD":
         return "GOOD"
     if integrity.coverage_ratio >= 0.80 and integrity.missingness_grade in {"GOOD", "FAIR"}:
         return "FAIR"
     return "POOR"
-
-
-def _resolve_runtime_mode(meta: Any) -> RuntimeMode:
-    if bool(_meta_get(meta, "is_coldstart_run", False)):
-        return RuntimeMode.BASELINE_FORMATION
-    return RuntimeMode.ONLINE_SCORING
-
-
-def _baseline_governance_for_mode(runtime_mode: RuntimeMode) -> BaselineGovernanceDecision:
-    readiness_state = "READY" if runtime_mode == RuntimeMode.ONLINE_SCORING else "FORMING"
-    return BaselineGovernanceDecision(
-        runtime_mode=runtime_mode,
-        readiness_state=readiness_state,
-        baseline_candidate_state="UNASSESSED",
-        contamination_verdict="UNASSESSED",
-        freeze_state="UNASSESSED",
-        shadow_refresh_state="UNASSESSED",
-        reason_codes=("shadow_mode_not_authoritative",),
-    )
 
 
 def _score_or_train_integrity(result: RepresentationPipelineResult) -> ObservationIntegrity | None:
@@ -186,6 +162,7 @@ def run_representation_pipeline(
     cfg: dict[str, Any],
     equip_id: int,
     run_id: str,
+    coldstart_complete: bool | None = None,
     logger: Any = Console,
 ) -> RepresentationPipelineResult:
     train_state = build_state_snapshot(
@@ -202,8 +179,10 @@ def run_representation_pipeline(
         run_id=run_id,
         window_label="score",
     )
-    runtime_mode = _resolve_runtime_mode(meta)
-    baseline_governance = _baseline_governance_for_mode(runtime_mode)
+    baseline_governance = build_shadow_baseline_governance(
+        meta=meta,
+        coldstart_complete=coldstart_complete,
+    )
     signal_summary = build_signal_profile_summary(
         score_df if score_df is not None and not score_df.empty else train_df
     )

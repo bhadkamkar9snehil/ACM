@@ -87,6 +87,25 @@ def test_representation_pipeline_uses_coldstart_meta_for_runtime_mode() -> None:
     assert result.eligibility.learn_allowed is True
 
 
+def test_representation_pipeline_accepts_bootstrap_runtime_mode_from_coldstart_flag() -> None:
+    train = _frame("2024-01-01T00:00:00", 3)
+    score = _frame("2024-01-01T03:00:00", 2)
+
+    result = run_representation_pipeline(
+        train_df=train,
+        score_df=score,
+        meta={"is_coldstart_run": False, "sampling_seconds": 3600.0},
+        cfg={},
+        equip_id=8,
+        run_id="run-bootstrap",
+        coldstart_complete=False,
+    )
+
+    assert result.baseline_governance.runtime_mode == RuntimeMode.BOOTSTRAP_NOT_READY
+    assert result.baseline_governance.readiness_state == "NOT_READY"
+    assert "runtime_mode_not_ready" in result.eligibility.suppressed_reason_codes
+
+
 def test_representation_pipeline_handles_empty_score_window() -> None:
     train = _frame("2024-01-01T00:00:00", 3)
     score = pd.DataFrame(index=pd.DatetimeIndex([], name="EntryDateTime"))

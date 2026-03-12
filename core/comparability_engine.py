@@ -150,8 +150,10 @@ def evaluate_eligibility(
         if readiness_state not in _READY_BASELINE_STATES:
             suppressed.append("baseline_not_ready")
         if contamination_verdict and contamination_verdict not in _CLEAR_CONTAMINATION_STATES:
-            if contamination_verdict in {"CONTAMINATED", "FAILED", "SUSPECT"}:
+            if contamination_verdict in {"CONTAMINATED", "FAILED"}:
                 suppressed.append("baseline_contaminated")
+            elif contamination_verdict == "SUSPECT":
+                degraded.append("baseline_contamination_suspect")
             else:
                 degraded.append("baseline_contamination_unassessed")
 

@@ -1,15 +1,16 @@
 {
-  "generated_at": "2026-03-12T07:47:22+00:00",
-  "module_count": 52,
+  "generated_at": "2026-03-12T07:53:59+00:00",
+  "module_count": 53,
   "modules": [
     {
       "module_name": "core.acm",
       "source_path": "core/acm.py",
       "symbol_count": 5,
-      "core_import_count": 20,
+      "core_import_count": 21,
       "core_imports": [
         "core",
         "core.adaptive_thresholds",
+        "core.baseline_governor",
         "core.detector_orchestrator",
         "core.episode_culprits_writer",
         "core.ewm_baseline",
@@ -55,6 +56,15 @@
       "core_import_count": 1,
       "core_imports": [
         "core.observability"
+      ]
+    },
+    {
+      "module_name": "core.baseline_governor",
+      "source_path": "core/baseline_governor.py",
+      "symbol_count": 8,
+      "core_import_count": 1,
+      "core_imports": [
+        "core.representation_contracts"
       ]
     },
     {
@@ -395,9 +405,10 @@
     {
       "module_name": "core.representation_pipeline",
       "source_path": "core/representation_pipeline.py",
-      "symbol_count": 11,
-      "core_import_count": 5,
+      "symbol_count": 8,
+      "core_import_count": 6,
       "core_imports": [
+        "core.baseline_governor",
         "core.comparability_engine",
         "core.observability",
         "core.representation_contracts",
