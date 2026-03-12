@@ -1,7 +1,7 @@
 ---
 type: index
 auto-updated: true
-generated_at: 2026-03-12T10:56:09+00:00
+generated_at: 2026-03-12T11:18:10+00:00
 ---
 
 # ACM Obsidian Knowledge Graph
@@ -14,7 +14,7 @@ Single source of truth for ACM codebase knowledge.
 ## Snapshot (auto-generated)
 - modules: 55
 - symbols (functions/classes/methods): 1082
-- generated_at_utc: 2026-03-12T10:56:09+00:00
+- generated_at_utc: 2026-03-12T11:18:10+00:00
 
 ## Generated — Codebase Navigation
 - [[01_Modules]] — all core modules

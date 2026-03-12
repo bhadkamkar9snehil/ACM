@@ -408,7 +408,6 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
     use_per_regime: bool = False
     score_regime_labels: Optional[np.ndarray] = None
     representation_shadow = None
-    representation_store_result = None
     representation_score_suppressed = False
     ewm_freeze_changes: Optional[Dict[Any, str]] = None
     schema_drift_decision = None
@@ -959,7 +958,7 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
         with T.section("representation.shadow.persist"):
             if representation_shadow is not None and output_manager is not None:
                 try:
-                    representation_store_result = output_manager.write_representation_artifacts(
+                    output_manager.write_representation_artifacts(
                         representation_result=representation_shadow,
                         signal_source_df=raw_score if raw_score is not None else score,
                     )

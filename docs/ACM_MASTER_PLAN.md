@@ -2139,11 +2139,13 @@ Do not do this too early:
 
 ### SQL migrations and persistence rollout
 
-Current highest numbered migration is `017`.
+Current highest numbered migration in repo is `022`.
 
-The `2026.2` plan should reserve the next migration numbers for representation-governance control-plane tables.
+The representation-governance control-plane migrations and run-level summary migration now exist in repo.
 
-Create these files:
+What remains is rollout validation, replay evidence, and operator/runbook closure rather than file creation.
+
+These files now exist:
 
 #### `scripts/sql/migrations/v11/018_acm_representation_status.sql`
 
@@ -2264,15 +2266,36 @@ Implementation notes:
 - support replace semantics by run, equipment, and timestamp
 - link clearly to the representation status row for the same batch
 
-Optional migration only if needed:
+#### `scripts/sql/migrations/v11/022_acm_runs_representation_status.sql`
 
-- add a later migration for `ACM_Runs` summary columns only if run-level representation summaries cannot be carried cleanly through existing metadata paths
+Purpose:
+
+- project run-level representation authority and suppression metadata directly onto `ACM_Runs`
+
+Minimum columns:
+
+- `RepresentationAuthoritative`
+- `RepresentationScoreAllowed`
+- `RepresentationLearnAllowed`
+- `RepresentationContextLabel`
+- `RepresentationRuntimeMode`
+- `RepresentationSchemaCompatibility`
+- `RepresentationBasisCompatibility`
+- `RepresentationBaselineCompatibility`
+- `RepresentationSuppressedReasons`
+- `RepresentationDegradedReasons`
+
+Implementation notes:
+
+- this migration is now required because run-level representation summaries are part of the `G2` suppression-visibility contract
+- keep these fields as operator-facing summaries; detailed batch reasoning remains in `ACM_RepresentationStatus`
 
 Files to modify with the migrations:
 
 - `core/output_contracts.py`
 - any installer or deployment script that enumerates v11 migrations
 - `tests/test_sql_batch_runner.py`
+- `tests/test_v11_modules.py`
 - representation-store tests
 
 ### Test files to add or expand
@@ -2327,6 +2350,35 @@ Status as of 2026-03-12:
 - Slice 9 completed: schema drift now routes through `core/schema_drift_manager.py`, cached-manifest alignment and regime-basis mismatch emit first-class compatibility decisions, and ACM feeds shadow schema/basis compatibility into the representation layer without changing current retrain or fallback authority.
 - Slice 10 completed: representation control-plane persistence now routes through `core/representation_store.py`, shadow governance artifacts can be dual-written to SQL through the existing output contract path, and migrations/contracts exist for the new representation tables without changing production detector-output authority.
 - Slice 11 completed: authoritative representation gating now exists in validation mode only, activation is explicit and replay-safe, learning-side effects are blocked when `learn_allowed = false`, downstream scoring outputs are suppressed when `score_allowed = false`, `scripts/sql_batch_runner.py` can invoke validation authority and surface representation status during replay inspection, and run-level representation status is now projected onto `ACM_Runs` so suppression/degradation reasons are visible in top-level run metadata without changing default production authority.
+
+### Audit checkpoint: 2026-03-12
+
+Strict repo audit against this plan shows:
+
+- the implementation is on track through Slice 11, but not beyond it
+- the new representation owners, SQL tables, validation-only authority path, and run-level representation summary projection are all real in code
+- `G2` is now satisfied in code because suppression reasons are persisted in `ACM_RepresentationStatus`, surfaced by `scripts/sql_batch_runner.py`, and projected onto `ACM_Runs`
+- `G1`, `G4`, and `G6` remain open because zero-day replay closure and replay-qualified legacy-owner replacement are not complete
+- the repo is intentionally carrying duplicate owners in shadow/validation mode; this is acceptable until `RG-14`, but only if those owners are treated as transitional
+
+Transitional duplicate owners that should survive until replay-qualified replacement exists:
+
+- `core/regimes.py` compatibility wrappers for structure and context extraction
+- `core/model_persistence.py::align_current_features_to_cached_manifest()`
+- `core/detector_orchestrator.py::validate_model_feature_compatibility()`
+- legacy adaptation side effects in `core/ewm_baseline.py`, `core/model_lifecycle.py`, and `core/model_evaluation.py`
+
+Audit cleanup findings that are safe immediately:
+
+- remove dead locals and unused shadow-write placeholders when they are not read anywhere
+- fix stale operator and knowledge docs that advertise unsupported CLI flags
+- keep generated ACM memory artifacts refreshed after runtime/tooling changes so the repo navigation layer stays green
+
+Audit findings that must wait for `RG-14`:
+
+- deleting the `core/regimes.py` compatibility wrappers
+- removing legacy schema-alignment entrypoints before direct callers cut over
+- deleting legacy adaptation authorities before replay-qualified replacement exists
 
 ### Recommended delivery slices
 
