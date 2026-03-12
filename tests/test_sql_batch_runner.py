@@ -52,6 +52,11 @@ class _SequenceCursor:
             return None
         return self._rows.pop(0)
 
+    def fetchall(self):
+        rows = list(self._rows)
+        self._rows.clear()
+        return rows
+
     def close(self):
         return None
 
@@ -191,6 +196,95 @@ def test_process_equipment_emits_final_summary_on_precheck_failure(tmp_path, mon
     assert success is False
     assert any(
         "Final summary | status=FAIL" in msg and "note=sql_connection_failure" in msg
+        for _, msg in messages
+    )
+
+
+def test_validate_representation_sql_contract_reports_missing_tables_and_columns(tmp_path):
+    runner = SQLBatchRunner(
+        sql_conn_string="DRIVER={ODBC Driver 17 for SQL Server};SERVER=.;DATABASE=ACM;Trusted_Connection=yes;",
+        artifact_root=tmp_path,
+        representation_authority="validation",
+    )
+
+    class _Cursor:
+        def __init__(self):
+            self.queries = []
+
+        def execute(self, query, params=None):
+            self.queries.append((str(query), tuple(params) if params else ()))
+            return self
+
+        def fetchall(self):
+            query = self.queries[-1][0]
+            if "FROM sys.tables" in query:
+                return [("ACM_RepresentationStatus",), ("ACM_SignalProfiles",)]
+            if "FROM sys.columns" in query:
+                return [("RepresentationAuthoritative",), ("RepresentationScoreAllowed",)]
+            return []
+
+    class _Conn:
+        def __init__(self):
+            self.cursor_obj = _Cursor()
+
+        def cursor(self):
+            return self.cursor_obj
+
+        def close(self):
+            return None
+
+    runner._get_sql_connection = lambda: _Conn()  # type: ignore[method-assign]
+
+    ok, issues = runner._validate_representation_sql_contract()
+
+    assert ok is False
+    assert any("missing tables:" in issue and "ACM_RepresentationSchemas" in issue for issue in issues)
+    assert any("missing ACM_Runs columns:" in issue and "RepresentationLearnAllowed" in issue for issue in issues)
+
+
+def test_process_equipment_fails_fast_when_validation_sql_contract_is_missing(tmp_path, monkeypatch):
+    runner = SQLBatchRunner(
+        sql_conn_string="DRIVER={ODBC Driver 17 for SQL Server};SERVER=.;DATABASE=ACM;Trusted_Connection=yes;",
+        artifact_root=tmp_path,
+        representation_authority="validation",
+    )
+    messages = []
+
+    class _ConsoleCapture:
+        @staticmethod
+        def header(msg, **kwargs):
+            messages.append(("header", msg))
+
+        @staticmethod
+        def info(msg, **kwargs):
+            messages.append(("info", msg))
+
+        @staticmethod
+        def ok(msg, **kwargs):
+            messages.append(("ok", msg))
+
+        @staticmethod
+        def warn(msg, **kwargs):
+            messages.append(("warn", msg))
+
+        @staticmethod
+        def error(msg, **kwargs):
+            messages.append(("error", msg))
+
+        @staticmethod
+        def status(msg, **kwargs):
+            messages.append(("status", msg))
+
+    monkeypatch.setattr(sql_batch_runner_module, "Console", _ConsoleCapture)
+    runner._test_sql_connection = lambda: True  # type: ignore[method-assign]
+    runner._validate_representation_sql_contract = lambda: (False, ["missing tables: ACM_RepresentationStatus"])  # type: ignore[method-assign]
+
+    success = runner.process_equipment("FD_FAN")
+
+    assert success is False
+    assert any("Validation authority requires representation SQL contract" in msg for _, msg in messages)
+    assert any(
+        "Final summary | status=FAIL" in msg and "note=representation_sql_contract_missing" in msg
         for _, msg in messages
     )
 

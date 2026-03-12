@@ -3693,6 +3693,77 @@ class TestRefactorHelpers:
         assert calls["sensor"] is True
         assert calls["sections"] == ["baseline.buffer_write", "sensor.context"]
 
+    def test_prepare_persistence_inputs_skips_baseline_buffer_when_representation_blocks_learning(self):
+        """Persistence input preparation should not mutate the baseline buffer when learning is blocked."""
+        from core.output_manager import OutputManager
+        from core.representation_contracts import EligibilityDecision
+
+        out = OutputManager.__new__(OutputManager)
+        out.equip_id = 5010
+        out.run_id = "run-1"
+        calls = {"sections": [], "baseline": False, "sensor": False}
+
+        class _Section:
+            def __init__(self, name):
+                self.name = name
+
+            def __enter__(self):
+                calls["sections"].append(self.name)
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        def _section_fn(name):
+            return _Section(name)
+
+        def _update_baseline_buffer(**kwargs):
+            calls["baseline"] = True
+
+        def _build_sensor_context(**kwargs):
+            calls["sensor"] = True
+            return {"ctx": 1}
+
+        out.update_baseline_buffer = _update_baseline_buffer
+
+        idx = pd.date_range("2026-01-01", periods=2, freq="h")
+        raw_train = pd.DataFrame({"a": [1.0, 2.0]}, index=idx)
+        raw_score = pd.DataFrame({"a": [1.5, 2.5]}, index=idx)
+        frame = pd.DataFrame({"fused": [float("nan"), float("nan")]}, index=idx)
+
+        result = out.prepare_persistence_inputs(
+            section_fn=_section_fn,
+            raw_train=raw_train,
+            raw_score=raw_score,
+            frame=frame,
+            omr_contributions_data=None,
+            regime_model=None,
+            cfg={},
+            coldstart_complete=True,
+            build_sensor_analytics_context_fn=_build_sensor_context,
+            logger=type("L", (), {"warn": lambda *a, **k: None, "info": lambda *a, **k: None})(),
+            equip="FD_FAN",
+            representation_result=type(
+                "RepresentationResult",
+                (),
+                {
+                    "authoritative": True,
+                    "eligibility": EligibilityDecision(
+                        authoritative=True,
+                        score_allowed=False,
+                        learn_allowed=False,
+                        suppressed_reason_codes=("context_unknown",),
+                    ),
+                },
+            )(),
+            representation_authority_active=True,
+        )
+
+        assert result.sensor_context == {"ctx": 1}
+        assert calls["baseline"] is False
+        assert calls["sensor"] is True
+        assert calls["sections"] == ["baseline.buffer_write", "sensor.context"]
+
     def test_resolve_run_outcome_from_degradations(self):
         """Run metadata helper should map degradation list to DEGRADED outcome and payload."""
         from core.run_metadata_writer import resolve_run_outcome_from_degradations

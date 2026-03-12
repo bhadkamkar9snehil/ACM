@@ -1012,6 +1012,8 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
             build_sensor_analytics_context_fn=build_sensor_analytics_context,
             logger=Console,
             equip=equip,
+            representation_result=representation_shadow,
+            representation_authority_active=representation_authority_policy.active,
         )
         sensor_context: Optional[Dict[str, Any]] = prep_inputs.sensor_context
 

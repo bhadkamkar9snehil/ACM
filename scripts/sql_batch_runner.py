@@ -204,6 +204,25 @@ class SQLBatchRunner:
         self.representation_authority = str(representation_authority or "shadow").strip().lower()
         self._latest_run_inspection: Dict[str, RunInspectionSummary] = {}
 
+    _VALIDATION_REQUIRED_TABLES: Tuple[str, ...] = (
+        "ACM_RepresentationStatus",
+        "ACM_SignalProfiles",
+        "ACM_RepresentationSchemas",
+        "ACM_BaselineGovernance",
+    )
+    _VALIDATION_REQUIRED_RUN_COLUMNS: Tuple[str, ...] = (
+        "RepresentationAuthoritative",
+        "RepresentationScoreAllowed",
+        "RepresentationLearnAllowed",
+        "RepresentationContextLabel",
+        "RepresentationRuntimeMode",
+        "RepresentationSchemaCompatibility",
+        "RepresentationBasisCompatibility",
+        "RepresentationBaselineCompatibility",
+        "RepresentationSuppressedReasons",
+        "RepresentationDegradedReasons",
+    )
+
     def _log_historian_overview(self, equip_name: str) -> bool:
         """Preflight: Log historian table coverage and return True when data exists.
 
@@ -273,6 +292,70 @@ class SQLBatchRunner:
         except Exception as exc:
             Console.error(f"SQL connection test failed: {exc}", component="SQL", error=str(exc), error_type=type(exc).__name__)
             return False
+
+    def _validate_representation_sql_contract(self) -> Tuple[bool, List[str]]:
+        """Ensure validation-mode replay has the required SQL persistence contract."""
+        if self.representation_authority != "validation":
+            return True, []
+
+        conn = None
+        try:
+            conn = self._get_sql_connection()
+            cur = conn.cursor()
+
+            table_list = ", ".join(f"'{name}'" for name in self._VALIDATION_REQUIRED_TABLES)
+            cur.execute(
+                f"SELECT name FROM sys.tables WHERE name IN ({table_list})"
+            )
+            existing_tables = {str(row[0]) for row in cur.fetchall() if row and row[0]}
+
+            column_list = ", ".join(f"'{name}'" for name in self._VALIDATION_REQUIRED_RUN_COLUMNS)
+            cur.execute(
+                f"""
+                SELECT c.name
+                FROM sys.columns c
+                JOIN sys.tables t ON c.object_id = t.object_id
+                WHERE t.name = 'ACM_Runs'
+                  AND c.name IN ({column_list})
+                """
+            )
+            existing_columns = {str(row[0]) for row in cur.fetchall() if row and row[0]}
+
+            missing_tables = [
+                name for name in self._VALIDATION_REQUIRED_TABLES if name not in existing_tables
+            ]
+            missing_columns = [
+                name for name in self._VALIDATION_REQUIRED_RUN_COLUMNS if name not in existing_columns
+            ]
+
+            issues: List[str] = []
+            if missing_tables:
+                issues.append(
+                    "missing tables: " + ", ".join(missing_tables)
+                )
+            if missing_columns:
+                issues.append(
+                    "missing ACM_Runs columns: " + ", ".join(missing_columns)
+                )
+
+            if issues:
+                return False, issues
+
+            Console.info(
+                "Representation SQL contract ready for validation authority",
+                component="PRECHECK",
+                required_tables=len(self._VALIDATION_REQUIRED_TABLES),
+                required_run_columns=len(self._VALIDATION_REQUIRED_RUN_COLUMNS),
+            )
+            return True, []
+        except Exception as exc:
+            return False, [f"representation SQL readiness check failed: {exc}"]
+        finally:
+            try:
+                if conn is not None:
+                    conn.close()
+            except Exception:
+                pass
 
     # ------------------------
     # SQL helpers (config/progress)
@@ -1828,6 +1911,24 @@ class SQLBatchRunner:
             if not self._test_sql_connection():
                 final_note = "sql_connection_failure"
                 Console.error(f"{equip_name}: Skipping processing due to SQL connection failure", component="PRECHECK", equipment=equip_name)
+                return False
+
+            representation_sql_ok, representation_sql_issues = self._validate_representation_sql_contract()
+            if not representation_sql_ok:
+                final_note = "representation_sql_contract_missing"
+                Console.error(
+                    f"{equip_name}: Validation authority requires representation SQL contract from migrations 018-022",
+                    component="PRECHECK",
+                    equipment=equip_name,
+                    representation_authority=self.representation_authority,
+                )
+                for issue in representation_sql_issues:
+                    Console.error(
+                        f"{equip_name}: {issue}",
+                        component="PRECHECK",
+                        equipment=equip_name,
+                        representation_authority=self.representation_authority,
+                    )
                 return False
 
             # Load progress

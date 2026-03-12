@@ -31,6 +31,7 @@ The **SQL Batch Runner** enables continuous ACM processing directly from the SQL
 - **Representation-aware replay**: Can pass `--representation-authority validation` through to `core.acm`
 - **Replay-safe activation**: Validation authority is only intended for historical replay and other explicit validation runs
 - **Operator inspection**: Final summary now surfaces representation mode, score eligibility, learn eligibility, compatibility state, and suppression reasons from SQL
+- **Fail-fast SQL contract check**: Validation mode now verifies that migrations `018` through `022` are present before it starts processing
 
 ## Usage
 
@@ -81,6 +82,14 @@ Run the replay harness with validation-only representation authority:
 ```powershell
 python scripts/sql_batch_runner.py --equip FD_FAN --tick-minutes 1440 --start-from-beginning --representation-authority validation
 ```
+
+Validation mode now requires:
+
+- `ACM_RepresentationStatus`
+- `ACM_SignalProfiles`
+- `ACM_RepresentationSchemas`
+- `ACM_BaselineGovernance`
+- `ACM_Runs` representation summary columns from migration `022`
 
 ## Processing Flow
 
@@ -208,7 +217,7 @@ Tracked in `.sql_batch_progress.json`:
 | `--start-from-beginning` | flag | off | Force restart from earliest historian timestamp |
 | `--resume` | flag | off | Resume from last batch checkpoint |
 | `--dry-run` | flag | off | Preview without execution |
-| `--representation-authority` | string | shadow | Pass representation authority mode to ACM replay runs (`shadow` or `validation`) |
+| `--representation-authority` | string | shadow | Pass representation authority mode to ACM replay runs (`shadow` or `validation`). `validation` now fails fast unless migrations `018` through `022` are applied. |
 
 ### Discover More Options
 

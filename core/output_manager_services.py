@@ -1312,14 +1312,33 @@ def prepare_persistence_inputs_service(
     build_sensor_analytics_context_fn: Any,
     logger: Any,
     equip: str,
+    representation_result: Optional[Any] = None,
+    representation_authority_active: bool = False,
 ) -> Dict[str, Any]:
     """Prepare persistence-stage inputs: baseline buffer update and sensor context."""
-    with section_fn("baseline.buffer_write"):
-        output_manager.update_baseline_buffer(
-            score_numeric=raw_score,
-            cfg=cfg,
-            coldstart_complete=coldstart_complete,
+    learn_blocked = False
+    if representation_authority_active and representation_result is not None:
+        eligibility = getattr(representation_result, "eligibility", None)
+        learn_blocked = bool(
+            getattr(representation_result, "authoritative", False)
+            and eligibility is not None
+            and getattr(eligibility, "learn_allowed", None) is False
         )
+
+    with section_fn("baseline.buffer_write"):
+        if learn_blocked:
+            Console.info(
+                "Representation authority skipped baseline buffer mutation",
+                component="REPRESENTATION",
+                equip_id=output_manager.equip_id,
+                run_id=output_manager.run_id,
+            )
+        else:
+            output_manager.update_baseline_buffer(
+                score_numeric=raw_score,
+                cfg=cfg,
+                coldstart_complete=coldstart_complete,
+            )
 
     with section_fn("sensor.context"):
         sensor_context = build_sensor_analytics_context_fn(

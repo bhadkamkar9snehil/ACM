@@ -2391,6 +2391,8 @@ class OutputManager:
         build_sensor_analytics_context_fn: Any,
         logger: Any,
         equip: str,
+        representation_result: Optional[Any] = None,
+        representation_authority_active: bool = False,
     ) -> PersistenceInputPreparationResult:
         """Prepare persistence-stage inputs: baseline buffer update and sensor context."""
         payload = prepare_persistence_inputs_service(
@@ -2406,6 +2408,8 @@ class OutputManager:
             build_sensor_analytics_context_fn=build_sensor_analytics_context_fn,
             logger=logger,
             equip=equip,
+            representation_result=representation_result,
+            representation_authority_active=representation_authority_active,
         )
         return PersistenceInputPreparationResult(**payload)
 
