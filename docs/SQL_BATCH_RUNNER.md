@@ -27,6 +27,11 @@ The **SQL Batch Runner** enables continuous ACM processing directly from the SQL
 - **Run tracking**: Records every run in `ACM_Runs` table
 - **Analytics output**: Populates 26+ SQL analytics tables
 
+### 4. Replay Validation Mode
+- **Representation-aware replay**: Can pass `--representation-authority validation` through to `core.acm`
+- **Replay-safe activation**: Validation authority is only intended for historical replay and other explicit validation runs
+- **Operator inspection**: Final summary now surfaces representation mode, score eligibility, learn eligibility, compatibility state, and suppression reasons from SQL
+
 ## Usage
 
 ### Basic Usage
@@ -69,6 +74,14 @@ Adjust tick window and coldstart attempts:
 python scripts/sql_batch_runner.py --equip FD_FAN --tick-minutes 60 --max-coldstart-attempts 5 --start-from-beginning
 ```
 
+### Representation Validation Replay
+
+Run the replay harness with validation-only representation authority:
+
+```powershell
+python scripts/sql_batch_runner.py --equip FD_FAN --tick-minutes 1440 --start-from-beginning --representation-authority validation
+```
+
 ## Processing Flow
 
 ### Phase 1: Coldstart
@@ -109,6 +122,7 @@ At the end of each equipment run, the batch runner now emits:
 - ACM health metrics: `health_status`, `avg_health`, `min_health`, `max_fused_z`, `data_quality`, `refit_requested`
 - zero-day metrics: `active`, `status`, `surface`, `channels`
 - key output counts: scores, health timeline, regime timeline, episodes, hotspots, forecast outputs
+- representation governance: runtime mode, authoritative flag, `score_allowed`, `learn_allowed`, compatibility state, and suppression/degraded reasons
 - SQL log counts: total `ACM_RunLogs`, warnings, errors
 
 The intent is that the batch runner final summary should be sufficient for operator review
@@ -194,6 +208,7 @@ Tracked in `.sql_batch_progress.json`:
 | `--start-from-beginning` | flag | off | Force restart from earliest historian timestamp |
 | `--resume` | flag | off | Resume from last batch checkpoint |
 | `--dry-run` | flag | off | Preview without execution |
+| `--representation-authority` | string | shadow | Pass representation authority mode to ACM replay runs (`shadow` or `validation`) |
 
 ### Discover More Options
 

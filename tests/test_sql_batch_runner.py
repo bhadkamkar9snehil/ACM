@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import io
 from datetime import datetime
 from pathlib import Path
 
@@ -303,12 +304,23 @@ def test_process_equipment_emits_acm_derived_summary_details_when_available(tmp_
         zero_day_status="active_hdbscan",
         zero_day_surface_type="raw_numeric",
         zero_day_channel_count=79,
+        representation_authoritative=True,
+        representation_score_allowed=False,
+        representation_learn_allowed=False,
+        representation_context_label="UNKNOWN",
+        representation_runtime_mode="ONLINE_SCORING",
+        representation_schema_compatibility="COMPATIBLE",
+        representation_basis_compatibility="COMPATIBLE",
+        representation_baseline_compatibility="COMPATIBLE",
+        representation_suppressed_reasons='["context_unknown"]',
+        representation_degraded_reasons="[]",
         forecast_outputs_required=False,
         table_counts={
             "ACM_Scores_Wide": 1781,
             "ACM_HealthTimeline": 1781,
             "ACM_RegimeTimeline": 1781,
             "ACM_SensorHotspots": 12,
+            "ACM_RepresentationStatus": 1,
             "ACM_HealthForecast": 0,
             "ACM_FailureForecast": 0,
             "ACM_RUL": 0,
@@ -326,7 +338,44 @@ def test_process_equipment_emits_acm_derived_summary_details_when_available(tmp_
     assert any("ACM metrics | train_rows=500 | score_rows=1781 | health_status=HEALTHY" in msg for _, msg in messages)
     assert any("Zero-day | active=yes | status=active_hdbscan | surface=raw_numeric | channels=79" in msg for _, msg in messages)
     assert any("Outputs | scores=1781 | health_timeline=1781 | regime_timeline=1781 | episodes=3" in msg for _, msg in messages)
+    assert any("Representation | mode=ONLINE_SCORING | authoritative=yes | score_allowed=no | learn_allowed=no" in msg for _, msg in messages)
     assert any("Logs | run_logs=245 | warnings=7 | errors=0" in msg for _, msg in messages)
+
+
+def test_run_acm_batch_passes_representation_authority_cli(tmp_path, monkeypatch):
+    runner = SQLBatchRunner(
+        sql_conn_string="DRIVER={ODBC Driver 17 for SQL Server};SERVER=.;DATABASE=ACM;Trusted_Connection=yes;",
+        artifact_root=tmp_path,
+        tick_minutes=10,
+        max_coldstart_attempts=2,
+        representation_authority="validation",
+    )
+    runner._inspect_last_run_outputs = lambda equip_name: None  # type: ignore[method-assign]
+    captured = {"cmd": None}
+
+    class _FakeProcess:
+        def __init__(self, cmd):
+            captured["cmd"] = cmd
+            self.returncode = 0
+            self.stdout = io.StringIO("RUN END: outcome=OK\n")
+
+        def wait(self):
+            return 0
+
+    monkeypatch.setattr(sql_batch_runner_module, "get_trace_context", lambda: {})
+    monkeypatch.setattr(sql_batch_runner_module.subprocess, "Popen", lambda cmd, **kwargs: _FakeProcess(cmd))
+
+    success, outcome = runner._run_acm_batch(
+        "FD_FAN",
+        start_time=datetime(2026, 1, 1, 0, 0, 0),
+        end_time=datetime(2026, 1, 1, 0, 9, 59),
+    )
+
+    assert success is True
+    assert outcome == "OK"
+    assert captured["cmd"] is not None
+    assert "--representation-authority" in captured["cmd"]
+    assert "validation" in captured["cmd"]
 
 
 def test_process_equipment_emits_final_summary_on_exception(tmp_path, monkeypatch):

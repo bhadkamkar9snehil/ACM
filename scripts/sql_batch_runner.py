@@ -157,6 +157,16 @@ class RunInspectionSummary:
     zero_day_status: Optional[str] = None
     zero_day_surface_type: Optional[str] = None
     zero_day_channel_count: Optional[int] = None
+    representation_authoritative: Optional[bool] = None
+    representation_score_allowed: Optional[bool] = None
+    representation_learn_allowed: Optional[bool] = None
+    representation_context_label: Optional[str] = None
+    representation_runtime_mode: Optional[str] = None
+    representation_schema_compatibility: Optional[str] = None
+    representation_basis_compatibility: Optional[str] = None
+    representation_baseline_compatibility: Optional[str] = None
+    representation_suppressed_reasons: Optional[str] = None
+    representation_degraded_reasons: Optional[str] = None
     forecast_outputs_required: bool = False
     table_counts: Dict[str, int] = field(default_factory=dict)
     run_log_total: Optional[int] = None
@@ -174,6 +184,7 @@ class SQLBatchRunner:
                  max_coldstart_attempts: int = 10,
                  max_batches: Optional[int] = None,
                  start_from_beginning: bool = False,
+                 representation_authority: str = "shadow",
                  ):
         """Initialize batch runner.
 
@@ -190,6 +201,7 @@ class SQLBatchRunner:
         self.progress_file = artifact_root / ".sql_batch_progress.json"
         self.max_batches = max_batches
         self.start_from_beginning = start_from_beginning
+        self.representation_authority = str(representation_authority or "shadow").strip().lower()
         self._latest_run_inspection: Dict[str, RunInspectionSummary] = {}
 
     def _log_historian_overview(self, equip_name: str) -> bool:
@@ -805,6 +817,10 @@ class SQLBatchRunner:
                     ("ACM_PCA_Metrics", True, False),
                     ("ACM_SensorHotspots", True, False),
                     ("ACM_SensorDefects", True, False),
+                    ("ACM_RepresentationStatus", True, False),
+                    ("ACM_SignalProfiles", True, False),
+                    ("ACM_RepresentationSchemas", True, False),
+                    ("ACM_BaselineGovernance", True, False),
                 ]
                 for table_name, has_run, critical in tables_to_check:
                     try:
@@ -924,6 +940,8 @@ class SQLBatchRunner:
                 run_log_total = None
                 run_log_warn = None
                 run_log_error = None
+                representation_columns: Dict[str, Any] = {}
+                baseline_columns: Dict[str, Any] = {}
                 try:
                     cur.execute(
                         """
@@ -953,6 +971,84 @@ class SQLBatchRunner:
                         error_type=type(log_err).__name__,
                     )
 
+                try:
+                    cur.execute(
+                        """
+                        IF OBJECT_ID('dbo.ACM_RepresentationStatus', 'U') IS NOT NULL
+                            SELECT TOP 1
+                                Authoritative,
+                                ScoreAllowed,
+                                LearnAllowed,
+                                ContextLabel,
+                                SchemaCompatibility,
+                                BasisCompatibility,
+                                BaselineCompatibility,
+                                SuppressedReasonsJson,
+                                DegradedReasonsJson
+                            FROM dbo.ACM_RepresentationStatus
+                            WHERE EquipID = ? AND RunID = ?
+                            ORDER BY [Timestamp] DESC
+                        ELSE
+                            SELECT
+                                CAST(NULL AS BIT),
+                                CAST(NULL AS BIT),
+                                CAST(NULL AS BIT),
+                                CAST(NULL AS NVARCHAR(128)),
+                                CAST(NULL AS NVARCHAR(64)),
+                                CAST(NULL AS NVARCHAR(64)),
+                                CAST(NULL AS NVARCHAR(64)),
+                                CAST(NULL AS NVARCHAR(MAX)),
+                                CAST(NULL AS NVARCHAR(MAX))
+                        """,
+                        (equip_id, run_id),
+                    )
+                    representation_row = cur.fetchone()
+                    if representation_row:
+                        representation_columns = {
+                            "Authoritative": representation_row[0],
+                            "ScoreAllowed": representation_row[1],
+                            "LearnAllowed": representation_row[2],
+                            "ContextLabel": representation_row[3],
+                            "SchemaCompatibility": representation_row[4],
+                            "BasisCompatibility": representation_row[5],
+                            "BaselineCompatibility": representation_row[6],
+                            "SuppressedReasonsJson": representation_row[7],
+                            "DegradedReasonsJson": representation_row[8],
+                        }
+                except Exception as representation_err:
+                    Console.warn(
+                        f"Could not inspect ACM_RepresentationStatus for summary: {representation_err}",
+                        component="QA",
+                        equip_id=equip_id,
+                        run_id=run_id_str,
+                        error_type=type(representation_err).__name__,
+                    )
+
+                try:
+                    cur.execute(
+                        """
+                        IF OBJECT_ID('dbo.ACM_BaselineGovernance', 'U') IS NOT NULL
+                            SELECT TOP 1 RuntimeMode
+                            FROM dbo.ACM_BaselineGovernance
+                            WHERE EquipID = ? AND RunID = ?
+                            ORDER BY [Timestamp] DESC
+                        ELSE
+                            SELECT CAST(NULL AS NVARCHAR(64))
+                        """,
+                        (equip_id, run_id),
+                    )
+                    baseline_row = cur.fetchone()
+                    if baseline_row:
+                        baseline_columns = {"RuntimeMode": baseline_row[0]}
+                except Exception as baseline_err:
+                    Console.warn(
+                        f"Could not inspect ACM_BaselineGovernance for summary: {baseline_err}",
+                        component="QA",
+                        equip_id=equip_id,
+                        run_id=run_id_str,
+                        error_type=type(baseline_err).__name__,
+                    )
+
                 summary = RunInspectionSummary(
                     run_id=run_id_str,
                     run_source=str(run_source or "unknown"),
@@ -972,6 +1068,16 @@ class SQLBatchRunner:
                     zero_day_status=str(runs_columns["ZeroDayStatus"]) if runs_columns.get("ZeroDayStatus") is not None else None,
                     zero_day_surface_type=str(runs_columns["ZeroDaySurfaceType"]) if runs_columns.get("ZeroDaySurfaceType") is not None else None,
                     zero_day_channel_count=int(runs_columns["ZeroDayChannelCount"]) if runs_columns.get("ZeroDayChannelCount") is not None else None,
+                    representation_authoritative=bool(representation_columns["Authoritative"]) if representation_columns.get("Authoritative") is not None else None,
+                    representation_score_allowed=bool(representation_columns["ScoreAllowed"]) if representation_columns.get("ScoreAllowed") is not None else None,
+                    representation_learn_allowed=bool(representation_columns["LearnAllowed"]) if representation_columns.get("LearnAllowed") is not None else None,
+                    representation_context_label=str(representation_columns["ContextLabel"]) if representation_columns.get("ContextLabel") is not None else None,
+                    representation_runtime_mode=str(baseline_columns["RuntimeMode"]) if baseline_columns.get("RuntimeMode") is not None else None,
+                    representation_schema_compatibility=str(representation_columns["SchemaCompatibility"]) if representation_columns.get("SchemaCompatibility") is not None else None,
+                    representation_basis_compatibility=str(representation_columns["BasisCompatibility"]) if representation_columns.get("BasisCompatibility") is not None else None,
+                    representation_baseline_compatibility=str(representation_columns["BaselineCompatibility"]) if representation_columns.get("BaselineCompatibility") is not None else None,
+                    representation_suppressed_reasons=str(representation_columns["SuppressedReasonsJson"]) if representation_columns.get("SuppressedReasonsJson") is not None else None,
+                    representation_degraded_reasons=str(representation_columns["DegradedReasonsJson"]) if representation_columns.get("DegradedReasonsJson") is not None else None,
                     forecast_outputs_required=forecast_outputs_required,
                     table_counts=table_counts,
                     run_log_total=run_log_total,
@@ -1235,6 +1341,8 @@ class SQLBatchRunner:
             cmd.extend(["--start-time", start_time.isoformat()])
         if end_time:
             cmd.extend(["--end-time", end_time.isoformat()])
+        if self.representation_authority != "shadow":
+            cmd.extend(["--representation-authority", self.representation_authority])
 
         # v11.8.0: No mode argument - core.acm decides adaptively
         printable = " ".join(cmd)
@@ -1590,6 +1698,18 @@ class SQLBatchRunner:
                 return "?"
             return "yes" if bool(value) else "no"
 
+        def _fmt_reason_text(value: Optional[str]) -> str:
+            if value in (None, "", "[]"):
+                return "[]"
+            try:
+                parsed = json.loads(str(value))
+                if isinstance(parsed, list):
+                    cleaned = [str(item) for item in parsed if str(item).strip()]
+                    return "[" + ", ".join(cleaned) + "]" if cleaned else "[]"
+            except Exception:
+                pass
+            return str(value)
+
         Console.status("\n" + "-" * 60)
         log_fn(
             f"{equip_name}: Final summary | status={status} | coldstart_complete={coldstart_complete} "
@@ -1652,6 +1772,26 @@ class SQLBatchRunner:
                 equipment=equip_name,
                 run_id=inspection.run_id,
             )
+            if (
+                inspection.representation_runtime_mode is not None
+                or inspection.representation_authoritative is not None
+                or inspection.table_counts.get("ACM_RepresentationStatus", 0) > 0
+            ):
+                Console.info(
+                    f"{equip_name}: Representation | mode={inspection.representation_runtime_mode or '?'} "
+                    f"| authoritative={_fmt_bool(inspection.representation_authoritative)} "
+                    f"| score_allowed={_fmt_bool(inspection.representation_score_allowed)} "
+                    f"| learn_allowed={_fmt_bool(inspection.representation_learn_allowed)} "
+                    f"| context={inspection.representation_context_label or '?'} "
+                    f"| schema={inspection.representation_schema_compatibility or '?'} "
+                    f"| basis={inspection.representation_basis_compatibility or '?'} "
+                    f"| baseline={inspection.representation_baseline_compatibility or '?'} "
+                    f"| suppressed={_fmt_reason_text(inspection.representation_suppressed_reasons)} "
+                    f"| degraded={_fmt_reason_text(inspection.representation_degraded_reasons)}",
+                    component="SUMMARY",
+                    equipment=equip_name,
+                    run_id=inspection.run_id,
+                )
             Console.info(
                 f"{equip_name}: Logs | run_logs={_fmt_int(inspection.run_log_total)} "
                 f"| warnings={_fmt_int(inspection.run_log_warn)} "
@@ -1883,6 +2023,12 @@ def main() -> int:
                         help="Resume from last successful batch")
     parser.add_argument("--dry-run", action="store_true",
                         help="Print commands without running")
+    parser.add_argument(
+        "--representation-authority",
+        choices=["shadow", "validation"],
+        default="shadow",
+        help="Representation authority mode to pass to replayed ACM runs (default: shadow).",
+    )
     args = parser.parse_args()
 
     # Build SQL connection string (login timeout is controlled via pyodbc.connect timeout)
@@ -1926,6 +2072,7 @@ def main() -> int:
         max_coldstart_attempts=args.max_coldstart_attempts,
         max_batches=args.max_batches,
         start_from_beginning=args.start_from_beginning,
+        representation_authority=args.representation_authority,
     )
 
     max_workers = max(1, args.max_workers)
@@ -1939,6 +2086,11 @@ def main() -> int:
     Console.info(f"Resume: {args.resume}", component="MAIN", resume=args.resume)
     Console.info(f"Dry Run: {args.dry_run}", component="MAIN", dry_run=args.dry_run)
     Console.info(f"Pipeline Mode: adaptive", component="MAIN", mode="adaptive")
+    Console.info(
+        f"Representation Authority: {args.representation_authority}",
+        component="MAIN",
+        representation_authority=args.representation_authority,
+    )
     Console.status("="*60)
 
     import time
