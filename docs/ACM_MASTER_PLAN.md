@@ -2312,6 +2312,17 @@ Every new module above must have:
 - one integration path through `core/acm.py` shadow mode
 - replay evidence before authority shift
 
+### Implementation progress
+
+Status as of 2026-03-12:
+
+- Slice 1 completed: contracts and shadow shell are live in repo.
+- Slice 2 completed: observation normalization now routes through `core/time_normalizer.py`.
+- Slice 3 completed: signal qualification now has a shared owner in `core/signal_profiler.py`.
+- Slice 4 completed: governed batch-window state construction now lives in `core/state_builder.py`.
+- Slice 5 completed: the `RG-07` milestone was delivered as two reviewable extractions, `core/structure_encoder.py` and `core/feature_schema.py`, while keeping runtime authority unchanged.
+- Slice 6 completed: context ownership now routes through `core/context_engine.py`, and regime postprocess emits a shadow typed `ContextAssignment` without changing score authority.
+
 ### Recommended delivery slices
 
 These slices are the safest implementation order.

@@ -2548,6 +2548,9 @@ class TestRefactorHelpers:
         assert "regime_state" in result.frame.columns
         assert "transient_state" in result.frame.columns
         assert result.transient_counts == {"steady": 1, "startup": 1}
+        assert result.context_assignment.context_label == "REGIME_1"
+        assert result.context_assignment.transition_status == "STARTUP"
+        assert result.context_assignment.is_ambiguous is True
 
     def test_run_scoring_regime_stage_orchestrates_basis_score_label_and_occupancy(self, monkeypatch):
         """Scoring-regime stage should orchestrate basis build, detector score, regime label, and occupancy writes."""
