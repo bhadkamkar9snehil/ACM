@@ -100,6 +100,7 @@ from core.sql_client import (
 )
 from core.representation_pipeline import run_representation_pipeline
 from core.time_normalizer import deduplicate_index, ensure_local_index
+from core.structure_encoder import select_ewm_monitoring_surface
 
 from utils.timer import Timer, enable_timer_metrics  # type: ignore
 from core.resource_monitor import enable_resource_metrics
@@ -582,7 +583,7 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
                 degradations.append("ewm_monitoring_surface")
             else:
                 _ewm_cols, _ewm_train_numeric, _ewm_score_numeric, _ewm_surface_meta = (
-                    regimes.select_ewm_monitoring_surface(
+                    select_ewm_monitoring_surface(
                         raw_train.reindex(train.index),
                         raw_score.reindex(score.index),
                         cfg=cfg,
