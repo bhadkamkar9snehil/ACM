@@ -84,8 +84,8 @@ def _make_runner(tmp_path: Path) -> SQLBatchRunner:
 def test_reset_progress_to_beginning_clears_local_progress_entry(tmp_path):
     runner = _make_runner(tmp_path)
     progress = {
-        "FD_FAN": {"coldstart_complete": True, "last_batch_end": "2024-01-01T00:09:59", "batches_completed": 1},
-        "GT_01": {"coldstart_complete": False, "batches_completed": 0},
+        "FD_FAN": {"last_batch_end": "2024-01-01T00:09:59", "batches_completed": 1},
+        "GT_01": {"batches_completed": 0},
     }
     runner.progress_file.write_text(json.dumps(progress), encoding="utf-8")
 
@@ -340,6 +340,7 @@ def test_process_equipment_emits_final_summary_on_success(tmp_path, monkeypatch)
     monkeypatch.setattr(sql_batch_runner_module, "Console", _ConsoleCapture)
     runner._test_sql_connection = lambda: True  # type: ignore[method-assign]
     runner._load_progress = lambda: {}  # type: ignore[method-assign]
+    runner._check_coldstart_status = lambda equip_name: (False, 0, 500)  # type: ignore[method-assign]
     runner._get_equip_id = lambda equip_name: None  # type: ignore[method-assign]
     runner._log_historian_overview = lambda equip_name: True  # type: ignore[method-assign]
     runner._process_coldstart = lambda equip_name, dry_run=False: (True, None)  # type: ignore[method-assign]
@@ -356,6 +357,79 @@ def test_process_equipment_emits_final_summary_on_success(tmp_path, monkeypatch)
         "Final summary | status=SUCCESS" in msg and "batches_processed=2" in msg and "note=batches_processed" in msg
         for _, msg in messages
     )
+
+
+def test_process_equipment_resume_uses_governed_sql_status_not_local_progress(tmp_path, monkeypatch):
+    runner = _make_runner(tmp_path)
+    messages = []
+    process_coldstart_called = False
+
+    class _ConsoleCapture:
+        @staticmethod
+        def header(msg, **kwargs):
+            messages.append(("header", msg))
+
+        @staticmethod
+        def info(msg, **kwargs):
+            messages.append(("info", msg))
+
+        @staticmethod
+        def ok(msg, **kwargs):
+            messages.append(("ok", msg))
+
+        @staticmethod
+        def warn(msg, **kwargs):
+            messages.append(("warn", msg))
+
+        @staticmethod
+        def error(msg, **kwargs):
+            messages.append(("error", msg))
+
+        @staticmethod
+        def status(msg, **kwargs):
+            messages.append(("status", msg))
+
+    def _process_coldstart(*args, **kwargs):
+        nonlocal process_coldstart_called
+        process_coldstart_called = True
+        return True, None
+
+    monkeypatch.setattr(sql_batch_runner_module, "Console", _ConsoleCapture)
+    runner._test_sql_connection = lambda: True  # type: ignore[method-assign]
+    runner._load_progress = lambda: {  # type: ignore[method-assign]
+        "FD_FAN": {"last_batch_end": "2024-01-01T00:09:59", "batches_completed": 1}
+    }
+    runner._check_coldstart_status = lambda equip_name: (True, 500, 500)  # type: ignore[method-assign]
+    runner._get_equip_id = lambda equip_name: None  # type: ignore[method-assign]
+    runner._log_historian_overview = lambda equip_name: True  # type: ignore[method-assign]
+    runner._process_coldstart = _process_coldstart  # type: ignore[method-assign]
+    runner._process_batches = lambda equip_name, start_from=None, dry_run=False, resume=False: BatchProcessingResult(  # type: ignore[method-assign]
+        completed=1,
+        attempted=1,
+        failed=False,
+    )
+
+    success = runner.process_equipment("FD_FAN", resume=True)
+
+    assert success is True
+    assert process_coldstart_called is False
+    assert any("Baseline bootstrap already complete, skipping to batch processing" in msg for _, msg in messages)
+
+
+def test_process_batches_progress_no_longer_persists_coldstart_complete(tmp_path):
+    runner = _make_runner(tmp_path)
+    runner._get_data_range = lambda equip: (datetime(2024, 1, 1, 0, 0, 0), datetime(2024, 1, 1, 0, 9, 59))  # type: ignore[method-assign]
+    runner._load_progress = lambda: {}  # type: ignore[method-assign]
+    saved = {}
+    runner._save_progress = lambda progress: saved.update(progress)  # type: ignore[method-assign]
+    runner._run_acm_batch = lambda *args, **kwargs: (True, "OK")  # type: ignore[method-assign]
+
+    result = runner._process_batches("FD_FAN")
+
+    assert result.completed == 1
+    assert "FD_FAN" in saved
+    assert saved["FD_FAN"]["batches_completed"] == 1
+    assert "coldstart_complete" not in saved["FD_FAN"]
 
 
 def test_process_equipment_emits_acm_derived_summary_details_when_available(tmp_path, monkeypatch):

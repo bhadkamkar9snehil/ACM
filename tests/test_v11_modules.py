@@ -1049,7 +1049,7 @@ class TestRefactorHelpers:
         assert "zero-day scoring is inactive on this run" in message.lower()
         assert fields["noop_reason"] == "COLDSTART_DEFERRED"
         assert fields["zero_day_scoring_active"] is False
-        assert fields["legacy_fit_ready"] is False
+        assert fields["governed_runtime_ready_for_scoring"] is False
 
     def test_classify_noop_reason_prefers_governed_readiness_hint(self):
         """NOOP fallback classification should use governed load-stage readiness hints."""

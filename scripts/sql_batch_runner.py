@@ -1268,7 +1268,6 @@ class SQLBatchRunner:
         Returns:
             Dictionary with equipment progress: {
                 'FD_FAN': {
-                    'coldstart_complete': True,
                     'last_batch_end': '2012-01-10 00:00:00',
                     'batches_completed': 15
                 }
@@ -1810,7 +1809,6 @@ class SQLBatchRunner:
             # Update progress
             equip_progress['last_batch_end'] = next_ts.isoformat()
             equip_progress['batches_completed'] = batches_completed_total
-            equip_progress['coldstart_complete'] = True
             progress[equip_name] = equip_progress
 
             if not dry_run:
@@ -1845,7 +1843,7 @@ class SQLBatchRunner:
         equip_name: str,
         *,
         success: bool,
-        coldstart_complete: bool,
+        baseline_bootstrap_complete: bool,
         batches_processed: int,
         elapsed_seconds: float,
         note: str,
@@ -1895,13 +1893,13 @@ class SQLBatchRunner:
 
         Console.status("\n" + "-" * 60)
         log_fn(
-            f"{equip_name}: Final summary | status={status} | coldstart_complete={coldstart_complete} "
+            f"{equip_name}: Final summary | status={status} | baseline_bootstrap_complete={baseline_bootstrap_complete} "
             f"| batches_processed={batches_processed} | elapsed={elapsed_minutes}m {elapsed_remainder}s "
             f"| note={note}",
             component="SUMMARY",
             equipment=equip_name,
             status=status,
-            coldstart_complete=coldstart_complete,
+            baseline_bootstrap_complete=baseline_bootstrap_complete,
             batches_processed=batches_processed,
             elapsed_minutes=elapsed_minutes,
             elapsed_seconds=elapsed_remainder,
@@ -2000,7 +1998,7 @@ class SQLBatchRunner:
         """
         import time
         start_time = time.time()
-        coldstart_completed_for_summary = False
+        baseline_bootstrap_completed_for_summary = False
         batches_processed_for_summary = 0
         final_note = "aborted_before_completion"
         result = False
@@ -2088,13 +2086,17 @@ class SQLBatchRunner:
                 Console.error(f"{equip_name}: Historian has no data — aborting this equipment run", component="PRECHECK", equipment=equip_name)
                 return False
 
-            # Check if coldstart already complete
-            coldstart_complete = equip_progress.get('coldstart_complete', False)
+            # Check governed baseline-bootstrap status from SQL, not local runner state.
+            baseline_bootstrap_complete, _, _ = self._check_coldstart_status(equip_name)
 
-            if resume and coldstart_complete:
-                coldstart_completed_for_summary = True
+            if resume and baseline_bootstrap_complete:
+                baseline_bootstrap_completed_for_summary = True
                 final_note = "resume_skipped_coldstart"
-                Console.info(f"{equip_name}: Coldstart already complete, skipping to batch processing", component="COLDSTART", equipment=equip_name)
+                Console.info(
+                    f"{equip_name}: Baseline bootstrap already complete, skipping to batch processing",
+                    component="COLDSTART",
+                    equipment=equip_name,
+                )
                 coldstart_last_end: Optional[datetime] = None
             else:
                 # Phase 1: Coldstart
@@ -2104,19 +2106,14 @@ class SQLBatchRunner:
                     Console.error(f"{equip_name}: Coldstart failed", component="COLDSTART", equipment=equip_name)
                     return False
 
-                coldstart_completed_for_summary = True
-                final_note = "coldstart_completed"
-                # Update progress
-                equip_progress['coldstart_complete'] = True
-                progress[equip_name] = equip_progress
-                if not dry_run:
-                    self._save_progress(progress)
+                baseline_bootstrap_completed_for_summary = True
+                final_note = "baseline_bootstrap_completed"
 
             # Phase 2: Batch processing
             # If we just completed coldstart during this run, start the batch phase
             # immediately after the coldstart window to avoid reprocessing the same window.
             start_from_ts: Optional[datetime] = None
-            coldstart_ran_this_session = not (resume and coldstart_complete)
+            coldstart_ran_this_session = not (resume and baseline_bootstrap_complete)
             try:
                 # Only honor coldstart_last_end when we executed coldstart above and not in resume-fast path
                 if coldstart_ran_this_session and 'coldstart_last_end' in locals() and coldstart_last_end is not None:
@@ -2168,12 +2165,12 @@ class SQLBatchRunner:
         finally:
             elapsed_time = time.time() - start_time
             inspection = self._latest_run_inspection.get(equip_name)
-            if inspection is None and (coldstart_completed_for_summary or batches_processed_for_summary > 0):
+            if inspection is None and (baseline_bootstrap_completed_for_summary or batches_processed_for_summary > 0):
                 inspection = self._inspect_last_run_outputs(equip_name)
             self._emit_equipment_summary(
                 equip_name,
                 success=result,
-                coldstart_complete=coldstart_completed_for_summary,
+                baseline_bootstrap_complete=baseline_bootstrap_completed_for_summary,
                 batches_processed=batches_processed_for_summary,
                 elapsed_seconds=elapsed_time,
                 note=final_note,

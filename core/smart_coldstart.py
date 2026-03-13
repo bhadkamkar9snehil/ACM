@@ -2,7 +2,7 @@
 ACM Smart Coldstart Module
 
 Current responsibilities:
-1. read SQL-backed coldstart progress and legacy lifecycle hints
+1. read SQL-backed coldstart progress and governed runtime-mode hints
 2. choose the scoring-window or baseline-window load path
 3. track coldstart progress across batches
 4. never fall back to file mode
@@ -82,7 +82,7 @@ def build_noop_observability(reason: str) -> Tuple[str, Dict[str, Any]]:
             {
                 "noop_reason": normalized,
                 "zero_day_scoring_active": False,
-                "legacy_fit_ready": True,
+                "governed_runtime_ready_for_scoring": True,
             },
         )
 
@@ -92,7 +92,7 @@ def build_noop_observability(reason: str) -> Tuple[str, Dict[str, Any]]:
             {
                 "noop_reason": normalized,
                 "zero_day_scoring_active": False,
-                "legacy_fit_ready": False,
+                "governed_runtime_ready_for_scoring": False,
             },
         )
 
