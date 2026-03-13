@@ -3,62 +3,63 @@
 Last updated: 2026-03-13 UTC
 
 This file is a rewritten snapshot, not an append-only log.
-Each meaningful ACM slice should replace the contents of this file with current repo and runtime truth.
+Each meaningful ACM slice replaces this file with current repo and runtime truth.
 
 ## At A Glance
 
 | Item | Current value |
 |---|---|
-| Overall `2026.2` completion | `76%` |
+| Overall `2026.2` completion | `78%` |
 | Architecture / ownership extraction | `90%` |
-| Runtime governed behavior | `80%` |
-| Coldstart / baseline unification | `79%` |
+| Runtime governed behavior | `82%` |
+| Coldstart / baseline unification | `85%` |
 | SQL / control-plane alignment | `78%` |
-| Replay qualification | `81%` |
+| Replay qualification | `83%` |
 | Dashboard / operator cutover | `35%` |
 | Forecast / RUL governed cutover | `20%` |
 | Current branch | `refactor/2026.2-rg-13-audit-hygiene` |
-| Latest runtime commit | `c83e630` |
-| Latest checkpoint tag | `checkpoint/2026.2-explicit-coldstart-load-decision-20260313` |
+| Latest validated runtime commit | `22628a3` |
+| Latest checkpoint tag | `checkpoint/2026.2-smart-coldstart-state-trim-20260313` |
 
 ## Time Estimate
 
 | Scope | Estimated remaining time |
 |---|---|
-| Core ACM runtime unification | `1.5 to 3 focused days` |
-| Full `2026.2` completion | `4 to 7 focused days` |
+| Core ACM runtime unification | `1 to 2 focused days` |
+| Full `2026.2` completion | `3.5 to 5.5 focused days` |
 
-The project is no longer in the extraction-heavy phase.
-Most new owners are already in place.
-The remaining time is concentrated in the harder tail:
+The remaining work is the hard tail:
 
-- final coldstart / baseline authority cleanup
-- earlier representation-first stop ordering
-- dashboard / operator cutover
-- forecast / RUL governed cutover
-- replay-qualified deletion of transitional owners
+- finish coldstart / baseline authority unification
+- push governed stop conditions earlier than avoidable prep cost
+- cut dashboards and operator views over to governed truth
+- bring forecast / RUL under governed eligibility
+- remove transitional owners after replay-qualified replacement
 
 ## What ACM Is Right Now
 
-ACM is no longer a pure legacy detector-first runtime.
-It is now a governed representation-aware runtime with real SQL-backed suppression and baseline-governance truth.
+ACM is now a governed representation-aware runtime with:
+
+- live SQL-backed suppression and baseline-governance truth
+- stable multi-asset no-score behavior
+- score-head / score-split baseline fallback mechanics removed
+- explicit load-path selection for existing-model reuse
+- shrinking legacy coldstart semantics
 
 Current repo/runtime truth:
 
 - governed representation authority is live
-- governed no-score runs are persisted correctly in SQL
-- score-head / score-split baseline fallback mechanics are removed
-- baseline candidate state now uses `TRUSTED_WINDOW_PENDING`
-- the old load-stage `needs_coldstart` boolean is replaced with an explicit load decision:
-  - `use_existing_models`
-  - `runtime_mode_hint`
-  - `reason_code`
-- many no-score runs now short-circuit before feature, detector, regime, zero-day, and health stages
+- governed no-score runs persist correct control-plane truth
+- baseline fallback now stays in `TRUSTED_WINDOW_PENDING` instead of fabricating train slices
+- `smart_coldstart` is closer to a historian-window / progress helper and no longer carries dead retry-era API baggage
+- dead helper-only `runtime_mode_hint` storage is removed
+- `smart_coldstart` no longer pretends to be stage-generic when it only persists score-stage progress
+- many no-score runs short-circuit before feature, detector, regime, zero-day, and health work
 
 What ACM is not yet:
 
 - fully representation-first from the earliest possible stop point
-- fully unified around `baseline_governor` as the only readiness authority
+- fully unified under `baseline_governor` as the only readiness authority
 - operator-complete in dashboards
 - forecast / RUL governed end-to-end
 - fully stripped of transitional legacy owners
@@ -69,9 +70,9 @@ Latest live 3-asset validation, run in parallel with observability disabled:
 
 | Asset | RunID | Result |
 |---|---|---|
-| `FD_FAN` | `e50175be-a412-4fa3-8882-418a7811ea7a` | `DEGRADED` |
-| `WFA_TURBINE_0` | `71835aa3-81ae-4b70-ab72-65dbf8759738` | `DEGRADED` |
-| `WFA_TURBINE_10` | `34622f4e-c334-4575-8bea-898479b2c678` | `DEGRADED` |
+| `FD_FAN` | `59161dfd-5f2a-4d1c-a5ca-47910f65b7b7` | `DEGRADED` |
+| `WFA_TURBINE_0` | `4781a34f-a17f-42a7-979c-5ff0a39f11f2` | `DEGRADED` |
+| `WFA_TURBINE_10` | `0336fb74-beb6-4426-9c16-4b70b13afdb6` | `DEGRADED` |
 
 Observed in logs for all three:
 
@@ -88,9 +89,11 @@ Observed in SQL for all three:
 | `ShadowRefreshState` | `WAITING_FOR_TRUSTED_WINDOW` |
 | `ScoreAllowed` | `0` |
 | `LearnAllowed` | `0` |
+| `SuppressedReasonsJson` | `["baseline_formation_scoring_disabled"]` |
+| `DegradedReasonsJson` | includes `baseline_trusted_window_pending` |
 | `ACM_Scores_Wide` rows | `0` |
 
-This means the current governed no-score path is stable across multiple assets and is not regressing as coldstart/baseline authority is cleaned up.
+This means the governed no-score path is still stable across multiple assets after the latest smart-coldstart cleanup.
 
 ## What Was Completed Recently
 
@@ -98,6 +101,8 @@ Recent validated slices:
 
 | Commit | Summary |
 |---|---|
+| `22628a3` | trim dead smart coldstart helper state |
+| `7310955` | remove dead smart-coldstart retry API |
 | `c83e630` | replace coldstart load boolean with explicit decision |
 | `16e3b3a` | narrow smart coldstart to helper-only flow |
 | `5625637` | remove `coldstart_complete` from load-stage result |
@@ -107,16 +112,18 @@ Recent validated slices:
 
 Net effect of these slices:
 
-- `coldstart_complete` is no longer part of the operative runtime contract for representation, health, persistence, or load-stage public output
-- the load-stage decision is now explicit instead of being hidden in one overloaded boolean
-- baseline formation semantics are now cleaner and closer to the target ACM definition
+- runtime no longer depends on `coldstart_complete` in representation, persistence, health, or public load-stage contracts
+- load-path selection is explicit instead of hidden in an overloaded boolean
+- dead retry-era parameters are gone
+- dead helper-only smart-coldstart state is gone
+- baseline formation semantics are cleaner and closer to the target ACM definition
 
 ## Remaining Work Burn-Down
 
 | Area | Current state | Remaining | Difficulty |
 |---|---|---|---|
 | Coldstart / baseline authority | Most runtime-facing legacy coldstart semantics are removed | Finish demoting `smart_coldstart` to historian-window / progress helper only; remove remaining lifecycle wrappers that still encode old readiness meaning | Medium |
-| Representation-first runtime ordering | No-score runs often stop before detector/regime work | Push stop conditions earlier than feature prep / seasonality / preview cost where evidence already exists | High |
+| Representation-first runtime ordering | No-score runs often stop before feature / detector / regime work | Push stop conditions earlier than any remaining avoidable preview / preparation cost where evidence already exists | High |
 | Zero-day demotion | Zero-day is non-authoritative on governed no-score runs | Remove remaining alternate-personality feel from runtime summaries and operator surfaces | Medium |
 | SQL / control-plane semantics | Governed tables and views are live and useful | Finalize target semantics for `ACM_SignalProfiles` and `ACM_RepresentationSchemas` | Medium |
 | Dashboards / operator truth | Governed views exist | Cut Grafana and operator queries over to governed views | High |
@@ -127,21 +134,21 @@ Net effect of these slices:
 
 Ordered by importance:
 
-1. Earlier representation-first stop ordering
-2. Final coldstart / baseline unification
+1. Final coldstart / baseline authority unification
+2. Earlier representation-first stop ordering
 3. Dashboard / operator cutover
 4. Forecast / RUL governed cutover
 5. Final legacy deletion
 
 The main blocker is no longer basis churn.
-The dominant remaining technical problem is that ACM still pays too much cost before final authority is known on many non-scoreable batches.
+The main blocker is finishing authority cleanup and then cutting operator surfaces over to governed ACM truth.
 
 ## Source Control State
 
 Current branch hygiene is good for runtime slices:
 
-- runtime slices are being committed separately
-- validated slices are being checkpoint-tagged
+- runtime slices are committed separately
+- validated slices are checkpoint-tagged
 - the current rolling branch is still the integration line for this work
 
 Current intentional dirtiness:
@@ -153,16 +160,16 @@ Current intentional dirtiness:
 
 Immediate next slices:
 
-1. Remove the remaining old coldstart / lifecycle wrappers that still carry readiness semantics outside `baseline_governor`
-2. Push governed no-score resolution earlier than feature prep where possible
-3. Continue 2-3 asset parallel validation after each runtime-affecting slice
+1. remove the remaining old coldstart / lifecycle wrappers that still carry readiness semantics outside `baseline_governor`
+2. push governed no-score resolution earlier than any remaining avoidable prep cost
+3. continue 2-3 asset parallel validation after each runtime-affecting slice
 
 After that:
 
-4. Finish SQL/control-plane semantic cleanup
-5. Cut dashboards over to governed views
-6. Bring forecast / RUL under governed ACM
-7. Delete transitional legacy owners after replay-qualified replacement
+4. finish SQL / control-plane semantic cleanup
+5. cut dashboards over to governed views
+6. bring forecast / RUL under governed ACM
+7. delete transitional legacy owners after replay-qualified replacement
 
 ## Completion Definition
 
