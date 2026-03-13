@@ -49,7 +49,7 @@
         "iconColor": "#6E9FFF",
         "name": "Batch Boundaries",
         "rawQuery": true,
-        "rawSql": "SELECT\n  MIN(sw.Timestamp) AS time,\n  'Batch #' + CAST(ROW_NUMBER() OVER (ORDER BY r.StartedAt) AS nvarchar) + ' start — scores re-calibrated, AR1/CUSUM state reset' AS text,\n  'BATCH' AS tags\nFROM dbo.ACM_Runs r\nJOIN dbo.ACM_Scores_Wide sw ON sw.RunID = r.RunID AND sw.EquipID = r.EquipID\nWHERE r.EquipID = $equipment\n  AND r.StartedAt BETWEEN $__timeFrom() AND $__timeTo()\nGROUP BY r.RunID, r.StartedAt\nORDER BY r.StartedAt ASC",
+        "rawSql": "SELECT\n  MIN(sw.Timestamp) AS time,\n  'Batch #' + CAST(ROW_NUMBER() OVER (ORDER BY r.StartedAt) AS nvarchar) + ' start \u2014 scores re-calibrated, AR1/CUSUM state reset' AS text,\n  'BATCH' AS tags\nFROM dbo.ACM_Runs r\nJOIN dbo.ACM_Scores_Wide sw ON sw.RunID = r.RunID AND sw.EquipID = r.EquipID\nWHERE r.EquipID = $equipment\n  AND r.StartedAt BETWEEN $__timeFrom() AND $__timeTo()\nGROUP BY r.RunID, r.StartedAt\nORDER BY r.StartedAt ASC",
         "type": "table"
       }
     ]
@@ -83,7 +83,7 @@
         "y": 0
       },
       "id": 1,
-      "title": "\u26a1 EQUIPMENT HEALTH \u2014 CURRENT STATUS",
+      "title": "\u26a1 EQUIPMENT STATE \u2014 CURRENT GOVERNED STATUS",
       "type": "row"
     },
     {
@@ -156,11 +156,11 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT TOP 1 HealthIndex\nFROM ACM_HealthTimeline\nWHERE EquipID = $equipment\nORDER BY Timestamp DESC",
+          "rawSql": "SELECT TOP 1 ROUND(HealthIndex, 1) AS HealthIndex FROM dbo.vw_ACM_EquipCurrentSnapshot WHERE EquipID = $equipment",
           "refId": "A"
         }
       ],
-      "title": "Health Index",
+      "title": "Current Health Index",
       "type": "gauge"
     },
     {
@@ -260,11 +260,11 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT TOP 1 HealthZone\nFROM dbo.ACM_HealthTimeline\nWHERE EquipID = $equipment\nORDER BY Timestamp DESC",
+          "rawSql": "SELECT TOP 1 RunClassification FROM dbo.vw_ACM_EquipCurrentSnapshot WHERE EquipID = $equipment",
           "refId": "A"
         }
       ],
-      "title": "Health Zone",
+      "title": "Run Classification",
       "type": "stat"
     },
     {
@@ -335,11 +335,11 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT DATEDIFF(HOUR,\n  (SELECT MIN(Timestamp) FROM dbo.ACM_HealthTimeline WHERE EquipID = $equipment\n     AND HealthZone IN ('WATCH','ALERT')\n     AND RunID = (SELECT TOP 1 RunID FROM dbo.ACM_Runs WHERE EquipID = $equipment ORDER BY StartedAt DESC)),\n  (SELECT MAX(Timestamp) FROM dbo.ACM_HealthTimeline WHERE EquipID = $equipment\n     AND HealthZone IN ('WATCH','ALERT')\n     AND RunID = (SELECT TOP 1 RunID FROM dbo.ACM_Runs WHERE EquipID = $equipment ORDER BY StartedAt DESC))\n) AS DurationHours",
+          "rawSql": "SELECT TOP 1 RepresentationRuntimeMode FROM dbo.vw_ACM_EquipCurrentSnapshot WHERE EquipID = $equipment",
           "refId": "A"
         }
       ],
-      "title": "Time in Zone",
+      "title": "Runtime Mode",
       "type": "stat"
     },
     {
@@ -405,11 +405,11 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT COUNT(*) AS TotalEpisodes\nFROM dbo.ACM_Episodes\nWHERE EquipID = $equipment\n  AND StartTime BETWEEN $__timeFrom() AND $__timeTo()",
+          "rawSql": "SELECT TOP 1 CAST(RepresentationScoreAllowed AS int) AS ScoreAllowed FROM dbo.vw_ACM_EquipCurrentSnapshot WHERE EquipID = $equipment",
           "refId": "A"
         }
       ],
-      "title": "Episodes (Time Range)",
+      "title": "Score Allowed",
       "type": "stat"
     },
     {
@@ -417,43 +417,112 @@
         "type": "mssql",
         "uid": "${datasource}"
       },
-      "description": "Worst active defect from latest run. Reads ACM_SensorDefects — the detector with the highest ViolationPct that has ActiveDefect=1. Shows severity: LOW/MEDIUM/HIGH/CRITICAL.",
+      "description": "Worst active defect from latest run. Reads ACM_SensorDefects \u2014 the detector with the highest ViolationPct that has ActiveDefect=1. Shows severity: LOW/MEDIUM/HIGH/CRITICAL.",
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
+          "color": {
+            "mode": "thresholds"
+          },
           "mappings": [
-            { "options": { "LOW":      { "color": "#FADE2A", "index": 0, "text": "LOW" } },      "type": "value" },
-            { "options": { "MEDIUM":   { "color": "#FF9830", "index": 1, "text": "MEDIUM" } },   "type": "value" },
-            { "options": { "HIGH":     { "color": "#E02F44", "index": 2, "text": "HIGH" } },     "type": "value" },
-            { "options": { "CRITICAL": { "color": "#C4162A", "index": 3, "text": "CRITICAL" } }, "type": "value" },
-            { "options": { "":         { "color": "#73BF69", "index": 4, "text": "NONE" } },     "type": "value" }
+            {
+              "options": {
+                "LOW": {
+                  "color": "#FADE2A",
+                  "index": 0,
+                  "text": "LOW"
+                }
+              },
+              "type": "value"
+            },
+            {
+              "options": {
+                "MEDIUM": {
+                  "color": "#FF9830",
+                  "index": 1,
+                  "text": "MEDIUM"
+                }
+              },
+              "type": "value"
+            },
+            {
+              "options": {
+                "HIGH": {
+                  "color": "#E02F44",
+                  "index": 2,
+                  "text": "HIGH"
+                }
+              },
+              "type": "value"
+            },
+            {
+              "options": {
+                "CRITICAL": {
+                  "color": "#C4162A",
+                  "index": 3,
+                  "text": "CRITICAL"
+                }
+              },
+              "type": "value"
+            },
+            {
+              "options": {
+                "": {
+                  "color": "#73BF69",
+                  "index": 4,
+                  "text": "NONE"
+                }
+              },
+              "type": "value"
+            }
           ],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
         },
         "overrides": []
       },
-      "gridPos": { "h": 3, "w": 3, "x": 10, "y": 1 },
+      "gridPos": {
+        "h": 3,
+        "w": 3,
+        "x": 10,
+        "y": 1
+      },
       "id": 6,
       "options": {
         "colorMode": "background",
         "graphMode": "none",
         "justifyMode": "center",
         "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "textMode": "value_and_name",
         "wideLayout": true
       },
       "targets": [
         {
-          "datasource": { "type": "mssql", "uid": "${datasource}" },
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT TOP 1 ISNULL(Severity, '') AS Severity\nFROM dbo.ACM_SensorDefects\nWHERE EquipID = $equipment\n  AND ActiveDefect = 1\n  AND RunID = (SELECT TOP 1 RunID FROM dbo.ACM_Runs WHERE EquipID = $equipment ORDER BY StartedAt DESC)\nORDER BY\n  CASE Severity WHEN 'CRITICAL' THEN 0 WHEN 'HIGH' THEN 1 WHEN 'MEDIUM' THEN 2 WHEN 'LOW' THEN 3 ELSE 4 END ASC",
+          "rawSql": "SELECT TOP 1 CAST(RepresentationLearnAllowed AS int) AS LearnAllowed FROM dbo.vw_ACM_EquipCurrentSnapshot WHERE EquipID = $equipment",
           "refId": "A"
         }
       ],
-      "title": "Active Defect Severity",
+      "title": "Learn Allowed",
       "type": "stat"
     },
     {
@@ -511,11 +580,11 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT TOP 1 SensorName AS WorstSensor\nFROM dbo.ACM_SensorHotspots\nWHERE EquipID = $equipment\n  AND RunID = (SELECT TOP 1 RunID FROM dbo.ACM_Runs WHERE EquipID = $equipment ORDER BY StartedAt DESC)\nORDER BY MaxAbsZ DESC",
+          "rawSql": "SELECT TOP 1 LEFT(OperatorFocus, 120) AS OperatorFocus FROM dbo.vw_ACM_RunStory WHERE EquipID = $equipment ORDER BY StartedAt DESC",
           "refId": "A"
         }
       ],
-      "title": "Worst Sensor",
+      "title": "Operator Focus",
       "type": "stat"
     },
     {
@@ -621,11 +690,11 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT HealthZone AS metric, COUNT(*) AS value\nFROM dbo.ACM_HealthTimeline\nWHERE EquipID = $equipment\n  AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nGROUP BY HealthZone\nORDER BY value DESC",
+          "rawSql": "SELECT RunClassification AS metric, COUNT(*) AS value FROM dbo.vw_ACM_RunFact WHERE EquipID = $equipment AND StartedAt BETWEEN $__timeFrom() AND $__timeTo() GROUP BY RunClassification ORDER BY value DESC",
           "refId": "A"
         }
       ],
-      "title": "Health Zone Distribution",
+      "title": "Run Classification Distribution",
       "type": "piechart"
     },
     {
@@ -756,7 +825,7 @@
         "type": "mssql",
         "uid": "${datasource}"
       },
-      "description": "6 active detector z-scores from ACM_Scores_Wide. AR1/PCA-T2/GMM/OMR fire every timestep; PCA-SPE/IForest are sparse (batch-scored, show as spikes). EWM (7th detector, v11.16.0) is fused into the score but not yet persisted to ACM_Scores_Wide — see output_manager.py write_scores(). Dashed lines = WARN (1.5) and ALERT (3.0) thresholds.",
+      "description": "6 active detector z-scores from ACM_Scores_Wide. AR1/PCA-T2/GMM/OMR fire every timestep; PCA-SPE/IForest are sparse (batch-scored, show as spikes). EWM (7th detector, v11.16.0) is fused into the score but not yet persisted to ACM_Scores_Wide \u2014 see output_manager.py write_scores(). Dashed lines = WARN (1.5) and ALERT (3.0) thresholds.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -817,54 +886,159 @@
         },
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "ar1_z" },
+            "matcher": {
+              "id": "byName",
+              "options": "ar1_z"
+            },
             "properties": [
-              { "id": "displayName", "value": "AR1" },
-              { "id": "color", "value": { "fixedColor": "#5794F2", "mode": "fixed" } },
-              { "id": "custom.lineWidth", "value": 1 }
+              {
+                "id": "displayName",
+                "value": "AR1"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#5794F2",
+                  "mode": "fixed"
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 1
+              }
             ]
           },
           {
-            "matcher": { "id": "byName", "options": "pca_spe_z" },
+            "matcher": {
+              "id": "byName",
+              "options": "pca_spe_z"
+            },
             "properties": [
-              { "id": "displayName", "value": "PCA-SPE" },
-              { "id": "color", "value": { "fixedColor": "#73BF69", "mode": "fixed" } },
-              { "id": "custom.showPoints", "value": "always" },
-              { "id": "custom.pointSize", "value": 4 }
+              {
+                "id": "displayName",
+                "value": "PCA-SPE"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#73BF69",
+                  "mode": "fixed"
+                }
+              },
+              {
+                "id": "custom.showPoints",
+                "value": "always"
+              },
+              {
+                "id": "custom.pointSize",
+                "value": 4
+              }
             ]
           },
           {
-            "matcher": { "id": "byName", "options": "pca_t2_z" },
+            "matcher": {
+              "id": "byName",
+              "options": "pca_t2_z"
+            },
             "properties": [
-              { "id": "displayName", "value": "PCA-T\u00b2" },
-              { "id": "color", "value": { "fixedColor": "#37872D", "mode": "fixed" } },
-              { "id": "custom.lineWidth", "value": 1 }
+              {
+                "id": "displayName",
+                "value": "PCA-T\u00b2"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#37872D",
+                  "mode": "fixed"
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 1
+              }
             ]
           },
           {
-            "matcher": { "id": "byName", "options": "iforest_z" },
+            "matcher": {
+              "id": "byName",
+              "options": "iforest_z"
+            },
             "properties": [
-              { "id": "displayName", "value": "IForest" },
-              { "id": "color", "value": { "fixedColor": "#FF9830", "mode": "fixed" } },
-              { "id": "custom.showPoints", "value": "always" },
-              { "id": "custom.pointSize", "value": 4 }
+              {
+                "id": "displayName",
+                "value": "IForest"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#FF9830",
+                  "mode": "fixed"
+                }
+              },
+              {
+                "id": "custom.showPoints",
+                "value": "always"
+              },
+              {
+                "id": "custom.pointSize",
+                "value": 4
+              }
             ]
           },
           {
-            "matcher": { "id": "byName", "options": "gmm_z" },
+            "matcher": {
+              "id": "byName",
+              "options": "gmm_z"
+            },
             "properties": [
-              { "id": "displayName", "value": "GMM" },
-              { "id": "color", "value": { "fixedColor": "#E0B400", "mode": "fixed" } },
-              { "id": "custom.lineWidth", "value": 1 }
+              {
+                "id": "displayName",
+                "value": "GMM"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#E0B400",
+                  "mode": "fixed"
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 1
+              }
             ]
           },
           {
-            "matcher": { "id": "byName", "options": "omr_z" },
+            "matcher": {
+              "id": "byName",
+              "options": "omr_z"
+            },
             "properties": [
-              { "id": "displayName", "value": "OMR" },
-              { "id": "color", "value": { "fixedColor": "#FF780A", "mode": "fixed" } },
-              { "id": "custom.lineWidth", "value": 2 },
-              { "id": "custom.lineStyle", "value": { "dash": [6, 3], "fill": "dash" } }
+              {
+                "id": "displayName",
+                "value": "OMR"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#FF780A",
+                  "mode": "fixed"
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 2
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "dash": [
+                    6,
+                    3
+                  ],
+                  "fill": "dash"
+                }
+              }
             ]
           }
         ]
@@ -1276,23 +1450,42 @@
     },
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 24 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 24
+      },
       "id": 18,
       "title": "\ud83c\udf0a EWM ZERO-DAY BASELINE",
       "type": "row"
     },
     {
-      "datasource": { "type": "mssql", "uid": "${datasource}" },
-      "description": "EWM is the 7th detector — always-on from observation 2, no training required. It tracks slow long-term drift from the equipment's day-0 sensor character using dual exponential moving averages (alpha_fast=0.05 ~20 batches, alpha_slow=0.005 ~200 batches). z_slow = slow EWM diverging from fast = genuine sustained drift, not transient noise. This is NOT the same as the 6 model-gated detectors — it fires before any model exists and is the only sentinel during COLDSTART.",
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "EWM is the 7th detector \u2014 always-on from observation 2, no training required. It tracks slow long-term drift from the equipment's day-0 sensor character using dual exponential moving averages (alpha_fast=0.05 ~20 batches, alpha_slow=0.005 ~200 batches). z_slow = slow EWM diverging from fast = genuine sustained drift, not transient noise. This is NOT the same as the 6 model-gated detectors \u2014 it fires before any model exists and is the only sentinel during COLDSTART.",
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
+          "color": {
+            "mode": "thresholds"
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "#73BF69", "value": null },
-              { "color": "#FF9830", "value": 1 },
-              { "color": "#C4162A", "value": 3 }
+              {
+                "color": "#73BF69",
+                "value": null
+              },
+              {
+                "color": "#FF9830",
+                "value": 1
+              },
+              {
+                "color": "#C4162A",
+                "value": 3
+              }
             ]
           },
           "unit": "short",
@@ -1301,20 +1494,34 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 25 },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 25
+      },
       "id": 18001,
       "options": {
         "colorMode": "background",
         "graphMode": "none",
         "justifyMode": "center",
         "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "textMode": "value_and_name",
         "wideLayout": true
       },
       "targets": [
         {
-          "datasource": { "type": "mssql", "uid": "${datasource}" },
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
@@ -1327,55 +1534,178 @@
       "type": "stat"
     },
     {
-      "datasource": { "type": "mssql", "uid": "${datasource}" },
-      "description": "EWM baseline health per regime. ScoreP50 = median z_slow across sensors (normal operation). ScoreP95 = 95th percentile z_slow. Frozen sensors (BaselineIntegrity=frozen) are excluded from scoring — their slow variance is too low to be informative.",
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "EWM baseline health per regime. ScoreP50 = median z_slow across sensors (normal operation). ScoreP95 = 95th percentile z_slow. Frozen sensors (BaselineIntegrity=frozen) are excluded from scoring \u2014 their slow variance is too low to be informative.",
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "palette-classic" },
+          "color": {
+            "mode": "palette-classic"
+          },
           "custom": {
             "align": "auto",
-            "cellOptions": { "type": "auto" },
+            "cellOptions": {
+              "type": "auto"
+            },
             "filterable": true,
             "inspect": false
           }
         },
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "ScoreP50" },
+            "matcher": {
+              "id": "byName",
+              "options": "ScoreP50"
+            },
             "properties": [
-              { "id": "custom.cellOptions", "value": { "type": "gauge", "mode": "basic" } },
-              { "id": "min", "value": 0 },
-              { "id": "max", "value": 5 },
-              { "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 1.5 }, { "color": "red", "value": 3 }] } }
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge",
+                  "mode": "basic"
+                }
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "max",
+                "value": 5
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 1.5
+                    },
+                    {
+                      "color": "red",
+                      "value": 3
+                    }
+                  ]
+                }
+              }
             ]
           },
           {
-            "matcher": { "id": "byName", "options": "ScoreP95" },
+            "matcher": {
+              "id": "byName",
+              "options": "ScoreP95"
+            },
             "properties": [
-              { "id": "custom.cellOptions", "value": { "type": "gauge", "mode": "basic" } },
-              { "id": "min", "value": 0 },
-              { "id": "max", "value": 8 },
-              { "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 1.5 }, { "color": "red", "value": 3 }] } }
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge",
+                  "mode": "basic"
+                }
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "max",
+                "value": 8
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 1.5
+                    },
+                    {
+                      "color": "red",
+                      "value": 3
+                    }
+                  ]
+                }
+              }
             ]
           },
           {
-            "matcher": { "id": "byName", "options": "BaselineIntegrity" },
+            "matcher": {
+              "id": "byName",
+              "options": "BaselineIntegrity"
+            },
             "properties": [
-              { "id": "custom.cellOptions", "value": { "type": "color-background", "mode": "basic" } },
-              { "id": "mappings", "value": [
-                { "type": "value", "options": { "ok":     { "color": "#73BF69", "index": 0, "text": "active" } } },
-                { "type": "value", "options": { "frozen": { "color": "#6E9FFF", "index": 1, "text": "frozen (flat sensor)" } } }
-              ]}
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "ok": {
+                        "color": "#73BF69",
+                        "index": 0,
+                        "text": "active"
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "frozen": {
+                        "color": "#6E9FFF",
+                        "index": 1,
+                        "text": "frozen (flat sensor)"
+                      }
+                    }
+                  }
+                ]
+              }
             ]
           }
         ]
       },
-      "gridPos": { "h": 8, "w": 18, "x": 6, "y": 25 },
+      "gridPos": {
+        "h": 8,
+        "w": 18,
+        "x": 6,
+        "y": 25
+      },
       "id": 18002,
-      "options": { "showHeader": true, "cellHeight": "sm", "footer": { "show": false, "reducer": ["sum"], "countRows": false } },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false,
+          "reducer": [
+            "sum"
+          ],
+          "countRows": false
+        }
+      },
       "targets": [
         {
-          "datasource": { "type": "mssql", "uid": "${datasource}" },
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
@@ -1387,18 +1717,27 @@
       "type": "table"
     },
     {
-      "datasource": { "type": "mssql", "uid": "${datasource}" },
-      "description": "Top sensors by EWM P95 z_slow score — highest values indicate sensors whose long-term behaviour has drifted most from their day-0 baseline. These are the sensors EWM is most actively flagging.",
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Top sensors by EWM P95 z_slow score \u2014 highest values indicate sensors whose long-term behaviour has drifted most from their day-0 baseline. These are the sensors EWM is most actively flagging.",
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "continuous-GrYlRd" },
+          "color": {
+            "mode": "continuous-GrYlRd"
+          },
           "custom": {
             "axisBorderShow": false,
             "axisLabel": "EWM P95 z_slow",
             "axisPlacement": "auto",
             "fillOpacity": 80,
             "gradientMode": "none",
-            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
             "lineWidth": 1
           },
           "unit": "short",
@@ -1406,7 +1745,12 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 29 },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 29
+      },
       "id": 18003,
       "options": {
         "orientation": "horizontal",
@@ -1414,14 +1758,24 @@
         "barWidth": 0.85,
         "groupWidth": 0.7,
         "stacking": "none",
-        "tooltip": { "mode": "single", "sort": "none" },
-        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": false },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": false
+        },
         "xTickLabelRotation": 0,
         "xTickLabelMaxLength": 30
       },
       "targets": [
         {
-          "datasource": { "type": "mssql", "uid": "${datasource}" },
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
@@ -1433,34 +1787,107 @@
       "type": "barchart"
     },
     {
-      "datasource": { "type": "mssql", "uid": "${datasource}" },
-      "description": "EWM-sourced episodes from ACM_Episodes where PrimaryDetector = 'ewm_z'. These fire independently of the model-gated detectors — they represent zero-day drift detections that happened even before HDBSCAN had enough data to cluster.",
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "EWM-sourced episodes from ACM_Episodes where PrimaryDetector = 'ewm_z'. These fire independently of the model-gated detectors \u2014 they represent zero-day drift detections that happened even before HDBSCAN had enough data to cluster.",
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "palette-classic" },
-          "custom": { "align": "auto", "cellOptions": { "type": "auto" }, "filterable": true }
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": true
+          }
         },
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "Severity" },
+            "matcher": {
+              "id": "byName",
+              "options": "Severity"
+            },
             "properties": [
-              { "id": "custom.cellOptions", "value": { "type": "color-background", "mode": "basic" } },
-              { "id": "mappings", "value": [
-                { "type": "value", "options": { "LOW":      { "color": "#FADE2A", "index": 0 } } },
-                { "type": "value", "options": { "MEDIUM":   { "color": "#FF9830", "index": 1 } } },
-                { "type": "value", "options": { "HIGH":     { "color": "#E02F44", "index": 2 } } },
-                { "type": "value", "options": { "CRITICAL": { "color": "#C4162A", "index": 3 } } }
-              ]}
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "LOW": {
+                        "color": "#FADE2A",
+                        "index": 0
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "MEDIUM": {
+                        "color": "#FF9830",
+                        "index": 1
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "HIGH": {
+                        "color": "#E02F44",
+                        "index": 2
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "CRITICAL": {
+                        "color": "#C4162A",
+                        "index": 3
+                      }
+                    }
+                  }
+                ]
+              }
             ]
           }
         ]
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 29 },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 29
+      },
       "id": 18004,
-      "options": { "showHeader": true, "cellHeight": "sm", "footer": { "show": false, "reducer": ["sum"], "countRows": false } },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false,
+          "reducer": [
+            "sum"
+          ],
+          "countRows": false
+        }
+      },
       "targets": [
         {
-          "datasource": { "type": "mssql", "uid": "${datasource}" },
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
@@ -1473,7 +1900,12 @@
     },
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 37 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 37
+      },
       "id": 20,
       "title": "\ud83c\udf00 OPERATING REGIMES",
       "type": "row"
@@ -1486,7 +1918,9 @@
       "description": "Regime label (integer) over time as a step line. -1 = UNKNOWN/novel. IsNovel = 1 marks rows where the model rejected regime assignment. Use this to see how many distinct operating modes the equipment visits and when transitions happen.",
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "palette-classic" },
+          "color": {
+            "mode": "palette-classic"
+          },
           "custom": {
             "axisBorderShow": false,
             "axisCenteredZero": false,
@@ -1497,72 +1931,185 @@
             "drawStyle": "line",
             "fillOpacity": 0,
             "gradientMode": "none",
-            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
             "insertNulls": false,
             "lineInterpolation": "stepAfter",
             "lineWidth": 2,
             "pointSize": 5,
-            "scaleDistribution": { "type": "linear" },
+            "scaleDistribution": {
+              "type": "linear"
+            },
             "showPoints": "never",
             "spanNulls": 3600000,
-            "stacking": { "group": "A", "mode": "none" },
-            "thresholdsStyle": { "mode": "off" }
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
           },
           "mappings": [],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
           "unit": "short"
         },
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "RegimeLabel" },
+            "matcher": {
+              "id": "byName",
+              "options": "RegimeLabel"
+            },
             "properties": [
-              { "id": "displayName", "value": "Regime ID" },
-              { "id": "color", "value": { "fixedColor": "#5794F2", "mode": "fixed" } }
+              {
+                "id": "displayName",
+                "value": "Regime ID"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#5794F2",
+                  "mode": "fixed"
+                }
+              }
             ]
           },
           {
-            "matcher": { "id": "byName", "options": "IsNovel" },
+            "matcher": {
+              "id": "byName",
+              "options": "IsNovel"
+            },
             "properties": [
-              { "id": "displayName", "value": "Novel (unassigned)" },
-              { "id": "color", "value": { "fixedColor": "#C4162A", "mode": "fixed" } },
-              { "id": "custom.drawStyle", "value": "bars" },
-              { "id": "custom.fillOpacity", "value": 60 },
-              { "id": "custom.lineWidth", "value": 0 },
-              { "id": "custom.axisPlacement", "value": "right" },
-              { "id": "custom.axisLabel", "value": "Novel" },
-              { "id": "max", "value": 1 },
-              { "id": "min", "value": 0 }
+              {
+                "id": "displayName",
+                "value": "Novel (unassigned)"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#C4162A",
+                  "mode": "fixed"
+                }
+              },
+              {
+                "id": "custom.drawStyle",
+                "value": "bars"
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 60
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 0
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "custom.axisLabel",
+                "value": "Novel"
+              },
+              {
+                "id": "max",
+                "value": 1
+              },
+              {
+                "id": "min",
+                "value": 0
+              }
             ]
           },
           {
-            "matcher": { "id": "byName", "options": "AssignmentConfidence" },
+            "matcher": {
+              "id": "byName",
+              "options": "AssignmentConfidence"
+            },
             "properties": [
-              { "id": "displayName", "value": "Assignment Confidence" },
-              { "id": "color", "value": { "fixedColor": "#73BF69", "mode": "fixed" } },
-              { "id": "custom.lineWidth", "value": 1 },
-              { "id": "custom.lineStyle", "value": { "dash": [4, 4], "fill": "dash" } },
-              { "id": "custom.axisPlacement", "value": "right" },
-              { "id": "custom.axisLabel", "value": "Confidence" },
-              { "id": "max", "value": 1 },
-              { "id": "min", "value": 0 }
+              {
+                "id": "displayName",
+                "value": "Assignment Confidence"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#73BF69",
+                  "mode": "fixed"
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 1
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "dash": [
+                    4,
+                    4
+                  ],
+                  "fill": "dash"
+                }
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "custom.axisLabel",
+                "value": "Confidence"
+              },
+              {
+                "id": "max",
+                "value": 1
+              },
+              {
+                "id": "min",
+                "value": 0
+              }
             ]
           }
         ]
       },
-      "gridPos": { "h": 6, "w": 14, "x": 0, "y": 25 },
+      "gridPos": {
+        "h": 6,
+        "w": 14,
+        "x": 0,
+        "y": 25
+      },
       "id": 21,
       "options": {
         "legend": {
-          "calcs": ["lastNotNull"],
+          "calcs": [
+            "lastNotNull"
+          ],
           "displayMode": "list",
           "placement": "bottom",
           "showLegend": true
         },
-        "tooltip": { "mode": "multi", "sort": "none" }
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
       },
       "targets": [
         {
-          "datasource": { "type": "mssql", "uid": "${datasource}" },
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
@@ -3148,7 +3695,7 @@
           "refId": "A"
         }
       ],
-      "title": "PCA Model — Components & Variance Explained",
+      "title": "PCA Model \u2014 Components & Variance Explained",
       "type": "timeseries"
     },
     {
@@ -3844,36 +4391,68 @@
     },
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 91 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 91
+      },
       "id": 200,
       "title": "\ud83e\udde0 MODEL LIFECYCLE & HEALTH QUALITY",
       "type": "row"
     },
     {
-      "datasource": { "type": "mssql", "uid": "${datasource}" },
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
       "description": "Current model maturity state, regime version, and training history from ACM_ActiveModels.",
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] },
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
           "mappings": []
         },
         "overrides": []
       },
-      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 92 },
+      "gridPos": {
+        "h": 4,
+        "w": 24,
+        "x": 0,
+        "y": 92
+      },
       "id": 201,
       "options": {
         "colorMode": "background",
         "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "horizontal",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "text": {},
         "textMode": "auto"
       },
       "targets": [
         {
-          "datasource": { "type": "mssql", "uid": "${datasource}" },
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
@@ -3885,17 +4464,31 @@
       "type": "stat"
     },
     {
-      "datasource": { "type": "mssql", "uid": "${datasource}" },
-      "description": "Coldstart progress — how far along data accumulation is.",
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Coldstart progress \u2014 how far along data accumulation is.",
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
+          "color": {
+            "mode": "thresholds"
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "red", "value": null },
-              { "color": "yellow", "value": 50 },
-              { "color": "green", "value": 100 }
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 50
+              },
+              {
+                "color": "green",
+                "value": 100
+              }
             ]
           },
           "unit": "percent",
@@ -3904,19 +4497,33 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 96 },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 0,
+        "y": 96
+      },
       "id": 202,
       "options": {
         "colorMode": "background",
         "graphMode": "area",
         "justifyMode": "auto",
         "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "textMode": "auto"
       },
       "targets": [
         {
-          "datasource": { "type": "mssql", "uid": "${datasource}" },
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
@@ -3928,11 +4535,16 @@
       "type": "stat"
     },
     {
-      "datasource": { "type": "mssql", "uid": "${datasource}" },
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
       "description": "Per-run: average health index and data quality score. Downward trends = degradation.",
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "palette-classic" },
+          "color": {
+            "mode": "palette-classic"
+          },
           "custom": {
             "axisBorderShow": false,
             "axisCenteredZero": false,
@@ -3942,16 +4554,27 @@
             "drawStyle": "line",
             "fillOpacity": 10,
             "gradientMode": "opacity",
-            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
             "insertNulls": false,
             "lineInterpolation": "smooth",
             "lineWidth": 2,
             "pointSize": 5,
-            "scaleDistribution": { "type": "linear" },
+            "scaleDistribution": {
+              "type": "linear"
+            },
             "showPoints": "auto",
             "spanNulls": true,
-            "stacking": { "group": "A", "mode": "none" },
-            "thresholdsStyle": { "mode": "off" }
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
           },
           "min": 0,
           "max": 100,
@@ -3959,20 +4582,34 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 16, "x": 8, "y": 96 },
+      "gridPos": {
+        "h": 8,
+        "w": 16,
+        "x": 8,
+        "y": 96
+      },
       "id": 203,
       "options": {
         "legend": {
-          "calcs": ["lastNotNull", "min"],
+          "calcs": [
+            "lastNotNull",
+            "min"
+          ],
           "displayMode": "table",
           "placement": "bottom",
           "showLegend": true
         },
-        "tooltip": { "mode": "multi", "sort": "none" }
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
       },
       "targets": [
         {
-          "datasource": { "type": "mssql", "uid": "${datasource}" },
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
@@ -3984,11 +4621,16 @@
       "type": "timeseries"
     },
     {
-      "datasource": { "type": "mssql", "uid": "${datasource}" },
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
       "description": "Health index confidence and quality flag per timestamp. Low confidence = model uncertain.",
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "palette-classic" },
+          "color": {
+            "mode": "palette-classic"
+          },
           "custom": {
             "axisBorderShow": false,
             "axisCenteredZero": false,
@@ -3998,45 +4640,79 @@
             "drawStyle": "line",
             "fillOpacity": 15,
             "gradientMode": "opacity",
-            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
             "insertNulls": false,
             "lineInterpolation": "smooth",
             "lineWidth": 2,
             "pointSize": 4,
-            "scaleDistribution": { "type": "linear" },
+            "scaleDistribution": {
+              "type": "linear"
+            },
             "showPoints": "never",
             "spanNulls": true,
-            "stacking": { "group": "A", "mode": "none" },
-            "thresholdsStyle": { "mode": "dashed" }
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "dashed"
+            }
           },
           "min": 0,
           "max": 1,
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "red", "value": null },
-              { "color": "yellow", "value": 0.5 },
-              { "color": "green", "value": 0.8 }
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.5
+              },
+              {
+                "color": "green",
+                "value": 0.8
+              }
             ]
           },
           "unit": "short"
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 104 },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 104
+      },
       "id": 204,
       "options": {
         "legend": {
-          "calcs": ["lastNotNull", "min"],
+          "calcs": [
+            "lastNotNull",
+            "min"
+          ],
           "displayMode": "table",
           "placement": "bottom",
           "showLegend": true
         },
-        "tooltip": { "mode": "multi", "sort": "none" }
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
       },
       "targets": [
         {
-          "datasource": { "type": "mssql", "uid": "${datasource}" },
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
@@ -4048,11 +4724,16 @@
       "type": "timeseries"
     },
     {
-      "datasource": { "type": "mssql", "uid": "${datasource}" },
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
       "description": "Regime assignment confidence over time. Low confidence = borderline operating state.",
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "palette-classic" },
+          "color": {
+            "mode": "palette-classic"
+          },
           "custom": {
             "axisBorderShow": false,
             "axisCenteredZero": false,
@@ -4062,16 +4743,27 @@
             "drawStyle": "line",
             "fillOpacity": 10,
             "gradientMode": "none",
-            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
             "insertNulls": false,
             "lineInterpolation": "smooth",
             "lineWidth": 1,
             "pointSize": 4,
-            "scaleDistribution": { "type": "linear" },
+            "scaleDistribution": {
+              "type": "linear"
+            },
             "showPoints": "never",
             "spanNulls": false,
-            "stacking": { "group": "A", "mode": "none" },
-            "thresholdsStyle": { "mode": "off" }
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
           },
           "min": 0,
           "max": 1,
@@ -4079,30 +4771,61 @@
         },
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "IsNovel" },
+            "matcher": {
+              "id": "byName",
+              "options": "IsNovel"
+            },
             "properties": [
-              { "id": "custom.drawStyle", "value": "bars" },
-              { "id": "custom.fillOpacity", "value": 80 },
-              { "id": "color", "value": { "fixedColor": "#FF9830", "mode": "fixed" } },
-              { "id": "custom.axisPlacement", "value": "right" }
+              {
+                "id": "custom.drawStyle",
+                "value": "bars"
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 80
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#FF9830",
+                  "mode": "fixed"
+                }
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              }
             ]
           }
         ]
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 104 },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 104
+      },
       "id": 205,
       "options": {
         "legend": {
-          "calcs": ["lastNotNull"],
+          "calcs": [
+            "lastNotNull"
+          ],
           "displayMode": "table",
           "placement": "bottom",
           "showLegend": true
         },
-        "tooltip": { "mode": "multi", "sort": "none" }
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
       },
       "targets": [
         {
-          "datasource": { "type": "mssql", "uid": "${datasource}" },
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
@@ -4115,7 +4838,12 @@
     },
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 91 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 91
+      },
       "id": 90,
       "title": "\ud83d\udce1 OBSERVABILITY \u2014 PROMETHEUS METRICS",
       "type": "row"

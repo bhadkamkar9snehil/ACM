@@ -36,7 +36,20 @@
         "iconColor": "#FF9830",
         "name": "Threshold Crossings",
         "rawQuery": true,
-        "rawSql": "SELECT Timestamp AS time, Detector + ' crossed ' + Direction + ' at Z=' + CAST(ROUND(ZScore,2) AS nvarchar(20)) AS text, 'THRESHOLD' AS tags\nFROM ACM_ThresholdCrossings\nWHERE EquipID = $equipment\n  AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY Timestamp ASC",
+        "rawSql": "SELECT Timestamp AS time,\n  'Fused Z crossed alert threshold (Z=' + CAST(ROUND(fused,2) AS nvarchar(20)) + ')' AS text,\n  'THRESHOLD' AS tags\nFROM dbo.ACM_Scores_Wide\nWHERE EquipID = $equipment\n  AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\n  AND fused >= 3.0\nORDER BY Timestamp ASC",
+        "type": "table"
+      },
+      {
+        "datasource": {
+          "type": "mssql",
+          "uid": "${datasource}"
+        },
+        "enable": true,
+        "hide": false,
+        "iconColor": "#6E9FFF",
+        "name": "Batch Boundaries",
+        "rawQuery": true,
+        "rawSql": "SELECT\n  MIN(sw.Timestamp) AS time,\n  'Batch #' + CAST(ROW_NUMBER() OVER (ORDER BY r.StartedAt) AS nvarchar) + ' start \u2014 scores re-calibrated, AR1/CUSUM state reset' AS text,\n  'BATCH' AS tags\nFROM dbo.ACM_Runs r\nJOIN dbo.ACM_Scores_Wide sw ON sw.RunID = r.RunID AND sw.EquipID = r.EquipID\nWHERE r.EquipID = $equipment\n  AND r.StartedAt BETWEEN $__timeFrom() AND $__timeTo()\nGROUP BY r.RunID, r.StartedAt\nORDER BY r.StartedAt ASC",
         "type": "table"
       }
     ]
@@ -70,7 +83,7 @@
         "y": 0
       },
       "id": 1,
-      "title": "\u26a1 EQUIPMENT HEALTH \u2014 CURRENT STATUS",
+      "title": "\u26a1 EQUIPMENT STATE \u2014 CURRENT GOVERNED STATUS",
       "type": "row"
     },
     {
@@ -84,6 +97,7 @@
           "color": {
             "mode": "thresholds"
           },
+          "mappings": [],
           "max": 100,
           "min": 0,
           "thresholds": {
@@ -91,7 +105,7 @@
             "steps": [
               {
                 "color": "#C4162A",
-                "value": 0
+                "value": null
               },
               {
                 "color": "#FF9830",
@@ -108,7 +122,8 @@
             ]
           },
           "unit": "percent"
-        }
+        },
+        "overrides": []
       },
       "gridPos": {
         "h": 6,
@@ -118,14 +133,6 @@
       },
       "id": 2,
       "options": {
-        "barShape": "rounded",
-        "barWidthFactor": 0.5,
-        "effects": {
-          "barGlow": true,
-          "centerGlow": true,
-          "gradient": true
-        },
-        "endpointMarker": "point",
         "minVizHeight": 75,
         "minVizWidth": 75,
         "orientation": "auto",
@@ -136,14 +143,9 @@
           "fields": "",
           "values": false
         },
-        "segmentCount": 1,
-        "segmentSpacing": 0.3,
-        "shape": "circle",
-        "showThresholdLabels": true,
+        "showThresholdLabels": false,
         "showThresholdMarkers": true,
-        "sizing": "auto",
-        "sparkline": false,
-        "textMode": "auto"
+        "sizing": "auto"
       },
       "targets": [
         {
@@ -154,11 +156,11 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT TOP 1 HealthIndex\nFROM ACM_HealthTimeline\nWHERE EquipID = $equipment\nORDER BY Timestamp DESC",
+          "rawSql": "SELECT TOP 1 ROUND(HealthIndex, 1) AS HealthIndex FROM dbo.vw_ACM_EquipCurrentSnapshot WHERE EquipID = $equipment",
           "refId": "A"
         }
       ],
-      "title": "Health Index",
+      "title": "Current Health Index",
       "type": "gauge"
     },
     {
@@ -219,11 +221,12 @@
             "steps": [
               {
                 "color": "green",
-                "value": 0
+                "value": null
               }
             ]
           }
-        }
+        },
+        "overrides": []
       },
       "gridPos": {
         "h": 6,
@@ -237,12 +240,11 @@
         "graphMode": "none",
         "justifyMode": "center",
         "orientation": "auto",
-        "percentChangeColorMode": "standard",
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
           ],
-          "fields": "/^HealthZone$/",
+          "fields": "",
           "values": false
         },
         "showPercentChange": false,
@@ -258,11 +260,11 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT TOP 1 HealthZone\nFROM dbo.ACM_HealthTimeline\nWHERE EquipID = $equipment\nORDER BY Timestamp DESC",
+          "rawSql": "SELECT TOP 1 RunClassification FROM dbo.vw_ACM_EquipCurrentSnapshot WHERE EquipID = $equipment",
           "refId": "A"
         }
       ],
-      "title": "Health Zone",
+      "title": "Run Classification",
       "type": "stat"
     },
     {
@@ -276,13 +278,12 @@
           "color": {
             "mode": "thresholds"
           },
-          "decimals": 1,
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
                 "color": "green",
-                "value": 0
+                "value": null
               },
               {
                 "color": "yellow",
@@ -298,8 +299,10 @@
               }
             ]
           },
-          "unit": "h"
-        }
+          "unit": "h",
+          "decimals": 1
+        },
+        "overrides": []
       },
       "gridPos": {
         "h": 3,
@@ -313,7 +316,6 @@
         "graphMode": "none",
         "justifyMode": "center",
         "orientation": "auto",
-        "percentChangeColorMode": "standard",
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
@@ -321,7 +323,6 @@
           "fields": "",
           "values": false
         },
-        "showPercentChange": false,
         "textMode": "value_and_name",
         "wideLayout": true
       },
@@ -334,11 +335,11 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT DATEDIFF(HOUR,\n  (SELECT MIN(Timestamp) FROM dbo.ACM_HealthTimeline WHERE EquipID = $equipment\n     AND HealthZone IN ('WATCH','ALERT')\n     AND RunID = (SELECT TOP 1 RunID FROM dbo.ACM_Runs WHERE EquipID = $equipment ORDER BY StartedAt DESC)),\n  (SELECT MAX(Timestamp) FROM dbo.ACM_HealthTimeline WHERE EquipID = $equipment\n     AND HealthZone IN ('WATCH','ALERT')\n     AND RunID = (SELECT TOP 1 RunID FROM dbo.ACM_Runs WHERE EquipID = $equipment ORDER BY StartedAt DESC))\n) AS DurationHours",
+          "rawSql": "SELECT TOP 1 RepresentationRuntimeMode FROM dbo.vw_ACM_EquipCurrentSnapshot WHERE EquipID = $equipment",
           "refId": "A"
         }
       ],
-      "title": "Time in Zone",
+      "title": "Runtime Mode",
       "type": "stat"
     },
     {
@@ -346,7 +347,77 @@
         "type": "mssql",
         "uid": "${datasource}"
       },
-      "description": "Latest-run detector defect severity derived from ACM_SensorDefects active rows",
+      "description": "Episode count and rate from latest run",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 3
+              },
+              {
+                "color": "red",
+                "value": 10
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 3,
+        "x": 7,
+        "y": 4
+      },
+      "id": 5,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value_and_name",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT TOP 1 CAST(RepresentationScoreAllowed AS int) AS ScoreAllowed FROM dbo.vw_ACM_EquipCurrentSnapshot WHERE EquipID = $equipment",
+          "refId": "A"
+        }
+      ],
+      "title": "Score Allowed",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Worst active defect from latest run. Reads ACM_SensorDefects \u2014 the detector with the highest ViolationPct that has ActiveDefect=1. Shows severity: LOW/MEDIUM/HIGH/CRITICAL.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -355,25 +426,50 @@
           "mappings": [
             {
               "options": {
-                "ALERT": {
+                "LOW": {
+                  "color": "#FADE2A",
+                  "index": 0,
+                  "text": "LOW"
+                }
+              },
+              "type": "value"
+            },
+            {
+              "options": {
+                "MEDIUM": {
                   "color": "#FF9830",
+                  "index": 1,
+                  "text": "MEDIUM"
+                }
+              },
+              "type": "value"
+            },
+            {
+              "options": {
+                "HIGH": {
+                  "color": "#E02F44",
                   "index": 2,
-                  "text": "\ud83d\udd36 ALERT"
-                },
+                  "text": "HIGH"
+                }
+              },
+              "type": "value"
+            },
+            {
+              "options": {
                 "CRITICAL": {
                   "color": "#C4162A",
                   "index": 3,
-                  "text": "\ud83d\udd34 CRITICAL"
-                },
-                "DEGRADED": {
-                  "color": "#FADE2A",
-                  "index": 1,
-                  "text": "\u26a0\ufe0f DEGRADED"
-                },
-                "HEALTHY": {
+                  "text": "CRITICAL"
+                }
+              },
+              "type": "value"
+            },
+            {
+              "options": {
+                "": {
                   "color": "#73BF69",
-                  "index": 0,
-                  "text": "\u2705 HEALTHY"
+                  "index": 4,
+                  "text": "NONE"
                 }
               },
               "type": "value"
@@ -384,11 +480,12 @@
             "steps": [
               {
                 "color": "green",
-                "value": 0
+                "value": null
               }
             ]
           }
-        }
+        },
+        "overrides": []
       },
       "gridPos": {
         "h": 3,
@@ -402,16 +499,14 @@
         "graphMode": "none",
         "justifyMode": "center",
         "orientation": "auto",
-        "percentChangeColorMode": "standard",
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
           ],
-          "fields": "/^Status$/",
+          "fields": "",
           "values": false
         },
-        "showPercentChange": false,
-        "textMode": "value",
+        "textMode": "value_and_name",
         "wideLayout": true
       },
       "targets": [
@@ -423,11 +518,73 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "WITH latest_run AS (\n  SELECT TOP 1 RunID\n  FROM dbo.ACM_Runs\n  WHERE EquipID = $equipment\n  ORDER BY StartedAt DESC\n), defect_rollup AS (\n  SELECT\n    SUM(CASE\n          WHEN TRY_CONVERT(bit, ActiveDefect) = 1 THEN 1\n          WHEN UPPER(CONVERT(varchar(10), ActiveDefect)) IN ('TRUE', 'YES') THEN 1\n          ELSE 0\n        END) AS ActiveDefects,\n    MAX(CASE\n          WHEN UPPER(COALESCE(Severity, '')) = 'CRITICAL' THEN 4\n          WHEN UPPER(COALESCE(Severity, '')) IN ('HIGH', 'ALERT') THEN 3\n          WHEN UPPER(COALESCE(Severity, '')) IN ('MEDIUM', 'WARNING', 'WATCH') THEN 2\n          WHEN UPPER(COALESCE(Severity, '')) IN ('LOW', 'CAUTION') THEN 1\n          ELSE 0\n        END) AS SeverityRank\n  FROM dbo.ACM_SensorDefects\n  WHERE EquipID = $equipment\n    AND RunID = (SELECT RunID FROM latest_run)\n)\nSELECT CASE\n         WHEN COALESCE(ActiveDefects, 0) = 0 THEN 'HEALTHY'\n         WHEN SeverityRank >= 4 THEN 'CRITICAL'\n         WHEN SeverityRank >= 3 THEN 'ALERT'\n         ELSE 'DEGRADED'\n       END AS Status\nFROM defect_rollup",
+          "rawSql": "SELECT TOP 1 CAST(RepresentationLearnAllowed AS int) AS LearnAllowed FROM dbo.vw_ACM_EquipCurrentSnapshot WHERE EquipID = $equipment",
           "refId": "A"
         }
       ],
-      "title": "Defect Status",
+      "title": "Learn Allowed",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Worst contributing sensor from latest run",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#FF9830",
+                "value": null
+              }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 3,
+        "x": 10,
+        "y": 4
+      },
+      "id": 7,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value_and_name",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT TOP 1 LEFT(OperatorFocus, 120) AS OperatorFocus FROM dbo.vw_ACM_RunStory WHERE EquipID = $equipment ORDER BY StartedAt DESC",
+          "refId": "A"
+        }
+      ],
+      "title": "Operator Focus",
       "type": "stat"
     },
     {
@@ -533,11 +690,11 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT HealthZone AS metric, COUNT(*) AS value\nFROM dbo.ACM_HealthTimeline\nWHERE EquipID = $equipment\n  AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nGROUP BY HealthZone\nORDER BY value DESC",
+          "rawSql": "SELECT RunClassification AS metric, COUNT(*) AS value FROM dbo.vw_ACM_RunFact WHERE EquipID = $equipment AND StartedAt BETWEEN $__timeFrom() AND $__timeTo() GROUP BY RunClassification ORDER BY value DESC",
           "refId": "A"
         }
       ],
-      "title": "Health Zone Distribution",
+      "title": "Run Classification Distribution",
       "type": "piechart"
     },
     {
@@ -549,7 +706,7 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "continuous-RdYlGr"
+            "mode": "thresholds"
           },
           "custom": {
             "axisBorderShow": false,
@@ -567,7 +724,7 @@
               "tooltip": false,
               "viz": false
             },
-            "insertNulls": 3600000,
+            "insertNulls": false,
             "lineInterpolation": "smooth",
             "lineWidth": 2,
             "pointSize": 5,
@@ -575,8 +732,7 @@
               "type": "linear"
             },
             "showPoints": "auto",
-            "showValues": false,
-            "spanNulls": 3600000,
+            "spanNulls": false,
             "stacking": {
               "group": "A",
               "mode": "none"
@@ -585,6 +741,7 @@
               "mode": "line+area"
             }
           },
+          "mappings": [],
           "max": 100,
           "min": 0,
           "thresholds": {
@@ -592,7 +749,7 @@
             "steps": [
               {
                 "color": "rgba(196,22,42,0.15)",
-                "value": 0
+                "value": null
               },
               {
                 "color": "rgba(255,152,48,0.10)",
@@ -609,7 +766,8 @@
             ]
           },
           "unit": "percent"
-        }
+        },
+        "overrides": []
       },
       "gridPos": {
         "h": 6,
@@ -630,7 +788,6 @@
           "showLegend": true
         },
         "tooltip": {
-          "hideZeros": false,
           "mode": "single",
           "sort": "none"
         }
@@ -644,145 +801,12 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT Timestamp AS time, HealthIndex AS value\nFROM ACM_HealthTimeline\nWHERE EquipID = $equipment\n  AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY Timestamp ASC",
+          "rawSql": "SELECT\n  Timestamp AS time,\n  HealthIndex,\n  NULLIF(RawHealthIndex, -1) AS RawHealthIndex\nFROM dbo.ACM_HealthTimeline\nWHERE EquipID = $equipment\n  AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY Timestamp ASC",
           "refId": "A"
         }
       ],
       "title": "Health Index Timeline",
       "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "mssql",
-        "uid": "${datasource}"
-      },
-      "description": "Episode count and rate from latest run",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": 0
-              },
-              {
-                "color": "yellow",
-                "value": 3
-              },
-              {
-                "color": "red",
-                "value": 10
-              }
-            ]
-          },
-          "unit": "short"
-        }
-      },
-      "gridPos": {
-        "h": 3,
-        "w": 3,
-        "x": 7,
-        "y": 4
-      },
-      "id": 5,
-      "options": {
-        "colorMode": "background",
-        "graphMode": "none",
-        "justifyMode": "center",
-        "orientation": "auto",
-        "percentChangeColorMode": "standard",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "showPercentChange": false,
-        "textMode": "value_and_name",
-        "wideLayout": true
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "mssql",
-            "uid": "${datasource}"
-          },
-          "editorMode": "code",
-          "format": "table",
-          "rawQuery": true,
-          "rawSql": "SELECT COUNT(*) AS TotalEpisodes\nFROM dbo.ACM_Episodes\nWHERE EquipID = $equipment\n  AND RunID = (SELECT TOP 1 RunID FROM dbo.ACM_Runs WHERE EquipID = $equipment ORDER BY StartedAt DESC)",
-          "refId": "A"
-        }
-      ],
-      "title": "Episodes (Latest Run)",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "mssql",
-        "uid": "${datasource}"
-      },
-      "description": "Worst contributing sensor from latest run",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "#FF9830",
-                "value": 0
-              }
-            ]
-          }
-        }
-      },
-      "gridPos": {
-        "h": 3,
-        "w": 3,
-        "x": 10,
-        "y": 4
-      },
-      "id": 7,
-      "options": {
-        "colorMode": "background",
-        "graphMode": "none",
-        "justifyMode": "center",
-        "orientation": "auto",
-        "percentChangeColorMode": "standard",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "/^WorstSensor$/",
-          "values": false
-        },
-        "showPercentChange": false,
-        "textMode": "value",
-        "wideLayout": true
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "mssql",
-            "uid": "${datasource}"
-          },
-          "editorMode": "code",
-          "format": "table",
-          "rawQuery": true,
-          "rawSql": "SELECT TOP 1 SensorName AS WorstSensor\nFROM dbo.ACM_SensorHotspots\nWHERE EquipID = $equipment\n  AND RunID = (SELECT TOP 1 RunID FROM dbo.ACM_Runs WHERE EquipID = $equipment ORDER BY StartedAt DESC)\nORDER BY MaxAbsZ DESC",
-          "refId": "A"
-        }
-      ],
-      "title": "Worst Sensor",
-      "type": "stat"
     },
     {
       "collapsed": false,
@@ -801,7 +825,7 @@
         "type": "mssql",
         "uid": "${datasource}"
       },
-      "description": "AR1, PCA-SPE, PCA-T2, MHAL, IForest, GMM, and CUSUM z-score signals from ACM_Scores_Wide",
+      "description": "6 active detector z-scores from ACM_Scores_Wide. AR1/PCA-T2/GMM/OMR fire every timestep; PCA-SPE/IForest are sparse (batch-scored, show as spikes). EWM (7th detector, v11.16.0) is fused into the score but not yet persisted to ACM_Scores_Wide \u2014 see output_manager.py write_scores(). Dashed lines = WARN (1.5) and ALERT (3.0) thresholds.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -816,22 +840,21 @@
             "barAlignment": 0,
             "barWidthFactor": 0.6,
             "drawStyle": "line",
-            "fillOpacity": 5,
-            "gradientMode": "hue",
+            "fillOpacity": 0,
+            "gradientMode": "none",
             "hideFrom": {
               "legend": false,
               "tooltip": false,
               "viz": false
             },
-            "insertNulls": 3600000,
+            "insertNulls": false,
             "lineInterpolation": "linear",
-            "lineWidth": 2,
+            "lineWidth": 1,
             "pointSize": 5,
             "scaleDistribution": {
               "type": "linear"
             },
             "showPoints": "never",
-            "showValues": false,
             "spanNulls": false,
             "stacking": {
               "group": "A",
@@ -841,20 +864,21 @@
               "mode": "dashed"
             }
           },
+          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
                 "color": "green",
-                "value": 0
+                "value": null
               },
               {
                 "color": "yellow",
                 "value": 1.5
               },
               {
-                "color": "#c90c22",
-                "value": 3
+                "color": "red",
+                "value": 3.0
               }
             ]
           },
@@ -877,6 +901,10 @@
                   "fixedColor": "#5794F2",
                   "mode": "fixed"
                 }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 1
               }
             ]
           },
@@ -896,6 +924,14 @@
                   "fixedColor": "#73BF69",
                   "mode": "fixed"
                 }
+              },
+              {
+                "id": "custom.showPoints",
+                "value": "always"
+              },
+              {
+                "id": "custom.pointSize",
+                "value": 4
               }
             ]
           },
@@ -915,25 +951,10 @@
                   "fixedColor": "#37872D",
                   "mode": "fixed"
                 }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "mhal_z"
-            },
-            "properties": [
-              {
-                "id": "displayName",
-                "value": "Mahal"
               },
               {
-                "id": "color",
-                "value": {
-                  "fixedColor": "#FADE2A",
-                  "mode": "fixed"
-                }
+                "id": "custom.lineWidth",
+                "value": 1
               }
             ]
           },
@@ -953,6 +974,14 @@
                   "fixedColor": "#FF9830",
                   "mode": "fixed"
                 }
+              },
+              {
+                "id": "custom.showPoints",
+                "value": "always"
+              },
+              {
+                "id": "custom.pointSize",
+                "value": 4
               }
             ]
           },
@@ -972,24 +1001,42 @@
                   "fixedColor": "#E0B400",
                   "mode": "fixed"
                 }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 1
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "cusum_z"
+              "options": "omr_z"
             },
             "properties": [
               {
                 "id": "displayName",
-                "value": "CUSUM"
+                "value": "OMR"
               },
               {
                 "id": "color",
                 "value": {
-                  "fixedColor": "#C4162A",
+                  "fixedColor": "#FF780A",
                   "mode": "fixed"
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 2
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "dash": [
+                    6,
+                    3
+                  ],
+                  "fill": "dash"
                 }
               }
             ]
@@ -1014,7 +1061,6 @@
           "showLegend": true
         },
         "tooltip": {
-          "hideZeros": false,
           "mode": "multi",
           "sort": "desc"
         }
@@ -1028,7 +1074,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT Timestamp AS time, ar1_z, pca_spe_z, pca_t2_z, mhal_z, iforest_z, gmm_z, cusum_z\nFROM ACM_Scores_Wide\nWHERE EquipID = $equipment\n  AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY Timestamp ASC",
+          "rawSql": "SELECT\n  Timestamp AS time,\n  NULLIF(ar1_z,    -8) AS ar1_z,\n  NULLIF(pca_spe_z,-8) AS pca_spe_z,\n  NULLIF(pca_t2_z, -8) AS pca_t2_z,\n  NULLIF(iforest_z,-8) AS iforest_z,\n  NULLIF(gmm_z,    -8) AS gmm_z,\n  NULLIF(omr_z,    -8) AS omr_z\nFROM dbo.ACM_Scores_Wide\nWHERE EquipID = $equipment\n  AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY Timestamp ASC",
           "refId": "A"
         }
       ],
@@ -1052,8 +1098,6 @@
             "axisColorMode": "text",
             "axisLabel": "Fused Z",
             "axisPlacement": "auto",
-            "barAlignment": 0,
-            "barWidthFactor": 0.6,
             "drawStyle": "line",
             "fillOpacity": 25,
             "gradientMode": "scheme",
@@ -1062,7 +1106,7 @@
               "tooltip": false,
               "viz": false
             },
-            "insertNulls": 3600000,
+            "insertNulls": false,
             "lineInterpolation": "smooth",
             "lineWidth": 2,
             "pointSize": 5,
@@ -1070,8 +1114,7 @@
               "type": "linear"
             },
             "showPoints": "never",
-            "showValues": false,
-            "spanNulls": 3600000,
+            "spanNulls": false,
             "stacking": {
               "group": "A",
               "mode": "none"
@@ -1080,13 +1123,14 @@
               "mode": "line+area"
             }
           },
+          "mappings": [],
           "min": 0,
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
                 "color": "green",
-                "value": 0
+                "value": null
               },
               {
                 "color": "yellow",
@@ -1094,16 +1138,17 @@
               },
               {
                 "color": "orange",
-                "value": 3
+                "value": 3.0
               },
               {
                 "color": "red",
-                "value": 5
+                "value": 5.0
               }
             ]
           },
           "unit": "short"
-        }
+        },
+        "overrides": []
       },
       "gridPos": {
         "h": 8,
@@ -1124,7 +1169,6 @@
           "showLegend": true
         },
         "tooltip": {
-          "hideZeros": false,
           "mode": "single",
           "sort": "none"
         }
@@ -1172,7 +1216,7 @@
               "tooltip": false,
               "viz": false
             },
-            "insertNulls": 3600000,
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 0,
             "pointSize": 5,
@@ -1180,31 +1224,16 @@
               "type": "linear"
             },
             "showPoints": "never",
-            "showValues": false,
             "spanNulls": false,
             "stacking": {
               "group": "A",
               "mode": "percent"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
             }
           },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": 0
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
+          "mappings": [],
           "unit": "percent"
-        }
+        },
+        "overrides": []
       },
       "gridPos": {
         "h": 8,
@@ -1223,7 +1252,6 @@
           "showLegend": true
         },
         "tooltip": {
-          "hideZeros": false,
           "mode": "multi",
           "sort": "desc"
         }
@@ -1262,8 +1290,10 @@
               "viz": false
             }
           },
+          "mappings": [],
           "unit": "percent"
-        }
+        },
+        "overrides": []
       },
       "gridPos": {
         "h": 8,
@@ -1283,16 +1313,7 @@
           "showLegend": true
         },
         "pieType": "pie",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "sort": "desc",
         "tooltip": {
-          "hideZeros": false,
           "mode": "single",
           "sort": "none"
         }
@@ -1324,23 +1345,12 @@
           "color": {
             "mode": "thresholds"
           },
-          "custom": {
-            "align": "auto",
-            "cellOptions": {
-              "type": "auto"
-            },
-            "footer": {
-              "reducers": []
-            },
-            "inspect": false
-          },
-          "decimals": 3,
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
                 "color": "green",
-                "value": 0
+                "value": null
               },
               {
                 "color": "yellow",
@@ -1348,11 +1358,12 @@
               },
               {
                 "color": "red",
-                "value": 4
+                "value": 4.0
               }
             ]
           },
-          "unit": "short"
+          "unit": "short",
+          "decimals": 3
         },
         "overrides": [
           {
@@ -1373,6 +1384,10 @@
               "options": "P95"
             },
             "properties": [
+              {
+                "id": "custom.displayMode",
+                "value": "color-background-solid"
+              },
               {
                 "id": "custom.width",
                 "value": 70
@@ -1406,7 +1421,15 @@
       "id": 15,
       "options": {
         "cellHeight": "sm",
-        "enablePagination": false,
+        "footer": {
+          "countRows": false,
+          "enablePagination": false,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
         "showHeader": true
       },
       "targets": [
@@ -1433,6 +1456,456 @@
         "x": 0,
         "y": 24
       },
+      "id": 18,
+      "title": "\ud83c\udf0a EWM ZERO-DAY BASELINE",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "EWM is the 7th detector \u2014 always-on from observation 2, no training required. It tracks slow long-term drift from the equipment's day-0 sensor character using dual exponential moving averages (alpha_fast=0.05 ~20 batches, alpha_slow=0.005 ~200 batches). z_slow = slow EWM diverging from fast = genuine sustained drift, not transient noise. This is NOT the same as the 6 model-gated detectors \u2014 it fires before any model exists and is the only sentinel during COLDSTART.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#73BF69",
+                "value": null
+              },
+              {
+                "color": "#FF9830",
+                "value": 1
+              },
+              {
+                "color": "#C4162A",
+                "value": 3
+              }
+            ]
+          },
+          "unit": "short",
+          "decimals": 0,
+          "min": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 25
+      },
+      "id": 18001,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value_and_name",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  COUNT(*) AS TotalSensors,\n  SUM(CASE WHEN BaselineIntegrity='frozen' THEN 1 ELSE 0 END) AS FrozenSensors,\n  SUM(CASE WHEN BaselineIntegrity='ok' THEN 1 ELSE 0 END) AS ActiveSensors\nFROM dbo.ACM_EWMBaseline\nWHERE EquipID = $equipment",
+          "refId": "A"
+        }
+      ],
+      "title": "EWM Sensor Coverage",
+      "transformations": [],
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "EWM baseline health per regime. ScoreP50 = median z_slow across sensors (normal operation). ScoreP95 = 95th percentile z_slow. Frozen sensors (BaselineIntegrity=frozen) are excluded from scoring \u2014 their slow variance is too low to be informative.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": true,
+            "inspect": false
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ScoreP50"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge",
+                  "mode": "basic"
+                }
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "max",
+                "value": 5
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 1.5
+                    },
+                    {
+                      "color": "red",
+                      "value": 3
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ScoreP95"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge",
+                  "mode": "basic"
+                }
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "max",
+                "value": 8
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 1.5
+                    },
+                    {
+                      "color": "red",
+                      "value": 3
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "BaselineIntegrity"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "ok": {
+                        "color": "#73BF69",
+                        "index": 0,
+                        "text": "active"
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "frozen": {
+                        "color": "#6E9FFF",
+                        "index": 1,
+                        "text": "frozen (flat sensor)"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 18,
+        "x": 6,
+        "y": 25
+      },
+      "id": 18002,
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false,
+          "reducer": [
+            "sum"
+          ],
+          "countRows": false
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  RegimeID,\n  COUNT(*) AS NSensors,\n  SUM(CASE WHEN BaselineIntegrity='frozen' THEN 1 ELSE 0 END) AS NFrozen,\n  ROUND(AVG(ScoreP50), 3) AS ScoreP50,\n  ROUND(AVG(ScoreP95), 3) AS ScoreP95,\n  MAX(NSamples) AS MaxSamples\nFROM dbo.ACM_EWMBaseline\nWHERE EquipID = $equipment\nGROUP BY RegimeID\nORDER BY RegimeID ASC",
+          "refId": "A"
+        }
+      ],
+      "title": "EWM Baseline Health by Regime",
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Top sensors by EWM P95 z_slow score \u2014 highest values indicate sensors whose long-term behaviour has drifted most from their day-0 baseline. These are the sensors EWM is most actively flagging.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "continuous-GrYlRd"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisLabel": "EWM P95 z_slow",
+            "axisPlacement": "auto",
+            "fillOpacity": 80,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineWidth": 1
+          },
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 29
+      },
+      "id": 18003,
+      "options": {
+        "orientation": "horizontal",
+        "showValue": "auto",
+        "barWidth": 0.85,
+        "groupWidth": 0.7,
+        "stacking": "none",
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": false
+        },
+        "xTickLabelRotation": 0,
+        "xTickLabelMaxLength": 30
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT TOP 20\n  SensorName,\n  ROUND(ScoreP95, 3) AS ScoreP95\nFROM dbo.ACM_EWMBaseline\nWHERE EquipID = $equipment\n  AND BaselineIntegrity = 'ok'\nORDER BY ScoreP95 DESC",
+          "refId": "A"
+        }
+      ],
+      "title": "Top 20 Sensors by EWM P95 Drift Score",
+      "type": "barchart"
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "EWM-sourced episodes from ACM_Episodes where PrimaryDetector = 'ewm_z'. These fire independently of the model-gated detectors \u2014 they represent zero-day drift detections that happened even before HDBSCAN had enough data to cluster.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Severity"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "LOW": {
+                        "color": "#FADE2A",
+                        "index": 0
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "MEDIUM": {
+                        "color": "#FF9830",
+                        "index": 1
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "HIGH": {
+                        "color": "#E02F44",
+                        "index": 2
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "CRITICAL": {
+                        "color": "#C4162A",
+                        "index": 3
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 29
+      },
+      "id": 18004,
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false,
+          "reducer": [
+            "sum"
+          ],
+          "countRows": false
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT TOP 30\n  CONVERT(varchar(16), StartTime, 120) AS StartTime,\n  CONVERT(varchar(16), EndTime, 120) AS EndTime,\n  ROUND(DurationHours, 2) AS DurationHours,\n  Severity\nFROM dbo.ACM_Episodes\nWHERE EquipID = $equipment\n  AND PrimaryDetector = 'ewm_z'\n  AND StartTime BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY StartTime DESC",
+          "refId": "A"
+        }
+      ],
+      "title": "EWM Zero-Day Episodes (Time Range)",
+      "type": "table"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 37
+      },
       "id": 20,
       "title": "\ud83c\udf00 OPERATING REGIMES",
       "type": "row"
@@ -1442,77 +1915,173 @@
         "type": "mssql",
         "uid": "${datasource}"
       },
-      "description": "Regime label over time \u2014 each band = distinct operating mode",
+      "description": "Regime label (integer) over time as a step line. -1 = UNKNOWN/novel. IsNovel = 1 marks rows where the model rejected regime assignment. Use this to see how many distinct operating modes the equipment visits and when transitions happen.",
       "fieldConfig": {
         "defaults": {
           "color": {
             "mode": "palette-classic"
           },
           "custom": {
-            "fillOpacity": 70,
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "Regime ID",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
             "hideFrom": {
               "legend": false,
               "tooltip": false,
               "viz": false
             },
             "insertNulls": false,
-            "lineWidth": 0,
-            "spanNulls": false
-          },
-          "mappings": [
-            {
-              "options": {
-                "-1": {
-                  "color": "#7B61FF",
-                  "index": 0,
-                  "text": "UNKNOWN"
-                }
-              },
-              "type": "value"
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
             },
-            {
-              "options": {
-                "0": {
-                  "color": "#73BF69",
-                  "index": 1,
-                  "text": "Regime 0"
-                }
-              },
-              "type": "value"
+            "showPoints": "never",
+            "spanNulls": 3600000,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
             },
-            {
-              "options": {
-                "1": {
-                  "color": "#FADE2A",
-                  "index": 2,
-                  "text": "Regime 1"
-                }
-              },
-              "type": "value"
-            },
-            {
-              "options": {
-                "2": {
-                  "color": "#FF9830",
-                  "index": 3,
-                  "text": "Regime 2"
-                }
-              },
-              "type": "value"
-            },
-            {
-              "options": {
-                "3": {
-                  "color": "#5794F2",
-                  "index": 4,
-                  "text": "Regime 3"
-                }
-              },
-              "type": "value"
+            "thresholdsStyle": {
+              "mode": "off"
             }
-          ]
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "RegimeLabel"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Regime ID"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#5794F2",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "IsNovel"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Novel (unassigned)"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#C4162A",
+                  "mode": "fixed"
+                }
+              },
+              {
+                "id": "custom.drawStyle",
+                "value": "bars"
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 60
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 0
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "custom.axisLabel",
+                "value": "Novel"
+              },
+              {
+                "id": "max",
+                "value": 1
+              },
+              {
+                "id": "min",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "AssignmentConfidence"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Assignment Confidence"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#73BF69",
+                  "mode": "fixed"
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 1
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "dash": [
+                    4,
+                    4
+                  ],
+                  "fill": "dash"
+                }
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "custom.axisLabel",
+                "value": "Confidence"
+              },
+              {
+                "id": "max",
+                "value": 1
+              },
+              {
+                "id": "min",
+                "value": 0
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 6,
@@ -1522,17 +2091,16 @@
       },
       "id": 21,
       "options": {
-        "alignValue": "left",
         "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
           "displayMode": "list",
           "placement": "bottom",
           "showLegend": true
         },
-        "mergeValues": true,
-        "rowHeight": 0.9,
-        "showValue": "auto",
         "tooltip": {
-          "mode": "single",
+          "mode": "multi",
           "sort": "none"
         }
       },
@@ -1545,12 +2113,12 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT Timestamp AS time, RegimeLabel AS value\nFROM ACM_RegimeTimeline\nWHERE EquipID = $equipment\n  AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY Timestamp ASC",
+          "rawSql": "SELECT\n  Timestamp AS time,\n  CAST(RegimeLabel AS int) AS RegimeLabel,\n  CAST(IsNovel AS float) AS IsNovel,\n  NULLIF(AssignmentConfidence, -1) AS AssignmentConfidence\nFROM dbo.ACM_RegimeTimeline\nWHERE EquipID = $equipment\n  AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY Timestamp ASC",
           "refId": "A"
         }
       ],
-      "title": "Regime Timeline (State Timeline)",
-      "type": "state-timeline"
+      "title": "Regime Timeline",
+      "type": "timeseries"
     },
     {
       "datasource": {
@@ -1982,16 +2550,15 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "continuous-RdYlGr"
+            "mode": "thresholds"
           },
           "custom": {
             "axisBorderShow": false,
-            "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "Max |Z-Score|",
             "axisPlacement": "auto",
             "fillOpacity": 80,
-            "gradientMode": "hue",
+            "gradientMode": "none",
             "hideFrom": {
               "legend": false,
               "tooltip": false,
@@ -2005,14 +2572,12 @@
               "mode": "off"
             }
           },
-          "decimals": 2,
-          "min": 0,
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
                 "color": "green",
-                "value": 0
+                "value": null
               },
               {
                 "color": "yellow",
@@ -2020,16 +2585,18 @@
               },
               {
                 "color": "orange",
-                "value": 3
+                "value": 3.0
               },
               {
                 "color": "red",
-                "value": 5
+                "value": 5.0
               }
             ]
           },
-          "unit": "short"
-        }
+          "unit": "short",
+          "decimals": 2
+        },
+        "overrides": []
       },
       "gridPos": {
         "h": 8,
@@ -2044,7 +2611,6 @@
         "fullHighlight": true,
         "groupWidth": 0.7,
         "legend": {
-          "calcs": [],
           "displayMode": "list",
           "placement": "bottom",
           "showLegend": false
@@ -2053,9 +2619,8 @@
         "showValue": "auto",
         "stacking": "none",
         "tooltip": {
-          "hideZeros": true,
-          "mode": "multi",
-          "sort": "desc"
+          "mode": "single",
+          "sort": "none"
         },
         "xField": "SensorName",
         "xTickLabelRotation": 0,
@@ -2088,27 +2653,17 @@
           "color": {
             "mode": "thresholds"
           },
-          "custom": {
-            "align": "auto",
-            "cellOptions": {
-              "type": "auto"
-            },
-            "footer": {
-              "reducers": []
-            },
-            "inspect": false
-          },
-          "decimals": 2,
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
                 "color": "green",
-                "value": 0
+                "value": null
               }
             ]
           },
-          "unit": "short"
+          "unit": "short",
+          "decimals": 2
         },
         "overrides": [
           {
@@ -2118,13 +2673,17 @@
             },
             "properties": [
               {
+                "id": "custom.displayMode",
+                "value": "color-background-solid"
+              },
+              {
                 "id": "thresholds",
                 "value": {
                   "mode": "absolute",
                   "steps": [
                     {
                       "color": "green",
-                      "value": 0
+                      "value": null
                     },
                     {
                       "color": "yellow",
@@ -2132,18 +2691,14 @@
                     },
                     {
                       "color": "orange",
-                      "value": 3
+                      "value": 3.0
                     },
                     {
                       "color": "red",
-                      "value": 5
+                      "value": 5.0
                     }
                   ]
                 }
-              },
-              {
-                "id": "custom.width",
-                "value": 77
               }
             ]
           },
@@ -2154,13 +2709,17 @@
             },
             "properties": [
               {
+                "id": "custom.displayMode",
+                "value": "color-background"
+              },
+              {
                 "id": "thresholds",
                 "value": {
                   "mode": "absolute",
                   "steps": [
                     {
                       "color": "green",
-                      "value": 0
+                      "value": null
                     },
                     {
                       "color": "yellow",
@@ -2183,117 +2742,7 @@
             "properties": [
               {
                 "id": "custom.width",
-                "value": 309
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "WarnCnt"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 72
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "LatestAbsZ"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 90
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "AlertCnt"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 68
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byType",
-              "options": "number"
-            },
-            "properties": [
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "gauge"
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Sensor"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 114
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Max Abz Z"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 176
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Latest Abs Z"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 166
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Warn Cnt"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 117
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Alert Cnt"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 79
+                "value": 200
               }
             ]
           }
@@ -2308,7 +2757,15 @@
       "id": 42,
       "options": {
         "cellHeight": "sm",
-        "enablePagination": false,
+        "footer": {
+          "countRows": false,
+          "enablePagination": false,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
         "showHeader": true
       },
       "targets": [
@@ -2325,24 +2782,7 @@
         }
       ],
       "title": "Sensor Hotspot Detail",
-      "type": "table",
-      "transformations": [
-        {
-          "id": "organize",
-          "options": {
-            "excludeByName": {},
-            "includeByName": {},
-            "indexByName": {},
-            "renameByName": {
-              "AlertCnt": "Alert Cnt",
-              "LatestAbsZ": "Latest Abs Z",
-              "MaxAbsZ": "Max Abz Z",
-              "SensorName": "Sensor",
-              "WarnCnt": "Warn Cnt"
-            }
-          }
-        }
-      ]
+      "type": "table"
     },
     {
       "datasource": {
@@ -2355,22 +2795,12 @@
           "color": {
             "mode": "thresholds"
           },
-          "custom": {
-            "align": "auto",
-            "cellOptions": {
-              "type": "auto"
-            },
-            "footer": {
-              "reducers": []
-            },
-            "inspect": false
-          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
                 "color": "green",
-                "value": 0
+                "value": null
               }
             ]
           },
@@ -2384,8 +2814,12 @@
             },
             "properties": [
               {
+                "id": "custom.displayMode",
+                "value": "color-background-solid"
+              },
+              {
                 "id": "custom.width",
-                "value": 77
+                "value": 85
               },
               {
                 "id": "mappings",
@@ -2435,13 +2869,17 @@
                 "value": "percent"
               },
               {
+                "id": "custom.displayMode",
+                "value": "color-background"
+              },
+              {
                 "id": "thresholds",
                 "value": {
                   "mode": "absolute",
                   "steps": [
                     {
                       "color": "green",
-                      "value": 0
+                      "value": null
                     },
                     {
                       "color": "yellow",
@@ -2453,10 +2891,6 @@
                     }
                   ]
                 }
-              },
-              {
-                "id": "custom.width",
-                "value": 182
               }
             ]
           },
@@ -2467,8 +2901,12 @@
             },
             "properties": [
               {
+                "id": "custom.displayMode",
+                "value": "color-background-solid"
+              },
+              {
                 "id": "custom.width",
-                "value": 125
+                "value": 80
               },
               {
                 "id": "mappings",
@@ -2496,56 +2934,6 @@
                 ]
               }
             ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "MaxZ"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 135
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "CurrentZ"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 136
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "DetectorType"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 207
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byType",
-              "options": "number"
-            },
-            "properties": [
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "gauge"
-                }
-              }
-            ]
           }
         ]
       },
@@ -2558,7 +2946,15 @@
       "id": 43,
       "options": {
         "cellHeight": "sm",
-        "enablePagination": false,
+        "footer": {
+          "countRows": false,
+          "enablePagination": false,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
         "showHeader": true
       },
       "targets": [
@@ -2606,8 +3002,6 @@
             "axisColorMode": "text",
             "axisLabel": "Drift Z",
             "axisPlacement": "auto",
-            "barAlignment": 0,
-            "barWidthFactor": 0.6,
             "drawStyle": "line",
             "fillOpacity": 20,
             "gradientMode": "scheme",
@@ -2624,7 +3018,6 @@
               "type": "linear"
             },
             "showPoints": "never",
-            "showValues": false,
             "spanNulls": false,
             "stacking": {
               "group": "A",
@@ -2634,16 +3027,17 @@
               "mode": "line+area"
             }
           },
+          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
                 "color": "green",
-                "value": 0
+                "value": null
               },
               {
                 "color": "yellow",
-                "value": 2
+                "value": 2.0
               },
               {
                 "color": "red",
@@ -2652,7 +3046,8 @@
             ]
           },
           "unit": "short"
-        }
+        },
+        "overrides": []
       },
       "gridPos": {
         "h": 7,
@@ -2673,7 +3068,6 @@
           "showLegend": true
         },
         "tooltip": {
-          "hideZeros": false,
           "mode": "single",
           "sort": "none"
         }
@@ -2703,10 +3097,9 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "continuous-GrYlRd"
+            "mode": "palette-classic"
           },
           "custom": {
-            "axisPlacement": "auto",
             "fillOpacity": 70,
             "hideFrom": {
               "legend": false,
@@ -2720,32 +3113,37 @@
           "mappings": [
             {
               "options": {
-                "ALERT": {
-                  "color": "dark-red",
-                  "index": 0
-                },
+                "GOOD": {
+                  "color": "#73BF69",
+                  "index": 0,
+                  "text": "GOOD"
+                }
+              },
+              "type": "value"
+            },
+            {
+              "options": {
                 "WATCH": {
-                  "color": "orange",
-                  "index": 1
+                  "color": "#FADE2A",
+                  "index": 1,
+                  "text": "WATCH"
+                }
+              },
+              "type": "value"
+            },
+            {
+              "options": {
+                "ALERT": {
+                  "color": "#FF9830",
+                  "index": 2,
+                  "text": "ALERT"
                 }
               },
               "type": "value"
             }
-          ],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": 0
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          }
-        }
+          ]
+        },
+        "overrides": []
       },
       "gridPos": {
         "h": 7,
@@ -2765,7 +3163,6 @@
         "rowHeight": 0.9,
         "showValue": "auto",
         "tooltip": {
-          "hideZeros": false,
           "mode": "single",
           "sort": "none"
         }
@@ -2797,44 +3194,16 @@
           "color": {
             "mode": "thresholds"
           },
-          "custom": {
-            "align": "auto",
-            "cellOptions": {
-              "type": "auto"
-            },
-            "footer": {
-              "reducers": []
-            },
-            "inspect": false
-          },
-          "mappings": [
-            {
-              "options": {
-                "ALERT": {
-                  "color": "red",
-                  "index": 1
-                },
-                "GOOD": {
-                  "color": "dark-green",
-                  "index": 2
-                },
-                "WATCH": {
-                  "color": "orange",
-                  "index": 0
-                }
-              },
-              "type": "value"
-            }
-          ],
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
                 "color": "green",
-                "value": 0
+                "value": null
               }
             ]
-          }
+          },
+          "mappings": []
         },
         "overrides": [
           {
@@ -2844,36 +3213,40 @@
             },
             "properties": [
               {
+                "id": "custom.displayMode",
+                "value": "color-background-solid"
+              },
+              {
                 "id": "mappings",
                 "value": [
                   {
                     "options": {
-                      "ALERT": {
-                        "color": "red",
-                        "index": 2
-                      },
                       "GOOD": {
-                        "color": "dark-green",
+                        "color": "#73BF69",
                         "index": 0
-                      },
+                      }
+                    },
+                    "type": "value"
+                  },
+                  {
+                    "options": {
                       "WATCH": {
-                        "color": "orange",
+                        "color": "#FADE2A",
                         "index": 1
+                      }
+                    },
+                    "type": "value"
+                  },
+                  {
+                    "options": {
+                      "ALERT": {
+                        "color": "#FF9830",
+                        "index": 2
                       }
                     },
                     "type": "value"
                   }
                 ]
-              },
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "color-background"
-                }
-              },
-              {
-                "id": "custom.width",
-                "value": 114
               }
             ]
           },
@@ -2890,100 +3263,6 @@
               {
                 "id": "decimals",
                 "value": 1
-              },
-              {
-                "id": "custom.width",
-                "value": 400
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "FromZone"
-            },
-            "properties": [
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "color-background"
-                }
-              },
-              {
-                "id": "custom.width",
-                "value": 109
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "HealthAtEvent"
-            },
-            "properties": [
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "mode": "lcd",
-                  "type": "gauge"
-                }
-              },
-              {
-                "id": "max",
-                "value": 100
-              },
-              {
-                "id": "min",
-                "value": 0
-              },
-              {
-                "id": "color",
-                "value": {
-                  "mode": "continuous-YlBl"
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "FusedZ"
-            },
-            "properties": [
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "mode": "lcd",
-                  "type": "gauge"
-                }
-              },
-              {
-                "id": "custom.width",
-                "value": 483
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Timestamp"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 171
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "EventType"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 166
               }
             ]
           }
@@ -2998,7 +3277,15 @@
       "id": 53,
       "options": {
         "cellHeight": "sm",
-        "enablePagination": false,
+        "footer": {
+          "countRows": false,
+          "enablePagination": false,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
         "showHeader": true
       },
       "targets": [
@@ -3042,7 +3329,6 @@
           },
           "custom": {
             "axisBorderShow": false,
-            "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "Count",
             "axisPlacement": "auto",
@@ -3066,7 +3352,7 @@
             "steps": [
               {
                 "color": "red",
-                "value": 0
+                "value": null
               },
               {
                 "color": "orange",
@@ -3083,7 +3369,8 @@
             ]
           },
           "unit": "short"
-        }
+        },
+        "overrides": []
       },
       "gridPos": {
         "h": 8,
@@ -3098,7 +3385,6 @@
         "fullHighlight": true,
         "groupWidth": 0.7,
         "legend": {
-          "calcs": [],
           "displayMode": "list",
           "placement": "bottom",
           "showLegend": false
@@ -3107,7 +3393,6 @@
         "showValue": "auto",
         "stacking": "none",
         "tooltip": {
-          "hideZeros": false,
           "mode": "single",
           "sort": "none"
         },
@@ -3150,18 +3435,14 @@
               "tooltip": false,
               "viz": false
             },
-            "lineWidth": 1,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            }
+            "lineWidth": 1
           },
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
                 "color": "green",
-                "value": 0
+                "value": null
               },
               {
                 "color": "yellow",
@@ -3169,11 +3450,12 @@
               },
               {
                 "color": "red",
-                "value": 3
+                "value": 3.0
               }
             ]
           }
-        }
+        },
+        "overrides": []
       },
       "gridPos": {
         "h": 8,
@@ -3188,13 +3470,11 @@
         "fillOpacity": 80,
         "gradientMode": "scheme",
         "legend": {
-          "calcs": [],
           "displayMode": "list",
           "placement": "bottom",
           "showLegend": false
         },
         "tooltip": {
-          "hideZeros": false,
           "mode": "single",
           "sort": "none"
         }
@@ -3220,7 +3500,7 @@
         "type": "mssql",
         "uid": "${datasource}"
       },
-      "description": "Per-run detector violation percentage from ACM_SensorDefects across the selected time range",
+      "description": "Anomaly rate % by detector and day \u2014 shows which detectors are most active",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -3228,12 +3508,7 @@
           },
           "custom": {
             "axisBorderShow": false,
-            "axisCenteredZero": false,
             "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "barWidthFactor": 0.6,
             "drawStyle": "line",
             "fillOpacity": 10,
             "gradientMode": "none",
@@ -3250,7 +3525,6 @@
               "type": "linear"
             },
             "showPoints": "auto",
-            "showValues": false,
             "spanNulls": false,
             "stacking": {
               "group": "A",
@@ -3260,21 +3534,9 @@
               "mode": "off"
             }
           },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": 0
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
           "unit": "percent"
-        }
+        },
+        "overrides": []
       },
       "gridPos": {
         "h": 8,
@@ -3294,7 +3556,6 @@
           "showLegend": true
         },
         "tooltip": {
-          "hideZeros": false,
           "mode": "multi",
           "sort": "desc"
         }
@@ -3308,11 +3569,11 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT\n  r.StartedAt AS time,\n  sd.DetectorType AS metric,\n  ROUND(sd.ViolationPct, 1) AS value\nFROM dbo.ACM_SensorDefects sd\nJOIN dbo.ACM_Runs r ON r.RunID = sd.RunID\nWHERE sd.EquipID = $equipment\n  AND r.StartedAt BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY r.StartedAt ASC, sd.DetectorType",
+          "rawSql": "SELECT\n  r.StartedAt AS time,\n  sd.DetectorType AS metric,\n  ROUND(sd.ViolationPct, 1) AS value\nFROM dbo.ACM_SensorDefects sd\nJOIN dbo.ACM_Runs r ON r.RunID = sd.RunID\nWHERE sd.EquipID = $equipment\n  AND sd.RunID = (SELECT TOP 1 RunID FROM dbo.ACM_Runs WHERE EquipID = $equipment ORDER BY StartedAt DESC)\nORDER BY sd.DetectorType",
           "refId": "A"
         }
       ],
-      "title": "Detector Violation % by Run",
+      "title": "Daily Anomaly Rate by Detector",
       "type": "timeseries"
     },
     {
@@ -3340,7 +3601,6 @@
           },
           "custom": {
             "axisBorderShow": false,
-            "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "Variance Explained",
             "axisPlacement": "auto",
@@ -3362,7 +3622,6 @@
               "type": "linear"
             },
             "showPoints": "never",
-            "showValues": false,
             "spanNulls": false,
             "stacking": {
               "group": "A",
@@ -3371,19 +3630,6 @@
             "thresholdsStyle": {
               "mode": "off"
             }
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": 0
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
           },
           "unit": "percentunit"
         },
@@ -3432,7 +3678,6 @@
           "showLegend": true
         },
         "tooltip": {
-          "hideZeros": false,
           "mode": "multi",
           "sort": "none"
         }
@@ -3446,22 +3691,11 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "WITH latest AS (\n  SELECT TOP 1\n    pm.RunID,\n    r.StartedAt,\n    pm.ComponentsJson\n  FROM dbo.ACM_PCA_Metrics pm\n  JOIN dbo.ACM_Runs r ON r.RunID = pm.RunID\n  WHERE pm.EquipID = $equipment\n  ORDER BY pm.CreatedAt DESC\n)\nSELECT\n  DATEADD(minute, CAST(j.[key] AS int), latest.StartedAt) AS time,\n  TRY_CAST(JSON_VALUE(j.value, '$.value') AS float) AS VarianceRatio\nFROM latest\nCROSS APPLY OPENJSON(latest.ComponentsJson) j\nWHERE JSON_VALUE(j.value, '$.type') = 'variance_ratio'\nORDER BY time",
+          "rawSql": "SELECT\n  r.StartedAt AS time,\n  pm.NComponents,\n  ROUND(pm.ExplainedVariance * 100.0, 1) AS ExplainedVariancePct,\n  pm.TrainSamples,\n  pm.TrainFeatures\nFROM dbo.ACM_PCA_Metrics pm\nJOIN dbo.ACM_Runs r ON r.RunID = pm.RunID AND r.EquipID = pm.EquipID\nWHERE pm.EquipID = $equipment\n  AND r.StartedAt BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY r.StartedAt ASC",
           "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "mssql",
-            "uid": "${datasource}"
-          },
-          "editorMode": "code",
-          "format": "time_series",
-          "rawQuery": true,
-          "rawSql": "WITH latest AS (\n  SELECT TOP 1\n    pm.RunID,\n    r.StartedAt,\n    pm.ComponentsJson\n  FROM dbo.ACM_PCA_Metrics pm\n  JOIN dbo.ACM_Runs r ON r.RunID = pm.RunID\n  WHERE pm.EquipID = $equipment\n  ORDER BY pm.CreatedAt DESC\n)\nSELECT\n  DATEADD(minute, CAST(j.[key] AS int), latest.StartedAt) AS time,\n  TRY_CAST(JSON_VALUE(j.value, '$.cumulative') AS float) AS CumulativeVariance\nFROM latest\nCROSS APPLY OPENJSON(latest.ComponentsJson) j\nWHERE JSON_VALUE(j.value, '$.type') = 'variance_ratio'\nORDER BY time",
-          "refId": "B"
         }
       ],
-      "title": "PCA Variance Explained by Component",
+      "title": "PCA Model \u2014 Components & Variance Explained",
       "type": "timeseries"
     },
     {
@@ -3475,23 +3709,12 @@
           "color": {
             "mode": "thresholds"
           },
-          "custom": {
-            "align": "auto",
-            "cellOptions": {
-              "type": "auto"
-            },
-            "footer": {
-              "reducers": []
-            },
-            "inspect": false
-          },
-          "decimals": 3,
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
                 "color": "blue",
-                "value": 0
+                "value": null
               },
               {
                 "color": "green",
@@ -3511,7 +3734,8 @@
               }
             ]
           },
-          "unit": "short"
+          "unit": "short",
+          "decimals": 3
         },
         "overrides": [
           {
@@ -3520,6 +3744,10 @@
               "options": "PearsonR"
             },
             "properties": [
+              {
+                "id": "custom.displayMode",
+                "value": "color-background-solid"
+              },
               {
                 "id": "custom.width",
                 "value": 90
@@ -3561,7 +3789,15 @@
       "id": 72,
       "options": {
         "cellHeight": "sm",
-        "enablePagination": false,
+        "footer": {
+          "countRows": false,
+          "enablePagination": false,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
         "showHeader": true
       },
       "targets": [
@@ -3591,22 +3827,12 @@
           "color": {
             "mode": "thresholds"
           },
-          "custom": {
-            "align": "auto",
-            "cellOptions": {
-              "type": "auto"
-            },
-            "footer": {
-              "reducers": []
-            },
-            "inspect": false
-          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
                 "color": "green",
-                "value": 0
+                "value": null
               }
             ]
           },
@@ -3619,6 +3845,10 @@
               "options": "CheckResult"
             },
             "properties": [
+              {
+                "id": "custom.displayMode",
+                "value": "color-background-solid"
+              },
               {
                 "id": "custom.width",
                 "value": 80
@@ -3668,13 +3898,17 @@
                 "value": "percent"
               },
               {
+                "id": "custom.displayMode",
+                "value": "color-background"
+              },
+              {
                 "id": "thresholds",
                 "value": {
                   "mode": "absolute",
                   "steps": [
                     {
                       "color": "green",
-                      "value": 0
+                      "value": null
                     },
                     {
                       "color": "yellow",
@@ -3712,7 +3946,15 @@
       "id": 73,
       "options": {
         "cellHeight": "sm",
-        "enablePagination": true,
+        "footer": {
+          "countRows": false,
+          "enablePagination": true,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
         "showHeader": true
       },
       "targets": [
@@ -3740,7 +3982,7 @@
         "y": 82
       },
       "id": 80,
-      "title": "\ud83c\udfc3 PIPELINE OPERATIONS \u2014 RUNS, ZERO-DAY & LOG PRESSURE",
+      "title": "\ud83c\udfc3 PIPELINE OPERATIONS \u2014 RUNS & PERFORMANCE",
       "type": "row"
     },
     {
@@ -3748,7 +3990,7 @@
         "type": "mssql",
         "uid": "${datasource}"
       },
-      "description": "Most recent ACM runs for this equipment, with zero-day status, data quality, max fused score, and SQL warning/error pressure.",
+      "description": "Most recent ACM runs \u2014 stage, outcome, rows processed",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -3769,7 +4011,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Health"
+              "options": "Outcome"
             },
             "properties": [
               {
@@ -3778,319 +4020,62 @@
               },
               {
                 "id": "custom.width",
-                "value": 92
+                "value": 90
               },
               {
                 "id": "mappings",
                 "value": [
                   {
-                    "type": "value",
                     "options": {
-                      "GOOD": {
-                        "text": "GOOD",
+                      "OK": {
                         "color": "#73BF69",
-                        "index": 0
+                        "index": 0,
+                        "text": "\u2705 OK"
                       }
-                    }
+                    },
+                    "type": "value"
                   },
                   {
-                    "type": "value",
                     "options": {
-                      "HEALTHY": {
-                        "text": "HEALTHY",
+                      "SUCCESS": {
                         "color": "#73BF69",
-                        "index": 1
+                        "index": 1,
+                        "text": "\u2705 OK"
                       }
-                    }
+                    },
+                    "type": "value"
                   },
                   {
-                    "type": "value",
                     "options": {
-                      "WATCH": {
-                        "text": "WATCH",
-                        "color": "#FFB357",
-                        "index": 2
+                      "NOOP": {
+                        "color": "#9fa7b3",
+                        "index": 2,
+                        "text": "\u23ed NOOP"
                       }
-                    }
+                    },
+                    "type": "value"
                   },
                   {
-                    "type": "value",
                     "options": {
-                      "CAUTION": {
-                        "text": "CAUTION",
-                        "color": "#FFB357",
-                        "index": 3
+                      "ERROR": {
+                        "color": "#C4162A",
+                        "index": 3,
+                        "text": "\u274c ERROR"
                       }
-                    }
+                    },
+                    "type": "value"
                   },
                   {
-                    "type": "value",
                     "options": {
-                      "ALERT": {
-                        "text": "ALERT",
-                        "color": "#E24D42",
-                        "index": 4
+                      "PARTIAL": {
+                        "color": "#FF9830",
+                        "index": 4,
+                        "text": "\u26a0\ufe0f PART"
                       }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "CRITICAL": {
-                        "text": "CRITICAL",
-                        "color": "#E24D42",
-                        "index": 5
-                      }
-                    }
+                    },
+                    "type": "value"
                   }
                 ]
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "ZeroDayStatus"
-            },
-            "properties": [
-              {
-                "id": "custom.displayMode",
-                "value": "color-background-solid"
-              },
-              {
-                "id": "custom.width",
-                "value": 150
-              },
-              {
-                "id": "mappings",
-                "value": [
-                  {
-                    "type": "value",
-                    "options": {
-                      "active_hdbscan": {
-                        "text": "HDBSCAN",
-                        "color": "#73BF69",
-                        "index": 0
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "active_online_pca_binner": {
-                        "text": "ONLINE PCA",
-                        "color": "#5794F2",
-                        "index": 1
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "active_global_fallback": {
-                        "text": "GLOBAL FALLBACK",
-                        "color": "#FFB357",
-                        "index": 2
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "inactive_coldstart_deferred": {
-                        "text": "COLDSTART",
-                        "color": "#9FA7B3",
-                        "index": 3
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "inactive_no_data": {
-                        "text": "NO DATA",
-                        "color": "#9FA7B3",
-                        "index": 4
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "inactive_unknown": {
-                        "text": "UNKNOWN",
-                        "color": "#9FA7B3",
-                        "index": 5
-                      }
-                    }
-                  }
-                ]
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Surface"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 140
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "ZdChannels"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "short"
-              },
-              {
-                "id": "custom.width",
-                "value": 78
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "RowsScored"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "short"
-              },
-              {
-                "id": "custom.width",
-                "value": 88
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Episodes"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "short"
-              },
-              {
-                "id": "custom.width",
-                "value": 76
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "DataQuality"
-            },
-            "properties": [
-              {
-                "id": "decimals",
-                "value": 2
-              },
-              {
-                "id": "custom.width",
-                "value": 84
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Warns"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 70
-              },
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "color-background",
-                  "mode": "gradient"
-                }
-              },
-              {
-                "id": "thresholds",
-                "value": {
-                  "mode": "absolute",
-                  "steps": [
-                    {
-                      "color": "green",
-                      "value": null
-                    },
-                    {
-                      "color": "yellow",
-                      "value": 1
-                    },
-                    {
-                      "color": "red",
-                      "value": 5
-                    }
-                  ]
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Errors"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 70
-              },
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "color-background",
-                  "mode": "gradient"
-                }
-              },
-              {
-                "id": "thresholds",
-                "value": {
-                  "mode": "absolute",
-                  "steps": [
-                    {
-                      "color": "green",
-                      "value": null
-                    },
-                    {
-                      "color": "red",
-                      "value": 1
-                    }
-                  ]
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "MaxFusedZ"
-            },
-            "properties": [
-              {
-                "id": "decimals",
-                "value": 2
-              },
-              {
-                "id": "custom.width",
-                "value": 88
               }
             ]
           },
@@ -4106,19 +4091,47 @@
               },
               {
                 "id": "custom.width",
-                "value": 88
+                "value": 90
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "StartedAt"
+              "options": "RowsRead"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "custom.width",
+                "value": 80
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Stage"
             },
             "properties": [
               {
                 "id": "custom.width",
-                "value": 150
+                "value": 100
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "StartTime"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 155
               }
             ]
           }
@@ -4145,8 +4158,8 @@
         "showHeader": true,
         "sortBy": [
           {
-            "displayName": "StartedAt",
-            "desc": true
+            "desc": true,
+            "displayName": "StartTime"
           }
         ]
       },
@@ -4159,11 +4172,11 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "WITH recent_runs AS (\n  SELECT TOP 20\n    r.RunID,\n    r.HealthStatus AS Health,\n    r.ZeroDayStatus,\n    r.ZeroDaySurfaceType AS Surface,\n    r.ZeroDayChannelCount AS ZdChannels,\n    r.ScoreRowCount AS RowsScored,\n    r.EpisodeCount AS Episodes,\n    ROUND(CAST(r.DataQualityScore AS float), 2) AS DataQuality,\n    ROUND(CAST(r.MaxFusedZ AS float), 2) AS MaxFusedZ,\n    r.DurationSeconds AS DurationSec,\n    r.StartedAt\n  FROM dbo.ACM_Runs r\n  WHERE r.EquipID = $equipment\n    AND r.StartedAt BETWEEN $__timeFrom() AND $__timeTo()\n  ORDER BY r.StartedAt DESC\n),\nlog_counts AS (\n  SELECT\n    rr.RunID,\n    SUM(CASE WHEN UPPER(rl.Level) IN ('WARN', 'WARNING') THEN 1 ELSE 0 END) AS Warns,\n    SUM(CASE WHEN UPPER(rl.Level) = 'ERROR' THEN 1 ELSE 0 END) AS Errors\n  FROM recent_runs rr\n  LEFT JOIN dbo.ACM_RunLogs rl ON rl.RunID = rr.RunID\n  GROUP BY rr.RunID\n)\nSELECT\n  rr.Health,\n  ISNULL(rr.ZeroDayStatus, 'inactive_unknown') AS ZeroDayStatus,\n  ISNULL(rr.Surface, 'n/a') AS Surface,\n  ISNULL(rr.ZdChannels, 0) AS ZdChannels,\n  ISNULL(rr.RowsScored, 0) AS RowsScored,\n  ISNULL(rr.Episodes, 0) AS Episodes,\n  ISNULL(rr.DataQuality, 0) AS DataQuality,\n  ISNULL(lc.Warns, 0) AS Warns,\n  ISNULL(lc.Errors, 0) AS Errors,\n  ISNULL(rr.MaxFusedZ, 0) AS MaxFusedZ,\n  ISNULL(rr.DurationSec, 0) AS DurationSec,\n  CONVERT(varchar(19), rr.StartedAt, 120) AS StartedAt\nFROM recent_runs rr\nLEFT JOIN log_counts lc ON lc.RunID = rr.RunID\nORDER BY rr.StartedAt DESC",
+          "rawSql": "SELECT TOP 20\n  eq.EquipCode AS Equipment,\n  r.HealthStatus,\n  r.ScoreRowCount,\n  r.EpisodeCount,\n  r.DurationSeconds,\n  CONVERT(varchar(19), r.StartedAt, 120) AS StartedAt\nFROM dbo.ACM_Runs r\nJOIN dbo.Equipment eq ON eq.EquipID = r.EquipID\nWHERE r.EquipID = $equipment\n  AND r.StartedAt BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY r.StartedAt DESC",
           "refId": "A"
         }
       ],
-      "title": "Recent ACM Runs",
+      "title": "Recent Pipeline Runs",
       "type": "table"
     },
     {
@@ -4171,7 +4184,7 @@
         "type": "mssql",
         "uid": "${datasource}"
       },
-      "description": "Distribution of zero-day execution modes for the selected equipment over the active time range.",
+      "description": "Run outcome distribution",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -4190,7 +4203,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "active_hdbscan"
+              "options": "OK"
             },
             "properties": [
               {
@@ -4205,13 +4218,13 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "active_online_pca_binner"
+              "options": "NOOP"
             },
             "properties": [
               {
                 "id": "color",
                 "value": {
-                  "fixedColor": "#5794F2",
+                  "fixedColor": "#9fa7b3",
                   "mode": "fixed"
                 }
               }
@@ -4220,43 +4233,13 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "active_global_fallback"
+              "options": "ERROR"
             },
             "properties": [
               {
                 "id": "color",
                 "value": {
-                  "fixedColor": "#FFB357",
-                  "mode": "fixed"
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "inactive_coldstart_deferred"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "fixedColor": "#9FA7B3",
-                  "mode": "fixed"
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "inactive_unknown"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "fixedColor": "#C0C6D0",
+                  "fixedColor": "#C4162A",
                   "mode": "fixed"
                 }
               }
@@ -4299,11 +4282,11 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT\n  ISNULL(r.ZeroDayStatus, 'inactive_unknown') AS metric,\n  COUNT(*) AS value\nFROM dbo.ACM_Runs r\nWHERE r.EquipID = $equipment\n  AND r.StartedAt BETWEEN $__timeFrom() AND $__timeTo()\nGROUP BY ISNULL(r.ZeroDayStatus, 'inactive_unknown')\nORDER BY value DESC",
+          "rawSql": "SELECT\n  r.HealthStatus,\n  COUNT(*) AS RunCount\nFROM dbo.ACM_Runs r\nWHERE r.EquipID = $equipment\n  AND r.StartedAt BETWEEN $__timeFrom() AND $__timeTo()\nGROUP BY r.HealthStatus\nORDER BY RunCount DESC",
           "refId": "A"
         }
       ],
-      "title": "Zero-Day Status Mix",
+      "title": "Run Outcome Distribution",
       "type": "piechart"
     },
     {
@@ -4311,19 +4294,19 @@
         "type": "mssql",
         "uid": "${datasource}"
       },
-      "description": "Per-run warning and error counts from ACM_RunLogs for the most recent runs in range.",
+      "description": "Run duration trend \u2014 spikes indicate heavy processing batches",
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "palette-classic"
+            "mode": "thresholds"
           },
           "custom": {
             "axisBorderShow": false,
             "axisColorMode": "text",
-            "axisLabel": "Log Count",
+            "axisLabel": "Duration (s)",
             "axisPlacement": "auto",
             "drawStyle": "bars",
-            "fillOpacity": 80,
+            "fillOpacity": 70,
             "gradientMode": "none",
             "hideFrom": {
               "legend": false,
@@ -4353,10 +4336,18 @@
               {
                 "color": "green",
                 "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 120
+              },
+              {
+                "color": "red",
+                "value": 300
               }
             ]
           },
-          "unit": "short"
+          "unit": "s"
         },
         "overrides": []
       },
@@ -4391,11 +4382,458 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "WITH recent_runs AS (\n  SELECT TOP 20 RunID, StartedAt\n  FROM dbo.ACM_Runs\n  WHERE EquipID = $equipment\n    AND StartedAt BETWEEN $__timeFrom() AND $__timeTo()\n  ORDER BY StartedAt DESC\n)\nSELECT\n  rr.StartedAt AS time,\n  CAST(SUM(CASE WHEN UPPER(rl.Level) IN ('WARN', 'WARNING') THEN 1 ELSE 0 END) AS float) AS value,\n  'Warnings' AS metric\nFROM recent_runs rr\nLEFT JOIN dbo.ACM_RunLogs rl ON rl.RunID = rr.RunID\nGROUP BY rr.StartedAt\nUNION ALL\nSELECT\n  rr.StartedAt AS time,\n  CAST(SUM(CASE WHEN UPPER(rl.Level) = 'ERROR' THEN 1 ELSE 0 END) AS float) AS value,\n  'Errors' AS metric\nFROM recent_runs rr\nLEFT JOIN dbo.ACM_RunLogs rl ON rl.RunID = rr.RunID\nGROUP BY rr.StartedAt\nORDER BY time",
+          "rawSql": "SELECT\n  r.StartedAt AS time,\n  r.DurationSeconds AS value,\n  'Duration (s)' AS metric\nFROM dbo.ACM_Runs r\nWHERE r.EquipID = $equipment\n  AND r.StartedAt BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY r.StartedAt",
           "refId": "A"
         }
       ],
-      "title": "Warnings & Errors by Run",
+      "title": "Run Duration History",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 91
+      },
+      "id": 200,
+      "title": "\ud83e\udde0 MODEL LIFECYCLE & HEALTH QUALITY",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Current model maturity state, regime version, and training history from ACM_ActiveModels.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 24,
+        "x": 0,
+        "y": 92
+      },
+      "id": 201,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "text": {},
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  ISNULL(RegimeMaturityState, 'UNKNOWN') AS MaturityState,\n  ISNULL(CAST(ActiveRegimeVersion AS nvarchar), '-') AS RegimeVersion,\n  TrainingRows,\n  ROUND(TrainingDays, 1) AS TrainingDays,\n  ConsecutiveRuns,\n  TotalRuns,\n  ROUND(ISNULL(SilhouetteScore, 0), 3) AS SilhouetteScore,\n  ROUND(ISNULL(StabilityRatio, 0), 3) AS StabilityRatio\nFROM dbo.ACM_ActiveModels\nWHERE EquipID = $equipment",
+          "refId": "A"
+        }
+      ],
+      "title": "Model Lifecycle State",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Coldstart progress \u2014 how far along data accumulation is.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 50
+              },
+              {
+                "color": "green",
+                "value": 100
+              }
+            ]
+          },
+          "unit": "percent",
+          "min": 0,
+          "max": 100
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 0,
+        "y": 96
+      },
+      "id": 202,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  ROUND(100.0 * AccumulatedRows / NULLIF(RequiredRows, 0), 1) AS ColdstartPct,\n  Stage,\n  Status,\n  AccumulatedRows,\n  RequiredRows\nFROM dbo.ACM_ColdstartState\nWHERE EquipID = $equipment",
+          "refId": "A"
+        }
+      ],
+      "title": "Coldstart Progress",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Per-run: average health index and data quality score. Downward trends = degradation.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "opacity",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": true,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "min": 0,
+          "max": 100,
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 16,
+        "x": 8,
+        "y": 96
+      },
+      "id": 203,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "min"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  r.StartedAt AS time,\n  ROUND(r.AvgHealthIndex, 1) AS AvgHealthIndex,\n  ROUND(r.DataQualityScore, 1) AS DataQualityScore\nFROM dbo.ACM_Runs r\nWHERE r.EquipID = $equipment\n  AND r.StartedAt BETWEEN $__timeFrom() AND $__timeTo()\n  AND r.AvgHealthIndex IS NOT NULL\nORDER BY r.StartedAt ASC",
+          "refId": "A"
+        }
+      ],
+      "title": "Run Health & Data Quality Score Trend",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Health index confidence and quality flag per timestamp. Low confidence = model uncertain.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "Confidence (0-1)",
+            "axisPlacement": "auto",
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "gradientMode": "opacity",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 4,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "dashed"
+            }
+          },
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.5
+              },
+              {
+                "color": "green",
+                "value": 0.8
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 104
+      },
+      "id": 204,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "min"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  Timestamp AS time,\n  NULLIF(Confidence, -1) AS Confidence,\n  CASE QualityFlag\n    WHEN 'GOOD' THEN 1.0\n    WHEN 'WARN' THEN 0.5\n    WHEN 'BAD'  THEN 0.1\n    ELSE NULL\n  END AS QualityFlagScore\nFROM dbo.ACM_HealthTimeline\nWHERE EquipID = $equipment\n  AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY Timestamp ASC",
+          "refId": "A"
+        }
+      ],
+      "title": "Health Confidence & Quality Flag",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "mssql",
+        "uid": "${datasource}"
+      },
+      "description": "Regime assignment confidence over time. Low confidence = borderline operating state.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "Confidence",
+            "axisPlacement": "auto",
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "smooth",
+            "lineWidth": 1,
+            "pointSize": 4,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "min": 0,
+          "max": 1,
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "IsNovel"
+            },
+            "properties": [
+              {
+                "id": "custom.drawStyle",
+                "value": "bars"
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 80
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#FF9830",
+                  "mode": "fixed"
+                }
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 104
+      },
+      "id": 205,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "mssql",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  Timestamp AS time,\n  NULLIF(AssignmentConfidence, -1) AS AssignmentConfidence,\n  CAST(IsNovel AS float) AS IsNovel\nFROM dbo.ACM_RegimeTimeline\nWHERE EquipID = $equipment\n  AND Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY Timestamp ASC",
+          "refId": "A"
+        }
+      ],
+      "title": "Regime Assignment Confidence & Novel Detections",
       "type": "timeseries"
     },
     {
@@ -4423,12 +4861,9 @@
           },
           "custom": {
             "axisBorderShow": false,
-            "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "Duration (s)",
             "axisPlacement": "auto",
-            "barAlignment": 0,
-            "barWidthFactor": 0.6,
             "drawStyle": "line",
             "fillOpacity": 10,
             "gradientMode": "none",
@@ -4445,7 +4880,6 @@
               "type": "linear"
             },
             "showPoints": "never",
-            "showValues": false,
             "spanNulls": false,
             "stacking": {
               "group": "A",
@@ -4455,21 +4889,9 @@
               "mode": "off"
             }
           },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": 0
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
           "unit": "s"
-        }
+        },
+        "overrides": []
       },
       "gridPos": {
         "h": 7,
@@ -4489,7 +4911,6 @@
           "showLegend": true
         },
         "tooltip": {
-          "hideZeros": false,
           "mode": "multi",
           "sort": "desc"
         }
@@ -4523,12 +4944,9 @@
           },
           "custom": {
             "axisBorderShow": false,
-            "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "Memory (MB)",
             "axisPlacement": "auto",
-            "barAlignment": 0,
-            "barWidthFactor": 0.6,
             "drawStyle": "line",
             "fillOpacity": 20,
             "gradientMode": "scheme",
@@ -4545,7 +4963,6 @@
               "type": "linear"
             },
             "showPoints": "never",
-            "showValues": false,
             "spanNulls": false,
             "stacking": {
               "group": "A",
@@ -4560,7 +4977,7 @@
             "steps": [
               {
                 "color": "green",
-                "value": 0
+                "value": null
               },
               {
                 "color": "yellow",
@@ -4573,7 +4990,8 @@
             ]
           },
           "unit": "decmbytes"
-        }
+        },
+        "overrides": []
       },
       "gridPos": {
         "h": 7,
@@ -4593,7 +5011,6 @@
           "showLegend": true
         },
         "tooltip": {
-          "hideZeros": false,
           "mode": "single",
           "sort": "none"
         }
@@ -4623,7 +5040,7 @@
         "y": 99
       },
       "id": 100,
-      "title": "\ud83d\udccb LOGS \u2014 SQL & LOKI",
+      "title": "\ud83d\udccb LOGS \u2014 LOKI",
       "type": "row"
     },
     {
@@ -4641,23 +5058,20 @@
         "overrides": []
       },
       "gridPos": {
+        "h": 10,
+        "w": 24,
         "x": 0,
-        "y": 100,
-        "w": 12,
-        "h": 10
+        "y": 100
       },
       "id": 101,
       "options": {
         "dedupStrategy": "none",
-        "enableInfiniteScrolling": false,
         "enableLogDetails": true,
         "prettifyLogMessage": false,
         "showCommonLabels": false,
-        "showControls": false,
         "showLabels": true,
         "showTime": true,
         "sortOrder": "Descending",
-        "unwrappedColumns": false,
         "wrapLogMessage": false
       },
       "targets": [
@@ -4672,185 +5086,8 @@
           "refId": "A"
         }
       ],
-      "title": "ACM Pipeline Logs (Loki)",
+      "title": "ACM Pipeline Logs",
       "type": "logs"
-    },
-    {
-      "datasource": {
-        "type": "mssql",
-        "uid": "${datasource}"
-      },
-      "description": "Latest-run SQL-native ACM log tail from ACM_RunLogs.",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          },
-          "mappings": []
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "LoggedAt"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 150
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Level"
-            },
-            "properties": [
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "color-background"
-                }
-              },
-              {
-                "id": "custom.width",
-                "value": 80
-              },
-              {
-                "id": "mappings",
-                "value": [
-                  {
-                    "type": "value",
-                    "options": {
-                      "ERROR": {
-                        "text": "ERROR",
-                        "color": "#E24D42",
-                        "index": 0
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "WARN": {
-                        "text": "WARN",
-                        "color": "#FFB357",
-                        "index": 1
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "WARNING": {
-                        "text": "WARN",
-                        "color": "#FFB357",
-                        "index": 2
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "INFO": {
-                        "text": "INFO",
-                        "color": "#5794F2",
-                        "index": 3
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "SUCCESS": {
-                        "text": "SUCCESS",
-                        "color": "#73BF69",
-                        "index": 4
-                      }
-                    }
-                  }
-                ]
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Component"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 100
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Message"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 520
-              }
-            ]
-          }
-        ]
-      },
-      "gridPos": {
-        "x": 12,
-        "y": 100,
-        "w": 12,
-        "h": 10
-      },
-      "id": 102,
-      "options": {
-        "cellHeight": "sm",
-        "footer": {
-          "countRows": false,
-          "enablePagination": true,
-          "fields": "",
-          "reducer": [
-            "sum"
-          ],
-          "show": false
-        },
-        "showHeader": true,
-        "sortBy": [
-          {
-            "displayName": "LoggedAt",
-            "desc": true
-          }
-        ]
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "mssql",
-            "uid": "${datasource}"
-          },
-          "editorMode": "code",
-          "format": "table",
-          "rawQuery": true,
-          "rawSql": "WITH latest_run AS (\n  SELECT TOP 1 RunID\n  FROM dbo.ACM_Runs\n  WHERE EquipID = $equipment\n    AND StartedAt BETWEEN $__timeFrom() AND $__timeTo()\n  ORDER BY StartedAt DESC\n)\nSELECT TOP 200\n  CONVERT(varchar(19), rl.LoggedAt, 120) AS LoggedAt,\n  UPPER(rl.Level) AS Level,\n  rl.Component,\n  LEFT(rl.Message, 220) AS Message\nFROM dbo.ACM_RunLogs rl\nJOIN latest_run lr ON lr.RunID = rl.RunID\nORDER BY rl.LoggedAt DESC",
-          "refId": "A"
-        }
-      ],
-      "title": "Latest Run SQL Logs",
-      "type": "table",
-      "transformations": null
     }
   ],
   "refresh": "30s",
@@ -4883,14 +5120,14 @@
           "type": "mssql",
           "uid": "mssql-ds"
         },
-        "definition": "SELECT EquipID AS __value, EquipCode AS __text FROM dbo.Equipment ORDER BY EquipCode",
+        "definition": "SELECT EquipID AS __value, EquipCode AS __text FROM dbo.Equipment WHERE Status = 1 ORDER BY EquipCode",
         "hide": 0,
         "includeAll": false,
         "label": "Equipment",
         "multi": false,
         "name": "equipment",
         "options": [],
-        "query": "SELECT EquipID AS __value, EquipCode AS __text FROM dbo.Equipment ORDER BY EquipCode",
+        "query": "SELECT EquipID AS __value, EquipCode AS __text FROM dbo.Equipment WHERE Status = 1 ORDER BY EquipCode",
         "refresh": 2,
         "regex": "",
         "sort": 1,
@@ -4938,6 +5175,6 @@
   "timezone": "browser",
   "title": "ACM \u2014 Complete Picture",
   "uid": "acm-master-complete-v2",
-  "version": 3,
+  "version": 1,
   "weekStart": ""
 }
