@@ -1052,6 +1052,18 @@ class TestRefactorHelpers:
         assert fields["zero_day_scoring_active"] is False
         assert fields["legacy_fit_ready"] is False
 
+    def test_classify_noop_reason_prefers_governed_readiness_hint(self):
+        """NOOP fallback classification should use governed load-stage readiness hints."""
+        from core import smart_coldstart as sc
+
+        reason = sc.classify_noop_reason(
+            train=None,
+            score=None,
+            meta={"enough_history_to_proceed": False},
+        )
+
+        assert reason == "COLDSTART_DEFERRED"
+
     def test_zero_day_status_from_noop_reason_maps_known_reasons(self):
         """NOOP reasons should map to stable persisted day-0 run statuses."""
         from core.run_metadata_writer import zero_day_status_from_noop_reason

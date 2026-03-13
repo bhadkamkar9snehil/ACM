@@ -192,7 +192,6 @@ def resolve_baseline_seed_decision(
 def resolve_runtime_mode(
     *,
     meta: Any,
-    coldstart_complete: Optional[bool] = None,
     refit_requested: bool = False,
 ) -> RuntimeMode:
     """Resolve the intended runtime mode from existing ACM runtime signals."""
@@ -208,9 +207,6 @@ def resolve_runtime_mode(
                 RuntimeMode.BASELINE_FORMATION,
             }:
                 return explicit_mode
-
-    if coldstart_complete is False:
-        return RuntimeMode.BOOTSTRAP_NOT_READY
 
     if bool(_meta_get(meta, "schema_break_requalification", False)):
         return RuntimeMode.SCHEMA_BREAK_REQUALIFICATION
@@ -289,7 +285,6 @@ def _normalized_baseline_seed_source(meta: Any) -> str:
 def build_shadow_baseline_governance(
     *,
     meta: Any,
-    coldstart_complete: Optional[bool] = None,
     baseline_contamination_verdict: str = "unknown",
     freeze_changes: Optional[Mapping[Any, str]] = None,
     refit_requested: bool = False,
@@ -297,7 +292,6 @@ def build_shadow_baseline_governance(
     """Build the current shadow baseline-governance contract."""
     runtime_mode = resolve_runtime_mode(
         meta=meta,
-        coldstart_complete=coldstart_complete,
         refit_requested=refit_requested,
     )
     contamination_verdict = _normalize_verdict(baseline_contamination_verdict, default="UNASSESSED")

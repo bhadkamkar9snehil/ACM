@@ -31,14 +31,13 @@ def classify_noop_reason(
     train: Optional[pd.DataFrame],
     score: Optional[pd.DataFrame],
     meta: Optional[Any] = None,
-    coldstart_complete: Optional[bool] = None,
 ) -> str:
     """
     Deterministic NOOP classification used by the ACM pipeline.
 
     Priority:
     1) Explicit reason from meta.noop_reason / meta['noop_reason']
-    2) Fallback inference from train/score and coldstart_complete
+    2) Fallback inference from train/score and governed load-stage hints
     """
     if meta is not None:
         try:
@@ -51,8 +50,18 @@ def classify_noop_reason(
         except Exception:
             pass
 
+    enough_history_to_proceed = True
+    if meta is not None:
+        try:
+            if isinstance(meta, dict):
+                enough_history_to_proceed = bool(meta.get("enough_history_to_proceed", True))
+            else:
+                enough_history_to_proceed = bool(getattr(meta, "enough_history_to_proceed", True))
+        except Exception:
+            enough_history_to_proceed = True
+
     if train is None or score is None:
-        if coldstart_complete is False:
+        if not enough_history_to_proceed:
             return "COLDSTART_DEFERRED"
         return "SCORING_NO_DATA"
 
@@ -165,7 +174,6 @@ def load_and_validate_data_stage(
             train,
             score,
             meta=meta,
-            coldstart_complete=coldstart_complete,
         )
         noop_message, noop_fields = build_noop_observability(reason)
         logger.info(noop_message, component="COLDSTART", **noop_fields)

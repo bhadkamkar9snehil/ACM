@@ -14,8 +14,7 @@ import pandas as pd
 
 def test_resolve_runtime_mode_respects_coldstart_completion_first() -> None:
     mode = resolve_runtime_mode(
-        meta={"is_coldstart_run": True},
-        coldstart_complete=False,
+        meta={"baseline_runtime_mode": "BOOTSTRAP_NOT_READY", "is_coldstart_run": True},
         refit_requested=False,
     )
 
@@ -25,7 +24,6 @@ def test_resolve_runtime_mode_respects_coldstart_completion_first() -> None:
 def test_resolve_runtime_mode_prefers_explicit_load_stage_bootstrap_hint() -> None:
     mode = resolve_runtime_mode(
         meta={"baseline_runtime_mode": "BOOTSTRAP_NOT_READY"},
-        coldstart_complete=True,
         refit_requested=False,
     )
 
@@ -35,7 +33,6 @@ def test_resolve_runtime_mode_prefers_explicit_load_stage_bootstrap_hint() -> No
 def test_resolve_runtime_mode_detects_controlled_adaptation() -> None:
     mode = resolve_runtime_mode(
         meta={"is_coldstart_run": False},
-        coldstart_complete=True,
         refit_requested=True,
     )
 
@@ -90,7 +87,6 @@ def test_annotate_load_stage_governance_meta_sets_scoring_fields() -> None:
 def test_build_shadow_baseline_governance_maps_baseline_formation() -> None:
     decision = build_shadow_baseline_governance(
         meta={"is_coldstart_run": True},
-        coldstart_complete=True,
     )
 
     assert decision.runtime_mode == RuntimeMode.BASELINE_FORMATION
@@ -105,7 +101,6 @@ def test_build_shadow_baseline_governance_maps_baseline_formation() -> None:
 def test_build_shadow_baseline_governance_maps_contamination_and_freeze() -> None:
     decision = build_shadow_baseline_governance(
         meta={"is_coldstart_run": False},
-        coldstart_complete=True,
         baseline_contamination_verdict="suspect",
         freeze_changes={(1, "sensor_a"): "frozen"},
         refit_requested=True,
@@ -124,8 +119,7 @@ def test_build_shadow_baseline_governance_maps_contamination_and_freeze() -> Non
 
 def test_build_shadow_baseline_governance_marks_bootstrap_as_not_ready() -> None:
     decision = build_shadow_baseline_governance(
-        meta={"is_coldstart_run": False},
-        coldstart_complete=False,
+        meta={"baseline_runtime_mode": "BOOTSTRAP_NOT_READY", "is_coldstart_run": False},
     )
 
     assert decision.runtime_mode == RuntimeMode.BOOTSTRAP_NOT_READY
@@ -140,7 +134,6 @@ def test_build_shadow_baseline_governance_marks_trusted_window_pending_as_non_au
             "baseline_seed_source": "trusted_window_pending",
             "baseline_seed_authoritative": False,
         },
-        coldstart_complete=True,
     )
 
     assert decision.runtime_mode == RuntimeMode.BASELINE_FORMATION

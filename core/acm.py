@@ -1051,7 +1051,6 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
             train = load_stage.train
             score = load_stage.score
             meta = load_stage.meta
-            coldstart_complete = load_stage.coldstart_complete
 
         if train is None or score is None:
             raise RuntimeError("Load stage returned no train/score data with should_continue=True")
@@ -1101,8 +1100,7 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
             return
         
         # ===== Adaptive rolling baseline (cold-start helper) =====
-        # B1 fix: coldstart_complete means "can_proceed" (True on scoring batches too).
-        # is_coldstart_run is True only when this batch IS the coldstart training run.
+        # `is_coldstart_run` means this batch itself is the governed baseline-formation run.
         is_coldstart_run = (
             meta.get("is_coldstart_run", False)
             if isinstance(meta, dict)
