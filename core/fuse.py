@@ -2909,7 +2909,6 @@ def run_health_stage(
     omr_contributions_data: Optional[pd.DataFrame],
     record_detector_scores_fn: Optional[Callable[..., None]],
     record_episode_fn: Optional[Callable[..., None]],
-    coldstart_complete: bool,
     equip_id: int,
     regime_model: Any,
     score_out: Dict[str, Any],

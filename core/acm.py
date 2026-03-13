@@ -1852,7 +1852,6 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
                 record_detector_scores_fn=record_detector_scores,
                 record_episode_fn=record_episode,
                 maybe_update_adaptive_thresholds_fn=maybe_update_adaptive_thresholds,
-                coldstart_complete=coldstart_complete,
                 equip_id=equip_id,
                 regime_model=regime_model,
                 score_out=score_out,
