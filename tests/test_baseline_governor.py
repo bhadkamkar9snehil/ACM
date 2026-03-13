@@ -2,9 +2,7 @@ from core.baseline_governor import (
     annotate_load_stage_governance_meta,
     BaselineSeedDecision,
     build_shadow_baseline_governance,
-    legacy_regime_maturity_requires_coldstart,
     resolve_coldstart_load_decision,
-    resolve_legacy_coldstart_load_decision,
     seed_baseline,
     resolve_baseline_seed_decision,
     resolve_runtime_mode,
@@ -40,28 +38,10 @@ def test_resolve_runtime_mode_detects_controlled_adaptation() -> None:
     assert mode == RuntimeMode.CONTROLLED_ADAPTATION
 
 
-def test_legacy_regime_maturity_requires_coldstart_handles_initializing_and_ready_states() -> None:
-    assert legacy_regime_maturity_requires_coldstart(None) is True
-    assert legacy_regime_maturity_requires_coldstart("INITIALIZING") is True
-    assert legacy_regime_maturity_requires_coldstart("  ") is True
-    assert legacy_regime_maturity_requires_coldstart("LEARNING") is False
-    assert legacy_regime_maturity_requires_coldstart("CONVERGED") is False
-
-
-def test_resolve_legacy_coldstart_load_decision_maps_legacy_lifecycle_hint() -> None:
-    baseline_window_path = resolve_legacy_coldstart_load_decision("INITIALIZING")
-    ready_for_scoring = resolve_legacy_coldstart_load_decision("LEARNING")
-
-    assert baseline_window_path.use_existing_models is False
-    assert baseline_window_path.reason_code == "legacy_maturity_requires_coldstart"
-    assert ready_for_scoring.use_existing_models is True
-    assert ready_for_scoring.reason_code == "legacy_maturity_ready_for_scoring"
-
-
 def test_resolve_coldstart_load_decision_prefers_governed_runtime_mode() -> None:
     decision = resolve_coldstart_load_decision(
         runtime_mode_hint=RuntimeMode.BASELINE_FORMATION.value,
-        regime_maturity_state="LEARNING",
+        run_runtime_mode_hint=RuntimeMode.ONLINE_SCORING.value,
     )
 
     assert decision.use_existing_models is False
@@ -71,11 +51,31 @@ def test_resolve_coldstart_load_decision_prefers_governed_runtime_mode() -> None
 def test_resolve_coldstart_load_decision_allows_existing_models_for_scoring_modes() -> None:
     decision = resolve_coldstart_load_decision(
         runtime_mode_hint=RuntimeMode.ONLINE_SCORING.value,
-        regime_maturity_state="INITIALIZING",
+        run_runtime_mode_hint=RuntimeMode.BASELINE_FORMATION.value,
     )
 
     assert decision.use_existing_models is True
     assert decision.reason_code == "governed_runtime_ready_for_scoring"
+
+
+def test_resolve_coldstart_load_decision_uses_run_runtime_mode_fallback() -> None:
+    decision = resolve_coldstart_load_decision(
+        runtime_mode_hint=None,
+        run_runtime_mode_hint=RuntimeMode.CONTROLLED_ADAPTATION.value,
+    )
+
+    assert decision.use_existing_models is True
+    assert decision.reason_code == "governed_runtime_ready_for_scoring"
+
+
+def test_resolve_coldstart_load_decision_defaults_to_baseline_formation_without_governed_rows() -> None:
+    decision = resolve_coldstart_load_decision(
+        runtime_mode_hint=None,
+        run_runtime_mode_hint=None,
+    )
+
+    assert decision.use_existing_models is False
+    assert decision.reason_code == "governed_runtime_missing_assume_baseline_formation"
 
 
 def test_annotate_load_stage_governance_meta_sets_explicit_bootstrap_fields() -> None:

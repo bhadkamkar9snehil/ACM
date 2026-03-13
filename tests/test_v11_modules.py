@@ -1137,7 +1137,7 @@ class TestRefactorHelpers:
         assert coldstart_calls == ["FD_FAN"]
 
     def test_smart_coldstart_check_status_prefers_governed_gate_from_baseline_governor(self, monkeypatch):
-        """SmartColdstart should prefer governed runtime mode and only use lifecycle as fallback."""
+        """SmartColdstart should prefer governed runtime mode and use governed run state as fallback."""
         from core import smart_coldstart as sc
 
         class _Cursor:
@@ -1148,8 +1148,8 @@ class TestRefactorHelpers:
             def fetchone(self):
                 if "ACM_BaselineGovernance" in self.query:
                     return ("BASELINE_FORMATION",)
-                if "ACM_ActiveModels" in self.query:
-                    return ("LEARNING",)
+                if "ACM_Runs" in self.query:
+                    return ("ONLINE_SCORING",)
                 return (123, 4)
 
             def __enter__(self):
@@ -1164,8 +1164,8 @@ class TestRefactorHelpers:
 
         calls = []
 
-        def _resolve_gate(*, runtime_mode_hint=None, regime_maturity_state=None):
-            calls.append((runtime_mode_hint, regime_maturity_state))
+        def _resolve_gate(*, runtime_mode_hint=None, run_runtime_mode_hint=None):
+            calls.append((runtime_mode_hint, run_runtime_mode_hint))
             return type(
                 "Decision",
                 (),
@@ -1180,7 +1180,7 @@ class TestRefactorHelpers:
         manager = sc.SmartColdstart(sql_client=_SqlClient(), equip_id=7, equip_name="FD_FAN")
         state = manager.check_status(required_rows=500)
 
-        assert calls == [("BASELINE_FORMATION", "LEARNING")]
+        assert calls == [("BASELINE_FORMATION", "ONLINE_SCORING")]
         assert state.use_existing_models is False
         assert state.gate_reason == "governed_runtime_requires_baseline_formation"
 

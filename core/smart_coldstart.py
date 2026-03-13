@@ -288,8 +288,7 @@ class SmartColdstart:
 
         Transitional behavior:
         - SQL access stays here
-        - interpretation of the legacy `RegimeMaturityState` hint now lives in
-          `core.baseline_governor.py`
+        - readiness/load-path meaning now comes from governed runtime-mode rows
 
         The old SP-based gate (ModelRegistry >= 3) was wrong: stale/corrupt models
         with 3+ model types in ModelRegistry would bypass coldstart indefinitely.
@@ -318,14 +317,22 @@ class SmartColdstart:
                 )
                 governed_row = cur.fetchone()
                 cur.execute(
-                    "SELECT RegimeMaturityState FROM dbo.ACM_ActiveModels WHERE EquipID = ?",
+                    """
+                    IF COL_LENGTH('dbo.ACM_Runs', 'RepresentationRuntimeMode') IS NOT NULL
+                    BEGIN
+                        SELECT TOP 1 RepresentationRuntimeMode
+                        FROM dbo.ACM_Runs
+                        WHERE EquipID = ?
+                        ORDER BY CompletedAt DESC, CreatedAt DESC
+                    END
+                    """,
                     (self.equip_id,)
                 )
-                lifecycle_row = cur.fetchone()
+                run_row = cur.fetchone()
 
             decision = resolve_coldstart_load_decision(
                 runtime_mode_hint=governed_row[0] if governed_row is not None else None,
-                regime_maturity_state=lifecycle_row[0] if lifecycle_row is not None else None,
+                run_runtime_mode_hint=run_row[0] if run_row is not None else None,
             )
             state.use_existing_models = decision.use_existing_models
             state.gate_reason = decision.reason_code

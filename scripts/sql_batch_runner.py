@@ -1333,7 +1333,7 @@ class SQLBatchRunner:
             Tuple of (is_complete, accumulated_rows, required_rows)
         """
         Console.info(
-            f"{equip_name}: Checking coldstart status in SQL (ACM_BaselineGovernance/ACM_ActiveModels/ACM_ColdstartState)...",
+            f"{equip_name}: Checking coldstart status in SQL (ACM_BaselineGovernance/ACM_Runs/ACM_ColdstartState)...",
             component="COLDSTART",
             equipment=equip_name,
         )
@@ -1368,14 +1368,18 @@ class SQLBatchRunner:
             baseline_row = cur.fetchone()
 
             cur.execute("""
-                SELECT RegimeMaturityState
-                FROM dbo.ACM_ActiveModels
-                WHERE EquipID = ?
+                IF COL_LENGTH('dbo.ACM_Runs', 'RepresentationRuntimeMode') IS NOT NULL
+                BEGIN
+                    SELECT TOP 1 RepresentationRuntimeMode
+                    FROM dbo.ACM_Runs
+                    WHERE EquipID = ?
+                    ORDER BY CompletedAt DESC, CreatedAt DESC
+                END
             """, (equip_id,))
-            maturity_row = cur.fetchone()
-            maturity_state = None
-            if maturity_row and maturity_row[0] is not None:
-                maturity_state = str(maturity_row[0]).strip().upper()
+            run_row = cur.fetchone()
+            run_runtime_mode = None
+            if run_row and run_row[0] is not None:
+                run_runtime_mode = str(run_row[0]).strip().upper()
 
             # Check coldstart state
             cur.execute("""
@@ -1407,7 +1411,7 @@ class SQLBatchRunner:
 
             decision = resolve_coldstart_load_decision(
                 runtime_mode_hint=runtime_mode,
-                regime_maturity_state=maturity_state,
+                run_runtime_mode_hint=run_runtime_mode,
             )
 
             if decision.use_existing_models:
@@ -1416,7 +1420,7 @@ class SQLBatchRunner:
                     component="COLDSTART",
                     equipment=equip_name,
                     runtime_mode=runtime_mode or "UNASSESSED",
-                    maturity_state=maturity_state or "INITIALIZING",
+                    run_runtime_mode=run_runtime_mode or "UNASSESSED",
                     baseline_candidate_state=baseline_candidate_state,
                     shadow_refresh_state=shadow_refresh_state,
                     status=status or "UNASSESSED",
@@ -1432,7 +1436,7 @@ class SQLBatchRunner:
                     component="COLDSTART",
                     equipment=equip_name,
                     runtime_mode=runtime_mode or "UNASSESSED",
-                    maturity_state=maturity_state or "INITIALIZING",
+                    run_runtime_mode=run_runtime_mode or "UNASSESSED",
                     baseline_candidate_state=baseline_candidate_state,
                     shadow_refresh_state=shadow_refresh_state,
                     status=status or "UNASSESSED",
@@ -1443,12 +1447,12 @@ class SQLBatchRunner:
                 return False, accum_rows or 0, required
 
             Console.info(
-                f"{equip_name}: No governed baseline-governance row and no active model lifecycle state; "
+                f"{equip_name}: No governed baseline-governance row and no governed ACM_Runs representation mode; "
                 f"using default minimum rows={min_required}",
                 component="COLDSTART",
                 equipment=equip_name,
                 runtime_mode=runtime_mode or "UNASSESSED",
-                maturity_state=maturity_state or "INITIALIZING",
+                run_runtime_mode=run_runtime_mode or "UNASSESSED",
                 min_required=min_required,
                 gate_reason=decision.reason_code,
             )

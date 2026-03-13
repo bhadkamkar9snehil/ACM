@@ -61,31 +61,20 @@ def _meta_set(meta: Any, key: str, value: Any) -> Any:
     return meta
 
 
-def legacy_regime_maturity_requires_coldstart(regime_maturity_state: Any) -> bool:
-    """
-    Transitional interpretation of legacy model lifecycle state.
-
-    This keeps the old `ACM_ActiveModels.RegimeMaturityState` hint in one place
-    while runtime-mode and readiness authority migrate into the governed
-    baseline contract.
-    """
-    state = str(regime_maturity_state or "").strip().upper()
-    return state in {"", "INITIALIZING", "NONE", "NULL"}
-
-
 def resolve_coldstart_load_decision(
     *,
     runtime_mode_hint: Any = None,
-    regime_maturity_state: Any = None,
+    run_runtime_mode_hint: Any = None,
 ) -> ColdstartLoadDecision:
     """
     Resolve whether ACM should use existing models or continue baseline formation.
 
-    Governed runtime mode is authoritative when available. Legacy lifecycle state
-    remains only as a fallback while coldstart ownership finishes converging on
-    baseline-governor semantics.
+    Governed runtime mode is authoritative. If no baseline-governance row exists
+    yet, the latest governed `ACM_Runs.RepresentationRuntimeMode` may still show
+    whether an asset has already entered scoreable operation. Without governed
+    runtime truth, ACM stays in baseline formation by default.
     """
-    runtime_mode = str(runtime_mode_hint or "").strip().upper()
+    runtime_mode = str(runtime_mode_hint or run_runtime_mode_hint or "").strip().upper()
     if runtime_mode in {
         RuntimeMode.ONLINE_SCORING.value,
         RuntimeMode.CONTROLLED_ADAPTATION.value,
@@ -103,25 +92,9 @@ def resolve_coldstart_load_decision(
             use_existing_models=False,
             reason_code="governed_runtime_requires_baseline_formation",
         )
-    return resolve_legacy_coldstart_load_decision(regime_maturity_state)
-
-
-def resolve_legacy_coldstart_load_decision(regime_maturity_state: Any) -> ColdstartLoadDecision:
-    """
-    Transitional load-stage owner for whether ACM still needs coldstart batching.
-
-    SmartColdstart may continue to fetch the legacy lifecycle hint from SQL, but
-    the meaning of that hint lives here so readiness semantics keep converging
-    on baseline-governor ownership.
-    """
-    if legacy_regime_maturity_requires_coldstart(regime_maturity_state):
-        return ColdstartLoadDecision(
-            use_existing_models=False,
-            reason_code="legacy_maturity_requires_coldstart",
-        )
     return ColdstartLoadDecision(
-        use_existing_models=True,
-        reason_code="legacy_maturity_ready_for_scoring",
+        use_existing_models=False,
+        reason_code="governed_runtime_missing_assume_baseline_formation",
     )
 
 
@@ -481,8 +454,7 @@ __all__ = [
     "ColdstartLoadDecision",
     "BaselineSeedDecision",
     "build_shadow_baseline_governance",
-    "legacy_regime_maturity_requires_coldstart",
-    "resolve_legacy_coldstart_load_decision",
+    "resolve_coldstart_load_decision",
     "seed_baseline",
     "seed_baseline_safe",
     "resolve_baseline_seed_decision",

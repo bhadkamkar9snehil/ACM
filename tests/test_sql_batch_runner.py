@@ -133,7 +133,7 @@ def test_check_coldstart_status_prefers_governed_runtime_mode(tmp_path):
     runner._get_sql_connection = lambda: _SequenceConn([  # type: ignore[method-assign]
         (101,),
         ("BASELINE_FORMATION", "TRUSTED_WINDOW_PENDING", "WAITING_FOR_TRUSTED_WINDOW"),
-        ("LEARNING",),
+        ("ONLINE_SCORING",),
         ("PENDING", 120, 500),
     ])
 
@@ -144,19 +144,36 @@ def test_check_coldstart_status_prefers_governed_runtime_mode(tmp_path):
     assert required == 500
 
 
-def test_check_coldstart_status_falls_back_to_legacy_maturity_when_governed_state_missing(tmp_path):
+def test_check_coldstart_status_falls_back_to_governed_run_mode_when_baseline_row_missing(tmp_path):
     runner = _make_runner(tmp_path)
     runner._get_config_int = lambda equip_id, path, default=500: 500  # type: ignore[method-assign]
     runner._get_sql_connection = lambda: _SequenceConn([  # type: ignore[method-assign]
         (101,),
         None,
-        ("LEARNING",),
+        ("ONLINE_SCORING",),
         ("PENDING", 120, 500),
     ])
 
     is_complete, accumulated, required = runner._check_coldstart_status("FD_FAN")
 
     assert is_complete is True
+    assert accumulated == 120
+    assert required == 500
+
+
+def test_check_coldstart_status_defaults_to_incomplete_without_governed_rows(tmp_path):
+    runner = _make_runner(tmp_path)
+    runner._get_config_int = lambda equip_id, path, default=500: 500  # type: ignore[method-assign]
+    runner._get_sql_connection = lambda: _SequenceConn([  # type: ignore[method-assign]
+        (101,),
+        None,
+        None,
+        ("PENDING", 120, 500),
+    ])
+
+    is_complete, accumulated, required = runner._check_coldstart_status("FD_FAN")
+
+    assert is_complete is False
     assert accumulated == 120
     assert required == 500
 
