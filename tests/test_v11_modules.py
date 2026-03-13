@@ -440,6 +440,27 @@ class TestAcmEntryPoint:
 
         assert acm._representation_blocks_pre_feature_runtime(representation_result) is True
 
+    def test_representation_blocks_pre_feature_runtime_on_schema_blockers(self):
+        """Manifest-only schema incompatibility should qualify for pre-feature fast-fail."""
+        from core import acm
+        from core.representation_contracts import EligibilityDecision
+
+        representation_result = type(
+            "RepresentationResult",
+            (),
+            {
+                "authoritative": True,
+                "eligibility": EligibilityDecision(
+                    authoritative=True,
+                    score_allowed=False,
+                    learn_allowed=False,
+                    suppressed_reason_codes=("schema_incompatible",),
+                ),
+            },
+        )()
+
+        assert acm._representation_blocks_pre_feature_runtime(representation_result) is True
+
     def test_representation_blocks_pre_feature_runtime_ignores_contextual_only_blockers(self):
         """Contextual blockers alone are not eligible for the pre-feature structural fast-fail."""
         from core import acm
@@ -915,6 +936,87 @@ class TestAcmEntryPoint:
         assert result.blocked is True
         assert result.zero_day_status is not None
         assert result.context_preview is not None
+
+    def test_run_representation_feature_schema_precheck_returns_blocked_result(self, monkeypatch):
+        """Manifest-only feature-schema preview should block before feature prep on additive-growth batches."""
+        from core import acm
+        from core.representation_contracts import EligibilityDecision, RepresentationAuthorityPolicy
+
+        idx = pd.date_range("2026-01-01", periods=2, freq="h")
+        train_df = pd.DataFrame({"a": [1.0, 2.0], "b": [3.0, 4.0]}, index=idx)
+        score_df = pd.DataFrame({"a": [1.5, 2.5], "b": [3.5, 4.5]}, index=idx)
+
+        monkeypatch.setattr(
+            acm,
+            "load_cached_manifest_only",
+            lambda **kwargs: {
+                "train_sensors": [
+                    "a_med",
+                    "a_mad",
+                    "a_mean",
+                    "a_std",
+                    "a_slope",
+                    "a_skew",
+                    "a_kurt",
+                    "a_energy_0",
+                    "a_energy_1",
+                    "a_energy_2",
+                    "a_rz",
+                ]
+            },
+        )
+        blocked_representation = type(
+            "RepresentationResult",
+            (),
+            {
+                "authoritative": True,
+                "eligibility": EligibilityDecision(
+                    authoritative=True,
+                    score_allowed=False,
+                    learn_allowed=False,
+                    suppressed_reason_codes=("schema_incompatible",),
+                ),
+            },
+        )()
+        monkeypatch.setattr(
+            acm,
+            "refresh_representation_runtime_authority",
+            lambda *args, **kwargs: blocked_representation,
+        )
+
+        class _Section:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        result = acm._run_representation_feature_schema_precheck(
+            representation_result=object(),
+            policy=RepresentationAuthorityPolicy(
+                mode="validation",
+                active=True,
+                reason="historical_replay_validation",
+                historical_replay=True,
+            ),
+            train_df=train_df,
+            score_df=score_df,
+            cfg={},
+            equip="FD_FAN",
+            equip_id=1,
+            run_id="run-1",
+            sql_client=object(),
+            meta=object(),
+            refit_requested=False,
+            section_fn=lambda name: _Section(),
+            logger=type("Logger", (), {"info": lambda *a, **k: None, "warn": lambda *a, **k: None})(),
+        )
+
+        assert result.representation_result is blocked_representation
+        assert result.schema_drift_decision is not None
+        assert result.schema_drift_decision.schema_compatibility == "ADDITIVE_GROWTH"
+        assert result.blocked is True
+        assert result.zero_day_status is not None
 
     def test_representation_blocks_post_regime_pretransient_on_context_blockers(self):
         """Pre-transient gating should stop downstream runtime for already-known context blockers."""

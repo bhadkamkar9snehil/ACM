@@ -18,6 +18,19 @@ from core.observability import Console
 
 FEATURE_SCHEMA_VERSION = "2026.2.shadow-v0"
 _ORDER_SENSITIVE_MODELS = {"pca", "iforest", "gmm", "omr", "regime"}
+_BASIC_FEATURE_FAMILIES = (
+    "_med",
+    "_mad",
+    "_mean",
+    "_std",
+    "_slope",
+    "_skew",
+    "_kurt",
+    "_energy_0",
+    "_energy_1",
+    "_energy_2",
+    "_rz",
+)
 
 
 @dataclass(frozen=True)
@@ -58,6 +71,33 @@ def schema_from_feature_list(
     return FeatureSchema(
         schema_version=schema_version,
         feature_columns=tuple(str(col) for col in feature_columns),
+        source=source,
+    )
+
+
+def derive_basic_feature_columns_from_raw_columns(
+    raw_columns: Sequence[str],
+) -> Tuple[str, ...]:
+    """Derive the deterministic ACM basic-feature column order from raw signal columns."""
+    normalized = tuple(str(col) for col in raw_columns)
+    if not normalized:
+        return ()
+
+    derived: list[str] = []
+    for family in _BASIC_FEATURE_FAMILIES:
+        derived.extend(f"{col}{family}" for col in normalized)
+    return tuple(derived)
+
+
+def schema_from_basic_raw_columns(
+    raw_columns: Sequence[str],
+    *,
+    schema_version: str = FEATURE_SCHEMA_VERSION,
+    source: str = "basic_raw_preview",
+) -> FeatureSchema:
+    return schema_from_feature_list(
+        derive_basic_feature_columns_from_raw_columns(raw_columns),
+        schema_version=schema_version,
         source=source,
     )
 
@@ -241,10 +281,12 @@ __all__ = [
     "FEATURE_SCHEMA_VERSION",
     "FeatureSchema",
     "FeatureSchemaComparison",
+    "derive_basic_feature_columns_from_raw_columns",
     "align_current_features_to_schema",
     "align_frames_to_schema",
     "compare_feature_schema",
     "schema_from_feature_list",
+    "schema_from_basic_raw_columns",
     "schema_from_manifest",
     "validate_cached_model_schema",
 ]

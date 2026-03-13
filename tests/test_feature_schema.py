@@ -6,6 +6,7 @@ from core.detector_orchestrator import validate_model_feature_compatibility
 from core.feature_schema import (
     align_current_features_to_schema,
     compare_feature_schema,
+    derive_basic_feature_columns_from_raw_columns,
     schema_from_manifest,
     validate_cached_model_schema,
 )
@@ -33,6 +34,21 @@ def test_compare_feature_schema_tracks_missing_extra_and_order() -> None:
     assert comparison.extra_in_current == ("b",)
     assert comparison.order_matches is False
     assert comparison.overlap_ratio == 0.5
+
+
+def test_derive_basic_feature_columns_from_raw_columns_matches_expected_order() -> None:
+    derived = derive_basic_feature_columns_from_raw_columns(["a", "b"])
+
+    assert derived[:6] == (
+        "a_med",
+        "b_med",
+        "a_mad",
+        "b_mad",
+        "a_mean",
+        "b_mean",
+    )
+    assert derived[-4:] == ("a_energy_2", "b_energy_2", "a_rz", "b_rz")
+    assert len(derived) == 22
 
 
 def test_align_current_features_to_schema_rejects_current_extra_features() -> None:

@@ -72,6 +72,7 @@ from core.detector_orchestrator import (
 )
 from core.model_persistence import (
     ModelAdaptationPersistenceResult,
+    load_cached_manifest_only,
     load_cached_feature_medians,
     load_cached_raw_signal_medians,
     load_quality_regime_state_if_needed,
@@ -79,6 +80,7 @@ from core.model_persistence import (
     load_manifest_protected_columns,
     run_model_adaptation_and_persistence_stage,
 )
+from core.schema_drift_manager import preview_feature_schema_drift_from_raw_columns
 
 from core.observability import (
     get_tracer,
@@ -189,6 +191,7 @@ _PRE_FEATURE_FAST_FAIL_BLOCKERS = {
     "stale_inputs",
     "insufficient_effective_signals",
     "poor_missingness",
+    "schema_incompatible",
     "baseline_not_ready",
     "baseline_contaminated",
 }
@@ -451,6 +454,16 @@ class RepresentationRawPreviewPrecheckResult:
 
 
 @dataclass(frozen=True)
+class RepresentationFeatureSchemaPrecheckResult:
+    """Outcome of the manifest-only feature-schema preview before feature preparation."""
+
+    representation_result: Optional[Any]
+    schema_drift_decision: Optional[Any] = None
+    blocked: bool = False
+    zero_day_status: Optional[Any] = None
+
+
+@dataclass(frozen=True)
 class RepresentationFeaturePreviewPrecheckResult:
     """Outcome of the cached feature-frame regime-context preview before detector load."""
 
@@ -467,6 +480,79 @@ class RepresentationFeaturePreviewPrecheckResult:
     preview_used: bool = False
     blocked: bool = False
     zero_day_status: Optional[Any] = None
+
+
+def _run_representation_feature_schema_precheck(
+    *,
+    representation_result: Optional[Any],
+    policy: RepresentationAuthorityPolicy,
+    train_df: pd.DataFrame,
+    score_df: pd.DataFrame,
+    cfg: Dict[str, Any],
+    equip: str,
+    equip_id: int,
+    run_id: str,
+    sql_client: Any,
+    meta: Any,
+    refit_requested: bool,
+    section_fn: Any,
+    logger: Any,
+) -> RepresentationFeatureSchemaPrecheckResult:
+    """Preview cached feature-schema drift from raw columns before feature-value build."""
+    if representation_result is None or not policy.active:
+        return RepresentationFeatureSchemaPrecheckResult(representation_result=representation_result)
+
+    raw_columns = list(score_df.columns) if len(score_df.columns) else list(train_df.columns)
+    if not raw_columns:
+        return RepresentationFeatureSchemaPrecheckResult(representation_result=representation_result)
+
+    with section_fn("representation.preview.feature_schema"):
+        cached_manifest = load_cached_manifest_only(
+            sql_client=sql_client,
+            equip=equip,
+            equip_id=equip_id,
+            cfg=cfg,
+            logger=logger,
+        )
+
+    if not cached_manifest:
+        return RepresentationFeatureSchemaPrecheckResult(representation_result=representation_result)
+
+    schema_drift_decision = preview_feature_schema_drift_from_raw_columns(
+        raw_columns,
+        cached_manifest,
+    )
+    representation_result = refresh_representation_runtime_authority(
+        representation_result,
+        cfg=cfg,
+        policy=policy,
+        meta=meta,
+        feature_schema_drift=schema_drift_decision,
+        refit_requested=refit_requested,
+        logger=logger,
+    )
+    blocked = _representation_blocks_pre_feature_runtime(representation_result)
+    zero_day_status = None
+    if blocked:
+        logger.info(
+            "Representation authority short-circuited feature, detector, regime, zero-day, and health stages from manifest-only feature-schema preview",
+            component="REPRESENTATION",
+            equip_id=equip_id,
+            run_id=run_id,
+        )
+        zero_day_status = build_zero_day_run_status(
+            scoring_active=False,
+            status="inactive_representation_blocked",
+            surface_type="none",
+            channel_count=0,
+        )
+
+    return RepresentationFeatureSchemaPrecheckResult(
+        representation_result=representation_result,
+        schema_drift_decision=schema_drift_decision,
+        blocked=blocked,
+        zero_day_status=zero_day_status,
+    )
 
 
 def _run_representation_raw_preview_precheck(
@@ -1231,6 +1317,35 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
             return
 
         if representation_shadow is not None and representation_authority_policy.active:
+            feature_schema_precheck = _run_representation_feature_schema_precheck(
+                representation_result=representation_shadow,
+                policy=representation_authority_policy,
+                train_df=train,
+                score_df=score,
+                cfg=cfg,
+                equip=equip,
+                equip_id=equip_id,
+                run_id=run_id,
+                sql_client=sql_client,
+                meta=meta,
+                refit_requested=refit_requested,
+                section_fn=T.section,
+                logger=Console,
+            )
+            representation_shadow = feature_schema_precheck.representation_result
+            if feature_schema_precheck.schema_drift_decision is not None:
+                schema_drift_decision = feature_schema_precheck.schema_drift_decision
+            if feature_schema_precheck.blocked:
+                representation_score_suppressed = True
+                quality_ok = False
+                degradations.append("representation_score_suppressed")
+                zero_day_status = feature_schema_precheck.zero_day_status
+
+        if (
+            representation_shadow is not None
+            and representation_authority_policy.active
+            and not representation_score_suppressed
+        ):
             raw_preview_precheck = _run_representation_raw_preview_precheck(
                 representation_result=representation_shadow,
                 policy=representation_authority_policy,

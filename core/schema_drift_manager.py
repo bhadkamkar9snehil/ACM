@@ -12,7 +12,11 @@ from typing import Any, Dict, Optional, Sequence, Tuple
 
 import pandas as pd
 
-from core.feature_schema import compare_feature_schema, schema_from_manifest
+from core.feature_schema import (
+    compare_feature_schema,
+    derive_basic_feature_columns_from_raw_columns,
+    schema_from_manifest,
+)
 from core.representation_contracts import CompatibilityStatus
 
 
@@ -126,6 +130,15 @@ def classify_feature_schema_drift(
         reason_codes=("schema_unassessed",),
         operator_summary="Schema drift could not be classified.",
     )
+
+
+def preview_feature_schema_drift_from_raw_columns(
+    raw_columns: Sequence[str],
+    cached_manifest: Optional[Dict[str, Any]],
+) -> SchemaDriftDecision:
+    """Preview feature-space schema drift using deterministic raw-column feature derivation."""
+    derived_columns = derive_basic_feature_columns_from_raw_columns(raw_columns)
+    return classify_feature_schema_drift(derived_columns, cached_manifest)
 
 
 def apply_feature_schema_alignment(

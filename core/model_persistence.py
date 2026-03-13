@@ -2081,8 +2081,39 @@ def load_manifest_protected_columns(
     """
     Load protected feature columns from latest cached model manifest when cache is enabled.
     """
+    if is_coldstart_run:
+        return None
+
+    manifest = load_cached_manifest_only(
+        sql_client=sql_client,
+        equip=equip,
+        equip_id=equip_id,
+        cfg=cfg,
+        logger=logger,
+    )
+    if not manifest:
+        return None
+    protected = manifest.get("train_sensors") or None
+    if protected:
+        logger.info(
+            f"Feature protection: {len(protected)} columns from cached model manifest will not be dropped by low-var filter",
+            component="FEAT",
+            equip=equip,
+        )
+    return protected
+
+
+def load_cached_manifest_only(
+    *,
+    sql_client: Any,
+    equip: str,
+    equip_id: int,
+    cfg: Dict[str, Any],
+    logger: Any = Console,
+) -> Optional[Dict[str, Any]]:
+    """Load only the latest cached model manifest using the shared SQL owner."""
     use_cache = bool(cfg.get("models", {}).get("use_cache", True))
-    if not use_cache or is_coldstart_run or sql_client is None:
+    if not use_cache or sql_client is None:
         return None
 
     try:
@@ -2091,20 +2122,10 @@ def load_manifest_protected_columns(
             sql_client=sql_client,
             equip_id=equip_id,
         )
-        manifest = manager.load_manifest_only()
-        if not manifest:
-            return None
-        protected = manifest.get("train_sensors") or None
-        if protected:
-            logger.info(
-                f"Feature protection: {len(protected)} columns from cached model manifest will not be dropped by low-var filter",
-                component="FEAT",
-                equip=equip,
-            )
-        return protected
+        return manager.load_manifest_only()
     except Exception as e:
         logger.warn(
-            f"Early manifest load failed (non-fatal): {e}",
+            f"Cheap manifest load failed (non-fatal): {e}",
             component="FEAT",
             equip=equip,
         )

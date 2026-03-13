@@ -6,6 +6,7 @@ from core.schema_drift_manager import (
     classify_feature_schema_drift,
     classify_regime_basis_drift,
     compatibility_status_from_drift,
+    preview_feature_schema_drift_from_raw_columns,
     validate_cached_model_schema_drift,
 )
 
@@ -31,6 +32,17 @@ def test_classify_feature_schema_drift_detects_additive_growth() -> None:
     assert decision.cache_compatible is False
     assert decision.should_refit is True
     assert decision.new_signals == ("c",)
+
+
+def test_preview_feature_schema_drift_from_raw_columns_detects_additive_growth() -> None:
+    decision = preview_feature_schema_drift_from_raw_columns(
+        ["a", "b"],
+        {"train_sensors": ["a_med", "a_mad", "a_mean", "a_std", "a_slope", "a_skew", "a_kurt", "a_energy_0", "a_energy_1", "a_energy_2", "a_rz"]},
+    )
+
+    assert decision.schema_compatibility == "ADDITIVE_GROWTH"
+    assert decision.cache_compatible is False
+    assert "b_med" in decision.new_signals
 
 
 def test_classify_feature_schema_drift_detects_temporary_tag_loss_and_intersection() -> None:

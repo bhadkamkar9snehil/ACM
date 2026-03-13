@@ -9,17 +9,16 @@ Each major ACM slice replaces this file with current repo and runtime truth.
 
 | Item | Current value |
 |---|---|
-| Overall `2026.2` completion | `81%` |
+| Overall `2026.2` completion | `84%` |
 | Architecture / ownership extraction | `91%` |
-| Runtime governed behavior | `85%` |
-| Coldstart / baseline unification | `92%` |
+| Runtime governed behavior | `87%` |
+| Coldstart / baseline unification | `94%` |
 | SQL / control-plane alignment | `78%` |
-| Replay qualification | `86%` |
+| Replay qualification | `88%` |
 | Dashboard / operator cutover | `35%` |
 | Forecast / RUL governed cutover | `20%` |
 | Current branch | `refactor/2026.2-rg-13-audit-hygiene` |
-| Latest validated runtime commit | `pending commit from current governed-only coldstart slice` |
-| Latest checkpoint tag | `pending tag for current governed-only coldstart slice` |
+| Latest validated runtime slice | `manifest-only feature-schema preview gate` |
 
 ## Time Estimate
 
@@ -30,7 +29,7 @@ Each major ACM slice replaces this file with current repo and runtime truth.
 
 The remaining work is now concentrated in:
 
-- earlier representation-first stop ordering
+- earlier representation-first stop ordering on learnable baseline-formation paths
 - final trusted-window package evolution
 - dashboard / operator cutover
 - forecast / RUL governed cutover
@@ -46,6 +45,7 @@ ACM is now a governed representation-aware runtime with:
 - governed coldstart/load decisions shared by runtime and runner
 - `smart_coldstart` reduced to a narrow historian-window / progress helper
 - many no-score runs short-circuit before feature, detector, regime, zero-day, and health work
+- additive-growth/schema-blocked batches now able to stop from a manifest-only feature-schema preview before seasonality and feature preparation
 
 Current repo/runtime truth:
 
@@ -58,6 +58,7 @@ Current repo/runtime truth:
   - `ACM_BaselineGovernance.RuntimeMode`
   - then `ACM_Runs.RepresentationRuntimeMode`
   - else safe default: baseline formation
+- the latest major stop-line improvement is a manifest-only feature-schema preview from raw columns before feature-value build
 
 What ACM is not yet:
 
@@ -72,34 +73,37 @@ Latest live 3-asset validation, run in parallel with observability disabled:
 
 | Asset | RunID | Result | What it proved |
 |---|---|---|---|
-| `FD_FAN` | `46b1cb4b-f983-4e2c-acf5-1e54a0a58e8e` | `NOOP` | governed-only coldstart/load authority still exits cleanly when no governed row exists yet |
-| `WFA_TURBINE_0` | `31c85cfe-5724-4712-9bdb-209702ca4238` | `DEGRADED` | later pre-transient suppression path still works under governed baseline formation |
-| `WFA_TURBINE_10` | `22f34578-ee55-4a9a-b4c0-55ba9eb9da40` | `DEGRADED` | cached feature-preview suppression path still works under governed baseline formation |
+| `FD_FAN` | `a2cc9e19-e1bb-4909-8dfc-1851beb57515` | `NOOP` | governed NOOP path remains clean; no regression from the earlier schema gate |
+| `WFA_TURBINE_0` | `5503ffaa-faad-4778-a9e0-1afb1e56d500` | `DEGRADED` | additive-growth/schema-blocked baseline-formation batch now stops from the manifest-only schema gate before seasonality and feature prep |
+| `WFA_TURBINE_10` | `d40a7f60-9c4a-461a-81b2-143f59f62aae` | `DEGRADED` | the same earlier schema gate now blocks this path before seasonality and feature prep |
 
 Observed in logs:
 
 - `FD_FAN`
   - clean `NOOP` finalization
 - `WFA_TURBINE_0`
-  - `Representation authority short-circuited transient, zero-day, and health stages after regime-context precheck`
-  - `RUN END: outcome=DEGRADED`
+  - `Representation authority short-circuited feature, detector, regime, zero-day, and health stages from manifest-only feature-schema preview`
+  - no `seasonality.detect`
+  - no `Building features`
 - `WFA_TURBINE_10`
-  - `Representation authority short-circuited detector scoring, zero-day, and health stages from cached feature-frame regime preview`
-  - `RUN END: outcome=DEGRADED`
+  - `Representation authority short-circuited feature, detector, regime, zero-day, and health stages from manifest-only feature-schema preview`
+  - no `seasonality.detect`
+  - no `Building features`
 
 Observed in SQL:
 
-| Asset | Runtime mode | Baseline candidate | Shadow refresh | Score allowed | Learn allowed | Score rows |
-|---|---|---|---|---|---|---|
-| `FD_FAN` | `NULL in governed columns for this NOOP path` | `NULL` | `NULL` | `NULL` | `NULL` | `0` |
-| `WFA_TURBINE_0` | `BASELINE_FORMATION` | `COLLECTING_TRUSTED_WINDOW` | `LEARNING_ALLOWED` | `0` | `1` | `0` |
-| `WFA_TURBINE_10` | `BASELINE_FORMATION` | `COLLECTING_TRUSTED_WINDOW` | `LEARNING_ALLOWED` | `0` | `0` | `0` |
+| Asset | Runtime mode | Baseline candidate | Shadow refresh | Schema | Basis | Score allowed | Learn allowed | Score rows |
+|---|---|---|---|---|---|---|---|---|
+| `FD_FAN` | `NULL in governed columns for this NOOP path` | `NULL` | `NULL` | `NULL` | `NULL` | `NULL` | `NULL` | `0` |
+| `WFA_TURBINE_0` | `BASELINE_FORMATION` | `COLLECTING_TRUSTED_WINDOW` | `LEARNING_ALLOWED` | `ADDITIVE_GROWTH` | `PENDING` | `0` | `0` | `0` |
+| `WFA_TURBINE_10` | `BASELINE_FORMATION` | `COLLECTING_TRUSTED_WINDOW` | `LEARNING_ALLOWED` | `ADDITIVE_GROWTH` | `PENDING` | `0` | `0` | `0` |
 
 This means:
 
-- runtime and replay now agree on governed coldstart/load authority
-- assets can still land in different valid governed states during baseline formation
+- runtime and replay still agree on governed coldstart/load authority
+- additive-growth/schema-blocked baseline-formation runs now stop much earlier
 - score tables remain correctly empty when score output is not allowed
+- the next runtime-ordering bottleneck is no longer seasonality on these windows; it is the remaining learnable baseline-formation path and later trusted-window evolution
 
 ## What Was Completed Recently
 
@@ -107,28 +111,26 @@ Recent validated slices:
 
 | Commit | Summary |
 |---|---|
-| `current pending runtime commit` | remove lifecycle fallback from governed coldstart/load decisions |
+| `pending current runtime commit` | add manifest-only feature-schema preview before feature build |
+| `7eb012b` | add cheap unadjusted raw preview gate |
+| `f093677` | remove local coldstart completion semantics |
+| `7ef15a6` | remove lifecycle fallback from coldstart authority |
 | `a9ee9c0` | prefer governed coldstart status in runtime and runner |
 | `add8f03` | remove retry semantics from smart coldstart |
-| `22628a3` | trim dead smart coldstart helper state |
-| `7310955` | remove dead smart-coldstart retry API |
-| `c83e630` | replace coldstart load boolean with explicit decision |
 
 Net effect of recent slices:
 
 - runtime no longer depends on hidden lifecycle meaning inside `smart_coldstart`
 - runner coldstart progression now uses governed coldstart/load authority
-- lifecycle fallback is now removed from those load decisions
-- public and internal load-stage contracts are explicit instead of boolean-driven
-- retry-era `smart_coldstart` naming and dead state are gone
-- coldstart / baseline formation is now much closer to a single governed personality
+- additive-growth/schema-blocked no-score runs now stop from a manifest-only preview before seasonality / feature prep
+- the main runtime-ordering problem has moved deeper into the remaining learnable baseline-formation path
 
 ## Remaining Work Burn-Down
 
 | Area | Current state | Remaining | Difficulty |
 |---|---|---|---|
-| Coldstart / baseline authority | Goverened load authority is in place for runtime and runner | Finish helper-only demotion and trusted-window package evolution; no major authority seams remain | Medium |
-| Representation-first runtime ordering | Many governed no-score runs stop before detector / regime work | Push stop conditions earlier than seasonality / raw preview / feature prep where evidence already exists | High |
+| Coldstart / baseline authority | Governed load authority is in place for runtime and runner | Finish helper-only demotion and trusted-window package evolution; no major authority seams remain | Medium |
+| Representation-first runtime ordering | Many governed no-score runs now stop before seasonality / feature prep | Push stop conditions earlier on the remaining learnable baseline-formation and trusted-window paths | High |
 | Zero-day demotion | Zero-day is non-authoritative on governed no-score runs | Remove remaining alternate-personality feel from runtime summaries and operator surfaces | Medium |
 | SQL / control-plane semantics | Governed tables and views are live and useful | Finalize target semantics for `ACM_SignalProfiles` and `ACM_RepresentationSchemas` | Medium |
 | Dashboards / operator truth | Governed views exist | Cut Grafana and operator queries over to governed views | High |
@@ -139,14 +141,14 @@ Net effect of recent slices:
 
 Ordered by importance:
 
-1. Earlier representation-first stop ordering
+1. Remaining late cost on learnable baseline-formation runtime
 2. Dashboard / operator cutover
 3. Forecast / RUL governed cutover
 4. Final trusted-window package evolution
 5. Final legacy deletion
 
 The main blocker is no longer coldstart authority cleanup.
-The main blocker is stopping more non-scoreable work earlier, then cutting operator truth over to governed ACM.
+The main blocker is finishing runtime ordering on the remaining expensive baseline-formation path, then cutting operator truth over to governed ACM.
 
 ## Source Control State
 
@@ -165,7 +167,7 @@ Current intentional dirtiness:
 
 Immediate next slices:
 
-1. push governed no-score resolution earlier than seasonality / raw preview / feature prep where evidence already exists
+1. push governed no-score resolution earlier on the remaining learnable baseline-formation paths
 2. keep final smart-coldstart helper demotion honest and avoid new wrappers
 3. continue targeted validation after each runtime-affecting slice, with 2-3 asset parallel runs only for major semantic changes
 
