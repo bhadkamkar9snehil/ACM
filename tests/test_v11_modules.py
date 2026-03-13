@@ -610,11 +610,13 @@ class TestAcmEntryPoint:
             def __exit__(self, exc_type, exc, tb):
                 return False
 
-        seasonality_stage = type("SeasonalityStage", (), {"train": "train_df", "score": "score_df"})()
+        def _seasonality_should_not_run(**kwargs):
+            raise AssertionError("seasonality should not run when unadjusted raw preview already blocks")
+
         monkeypatch.setattr(
             acm.fast_features,
             "run_seasonality_preparation_stage",
-            lambda **kwargs: seasonality_stage,
+            _seasonality_should_not_run,
         )
         monkeypatch.setattr(
             acm,
@@ -647,7 +649,7 @@ class TestAcmEntryPoint:
                     authoritative=True,
                     score_allowed=False,
                     learn_allowed=False,
-                    suppressed_reason_codes=("context_ambiguous",),
+                    suppressed_reason_codes=("context_ambiguous", "context_low_confidence"),
                 ),
             },
         )()
@@ -655,6 +657,11 @@ class TestAcmEntryPoint:
             acm,
             "refresh_representation_runtime_authority",
             lambda *args, **kwargs: blocked_representation,
+        )
+        monkeypatch.setattr(
+            acm,
+            "_representation_blocks_pre_detector_runtime",
+            lambda representation_result: True,
         )
 
         result = acm._run_representation_raw_preview_precheck(
@@ -679,6 +686,120 @@ class TestAcmEntryPoint:
         )
 
         assert result.representation_result is blocked_representation
+        assert result.seasonality_stage is None
+        assert result.blocked is True
+        assert result.zero_day_status is not None
+
+    def test_run_representation_raw_preview_precheck_falls_back_to_seasonality_when_unadjusted_preview_does_not_block(
+        self, monkeypatch
+    ):
+        """Raw pre-feature preview helper should pay seasonality only when the cheap unadjusted pass is not decisive."""
+        from core import acm
+        from core.representation_contracts import EligibilityDecision, RepresentationAuthorityPolicy
+
+        class _Section:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        seasonality_stage = type("SeasonalityStage", (), {"train": "train_df", "score": "score_df"})()
+        monkeypatch.setattr(
+            acm.fast_features,
+            "run_seasonality_preparation_stage",
+            lambda **kwargs: seasonality_stage,
+        )
+        monkeypatch.setattr(
+            acm,
+            "load_quality_regime_state_if_needed",
+            lambda **kwargs: ("state", 1, True),
+        )
+
+        preview_calls = {"count": 0}
+
+        def _preview(**kwargs):
+            preview_calls["count"] += 1
+            return type(
+                "Preview",
+                (),
+                {
+                    "available": True,
+                    "basis_result": type("Basis", (), {"basis_drift_decision": None})(),
+                    "context_preview": type(
+                        "ContextPreview",
+                        (),
+                        {"context_assignment": object()},
+                    )(),
+                },
+            )()
+
+        refresh_results = iter(
+            (
+                type(
+                    "RepresentationResult",
+                    (),
+                    {
+                        "authoritative": True,
+                        "eligibility": EligibilityDecision(
+                            authoritative=True,
+                            score_allowed=False,
+                            learn_allowed=True,
+                            suppressed_reason_codes=("context_ambiguous", "context_low_confidence"),
+                        ),
+                    },
+                )(),
+                type(
+                    "RepresentationResult",
+                    (),
+                    {
+                        "authoritative": True,
+                        "eligibility": EligibilityDecision(
+                            authoritative=True,
+                            score_allowed=False,
+                            learn_allowed=False,
+                            suppressed_reason_codes=("context_ambiguous", "context_low_confidence"),
+                        ),
+                    },
+                )(),
+            )
+        )
+
+        monkeypatch.setattr(acm.regimes, "preview_regime_context_from_raw_stage", _preview)
+        monkeypatch.setattr(
+            acm,
+            "refresh_representation_runtime_authority",
+            lambda *args, **kwargs: next(refresh_results),
+        )
+        block_results = iter((False, True))
+        monkeypatch.setattr(
+            acm,
+            "_representation_blocks_pre_detector_runtime",
+            lambda representation_result: next(block_results),
+        )
+
+        result = acm._run_representation_raw_preview_precheck(
+            representation_result=object(),
+            policy=RepresentationAuthorityPolicy(
+                mode="validation",
+                active=True,
+                reason="historical_replay_validation",
+                historical_replay=True,
+            ),
+            train_df=pd.DataFrame(),
+            score_df=pd.DataFrame(),
+            cfg={},
+            equip="FD_FAN",
+            equip_id=1,
+            run_id="run-1",
+            sql_client=object(),
+            meta=object(),
+            refit_requested=False,
+            section_fn=lambda name: _Section(),
+            logger=type("Logger", (), {"info": lambda *a, **k: None, "warn": lambda *a, **k: None})(),
+        )
+
+        assert preview_calls["count"] == 2
         assert result.seasonality_stage is seasonality_stage
         assert result.blocked is True
         assert result.zero_day_status is not None

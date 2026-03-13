@@ -493,6 +493,61 @@ def _run_representation_raw_preview_precheck(
         )
 
     try:
+        preview_regime_state, preview_regime_state_version, preview_regime_loaded_from_state = (
+            load_quality_regime_state_if_needed(
+                regime_model=None,
+                equip=equip,
+                equip_id=equip_id,
+                sql_client=sql_client,
+                logger=logger,
+            )
+        )
+
+        with section_fn("representation.preview.raw.unadjusted"):
+            raw_preview = regimes.preview_regime_context_from_raw_stage(
+                train_df=train_df,
+                score_df=score_df,
+                cfg=cfg,
+                regime_model=None,
+                regime_state=preview_regime_state,
+                regime_loaded_from_state=preview_regime_loaded_from_state,
+                regime_state_version=preview_regime_state_version,
+                raw_train=train_df,
+                raw_score=score_df,
+                equip=equip,
+                logger=logger,
+            )
+            if raw_preview.available:
+                basis_drift_decision = raw_preview.basis_result.basis_drift_decision
+                representation_result = refresh_representation_runtime_authority(
+                    representation_result,
+                    cfg=cfg,
+                    policy=policy,
+                    context=raw_preview.context_preview.context_assignment,
+                    meta=meta,
+                    basis_drift=basis_drift_decision,
+                    refit_requested=refit_requested,
+                    logger=logger,
+                )
+                if _representation_blocks_pre_detector_runtime(representation_result):
+                    logger.info(
+                        "Representation authority short-circuited feature, detector, regime, zero-day, and health stages from unadjusted raw regime-context preview",
+                        component="REPRESENTATION",
+                        equip_id=equip_id,
+                        run_id=run_id,
+                    )
+                    return RepresentationRawPreviewPrecheckResult(
+                        representation_result=representation_result,
+                        seasonality_stage=None,
+                        blocked=True,
+                        zero_day_status=build_zero_day_run_status(
+                            scoring_active=False,
+                            status="inactive_representation_blocked",
+                            surface_type="none",
+                            channel_count=0,
+                        ),
+                    )
+
         with section_fn("representation.preview.raw.seasonality"):
             seasonality_stage = fast_features.run_seasonality_preparation_stage(
                 train=train_df,
@@ -504,15 +559,6 @@ def _run_representation_raw_preview_precheck(
             )
 
         with section_fn("representation.preview.raw"):
-            preview_regime_state, preview_regime_state_version, preview_regime_loaded_from_state = (
-                load_quality_regime_state_if_needed(
-                    regime_model=None,
-                    equip=equip,
-                    equip_id=equip_id,
-                    sql_client=sql_client,
-                    logger=logger,
-                )
-            )
             raw_preview = regimes.preview_regime_context_from_raw_stage(
                 train_df=seasonality_stage.train,
                 score_df=seasonality_stage.score,
