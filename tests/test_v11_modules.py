@@ -993,7 +993,7 @@ class TestRefactorHelpers:
             def __init__(self, **kwargs):
                 pass
 
-            def load_with_retry(self, **kwargs):
+            def load_window(self, **kwargs):
                 return None, None, {"noop_reason": "SCORING_NO_DATA"}, False
 
         monkeypatch.setattr(sc, "SmartColdstart", _ColdstartManager)
@@ -1098,7 +1098,7 @@ class TestRefactorHelpers:
             def __init__(self, **kwargs):
                 pass
 
-            def load_with_retry(self, **kwargs):
+            def load_window(self, **kwargs):
                 return train.copy(), score.copy(), meta, True
 
         monkeypatch.setattr(sc, "SmartColdstart", _ColdstartManager)

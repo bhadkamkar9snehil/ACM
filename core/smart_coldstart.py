@@ -145,7 +145,7 @@ def load_and_validate_data_stage(
         equip_id=equip_id,
         equip_name=equip,
     )
-    train, score, meta, can_proceed = coldstart_manager.load_with_retry(
+    train, score, meta, can_proceed = coldstart_manager.load_window(
         cfg=cfg,
         output_manager=output_manager,
         start_time=win_start,
@@ -254,24 +254,15 @@ def load_and_validate_data_stage(
     )
 
 
+@dataclass
 class ColdstartState:
     """SQL-backed coldstart progress and load-path state for one equipment."""
-    
-    def __init__(self, equip_id: int):
-        self.equip_id = equip_id
-        self.use_existing_models = False
-        self.attempt_count = 0
-        self.accumulated_rows = 0
-        self.required_rows = 500
-        self.data_start_time: Optional[datetime] = None
-        self.data_end_time: Optional[datetime] = None
-        self.last_error: Optional[str] = None
-        self.gate_reason: Optional[str] = None
-        
-    def __repr__(self):
-        return (f"ColdstartState(equip={self.equip_id}, attempts={self.attempt_count}, "
-                f"rows={self.accumulated_rows}/{self.required_rows}, "
-                f"use_existing_models={self.use_existing_models})")
+    equip_id: int
+    use_existing_models: bool = False
+    attempt_count: int = 0
+    accumulated_rows: int = 0
+    required_rows: int = 500
+    gate_reason: Optional[str] = None
 
 
 class SmartColdstart:
@@ -563,8 +554,7 @@ class SmartColdstart:
                     cur.close()
                 except:
                     pass
-    # Start Load with retry here
-    def load_with_retry(
+    def load_window(
         self,
         cfg: Dict[str, Any],
         start_time: Optional[pd.Timestamp],
@@ -706,9 +696,6 @@ class SmartColdstart:
         }
         return None, None, meta_out, False
 
-    # End Load with retry here
-
-    # Here
     def _load_data_window(
         self,
         output_manager,
