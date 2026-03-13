@@ -1,15 +1,13 @@
 ﻿"""
 ACM Smart Coldstart Module
 
-Implements intelligent coldstart retry logic that:
-1. Detects insufficient data without failing
-2. Accumulates data over multiple job runs
-3. Auto-detects data cadence and calculates required lookback
-4. Retries until sufficient data exists for model training
-5. Never falls back to file mode
+Current responsibilities:
+1. read SQL-backed coldstart progress and legacy lifecycle hints
+2. choose the scoring-window or baseline-window load path
+3. track coldstart progress across batches
+4. never fall back to file mode
 
-Author: Copilot
-Date: November 13, 2025
+Runtime-mode and readiness meaning are owned by `core.baseline_governor`.
 """
 
 from datetime import datetime, timedelta
@@ -145,17 +143,11 @@ def load_and_validate_data_stage(
         equip_name=equip,
         stage="score",
     )
-    historical_replay = bool(getattr(args, "start_time", None))
-    coldstart_cfg = cfg.get("coldstart", {})
-    max_attempts = int(coldstart_cfg.get("max_attempts", 3))
     train, score, meta, can_proceed = coldstart_manager.load_with_retry(
         cfg=cfg,
         output_manager=output_manager,
         start_time=win_start,
         end_time=win_end,
-        max_attempts=max_attempts,
-        historical_replay=historical_replay,
-        equipment=equip,
     )
     gate_reason = getattr(coldstart_manager.state, "gate_reason", "") if getattr(coldstart_manager, "state", None) is not None else ""
 
@@ -261,7 +253,7 @@ def load_and_validate_data_stage(
 
 
 class ColdstartState:
-    """Represents the current coldstart state for an equipment."""
+    """SQL-backed coldstart progress and load-path state for one equipment."""
     
     def __init__(self, equip_id: int, stage: str = 'score'):
         self.equip_id = equip_id
@@ -276,25 +268,21 @@ class ColdstartState:
         self.last_error: Optional[str] = None
         self.gate_reason: Optional[str] = None
         
-    def is_ready(self) -> bool:
-        """Check if sufficient data has been accumulated for coldstart."""
-        return self.accumulated_rows >= self.required_rows
-    
     def __repr__(self):
         return (f"ColdstartState(equip={self.equip_id}, attempts={self.attempt_count}, "
-                f"rows={self.accumulated_rows}/{self.required_rows}, ready={self.is_ready()})")
+                f"rows={self.accumulated_rows}/{self.required_rows}, "
+                f"use_existing_models={self.use_existing_models})")
 
 
 class SmartColdstart:
     """
-    Smart coldstart manager that handles data accumulation and retry logic.
-    
-    Key Features:
-    - Auto-detects data cadence from histogram
-    - Calculates optimal lookback window
-    - Tracks progress across multiple job runs
-    - Retries with exponential window expansion
-    - Never fails - always defers to next run
+    Smart coldstart helper that manages SQL-backed progress and load-window selection.
+
+    Current responsibilities:
+    - auto-detect historian cadence
+    - calculate earliest-data coldstart windows when needed
+    - track progress across multiple job runs
+    - never fail the pipeline when the current window is not ready yet
     """
     
     def __init__(self, sql_client, equip_id: int, equip_name: str, stage: str = 'score'):
@@ -304,7 +292,7 @@ class SmartColdstart:
         self.stage = stage
         self.state: Optional[ColdstartState] = None
         
-    def check_status(self, required_rows: int = 500, tick_minutes: Optional[int] = None) -> ColdstartState:
+    def check_status(self, required_rows: int = 500) -> ColdstartState:
         """
         Check current coldstart status from database.
 
@@ -318,7 +306,6 @@ class SmartColdstart:
 
         Args:
             required_rows: Minimum rows needed to complete coldstart
-            tick_minutes: Unused (kept for call-site compatibility)
 
         Returns:
             ColdstartState with current status
@@ -363,7 +350,7 @@ class SmartColdstart:
         """
         Load accumulated_rows and attempt_count from ACM_ColdstartState.
 
-        Separated from the needs-coldstart gate so that progress tracking is
+        Separated from the load-path gate so that progress tracking is
         independent of the model-existence check.
 
         Returns:
@@ -583,12 +570,9 @@ class SmartColdstart:
     def load_with_retry(
         self,
         cfg: Dict[str, Any],
-        equipment: str,
         start_time: Optional[pd.Timestamp],
         end_time: Optional[pd.Timestamp],
         output_manager,
-        max_attempts: int = 3,
-        historical_replay: bool = False,
     ) -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame], Optional[Any], bool]:
         """
         Returns (train, score, meta, can_proceed).
@@ -598,9 +582,7 @@ class SmartColdstart:
         - can_proceed=False => NOOP. meta will contain meta.noop_reason (or dict key) describing why.
         """
         required_rows = int(cfg.get("runtime", {}).get("coldstart_required_rows", 500))
-        tick_minutes = cfg.get("runtime", {}).get("tick_minutes")
-
-        state = self.check_status(required_rows=required_rows, tick_minutes=tick_minutes)
+        state = self.check_status(required_rows=required_rows)
 
         # ---------------------------------------------------------------------
         # Scoring path: models exist -> load data for scoring (not coldstart)
@@ -642,9 +624,6 @@ class SmartColdstart:
         # Do NOT go back to earliest data - use the provided window!
         # ---------------------------------------------------------------------
         
-        # Rows still needed to complete coldstart
-        rows_needed = max(0, required_rows - (state.accumulated_rows or 0))
-        
         # Use the BATCH WINDOW provided, not earliest-based calculation
         # The batch runner already divided data into chunks; respect that!
         cs_start = start_time
@@ -671,9 +650,8 @@ class SmartColdstart:
             cs_end_dt = cs_end.to_pydatetime() if isinstance(cs_end, pd.Timestamp) else cs_end
 
         # COLDSTART path — single attempt for this batch window.
-        # The batch runner drives retry cadence across batches, not within a single run.
-        # The old for-loop (range(1, max_attempts+1)) returned on every branch of its
-        # first iteration, making max_attempts dead code. Removed.
+        # The batch runner drives batch-to-batch progression; this helper
+        # should not retry internally.
         train, score, meta, ok = self._load_data_window(
             output_manager=output_manager,
             cfg=cfg,
