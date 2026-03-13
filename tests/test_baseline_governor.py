@@ -48,12 +48,14 @@ def test_legacy_regime_maturity_requires_coldstart_handles_initializing_and_read
 
 
 def test_resolve_legacy_coldstart_load_decision_maps_legacy_lifecycle_hint() -> None:
-    needs_coldstart = resolve_legacy_coldstart_load_decision("INITIALIZING")
+    baseline_window_path = resolve_legacy_coldstart_load_decision("INITIALIZING")
     ready_for_scoring = resolve_legacy_coldstart_load_decision("LEARNING")
 
-    assert needs_coldstart.needs_coldstart is True
-    assert needs_coldstart.reason_code == "legacy_maturity_requires_coldstart"
-    assert ready_for_scoring.needs_coldstart is False
+    assert baseline_window_path.use_existing_models is False
+    assert baseline_window_path.runtime_mode_hint == RuntimeMode.BASELINE_FORMATION
+    assert baseline_window_path.reason_code == "legacy_maturity_requires_coldstart"
+    assert ready_for_scoring.use_existing_models is True
+    assert ready_for_scoring.runtime_mode_hint == RuntimeMode.ONLINE_SCORING
     assert ready_for_scoring.reason_code == "legacy_maturity_ready_for_scoring"
 
 

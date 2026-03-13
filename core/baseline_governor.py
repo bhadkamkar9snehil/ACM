@@ -36,7 +36,8 @@ class BaselineSeedDecision:
 
 @dataclass(frozen=True)
 class ColdstartLoadDecision:
-    needs_coldstart: bool
+    use_existing_models: bool
+    runtime_mode_hint: RuntimeMode
     reason_code: str
 
 
@@ -83,11 +84,13 @@ def resolve_legacy_coldstart_load_decision(regime_maturity_state: Any) -> Coldst
     """
     if legacy_regime_maturity_requires_coldstart(regime_maturity_state):
         return ColdstartLoadDecision(
-            needs_coldstart=True,
+            use_existing_models=False,
+            runtime_mode_hint=RuntimeMode.BASELINE_FORMATION,
             reason_code="legacy_maturity_requires_coldstart",
         )
     return ColdstartLoadDecision(
-        needs_coldstart=False,
+        use_existing_models=True,
+        runtime_mode_hint=RuntimeMode.ONLINE_SCORING,
         reason_code="legacy_maturity_ready_for_scoring",
     )
 

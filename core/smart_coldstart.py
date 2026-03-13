@@ -266,7 +266,8 @@ class ColdstartState:
     def __init__(self, equip_id: int, stage: str = 'score'):
         self.equip_id = equip_id
         self.stage = stage
-        self.needs_coldstart = True
+        self.use_existing_models = False
+        self.runtime_mode_hint = "BASELINE_FORMATION"
         self.attempt_count = 0
         self.accumulated_rows = 0
         self.required_rows = 500
@@ -333,9 +334,10 @@ class SmartColdstart:
                 row = cur.fetchone()
 
             decision = resolve_legacy_coldstart_load_decision(row[0] if row is not None else None)
-            state.needs_coldstart = decision.needs_coldstart
+            state.use_existing_models = decision.use_existing_models
+            state.runtime_mode_hint = decision.runtime_mode_hint.value
             state.gate_reason = decision.reason_code
-            if state.needs_coldstart:
+            if not state.use_existing_models:
                 accumulated, attempts = self._load_progress()
                 state.accumulated_rows = accumulated
                 state.attempt_count = attempts
@@ -350,7 +352,8 @@ class SmartColdstart:
                 error_type=type(e).__name__,
                 error=str(e)[:200],
             )
-            state.needs_coldstart = True  # safe default
+            state.use_existing_models = False  # safe default
+            state.runtime_mode_hint = "BASELINE_FORMATION"
             state.gate_reason = "check_status_failed_safe_default"
 
         self.state = state
@@ -602,7 +605,7 @@ class SmartColdstart:
         # ---------------------------------------------------------------------
         # Scoring path: models exist -> load data for scoring (not coldstart)
         # ---------------------------------------------------------------------
-        if not state.needs_coldstart:
+        if state.use_existing_models:
             train, score, meta, ok = self._load_data_window(
                 output_manager=output_manager,
                 cfg=cfg,
@@ -817,4 +820,3 @@ class SmartColdstart:
                     cur.close()
                 except:
                     pass
-
