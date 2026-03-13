@@ -9,32 +9,32 @@ Each meaningful ACM slice replaces this file with current repo and runtime truth
 
 | Item | Current value |
 |---|---|
-| Overall `2026.2` completion | `78%` |
+| Overall `2026.2` completion | `79%` |
 | Architecture / ownership extraction | `90%` |
-| Runtime governed behavior | `82%` |
-| Coldstart / baseline unification | `85%` |
+| Runtime governed behavior | `83%` |
+| Coldstart / baseline unification | `87%` |
 | SQL / control-plane alignment | `78%` |
-| Replay qualification | `83%` |
+| Replay qualification | `84%` |
 | Dashboard / operator cutover | `35%` |
 | Forecast / RUL governed cutover | `20%` |
 | Current branch | `refactor/2026.2-rg-13-audit-hygiene` |
-| Latest validated runtime commit | `22628a3` |
-| Latest checkpoint tag | `checkpoint/2026.2-smart-coldstart-state-trim-20260313` |
+| Latest validated runtime commit | `add8f03` |
+| Latest checkpoint tag | `checkpoint/2026.2-smart-coldstart-retry-semantics-removal-20260313` |
 
 ## Time Estimate
 
 | Scope | Estimated remaining time |
 |---|---|
-| Core ACM runtime unification | `1 to 2 focused days` |
-| Full `2026.2` completion | `3.5 to 5.5 focused days` |
+| Core ACM runtime unification | `0.5 to 1.5 focused days` |
+| Full `2026.2` completion | `3 to 5 focused days` |
 
-The remaining work is the hard tail:
+The remaining work is concentrated in:
 
-- finish coldstart / baseline authority unification
-- push governed stop conditions earlier than avoidable prep cost
-- cut dashboards and operator views over to governed truth
-- bring forecast / RUL under governed eligibility
-- remove transitional owners after replay-qualified replacement
+- final coldstart / baseline authority cleanup
+- earlier representation-first stop ordering
+- dashboard / operator cutover
+- forecast / RUL governed cutover
+- replay-qualified legacy deletion
 
 ## What ACM Is Right Now
 
@@ -42,19 +42,19 @@ ACM is now a governed representation-aware runtime with:
 
 - live SQL-backed suppression and baseline-governance truth
 - stable multi-asset no-score behavior
-- score-head / score-split baseline fallback mechanics removed
+- score-head / score-split baseline fallback removed
 - explicit load-path selection for existing-model reuse
-- shrinking legacy coldstart semantics
+- `smart_coldstart` reduced to real progress/load-window work instead of retry-era wrappers
+- many no-score runs short-circuit before feature, detector, regime, zero-day, and health work
 
 Current repo/runtime truth:
 
 - governed representation authority is live
 - governed no-score runs persist correct control-plane truth
-- baseline fallback now stays in `TRUSTED_WINDOW_PENDING` instead of fabricating train slices
-- `smart_coldstart` is closer to a historian-window / progress helper and no longer carries dead retry-era API baggage
-- dead helper-only `runtime_mode_hint` storage is removed
-- `smart_coldstart` no longer pretends to be stage-generic when it only persists score-stage progress
-- many no-score runs short-circuit before feature, detector, regime, zero-day, and health work
+- baseline fallback now stays in `TRUSTED_WINDOW_PENDING`
+- `smart_coldstart` no longer carries dead retry naming or dead helper-only state
+- `ColdstartState` now only carries live progress/load-path fields
+- `load_window()` now names the real behavior instead of pretending internal retry still exists
 
 What ACM is not yet:
 
@@ -70,9 +70,9 @@ Latest live 3-asset validation, run in parallel with observability disabled:
 
 | Asset | RunID | Result |
 |---|---|---|
-| `FD_FAN` | `59161dfd-5f2a-4d1c-a5ca-47910f65b7b7` | `DEGRADED` |
-| `WFA_TURBINE_0` | `4781a34f-a17f-42a7-979c-5ff0a39f11f2` | `DEGRADED` |
-| `WFA_TURBINE_10` | `0336fb74-beb6-4426-9c16-4b70b13afdb6` | `DEGRADED` |
+| `FD_FAN` | `5b565207-44f0-4eca-8724-b38de3ac0de2` | `DEGRADED` |
+| `WFA_TURBINE_0` | `c3116f56-27e1-40e6-b7fe-304cb9120573` | `DEGRADED` |
+| `WFA_TURBINE_10` | `b049a07a-9da1-4976-9f80-9e712cd37ee7` | `DEGRADED` |
 
 Observed in logs for all three:
 
@@ -101,21 +101,19 @@ Recent validated slices:
 
 | Commit | Summary |
 |---|---|
+| `add8f03` | remove retry semantics from smart coldstart |
 | `22628a3` | trim dead smart coldstart helper state |
 | `7310955` | remove dead smart-coldstart retry API |
 | `c83e630` | replace coldstart load boolean with explicit decision |
 | `16e3b3a` | narrow smart coldstart to helper-only flow |
 | `5625637` | remove `coldstart_complete` from load-stage result |
 | `9b138e1` | demote `coldstart_complete` from baseline governance |
-| `4e7099a` | remove legacy coldstart plumbing from persistence path |
-| `7964b38` | remove legacy coldstart plumbing from health path |
 
-Net effect of these slices:
+Net effect of recent slices:
 
 - runtime no longer depends on `coldstart_complete` in representation, persistence, health, or public load-stage contracts
 - load-path selection is explicit instead of hidden in an overloaded boolean
-- dead retry-era parameters are gone
-- dead helper-only smart-coldstart state is gone
+- retry-era `smart_coldstart` naming and dead state are being removed, not wrapped
 - baseline formation semantics are cleaner and closer to the target ACM definition
 
 ## Remaining Work Burn-Down
