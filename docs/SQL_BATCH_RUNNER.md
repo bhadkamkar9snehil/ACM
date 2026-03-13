@@ -33,6 +33,7 @@ The **SQL Batch Runner** enables continuous ACM processing directly from the SQL
 - **Operator inspection**: Final summary now surfaces representation mode, score eligibility, learn eligibility, compatibility state, and suppression reasons from SQL
 - **Fail-fast SQL contract check**: Validation mode now verifies that migrations `018` through `022` are present before it starts processing
 - **Suppression-aware QA**: When authoritative representation sets `score_allowed = false`, the runner now treats zero rows in score-derived tables as expected replay behavior instead of as a QA failure
+- **Deterministic run inspection**: When ACM emits a concrete `RunID`, the runner now inspects that exact run first instead of trying to infer the latest run from downstream forecast tables
 
 ## Usage
 
@@ -81,6 +82,13 @@ python scripts/sql_batch_runner.py --equip FD_FAN --tick-minutes 60 --max-coldst
 Run the replay harness with validation-only representation authority:
 
 ```powershell
+python scripts/sql_batch_runner.py --equip FD_FAN --tick-minutes 1440 --start-from-beginning --representation-authority validation
+```
+
+For development or replay qualification when you want to save local resources, you can disable the observability exporters without changing ACM behavior:
+
+```powershell
+$env:ACM_OBS_DISABLE=1
 python scripts/sql_batch_runner.py --equip FD_FAN --tick-minutes 1440 --start-from-beginning --representation-authority validation
 ```
 
@@ -135,7 +143,7 @@ The important distinction is:
 At the end of each equipment run, the batch runner now emits:
 
 - runner outcome: `status`, `coldstart_complete`, `batches_processed`, `elapsed`, `note`
-- latest ACM run metadata: `RunID`, source table, ACM run window, ACM duration
+- latest ACM run metadata: `RunID`, source table, ACM execution window, replay source-data window, ACM duration
 - ACM health metrics: `health_status`, `avg_health`, `min_health`, `max_fused_z`, `data_quality`, `refit_requested`
 - zero-day metrics: `active`, `status`, `surface`, `channels`
 - key output counts: scores, health timeline, regime timeline, episodes, hotspots, forecast outputs
@@ -226,6 +234,16 @@ Tracked in `.sql_batch_progress.json`:
 | `--resume` | flag | off | Resume from last batch checkpoint |
 | `--dry-run` | flag | off | Preview without execution |
 | `--representation-authority` | string | shadow | Pass representation authority mode to ACM replay runs (`shadow` or `validation`). `validation` now fails fast unless migrations `018` through `022` are applied. |
+
+### Environment flags
+
+| Variable | Meaning |
+|---|---|
+| `ACM_OBS_DISABLE=1` | Disable tracing, metrics, Loki, and profiling exporters for local dev/replay runs. Console logging still works. |
+| `ACM_OBS_ENABLE_TRACING=0/1` | Override tracing exporter independently. |
+| `ACM_OBS_ENABLE_METRICS=0/1` | Override OTEL metrics exporter independently. |
+| `ACM_OBS_ENABLE_LOKI=0/1` | Override Loki log push independently. |
+| `ACM_OBS_ENABLE_PROFILING=0/1` | Override profiling independently. |
 
 ### Discover More Options
 

@@ -20,7 +20,8 @@ from core.representation_contracts import (
     RepresentationRefs,
     RuntimeMode,
 )
-from core.signal_profiler import build_signal_profile_summary
+from core.schema_drift_manager import compatibility_status_from_drift
+from core.signal_profiler import profile_signal_frame, summarize_signal_profiles
 from core.state_builder import build_state_snapshot
 from utils.config_dict import cfg_get as _cfg_get
 
@@ -152,6 +153,8 @@ def apply_representation_authority(
         return result
     if not policy.active:
         return result
+    if result.authoritative and result.eligibility.authoritative:
+        return result
 
     updated = replace(
         result,
@@ -237,6 +240,52 @@ def enrich_representation_shadow(
     return updated
 
 
+def refresh_representation_runtime_authority(
+    result: RepresentationPipelineResult,
+    *,
+    cfg: dict[str, Any],
+    policy: RepresentationAuthorityPolicy | None = None,
+    context: ContextAssignment | None = None,
+    meta: Any | None = None,
+    feature_schema_drift: Any | None = None,
+    basis_drift: Any | None = None,
+    baseline_contamination_verdict: str = "unknown",
+    freeze_changes: Any | None = None,
+    refit_requested: bool = False,
+    logger: Any = Console,
+) -> RepresentationPipelineResult:
+    """Refresh runtime comparability and, when active, reapply representation authority.
+
+    This keeps `core.acm` from repeating the same compatibility/baseline-governance
+    assembly every time later runtime stages produce new context or drift evidence.
+    """
+    compatibility = compatibility_status_from_drift(
+        feature_schema_drift=feature_schema_drift,
+        basis_drift=basis_drift,
+    )
+    baseline_governance = build_shadow_baseline_governance(
+        meta=meta,
+        baseline_contamination_verdict=baseline_contamination_verdict,
+        freeze_changes=freeze_changes,
+        refit_requested=refit_requested,
+    )
+    updated = enrich_representation_shadow(
+        result,
+        cfg=cfg,
+        context=context,
+        compatibility=compatibility,
+        baseline_governance=baseline_governance,
+        logger=logger,
+    )
+    if policy is None:
+        return updated
+    return apply_representation_authority(
+        updated,
+        policy=policy,
+        logger=logger,
+    )
+
+
 def run_representation_pipeline(
     *,
     train_df: pd.DataFrame,
@@ -245,7 +294,6 @@ def run_representation_pipeline(
     cfg: dict[str, Any],
     equip_id: int,
     run_id: str,
-    coldstart_complete: bool | None = None,
     logger: Any = Console,
 ) -> RepresentationPipelineResult:
     train_state = build_state_snapshot(
@@ -264,11 +312,10 @@ def run_representation_pipeline(
     )
     baseline_governance = build_shadow_baseline_governance(
         meta=meta,
-        coldstart_complete=coldstart_complete,
     )
-    signal_summary = build_signal_profile_summary(
-        score_df if score_df is not None and not score_df.empty else train_df
-    )
+    profile_source_df = score_df if score_df is not None and not score_df.empty else train_df
+    signal_profiles = tuple(profile_signal_frame(profile_source_df))
+    signal_summary = summarize_signal_profiles(signal_profiles)
     context = ContextAssignment()
     compatibility = CompatibilityStatus()
     refs = RepresentationRefs()
@@ -283,6 +330,7 @@ def run_representation_pipeline(
         equip_id=int(equip_id),
         train_state=train_state,
         score_state=score_state,
+        signal_profiles=signal_profiles,
         signal_summary=signal_summary,
         context=context,
         compatibility=compatibility,
@@ -309,6 +357,7 @@ def run_representation_pipeline(
 __all__ = [
     "apply_representation_authority",
     "enrich_representation_shadow",
+    "refresh_representation_runtime_authority",
     "resolve_representation_authority_policy",
     "run_representation_pipeline",
 ]

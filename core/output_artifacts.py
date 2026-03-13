@@ -162,6 +162,7 @@ def write_sql_artifacts(
     spe_p95_train: float,
     t2_p95_train: float,
     anomaly_count: int,
+    score_outputs_enabled: bool,
     T: Any,
     culprit_writer_func: Optional[Callable] = None,
 ) -> int:
@@ -170,20 +171,28 @@ def write_sql_artifacts(
     """
     rows_written = 0
 
-    with T.section("sql.pca"):
-        rows_pca_model, rows_pca_load, rows_pca_metrics = write_pca_artifacts(
-            output_manager=output_manager,
-            pca_detector=pca_detector,
-            frame=frame,
-            train=train,
-            run_id=run_id,
+    if score_outputs_enabled:
+        with T.section("sql.pca"):
+            rows_pca_model, rows_pca_load, rows_pca_metrics = write_pca_artifacts(
+                output_manager=output_manager,
+                pca_detector=pca_detector,
+                frame=frame,
+                train=train,
+                run_id=run_id,
+                equip_id=equip_id,
+                equip=equip,
+                spe_p95_train=spe_p95_train,
+                t2_p95_train=t2_p95_train,
+                cfg=cfg,
+            )
+            rows_written += int(rows_pca_model + rows_pca_load + rows_pca_metrics)
+    else:
+        Console.info(
+            "Skipping PCA SQL artifacts because authoritative score signal is suppressed or unavailable",
+            component="REPRESENTATION",
             equip_id=equip_id,
-            equip=equip,
-            spe_p95_train=spe_p95_train,
-            t2_p95_train=t2_p95_train,
-            cfg=cfg,
+            run_id=run_id,
         )
-        rows_written += int(rows_pca_model + rows_pca_load + rows_pca_metrics)
 
     with T.section("sql.run_stats"):
         try:
@@ -238,4 +247,3 @@ def write_sql_artifacts(
             )
 
     return rows_written
-

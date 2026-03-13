@@ -23,11 +23,12 @@ from __future__ import annotations
 # Standard library imports
 # ============================
 import argparse
+from dataclasses import dataclass
 from functools import partial
 from datetime import datetime
 # NOTE: Parallel fitting via ThreadPoolExecutor was removed due to BLAS/OpenMP
 # deadlocks; model fitting is intentionally single-threaded here.
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 # NOTE: Overflow warnings are not suppressed globally. If they appear, treat
 # them as a signal of scaling/unit issues and handle them locally where safe.
@@ -59,22 +60,25 @@ from core.pipeline_types import (
 from core.seasonality import detect_and_adjust_safe
 from core.sensor_attribution import build_sensor_analytics_context
 from core.adaptive_thresholds import maybe_update_adaptive_thresholds
-from core.smart_coldstart import seed_baseline_safe, load_and_validate_data_stage
+from core.smart_coldstart import load_and_validate_data_stage
+from core.baseline_governor import seed_baseline_safe
 from core.ewm_baseline import EWMBaselineManager
 from core.regime_binner import OnlinePCABinner
 from core.detector_orchestrator import (
+    load_cached_regime_preview_from_sql_cache,
     score_all_detectors,
     fit_all_detectors,
     run_detector_initialization_stage,
 )
-from core.baseline_governor import build_shadow_baseline_governance
 from core.model_persistence import (
     ModelAdaptationPersistenceResult,
+    load_cached_feature_medians,
+    load_cached_raw_signal_medians,
+    load_quality_regime_state_if_needed,
     persist_calibration_params_safe,
     load_manifest_protected_columns,
     run_model_adaptation_and_persistence_stage,
 )
-from core.schema_drift_manager import compatibility_status_from_drift
 
 from core.observability import (
     get_tracer,
@@ -104,7 +108,7 @@ from core.sql_client import (
 )
 from core.representation_pipeline import (
     apply_representation_authority,
-    enrich_representation_shadow,
+    refresh_representation_runtime_authority,
     resolve_representation_authority_policy,
     run_representation_pipeline,
 )
@@ -177,6 +181,36 @@ _ZERO_DAY_PRECHECK_BLOCKERS = {
     "baseline_not_ready",
     "baseline_contaminated",
 }
+_PRE_FEATURE_FAST_FAIL_BLOCKERS = {
+    "runtime_mode_not_ready",
+    "schema_break_requalification_required",
+    "no_score_rows",
+    "insufficient_coverage",
+    "stale_inputs",
+    "insufficient_effective_signals",
+    "poor_missingness",
+    "baseline_not_ready",
+    "baseline_contaminated",
+}
+_PRE_FEATURE_FAST_FAIL_IGNORED = {
+    "baseline_formation_scoring_disabled",
+    "context_unknown",
+    "context_unassessed",
+}
+
+_POST_REGIME_PRECHECK_BLOCKERS = _ZERO_DAY_PRECHECK_BLOCKERS.union(
+    {
+        "context_unknown",
+        "context_unassessed",
+        "context_novel",
+        "context_ambiguous",
+        "context_transition_active",
+        "context_low_confidence",
+    }
+)
+_POST_REGIME_PRETRANSIENT_BLOCKERS = _POST_REGIME_PRECHECK_BLOCKERS.difference(
+    {"context_transition_active"}
+)
 
 
 def _representation_learning_blocked(representation_result: Optional[Any]) -> bool:
@@ -204,6 +238,479 @@ def _representation_blocks_zero_day_scoring(representation_result: Optional[Any]
         if str(reason).strip()
     }
     return bool(reasons.intersection(_ZERO_DAY_PRECHECK_BLOCKERS))
+
+
+def _representation_blocks_pre_feature_runtime(
+    representation_result: Optional[Any],
+) -> bool:
+    """Return True when authoritative structural blockers already make the batch non-scoreable before feature prep."""
+    if representation_result is None or not getattr(representation_result, "authoritative", False):
+        return False
+    eligibility = getattr(representation_result, "eligibility", None)
+    if eligibility is None:
+        return False
+    if getattr(eligibility, "score_allowed", None) is not False:
+        return False
+    if getattr(eligibility, "learn_allowed", None) is not False:
+        return False
+
+    reasons = {
+        str(reason).strip()
+        for reason in (getattr(eligibility, "suppressed_reason_codes", ()) or ())
+        if str(reason).strip()
+    }
+    effective_reasons = reasons.difference(_PRE_FEATURE_FAST_FAIL_IGNORED)
+    return bool(effective_reasons) and effective_reasons.issubset(_PRE_FEATURE_FAST_FAIL_BLOCKERS)
+
+
+def _baseline_seed_blocks_pre_feature_runtime(
+    baseline_seed: Optional[Any],
+    representation_result: Optional[Any],
+) -> bool:
+    """Return True when a score-derived baseline candidate is explicitly shadow-only."""
+    if baseline_seed is None:
+        return False
+    if getattr(baseline_seed, "authoritative", True):
+        return False
+    if getattr(baseline_seed, "applied_to_runtime", True):
+        return False
+    if representation_result is None or not getattr(representation_result, "authoritative", False):
+        return False
+    eligibility = getattr(representation_result, "eligibility", None)
+    if eligibility is None:
+        return False
+    return getattr(eligibility, "score_allowed", None) is False
+
+
+def _representation_blocks_post_regime_runtime(representation_result: Optional[Any]) -> bool:
+    """Return True when authoritative representation has enough post-regime context to stop downstream runtime."""
+    if representation_result is None or not getattr(representation_result, "authoritative", False):
+        return False
+    eligibility = getattr(representation_result, "eligibility", None)
+    if eligibility is None or getattr(eligibility, "score_allowed", None) is not False:
+        return False
+
+    reasons = {
+        str(reason).strip()
+        for reason in (getattr(eligibility, "suppressed_reason_codes", ()) or ())
+        if str(reason).strip()
+    }
+    return bool(reasons.intersection(_POST_REGIME_PRECHECK_BLOCKERS))
+
+
+def _representation_blocks_pre_detector_runtime(
+    representation_result: Optional[Any],
+) -> bool:
+    """Return True when authoritative pre-score context already blocks both scoring and learning."""
+    if representation_result is None or not getattr(representation_result, "authoritative", False):
+        return False
+    eligibility = getattr(representation_result, "eligibility", None)
+    if eligibility is None or getattr(eligibility, "score_allowed", None) is not False:
+        return False
+    if getattr(eligibility, "learn_allowed", None) is not False:
+        return False
+
+    reasons = {
+        str(reason).strip()
+        for reason in (getattr(eligibility, "suppressed_reason_codes", ()) or ())
+        if str(reason).strip()
+    }
+    return bool(reasons.intersection(_POST_REGIME_PRETRANSIENT_BLOCKERS))
+
+
+def _representation_blocks_post_regime_pretransient(
+    representation_result: Optional[Any],
+) -> bool:
+    """Return True when authoritative representation can stop runtime before transient detection runs."""
+    if representation_result is None or not getattr(representation_result, "authoritative", False):
+        return False
+    eligibility = getattr(representation_result, "eligibility", None)
+    if eligibility is None or getattr(eligibility, "score_allowed", None) is not False:
+        return False
+
+    reasons = {
+        str(reason).strip()
+        for reason in (getattr(eligibility, "suppressed_reason_codes", ()) or ())
+        if str(reason).strip()
+    }
+    return bool(reasons.intersection(_POST_REGIME_PRETRANSIENT_BLOCKERS))
+
+
+def _evaluate_representation_pre_feature(
+    *,
+    train_df: pd.DataFrame,
+    score_df: pd.DataFrame,
+    meta: Any,
+    cfg: Dict[str, Any],
+    equip_id: int,
+    run_id: str,
+    policy: RepresentationAuthorityPolicy,
+    logger: Any,
+    block_message: str,
+    failure_message: str,
+    fallback_result: Optional[Any] = None,
+) -> Tuple[Optional[Any], bool]:
+    """Run the structural representation precheck and report whether it blocks pre-feature runtime."""
+    try:
+        representation_result = run_representation_pipeline(
+            train_df=train_df,
+            score_df=score_df,
+            meta=meta,
+            cfg=cfg,
+            equip_id=equip_id,
+            run_id=run_id,
+            logger=logger,
+        )
+        if policy.active and representation_result is not None:
+            representation_result = apply_representation_authority(
+                representation_result,
+                policy=policy,
+                logger=logger,
+            )
+            if _representation_blocks_pre_feature_runtime(representation_result):
+                logger.info(
+                    block_message,
+                    component="REPRESENTATION",
+                    equip_id=equip_id,
+                    run_id=run_id,
+                )
+                return representation_result, True
+        return representation_result, False
+    except Exception as representation_exc:
+        logger.warn(
+            failure_message,
+            component="REPRESENTATION",
+            equip_id=equip_id,
+            run_id=run_id,
+            error_type=type(representation_exc).__name__,
+            error=str(representation_exc)[:200],
+        )
+        return fallback_result, False
+
+
+def _finalize_pre_feature_representation_short_circuit(
+    *,
+    representation_result: Optional[Any],
+    output_manager: Optional[Any],
+    score_df: pd.DataFrame,
+    degradations: List[str],
+    run_start_time: Optional[datetime],
+    equip: str,
+    equip_id: int,
+    run_id: str,
+    rows_written: int,
+    section_fn: Any,
+    logger: Any,
+) -> Tuple[str, Optional[str]]:
+    """Persist control-plane artifacts and close out a pre-feature authoritative no-score run."""
+    with section_fn("representation.shadow.persist"):
+        if representation_result is not None and output_manager is not None:
+            try:
+                output_manager.write_representation_artifacts(
+                    representation_result=representation_result,
+                    signal_source_df=score_df,
+                )
+            except Exception as representation_exc:
+                logger.warn(
+                    "Representation shadow persistence failed; continuing with legacy runtime authority",
+                    component="REPRESENTATION",
+                    equip_id=equip_id,
+                    run_id=run_id,
+                    error_type=type(representation_exc).__name__,
+                    error=str(representation_exc)[:200],
+                )
+
+    outcome, degraded_err_json = resolve_run_outcome_from_degradations(degradations)
+    err_json = None
+    if outcome == "DEGRADED":
+        err_json = degraded_err_json
+        logger.warn(
+            f"Run completed with {len(degradations)} degraded step(s): {degradations[:5]}",
+            component="RUN",
+            equip=equip,
+            run_id=run_id,
+        )
+
+    _elapsed_s = (datetime.now() - run_start_time).total_seconds() if run_start_time else 0
+    logger.info(
+        f"RUN END: outcome={outcome} elapsed={_elapsed_s:.0f}s "
+        f"max_fused_z=? episodes=0 rows_written={rows_written}",
+        component="RUN",
+    )
+    return outcome, err_json
+
+
+@dataclass(frozen=True)
+class RepresentationRawPreviewPrecheckResult:
+    """Outcome of the validation-mode raw regime-context preview before full feature prep."""
+
+    representation_result: Optional[Any]
+    seasonality_stage: Optional[Any]
+    blocked: bool = False
+    zero_day_status: Optional[Any] = None
+
+
+@dataclass(frozen=True)
+class RepresentationFeaturePreviewPrecheckResult:
+    """Outcome of the cached feature-frame regime-context preview before detector load."""
+
+    representation_result: Optional[Any]
+    train_df: pd.DataFrame
+    score_df: pd.DataFrame
+    schema_drift_decision: Optional[Any] = None
+    basis_result: Optional[Any] = None
+    context_preview: Optional[Any] = None
+    regime_model: Optional[Any] = None
+    regime_state: Optional[Any] = None
+    regime_state_version: int = 0
+    regime_loaded_from_state: bool = False
+    preview_used: bool = False
+    blocked: bool = False
+    zero_day_status: Optional[Any] = None
+
+
+def _run_representation_raw_preview_precheck(
+    *,
+    representation_result: Optional[Any],
+    policy: RepresentationAuthorityPolicy,
+    train_df: pd.DataFrame,
+    score_df: pd.DataFrame,
+    cfg: Dict[str, Any],
+    equip: str,
+    equip_id: int,
+    run_id: str,
+    sql_client: Any,
+    meta: Any,
+    refit_requested: bool,
+    section_fn: Any,
+    logger: Any,
+) -> RepresentationRawPreviewPrecheckResult:
+    """Run the earlier raw regime preview and decide whether it blocks pre-detector runtime."""
+    if representation_result is None or not policy.active:
+        return RepresentationRawPreviewPrecheckResult(
+            representation_result=representation_result,
+            seasonality_stage=None,
+        )
+
+    try:
+        with section_fn("representation.preview.raw.seasonality"):
+            seasonality_stage = fast_features.run_seasonality_preparation_stage(
+                train=train_df,
+                score=score_df,
+                cfg=cfg,
+                equip=equip,
+                section_fn=section_fn,
+                detect_and_adjust_fn=detect_and_adjust_safe,
+            )
+
+        with section_fn("representation.preview.raw"):
+            preview_regime_state, preview_regime_state_version, preview_regime_loaded_from_state = (
+                load_quality_regime_state_if_needed(
+                    regime_model=None,
+                    equip=equip,
+                    equip_id=equip_id,
+                    sql_client=sql_client,
+                    logger=logger,
+                )
+            )
+            raw_preview = regimes.preview_regime_context_from_raw_stage(
+                train_df=seasonality_stage.train,
+                score_df=seasonality_stage.score,
+                cfg=cfg,
+                regime_model=None,
+                regime_state=preview_regime_state,
+                regime_loaded_from_state=preview_regime_loaded_from_state,
+                regime_state_version=preview_regime_state_version,
+                raw_train=seasonality_stage.train,
+                raw_score=seasonality_stage.score,
+                equip=equip,
+                logger=logger,
+            )
+            if raw_preview.available:
+                basis_drift_decision = raw_preview.basis_result.basis_drift_decision
+                representation_result = refresh_representation_runtime_authority(
+                    representation_result,
+                    cfg=cfg,
+                    policy=policy,
+                    context=raw_preview.context_preview.context_assignment,
+                    meta=meta,
+                    basis_drift=basis_drift_decision,
+                    refit_requested=refit_requested,
+                    logger=logger,
+                )
+                if _representation_blocks_pre_detector_runtime(representation_result):
+                    logger.info(
+                        "Representation authority short-circuited feature, detector, regime, zero-day, and health stages from raw regime-context preview",
+                        component="REPRESENTATION",
+                        equip_id=equip_id,
+                        run_id=run_id,
+                    )
+                    return RepresentationRawPreviewPrecheckResult(
+                        representation_result=representation_result,
+                        seasonality_stage=seasonality_stage,
+                        blocked=True,
+                        zero_day_status=build_zero_day_run_status(
+                            scoring_active=False,
+                            status="inactive_representation_blocked",
+                            surface_type="none",
+                            channel_count=0,
+                        ),
+                    )
+    except Exception as representation_exc:
+        logger.warn(
+            "Representation authority raw regime-context preview failed; continuing with feature-prep runtime path",
+            component="REPRESENTATION",
+            equip_id=equip_id,
+            run_id=run_id,
+            error_type=type(representation_exc).__name__,
+            error=str(representation_exc)[:200],
+        )
+        return RepresentationRawPreviewPrecheckResult(
+            representation_result=representation_result,
+            seasonality_stage=None,
+        )
+
+    return RepresentationRawPreviewPrecheckResult(
+        representation_result=representation_result,
+        seasonality_stage=seasonality_stage,
+    )
+
+
+def _run_representation_feature_preview_precheck(
+    *,
+    representation_result: Optional[Any],
+    policy: RepresentationAuthorityPolicy,
+    train_df: pd.DataFrame,
+    score_df: pd.DataFrame,
+    raw_train: pd.DataFrame,
+    raw_score: pd.DataFrame,
+    cfg: Dict[str, Any],
+    equip: str,
+    equip_id: int,
+    run_id: str,
+    sql_client: Any,
+    meta: Any,
+    refit_requested: bool,
+    section_fn: Any,
+    logger: Any,
+) -> RepresentationFeaturePreviewPrecheckResult:
+    """Run cached regime preview on feature frames before full detector initialization."""
+    if representation_result is None or not policy.active:
+        return RepresentationFeaturePreviewPrecheckResult(
+            representation_result=representation_result,
+            train_df=train_df,
+            score_df=score_df,
+        )
+
+    with section_fn("representation.preview.feature.cache"):
+        preview_state = load_cached_regime_preview_from_sql_cache(
+            train=train_df,
+            score=score_df,
+            equip=equip,
+            sql_client=sql_client,
+            equip_id=equip_id,
+            cfg=cfg,
+            logger=logger,
+        )
+
+    preview_train = preview_state["train"]
+    preview_score = preview_state["score"]
+    preview_regime_model = preview_state["regime_model"]
+    preview_regime_state = preview_state["regime_state"]
+    preview_regime_state_version = preview_state["regime_state_version"]
+    preview_regime_loaded_from_state = preview_state["regime_loaded_from_state"]
+    schema_drift_decision = preview_state["schema_drift_decision"]
+
+    if preview_regime_model is None and not preview_regime_loaded_from_state:
+        return RepresentationFeaturePreviewPrecheckResult(
+            representation_result=representation_result,
+            train_df=preview_train,
+            score_df=preview_score,
+            schema_drift_decision=schema_drift_decision,
+        )
+
+    with section_fn("representation.preview.feature"):
+        basis_result = regimes.build_regime_feature_basis_stage(
+            train_features=preview_train,
+            score_features=preview_score,
+            raw_train=raw_train,
+            raw_score=raw_score,
+            pca_detector=None,
+            cfg=cfg,
+            regime_model=preview_regime_model,
+            equip=equip,
+            logger=logger,
+        )
+        context_preview = regimes.preview_regime_context_stage(
+            score_df=preview_score,
+            train_df=preview_train,
+            cfg=cfg,
+            regime_basis_train=basis_result.regime_basis_train,
+            regime_basis_score=basis_result.regime_basis_score,
+            regime_basis_meta=basis_result.regime_basis_meta,
+            regime_basis_hash=basis_result.regime_basis_hash,
+            regime_model=basis_result.regime_model,
+            regime_loaded_from_state=preview_regime_loaded_from_state,
+            regime_state=preview_regime_state,
+            regime_state_version=preview_regime_state_version,
+            raw_train=raw_train,
+        )
+
+    if not context_preview.available:
+        return RepresentationFeaturePreviewPrecheckResult(
+            representation_result=representation_result,
+            train_df=preview_train,
+            score_df=preview_score,
+            schema_drift_decision=schema_drift_decision,
+            basis_result=basis_result,
+            regime_model=basis_result.regime_model,
+            regime_state=preview_regime_state,
+            regime_state_version=preview_regime_state_version,
+            regime_loaded_from_state=preview_regime_loaded_from_state,
+        )
+
+    representation_result = refresh_representation_runtime_authority(
+        representation_result,
+        cfg=cfg,
+        policy=policy,
+        context=context_preview.context_assignment,
+        meta=meta,
+        feature_schema_drift=schema_drift_decision,
+        basis_drift=basis_result.basis_drift_decision,
+        refit_requested=refit_requested,
+        logger=logger,
+    )
+    blocked = _representation_blocks_pre_detector_runtime(representation_result)
+    zero_day_status = None
+    if blocked:
+        logger.info(
+            "Representation authority short-circuited detector scoring, zero-day, and health stages from cached feature-frame regime preview",
+            component="REPRESENTATION",
+            equip_id=equip_id,
+            run_id=run_id,
+        )
+        zero_day_status = build_zero_day_run_status(
+            scoring_active=False,
+            status="inactive_representation_blocked",
+            surface_type="none",
+            channel_count=0,
+        )
+
+    return RepresentationFeaturePreviewPrecheckResult(
+        representation_result=representation_result,
+        train_df=preview_train,
+        score_df=preview_score,
+        schema_drift_decision=schema_drift_decision,
+        basis_result=basis_result,
+        context_preview=context_preview,
+        regime_model=context_preview.regime_model,
+        regime_state=preview_regime_state,
+        regime_state_version=preview_regime_state_version,
+        regime_loaded_from_state=preview_regime_loaded_from_state,
+        preview_used=True,
+        blocked=blocked,
+        zero_day_status=zero_day_status,
+    )
 
 
 def _initialize_zero_day_runtime(
@@ -457,19 +964,60 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
     # 'in dir()' checks throughout the pipeline.
     train: Optional[pd.DataFrame] = None
     col_meds: Optional[pd.Series] = None
+    raw_signal_medians: Optional[Dict[str, float]] = None
     # NOTE: regime_model is declared earlier; avoid redefinition here.
     meta: Optional[Any] = None
     frame: Optional[pd.DataFrame] = None
+    train_frame: Optional[pd.DataFrame] = None
     episodes: Optional[pd.DataFrame] = None
     score_out: Optional[Dict[str, Any]] = None
+    omr_contributions_data: Optional[pd.DataFrame] = None
     quality_ok: bool = False
     use_per_regime: bool = False
+    fusion_weights_used: Optional[Dict[str, float]] = None
+    spe_p95_train: Optional[float] = None
+    t2_p95_train: Optional[float] = None
     score_regime_labels: Optional[np.ndarray] = None
+    train_regime_labels: Optional[np.ndarray] = None
+    current_model_maturity: Optional[str] = None
+    regime_model_was_trained: bool = False
+    saved_model_version: Optional[int] = None
     representation_shadow = None
     representation_score_suppressed = False
     ewm_freeze_changes: Optional[Dict[Any, str]] = None
     schema_drift_decision = None
     basis_drift_decision = None
+    pre_score_basis_result = None
+    feature_preview_context_evaluated = False
+    skip_post_regime_runtime = False
+    skip_prefeature_runtime = False
+    seasonality_stage = None
+    det_flags = {
+        "ar1_enabled": False,
+        "pca_enabled": False,
+        "iforest_enabled": False,
+        "gmm_enabled": False,
+        "omr_enabled": False,
+    }
+    detector_flags = dict(det_flags)
+    detectors = {
+        "ar1_detector": None,
+        "pca_detector": None,
+        "iforest_detector": None,
+        "gmm_detector": None,
+        "omr_detector": None,
+        "pca_train_spe": None,
+        "pca_train_t2": None,
+    }
+    regime_state = None
+    regime_state_version = 0
+    regime_loaded_from_state = False
+    cached_models = None
+    cached_manifest = None
+    cached_calibration_params = None
+    detectors_just_trained = False
+    baseline_contamination_verdict = "unknown"
+    baseline_contamination_rate = 0.0
 
     try:
         # ===== Phase 1: Load data from SQL =====
@@ -509,28 +1057,48 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
             raise RuntimeError("Load stage returned no train/score data with should_continue=True")
 
         with T.section("representation.shadow"):
-            try:
-                representation_shadow = run_representation_pipeline(
-                    train_df=train,
-                    score_df=score,
-                    meta=meta,
-                    cfg=cfg,
-                    equip_id=equip_id,
-                    run_id=run_id,
-                    coldstart_complete=coldstart_complete,
-                    logger=Console,
-                )
-            except Exception as representation_exc:
-                Console.warn(
-                    "Representation shadow pipeline failed; continuing with legacy runtime authority",
-                    component="REPRESENTATION",
-                    equip_id=equip_id,
-                    run_id=run_id,
-                    error_type=type(representation_exc).__name__,
-                    error=str(representation_exc)[:200],
+            representation_shadow, skip_prefeature_runtime = _evaluate_representation_pre_feature(
+                train_df=train,
+                score_df=score,
+                meta=meta,
+                cfg=cfg,
+                equip_id=equip_id,
+                run_id=run_id,
+                policy=representation_authority_policy,
+                logger=Console,
+                block_message="Representation authority short-circuited feature, detector, regime, zero-day, and health stages from load-time structural precheck",
+                failure_message="Representation shadow pipeline failed; continuing with legacy runtime authority",
+                fallback_result=representation_shadow,
+            )
+            if skip_prefeature_runtime:
+                representation_score_suppressed = True
+                quality_ok = False
+                degradations.append("representation_score_suppressed")
+                zero_day_status = build_zero_day_run_status(
+                    scoring_active=False,
+                    status="inactive_representation_blocked",
+                    surface_type="none",
+                    channel_count=0,
                 )
 
         T.log("data_split_complete", train_rows=train.shape[0], train_cols=train.shape[1], score_rows=score.shape[0], score_cols=score.shape[1])
+
+        if skip_prefeature_runtime:
+            rows_read = int(score.shape[0])
+            outcome, err_json = _finalize_pre_feature_representation_short_circuit(
+                representation_result=representation_shadow,
+                output_manager=output_manager,
+                score_df=score,
+                degradations=degradations,
+                run_start_time=run_start_time,
+                equip=equip,
+                equip_id=equip_id,
+                run_id=run_id,
+                rows_written=rows_written,
+                section_fn=T.section,
+                logger=Console,
+            )
+            return
         
         # ===== Adaptive rolling baseline (cold-start helper) =====
         # B1 fix: coldstart_complete means "can_proceed" (True on scoring batches too).
@@ -541,7 +1109,7 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
             else getattr(meta, "is_coldstart_run", False)
         )
         with T.section("baseline.seed"):
-            train, score, _ = seed_baseline_safe(
+            baseline_seed = seed_baseline_safe(
                 train=train.copy(),
                 score=score.copy(),
                 sql_client=sql_client,
@@ -550,8 +1118,114 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
                 equip=equip,
                 is_coldstart=is_coldstart_run,
                 ensure_local_index_fn=ensure_local_index,
+                apply_non_authoritative_seed=not representation_authority_policy.active,
                 logger=Console,
             )
+            train = baseline_seed.train_df
+            score = baseline_seed.score_df
+            if isinstance(meta, dict):
+                meta["baseline_seed_source"] = baseline_seed.source_code
+                meta["baseline_seed_authoritative"] = baseline_seed.authoritative
+                meta["baseline_seed_applied_to_runtime"] = baseline_seed.applied_to_runtime
+            else:
+                setattr(meta, "baseline_seed_source", baseline_seed.source_code)
+                setattr(meta, "baseline_seed_authoritative", baseline_seed.authoritative)
+                setattr(meta, "baseline_seed_applied_to_runtime", baseline_seed.applied_to_runtime)
+
+        if representation_shadow is not None and representation_authority_policy.active:
+            with T.section("representation.shadow.baseline"):
+                representation_shadow, skip_prefeature_runtime = _evaluate_representation_pre_feature(
+                    train_df=train,
+                    score_df=score,
+                    meta=meta,
+                    cfg=cfg,
+                    equip_id=equip_id,
+                    run_id=run_id,
+                    policy=representation_authority_policy,
+                    logger=Console,
+                    block_message="Representation authority short-circuited feature, detector, regime, zero-day, and health stages after baseline seeding",
+                    failure_message="Representation post-baseline structural recheck failed; continuing with later runtime authority",
+                    fallback_result=representation_shadow,
+                )
+                if (
+                    not skip_prefeature_runtime
+                    and _baseline_seed_blocks_pre_feature_runtime(baseline_seed, representation_shadow)
+                ):
+                    Console.info(
+                        "Representation authority short-circuited feature, detector, regime, zero-day, and health stages because no authoritative trusted baseline window is available yet",
+                        component="REPRESENTATION",
+                        equip_id=equip_id,
+                        run_id=run_id,
+                    )
+                    skip_prefeature_runtime = True
+                if skip_prefeature_runtime:
+                    representation_score_suppressed = True
+                    quality_ok = False
+                    degradations.append("representation_score_suppressed")
+                    zero_day_status = build_zero_day_run_status(
+                        scoring_active=False,
+                        status="inactive_representation_blocked",
+                        surface_type="none",
+                        channel_count=0,
+                    )
+
+        if skip_prefeature_runtime:
+            rows_read = int(score.shape[0])
+            outcome, err_json = _finalize_pre_feature_representation_short_circuit(
+                representation_result=representation_shadow,
+                output_manager=output_manager,
+                score_df=score,
+                degradations=degradations,
+                run_start_time=run_start_time,
+                equip=equip,
+                equip_id=equip_id,
+                run_id=run_id,
+                rows_written=rows_written,
+                section_fn=T.section,
+                logger=Console,
+            )
+            return
+
+        if representation_shadow is not None and representation_authority_policy.active:
+            raw_preview_precheck = _run_representation_raw_preview_precheck(
+                representation_result=representation_shadow,
+                policy=representation_authority_policy,
+                train_df=train,
+                score_df=score,
+                cfg=cfg,
+                equip=equip,
+                equip_id=equip_id,
+                run_id=run_id,
+                sql_client=sql_client,
+                meta=meta,
+                refit_requested=refit_requested,
+                section_fn=T.section,
+                logger=Console,
+            )
+            representation_shadow = raw_preview_precheck.representation_result
+            seasonality_stage = raw_preview_precheck.seasonality_stage
+            if raw_preview_precheck.blocked:
+                representation_score_suppressed = True
+                quality_ok = False
+                degradations.append("representation_score_suppressed")
+                zero_day_status = raw_preview_precheck.zero_day_status
+
+        if representation_score_suppressed and skip_post_regime_runtime is False:
+            rows_read = int(score.shape[0])
+            outcome, err_json = _finalize_pre_feature_representation_short_circuit(
+                representation_result=representation_shadow,
+                output_manager=output_manager,
+                score_df=score,
+                degradations=degradations,
+                run_start_time=run_start_time,
+                equip=equip,
+                equip_id=equip_id,
+                run_id=run_id,
+                rows_written=rows_written,
+                section_fn=T.section,
+                logger=Console,
+            )
+            return
 
         # ===== Feature preparation =====
         feature_stage = fast_features.run_feature_preparation_stage(
@@ -568,6 +1242,9 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
             detect_and_adjust_fn=detect_and_adjust_safe,
             run_data_guardrails_fn=run_data_guardrails_safe,
             load_manifest_protected_columns_fn=load_manifest_protected_columns,
+            load_cached_raw_signal_medians_fn=load_cached_raw_signal_medians,
+            load_cached_feature_medians_fn=load_cached_feature_medians,
+            seasonality_result=seasonality_stage,
         )
         train = feature_stage.train
         score = feature_stage.score
@@ -575,103 +1252,300 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
         raw_score = feature_stage.raw_score
         seasonal_patterns = feature_stage.seasonal_patterns
         refit_requested = feature_stage.refit_requested
-
-        # ===== Phase 2: Load or fit detectors =====
-        detector_init = run_detector_initialization_stage(
-            section_fn=T.section,
-            train=train,
-            score=score,
-            cfg=cfg,
-            meta=meta,
-            detector_cache=None,
-            output_manager=output_manager,
-            sql_client=sql_client,
-            run_id=run_id,
-            equip_id=equip_id,
-            equip=equip,
-            logger=Console,
+        raw_signal_medians = (
+            raw_train.select_dtypes(include=[np.number]).median().to_dict()
+            if raw_train is not None and not raw_train.empty
+            else None
         )
-
-        train = detector_init.train
-        score = detector_init.score
-        det_flags = detector_init.det_flags
-        detector_flags = detector_init.enabled_flags()
-        detectors = detector_init.detector_payload()
-        regime_model = detector_init.regime_model
-        regime_state = detector_init.regime_state
-        regime_state_version = detector_init.regime_state_version
-        regime_loaded_from_state = detector_init.regime_loaded_from_state
-        col_meds = detector_init.col_meds
-        cached_models = detector_init.cached_models
-        cached_manifest = detector_init.cached_manifest
-        cached_calibration_params = detector_init.cached_calibration_params
-        detectors_just_trained = detector_init.detectors_just_trained
-        baseline_contamination_verdict = detector_init.baseline_contamination_verdict
-        baseline_contamination_rate = detector_init.baseline_contamination_rate
-        schema_drift_decision = detector_init.schema_drift_decision
-
-        # ===== Phase 3-5: Regime basis + detector scoring + regime labeling =====
-        scoring_regime_stage = regimes.run_scoring_regime_stage(
-            train_df=train,
-            score_df=score,
-            raw_train=raw_train,
-            raw_score=raw_score,
-            cfg=cfg,
-            pca_detector=detectors["pca_detector"],
-            regime_model=regime_model,
-            regime_state=regime_state,
-            regime_state_version=regime_state_version,
-            regime_loaded_from_state=regime_loaded_from_state,
-            det_flags=det_flags,
-            detectors=detectors,
-            equip=equip,
-            equip_id=equip_id,
-            sql_client=sql_client,
-            output_manager=output_manager,
-            refit_requested=refit_requested,
-            section_fn=T.section,
-            score_all_detectors_fn=score_all_detectors,
-            resolve_maturity_for_regime_stage_fn=resolve_maturity_for_regime_stage,
-            record_regime_fn=record_regime,
-            logger=Console,
-        )
-        frame = scoring_regime_stage.frame
-        omr_contributions_data = scoring_regime_stage.omr_contributions_data
-        score_out = scoring_regime_stage.score_out
-        regime_model = scoring_regime_stage.regime_model
-        train_regime_labels = scoring_regime_stage.train_regime_labels
-        score_regime_labels = scoring_regime_stage.score_regime_labels
-        regime_quality_ok = scoring_regime_stage.regime_quality_ok
-        regime_state_version = scoring_regime_stage.regime_state_version
-        regime_loaded_from_state = scoring_regime_stage.regime_loaded_from_state
-        current_model_maturity = scoring_regime_stage.current_model_maturity
-        regime_model_was_trained = scoring_regime_stage.regime_model_was_trained
-        basis_drift_decision = scoring_regime_stage.basis_drift_decision
-        if scoring_regime_stage.degraded_regime_basis:
-            degradations.append("regime_feature_basis")
 
         if representation_shadow is not None and representation_authority_policy.active:
+            feature_preview_precheck = _run_representation_feature_preview_precheck(
+                representation_result=representation_shadow,
+                policy=representation_authority_policy,
+                train_df=train,
+                score_df=score,
+                raw_train=raw_train,
+                raw_score=raw_score,
+                cfg=cfg,
+                equip=equip,
+                equip_id=equip_id,
+                run_id=run_id,
+                sql_client=sql_client,
+                meta=meta,
+                refit_requested=refit_requested,
+                section_fn=T.section,
+                logger=Console,
+            )
+            representation_shadow = feature_preview_precheck.representation_result
+            train = feature_preview_precheck.train_df
+            score = feature_preview_precheck.score_df
+            if feature_preview_precheck.schema_drift_decision is not None:
+                schema_drift_decision = feature_preview_precheck.schema_drift_decision
+            if feature_preview_precheck.preview_used:
+                feature_preview_context_evaluated = True
+                pre_score_basis_result = feature_preview_precheck.basis_result
+                regime_model = feature_preview_precheck.regime_model
+                regime_state = feature_preview_precheck.regime_state
+                regime_state_version = feature_preview_precheck.regime_state_version
+                regime_loaded_from_state = feature_preview_precheck.regime_loaded_from_state
+            if feature_preview_precheck.blocked and feature_preview_precheck.context_preview is not None:
+                frame = feature_preview_precheck.context_preview.frame
+                episodes = pd.DataFrame()
+                score_out = feature_preview_precheck.context_preview.score_out
+                regime_model = feature_preview_precheck.context_preview.regime_model
+                train_regime_labels = feature_preview_precheck.context_preview.train_regime_labels
+                score_regime_labels = feature_preview_precheck.context_preview.score_regime_labels
+                regime_quality_ok = feature_preview_precheck.context_preview.regime_quality_ok
+                representation_score_suppressed = True
+                skip_post_regime_runtime = True
+                quality_ok = False
+                degradations.append("representation_score_suppressed")
+                zero_day_status = feature_preview_precheck.zero_day_status
+
+        # ===== Phase 2: Load or fit detectors =====
+        if not skip_post_regime_runtime:
+            detector_init = run_detector_initialization_stage(
+                section_fn=T.section,
+                train=train,
+                score=score,
+                cfg=cfg,
+                meta=meta,
+                detector_cache=None,
+                output_manager=output_manager,
+                sql_client=sql_client,
+                run_id=run_id,
+                equip_id=equip_id,
+                equip=equip,
+                logger=Console,
+            )
+
+            train = detector_init.train
+            score = detector_init.score
+            det_flags = detector_init.det_flags
+            detector_flags = detector_init.enabled_flags()
+            detectors = detector_init.detector_payload()
+            regime_model = detector_init.regime_model
+            regime_state = detector_init.regime_state
+            regime_state_version = detector_init.regime_state_version
+            regime_loaded_from_state = detector_init.regime_loaded_from_state
+            col_meds = detector_init.col_meds
+            cached_models = detector_init.cached_models
+            cached_manifest = detector_init.cached_manifest
+            cached_calibration_params = detector_init.cached_calibration_params
+            detectors_just_trained = detector_init.detectors_just_trained
+            baseline_contamination_verdict = detector_init.baseline_contamination_verdict
+            baseline_contamination_rate = detector_init.baseline_contamination_rate
+            schema_drift_decision = detector_init.schema_drift_decision
+
+        if (
+            representation_shadow is not None
+            and representation_authority_policy.active
+            and not skip_post_regime_runtime
+            and not feature_preview_context_evaluated
+        ):
             try:
-                representation_shadow = enrich_representation_shadow(
-                    representation_shadow,
+                pre_score_basis_result = regimes.build_regime_feature_basis_stage(
+                    train_features=train,
+                    score_features=score,
+                    raw_train=raw_train,
+                    raw_score=raw_score,
+                    pca_detector=detectors["pca_detector"],
                     cfg=cfg,
-                    compatibility=compatibility_status_from_drift(
+                    regime_model=regime_model,
+                    equip=equip,
+                    logger=Console,
+                )
+                basis_drift_decision = pre_score_basis_result.basis_drift_decision
+
+                context_preview = regimes.preview_regime_context_stage(
+                    score_df=score,
+                    train_df=train,
+                    cfg=cfg,
+                    regime_basis_train=pre_score_basis_result.regime_basis_train,
+                    regime_basis_score=pre_score_basis_result.regime_basis_score,
+                    regime_basis_meta=pre_score_basis_result.regime_basis_meta,
+                    regime_basis_hash=pre_score_basis_result.regime_basis_hash,
+                    regime_model=pre_score_basis_result.regime_model,
+                    regime_loaded_from_state=regime_loaded_from_state,
+                    regime_state=regime_state,
+                    regime_state_version=regime_state_version,
+                    raw_train=raw_train,
+                )
+
+                if context_preview.available:
+                    representation_shadow = refresh_representation_runtime_authority(
+                        representation_shadow,
+                        cfg=cfg,
+                        policy=representation_authority_policy,
+                        context=context_preview.context_assignment,
+                        meta=meta,
                         feature_schema_drift=schema_drift_decision,
                         basis_drift=basis_drift_decision,
-                    ),
-                    baseline_governance=build_shadow_baseline_governance(
-                        meta=meta,
-                        coldstart_complete=coldstart_complete,
                         baseline_contamination_verdict=baseline_contamination_verdict,
                         refit_requested=refit_requested,
-                    ),
-                    logger=Console,
+                        logger=Console,
+                    )
+
+                    if _representation_blocks_pre_detector_runtime(representation_shadow):
+                        frame = context_preview.frame
+                        episodes = pd.DataFrame()
+                        score_out = context_preview.score_out
+                        regime_model = context_preview.regime_model
+                        train_regime_labels = context_preview.train_regime_labels
+                        score_regime_labels = context_preview.score_regime_labels
+                        regime_quality_ok = context_preview.regime_quality_ok
+                        representation_score_suppressed = True
+                        skip_post_regime_runtime = True
+                        quality_ok = False
+                        degradations.append("representation_score_suppressed")
+                        zero_day_status = build_zero_day_run_status(
+                            scoring_active=False,
+                            status="inactive_representation_blocked",
+                            surface_type="none",
+                            channel_count=0,
+                        )
+                        Console.info(
+                            "Representation authority short-circuited detector scoring, zero-day, and health stages from pre-score regime-context preview",
+                            component="REPRESENTATION",
+                            equip_id=equip_id,
+                            run_id=run_id,
+                        )
+            except Exception as representation_exc:
+                Console.warn(
+                    "Representation authority pre-score context preview failed; continuing with full runtime authority path",
+                    component="REPRESENTATION",
+                    equip_id=equip_id,
+                    run_id=run_id,
+                    error_type=type(representation_exc).__name__,
+                    error=str(representation_exc)[:200],
                 )
-                representation_shadow = apply_representation_authority(
+
+        # ===== Phase 3-5: Regime basis + detector scoring + regime labeling =====
+        if not skip_post_regime_runtime:
+            scoring_regime_stage = regimes.run_scoring_regime_stage(
+                train_df=train,
+                score_df=score,
+                raw_train=raw_train,
+                raw_score=raw_score,
+                cfg=cfg,
+                pca_detector=detectors["pca_detector"],
+                regime_model=regime_model,
+                regime_state=regime_state,
+                regime_state_version=regime_state_version,
+                regime_loaded_from_state=regime_loaded_from_state,
+                det_flags=det_flags,
+                detectors=detectors,
+                equip=equip,
+                equip_id=equip_id,
+                sql_client=sql_client,
+                output_manager=output_manager,
+                refit_requested=refit_requested,
+                section_fn=T.section,
+                score_all_detectors_fn=score_all_detectors,
+                resolve_maturity_for_regime_stage_fn=resolve_maturity_for_regime_stage,
+                record_regime_fn=record_regime,
+                logger=Console,
+                basis_result_override=pre_score_basis_result,
+            )
+            frame = scoring_regime_stage.frame
+            omr_contributions_data = scoring_regime_stage.omr_contributions_data
+            score_out = scoring_regime_stage.score_out
+            regime_model = scoring_regime_stage.regime_model
+            train_regime_labels = scoring_regime_stage.train_regime_labels
+            score_regime_labels = scoring_regime_stage.score_regime_labels
+            regime_quality_ok = scoring_regime_stage.regime_quality_ok
+            regime_state_version = scoring_regime_stage.regime_state_version
+            regime_loaded_from_state = scoring_regime_stage.regime_loaded_from_state
+            current_model_maturity = scoring_regime_stage.current_model_maturity
+            regime_model_was_trained = scoring_regime_stage.regime_model_was_trained
+            basis_drift_decision = scoring_regime_stage.basis_drift_decision
+            if scoring_regime_stage.degraded_regime_basis:
+                degradations.append("regime_feature_basis")
+
+        if (
+            not skip_post_regime_runtime
+            and representation_shadow is not None
+            and representation_authority_policy.active
+        ):
+            try:
+                representation_shadow = refresh_representation_runtime_authority(
                     representation_shadow,
+                    cfg=cfg,
                     policy=representation_authority_policy,
+                    context=regimes.build_context_assignment(frame),
+                    meta=meta,
+                    feature_schema_drift=schema_drift_decision,
+                    basis_drift=basis_drift_decision,
+                    baseline_contamination_verdict=baseline_contamination_verdict,
+                    refit_requested=refit_requested,
                     logger=Console,
                 )
+
+                if _representation_blocks_post_regime_pretransient(representation_shadow):
+                    frame, episodes, representation_score_suppressed = fuse.suppress_representation_scoring(
+                        frame=frame,
+                        episodes=pd.DataFrame(),
+                        representation_result=representation_shadow,
+                        logger=Console,
+                    )
+                    if representation_score_suppressed:
+                        degradations.append("representation_score_suppressed")
+                        quality_ok = False
+                        skip_post_regime_runtime = True
+                        zero_day_status = build_zero_day_run_status(
+                            scoring_active=False,
+                            status="inactive_representation_blocked",
+                            surface_type="none",
+                            channel_count=0,
+                        )
+                        Console.info(
+                            "Representation authority short-circuited transient, zero-day, and health stages after regime-context precheck",
+                            component="REPRESENTATION",
+                            equip_id=equip_id,
+                            run_id=run_id,
+                        )
+                elif frame is not None:
+                    frame, _ = regimes.apply_transient_state_labels(
+                        frame=frame,
+                        score_data=score,
+                        cfg=cfg,
+                        logger=Console,
+                    )
+                    representation_shadow = refresh_representation_runtime_authority(
+                        representation_shadow,
+                        cfg=cfg,
+                        policy=representation_authority_policy,
+                        context=regimes.build_context_assignment(frame),
+                        meta=meta,
+                        feature_schema_drift=schema_drift_decision,
+                        basis_drift=basis_drift_decision,
+                        baseline_contamination_verdict=baseline_contamination_verdict,
+                        refit_requested=refit_requested,
+                        logger=Console,
+                    )
+                    if _representation_blocks_post_regime_runtime(representation_shadow):
+                        frame, episodes, representation_score_suppressed = fuse.suppress_representation_scoring(
+                            frame=frame,
+                            episodes=pd.DataFrame(),
+                            representation_result=representation_shadow,
+                            logger=Console,
+                        )
+                        if representation_score_suppressed:
+                            degradations.append("representation_score_suppressed")
+                            quality_ok = False
+                            skip_post_regime_runtime = True
+                            zero_day_status = build_zero_day_run_status(
+                                scoring_active=False,
+                                status="inactive_representation_blocked",
+                                surface_type="none",
+                                channel_count=0,
+                            )
+                            Console.info(
+                                "Representation authority short-circuited zero-day and health stages after post-regime context gating",
+                                component="REPRESENTATION",
+                                equip_id=equip_id,
+                                run_id=run_id,
+                            )
             except Exception as representation_exc:
                 Console.warn(
                     "Representation authority precheck failed; continuing with legacy runtime authority",
@@ -687,7 +1561,10 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
         # ewm_z = mean z_slow per row (long-term character deviation = genuine fault signal).
         # Feature-flagged: models.ewm_baseline.enabled (default True).
         zero_day_learning_blocked = _representation_learning_blocked(representation_shadow)
-        zero_day_scoring_blocked = _representation_blocks_zero_day_scoring(representation_shadow)
+        zero_day_scoring_blocked = (
+            skip_post_regime_runtime
+            or _representation_blocks_zero_day_scoring(representation_shadow)
+        )
 
         if _ewm_enabled and zero_day_scoring_blocked:
             zero_day_status = build_zero_day_run_status(
@@ -922,6 +1799,7 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
                 detectors=detectors,
                 detector_cache=None,
                 col_meds=col_meds,
+                raw_signal_medians=raw_signal_medians,
                 timing_sections=T.timings if hasattr(T, "timings") else None,
                 model_state=model_state,
                 regime_state_version=regime_state_version,
@@ -935,102 +1813,99 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
         model_state = model_stage.model_state
 
         # ===== Phase 6-7 + adaptive postprocess =====
-        persist_calibration = partial(
-            persist_calibration_params_safe,
-            equip=equip,
-            sql_client=sql_client,
-            equip_id=equip_id,
-            logger=Console,
-        )
-        health_stage = fuse.run_health_stage(
-            section_fn=T.section,
-            train=train,
-            score=score,
-            frame=frame,
-            cfg=cfg,
-            regime_quality_ok=regime_quality_ok,
-            train_regime_labels=train_regime_labels,
-            score_regime_labels=score_regime_labels,
-            pca_train_spe=detectors["pca_train_spe"],
-            pca_train_t2=detectors["pca_train_t2"],
-            detectors=detectors,
-            detector_flags=detector_flags,
-            cached_calibration_params=cached_calibration_params,
-            saved_model_version=saved_model_version,
-            persist_calibration_params_fn=persist_calibration,
-            output_manager=output_manager,
-            logger=Console,
-            equip=equip,
-            previous_weights=None,
-            omr_contributions_data=omr_contributions_data,
-            record_detector_scores_fn=record_detector_scores,
-            record_episode_fn=record_episode,
-            maybe_update_adaptive_thresholds_fn=maybe_update_adaptive_thresholds,
-            coldstart_complete=coldstart_complete,
-            equip_id=equip_id,
-            regime_model=regime_model,
-            score_out=score_out,
-            sql_client=sql_client,
-            run_id=run_id,
-            cached_manifest=cached_manifest,
-            baseline_contamination_verdict=baseline_contamination_verdict,
-            representation_result=representation_shadow,
-            representation_authority_active=representation_authority_policy.active,
-        )
-        frame = health_stage.frame
-        train_frame = health_stage.train_frame
-        episodes = health_stage.episodes
-        fusion_weights_used = health_stage.fusion_weights_used
-        spe_p95_train = health_stage.spe_p95_train
-        t2_p95_train = health_stage.t2_p95_train
-        quality_ok = health_stage.quality_ok
-        use_per_regime = health_stage.use_per_regime
+        if skip_post_regime_runtime:
+            Console.info(
+                "Representation authority skipped calibration, fusion, and adaptive postprocess after post-regime context gating",
+                component="REPRESENTATION",
+                equip_id=equip_id,
+                run_id=run_id,
+            )
+        else:
+            persist_calibration = partial(
+                persist_calibration_params_safe,
+                equip=equip,
+                sql_client=sql_client,
+                equip_id=equip_id,
+                logger=Console,
+            )
+            health_stage = fuse.run_health_stage(
+                section_fn=T.section,
+                train=train,
+                score=score,
+                frame=frame,
+                cfg=cfg,
+                regime_quality_ok=regime_quality_ok,
+                train_regime_labels=train_regime_labels,
+                score_regime_labels=score_regime_labels,
+                pca_train_spe=detectors["pca_train_spe"],
+                pca_train_t2=detectors["pca_train_t2"],
+                detectors=detectors,
+                detector_flags=detector_flags,
+                cached_calibration_params=cached_calibration_params,
+                saved_model_version=saved_model_version,
+                persist_calibration_params_fn=persist_calibration,
+                output_manager=output_manager,
+                logger=Console,
+                equip=equip,
+                previous_weights=None,
+                omr_contributions_data=omr_contributions_data,
+                record_detector_scores_fn=record_detector_scores,
+                record_episode_fn=record_episode,
+                maybe_update_adaptive_thresholds_fn=maybe_update_adaptive_thresholds,
+                coldstart_complete=coldstart_complete,
+                equip_id=equip_id,
+                regime_model=regime_model,
+                score_out=score_out,
+                sql_client=sql_client,
+                run_id=run_id,
+                cached_manifest=cached_manifest,
+                baseline_contamination_verdict=baseline_contamination_verdict,
+                representation_result=representation_shadow,
+                representation_authority_active=representation_authority_policy.active,
+            )
+            frame = health_stage.frame
+            train_frame = health_stage.train_frame
+            episodes = health_stage.episodes
+            fusion_weights_used = health_stage.fusion_weights_used
+            spe_p95_train = health_stage.spe_p95_train
+            t2_p95_train = health_stage.t2_p95_train
+            quality_ok = health_stage.quality_ok
+            use_per_regime = health_stage.use_per_regime
 
-        with T.section("representation.shadow.comparability"):
-            if representation_shadow is not None:
-                try:
-                    baseline_governance = build_shadow_baseline_governance(
-                        meta=meta,
-                        coldstart_complete=coldstart_complete,
-                        baseline_contamination_verdict=baseline_contamination_verdict,
-                        freeze_changes=ewm_freeze_changes,
-                        refit_requested=refit_requested,
-                    )
-                    compatibility = compatibility_status_from_drift(
-                        feature_schema_drift=schema_drift_decision,
-                        basis_drift=basis_drift_decision,
-                    )
-                    representation_shadow = enrich_representation_shadow(
-                        representation_shadow,
-                        cfg=cfg,
-                        context=getattr(health_stage, "context_assignment", None),
-                        compatibility=compatibility,
-                        baseline_governance=baseline_governance,
-                        logger=Console,
-                    )
-                    representation_shadow = apply_representation_authority(
-                        representation_shadow,
-                        policy=representation_authority_policy,
-                        logger=Console,
-                    )
-                    frame, episodes, representation_score_suppressed = fuse.suppress_representation_scoring(
-                        frame=frame,
-                        episodes=episodes,
-                        representation_result=representation_shadow,
-                        logger=Console,
-                    )
-                    if representation_score_suppressed:
-                        degradations.append("representation_score_suppressed")
-                        quality_ok = False
-                except Exception as representation_exc:
-                    Console.warn(
-                        "Representation shadow comparability failed; continuing with legacy runtime authority",
-                        component="REPRESENTATION",
-                        equip_id=equip_id,
-                        run_id=run_id,
-                        error_type=type(representation_exc).__name__,
-                        error=str(representation_exc)[:200],
-                    )
+            with T.section("representation.shadow.comparability"):
+                if representation_shadow is not None:
+                    try:
+                        representation_shadow = refresh_representation_runtime_authority(
+                            representation_shadow,
+                            cfg=cfg,
+                            policy=representation_authority_policy,
+                            context=getattr(health_stage, "context_assignment", None),
+                            meta=meta,
+                            feature_schema_drift=schema_drift_decision,
+                            basis_drift=basis_drift_decision,
+                            baseline_contamination_verdict=baseline_contamination_verdict,
+                            freeze_changes=ewm_freeze_changes,
+                            refit_requested=refit_requested,
+                            logger=Console,
+                        )
+                        frame, episodes, representation_score_suppressed = fuse.suppress_representation_scoring(
+                            frame=frame,
+                            episodes=episodes,
+                            representation_result=representation_shadow,
+                            logger=Console,
+                        )
+                        if representation_score_suppressed:
+                            degradations.append("representation_score_suppressed")
+                            quality_ok = False
+                    except Exception as representation_exc:
+                        Console.warn(
+                            "Representation shadow comparability failed; continuing with legacy runtime authority",
+                            component="REPRESENTATION",
+                            equip_id=equip_id,
+                            run_id=run_id,
+                            error_type=type(representation_exc).__name__,
+                            error=str(representation_exc)[:200],
+                        )
         with T.section("representation.shadow.persist"):
             if representation_shadow is not None and output_manager is not None:
                 try:
@@ -1126,6 +2001,8 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
             anomaly_count=anomaly_count,
             timer=T,
             culprit_writer_func=write_episode_culprits_enhanced,
+            representation_result=representation_shadow,
+            representation_authority_active=representation_authority_policy.active,
             max_total_rows=10000,
         )
         rows_written = persist_stage.rows_written

@@ -2199,6 +2199,7 @@ class OutputManager:
         scores_df: pd.DataFrame,
         raw_score: Optional[pd.DataFrame],
         seasonal_patterns: Optional[Dict[str, List[Any]]],
+        artifact_flags: Optional[Dict[str, bool]] = None,
         max_total_rows: int = 10000,
     ) -> PersistArtifactsResult:
         """Persist optional secondary artifacts derived from current run data."""
@@ -2207,6 +2208,7 @@ class OutputManager:
             scores_df=scores_df,
             raw_score=raw_score,
             seasonal_patterns=seasonal_patterns,
+            artifact_flags=artifact_flags,
             max_total_rows=max_total_rows,
         )
         return PersistArtifactsResult(**payload)
@@ -2246,6 +2248,7 @@ class OutputManager:
         spe_p95_train: float,
         t2_p95_train: float,
         anomaly_count: int,
+        score_outputs_enabled: bool,
         timer: Any,
         culprit_writer_func: Optional[Callable[..., Any]] = None,
     ) -> int:
@@ -2269,6 +2272,7 @@ class OutputManager:
                 spe_p95_train=spe_p95_train,
                 t2_p95_train=t2_p95_train,
                 anomaly_count=anomaly_count,
+                score_outputs_enabled=score_outputs_enabled,
                 T=timer,
                 culprit_writer_func=culprit_writer_func,
             )
@@ -2288,6 +2292,8 @@ class OutputManager:
         fusion_weights_used: Optional[Dict[str, float]],
         record_episode_fn: Optional[Callable[..., Any]] = None,
         equip: Optional[str] = None,
+        representation_result: Optional[Any] = None,
+        representation_authority_active: bool = False,
         max_total_rows: int = 10000,
     ) -> PersistPipelineOutputsResult:
         """Persist core and optional run artifacts, then release persist-phase memory."""
@@ -2305,6 +2311,8 @@ class OutputManager:
             fusion_weights_used=fusion_weights_used,
             record_episode_fn=record_episode_fn,
             equip=equip,
+            representation_result=representation_result,
+            representation_authority_active=representation_authority_active,
             max_total_rows=max_total_rows,
         )
         return PersistPipelineOutputsResult(**payload)
@@ -2340,6 +2348,8 @@ class OutputManager:
         anomaly_count: int,
         timer: Any,
         culprit_writer_func: Optional[Callable[..., Any]] = None,
+        representation_result: Optional[Any] = None,
+        representation_authority_active: bool = False,
         max_total_rows: int = 10000,
     ) -> PersistenceStageResult:
         """Execute full persistence stage for pipeline outputs and SQL artifacts."""
@@ -2373,6 +2383,8 @@ class OutputManager:
             anomaly_count=anomaly_count,
             timer=timer,
             culprit_writer_func=culprit_writer_func,
+            representation_result=representation_result,
+            representation_authority_active=representation_authority_active,
             max_total_rows=max_total_rows,
         )
         return PersistenceStageResult(**payload)

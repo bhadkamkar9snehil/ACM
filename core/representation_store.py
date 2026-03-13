@@ -16,7 +16,6 @@ import pandas as pd
 
 from core.observability import Console
 from core.representation_contracts import RepresentationPipelineResult, StateSnapshot
-from core.signal_profiler import profile_signal_frame
 
 
 @dataclass(frozen=True)
@@ -104,13 +103,29 @@ def build_representation_status_df(result: RepresentationPipelineResult) -> pd.D
 def build_signal_profiles_df(
     result: RepresentationPipelineResult,
     signal_source_df: Optional[pd.DataFrame],
+    *,
+    logger: Any = Console,
 ) -> pd.DataFrame:
     state = _state_ref(result)
-    if state is None or signal_source_df is None or signal_source_df.empty:
+    if state is None:
         return pd.DataFrame()
 
+    profiles = tuple(getattr(result, "signal_profiles", ()) or ())
+    if not profiles:
+        if signal_source_df is None or signal_source_df.empty:
+            return pd.DataFrame()
+        logger.warn(
+            "Representation signal profiles missing from pipeline output; falling back to store-time reprofiling",
+            component="REPRESENTATION",
+            equip_id=result.equip_id,
+            run_id=result.run_id,
+        )
+        from core.signal_profiler import profile_signal_frame
+
+        profiles = tuple(profile_signal_frame(signal_source_df))
+
     rows = []
-    for profile in profile_signal_frame(signal_source_df):
+    for profile in profiles:
         rows.append(
             {
                 "RunID": result.run_id,
@@ -202,7 +217,11 @@ def persist_representation_artifacts(
         return RepresentationStoreWriteResult()
 
     status_df = build_representation_status_df(representation_result)
-    signal_df = build_signal_profiles_df(representation_result, signal_source_df)
+    signal_df = build_signal_profiles_df(
+        representation_result,
+        signal_source_df,
+        logger=logger,
+    )
     schema_df = build_representation_schemas_df(representation_result)
     baseline_df = build_baseline_governance_df(representation_result)
 

@@ -29,14 +29,19 @@ def _integrity(
 def _baseline(
     *,
     runtime_mode: RuntimeMode = RuntimeMode.ONLINE_SCORING,
+    enough_history_to_proceed: bool = True,
+    baseline_ready: bool = True,
     readiness_state: str = "READY",
+    baseline_candidate_state: str = "UNASSESSED",
     contamination_verdict: str = "CLEAR",
     shadow_refresh_state: str = "UNASSESSED",
 ) -> BaselineGovernanceDecision:
     return BaselineGovernanceDecision(
         runtime_mode=runtime_mode,
+        enough_history_to_proceed=enough_history_to_proceed,
+        baseline_ready=baseline_ready,
         readiness_state=readiness_state,
-        baseline_candidate_state="UNASSESSED",
+        baseline_candidate_state=baseline_candidate_state,
         contamination_verdict=contamination_verdict,
         freeze_state="UNASSESSED",
         shadow_refresh_state=shadow_refresh_state,
@@ -106,6 +111,26 @@ def test_evaluate_eligibility_allows_baseline_formation_learning() -> None:
     assert "baseline_formation_scoring_disabled" in decision.suppressed_reason_codes
 
 
+def test_evaluate_eligibility_blocks_learning_while_trusted_window_is_pending() -> None:
+    decision = evaluate_eligibility(
+        integrity=_integrity(),
+        context=ContextAssignment(),
+        compatibility=CompatibilityStatus(),
+        baseline_governance=_baseline(
+            runtime_mode=RuntimeMode.BASELINE_FORMATION,
+            readiness_state="FORMING",
+            baseline_ready=False,
+            baseline_candidate_state="TRUSTED_WINDOW_PENDING",
+        ),
+        cfg={},
+    )
+
+    assert decision.score_allowed is False
+    assert decision.learn_allowed is False
+    assert "baseline_formation_scoring_disabled" in decision.suppressed_reason_codes
+    assert "baseline_trusted_window_pending" in decision.degraded_reason_codes
+
+
 def test_evaluate_eligibility_blocks_schema_incompatibility() -> None:
     decision = evaluate_eligibility(
         integrity=_integrity(),
@@ -146,3 +171,22 @@ def test_evaluate_eligibility_blocks_poor_integrity() -> None:
     assert "insufficient_coverage" in decision.suppressed_reason_codes
     assert "poor_missingness" in decision.suppressed_reason_codes
     assert "insufficient_effective_signals" in decision.suppressed_reason_codes
+
+
+def test_evaluate_eligibility_uses_explicit_bootstrap_history_flag() -> None:
+    decision = evaluate_eligibility(
+        integrity=_integrity(),
+        context=_context(),
+        compatibility=CompatibilityStatus(),
+        baseline_governance=_baseline(
+            runtime_mode=RuntimeMode.BOOTSTRAP_NOT_READY,
+            enough_history_to_proceed=False,
+            baseline_ready=False,
+            readiness_state="NOT_READY",
+        ),
+        cfg={},
+    )
+
+    assert decision.score_allowed is False
+    assert "runtime_mode_not_ready" in decision.suppressed_reason_codes
+    assert "insufficient_history_to_proceed" in decision.degraded_reason_codes

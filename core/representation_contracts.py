@@ -100,6 +100,8 @@ class RepresentationAuthorityPolicy:
 @dataclass(frozen=True)
 class BaselineGovernanceDecision:
     runtime_mode: RuntimeMode
+    enough_history_to_proceed: bool
+    baseline_ready: bool
     readiness_state: str
     baseline_candidate_state: str
     contamination_verdict: str
@@ -133,6 +135,7 @@ class RepresentationPipelineResult:
     equip_id: int
     train_state: Optional[StateSnapshot]
     score_state: Optional[StateSnapshot]
+    signal_profiles: Tuple[SignalProfile, ...]
     signal_summary: SignalProfileSummary
     context: ContextAssignment
     compatibility: CompatibilityStatus

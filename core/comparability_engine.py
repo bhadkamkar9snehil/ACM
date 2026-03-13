@@ -45,6 +45,7 @@ _PENDING_COMPATIBILITY = {"PENDING", "UNASSESSED", "UNKNOWN", "UNBOUND"}
 _READY_BASELINE_STATES = {"ACTIVE", "READY"}
 _CLEAR_CONTAMINATION_STATES = {"CLEAR", "NONE"}
 _ADAPTATION_REFRESH_ALLOWED = {"ALLOWED", "ENABLED", "READY", "SHADOW_REFRESH_ALLOWED"}
+_PENDING_TRUSTED_WINDOW_STATES = {"TRUSTED_WINDOW_PENDING"}
 
 
 def _policy(cfg: dict[str, Any], key: str, default: Any) -> Any:
@@ -104,11 +105,16 @@ def evaluate_eligibility(
 
     runtime_mode = baseline_governance.runtime_mode
     readiness_state = str(baseline_governance.readiness_state).strip().upper()
+    baseline_candidate_state = str(baseline_governance.baseline_candidate_state).strip().upper()
+    enough_history_to_proceed = bool(baseline_governance.enough_history_to_proceed)
+    baseline_ready = bool(baseline_governance.baseline_ready)
     contamination_verdict = str(baseline_governance.contamination_verdict).strip().upper()
     shadow_refresh_state = str(baseline_governance.shadow_refresh_state).strip().upper()
 
     if runtime_mode == RuntimeMode.BOOTSTRAP_NOT_READY:
         suppressed.append("runtime_mode_not_ready")
+        if not enough_history_to_proceed:
+            degraded.append("insufficient_history_to_proceed")
     elif runtime_mode == RuntimeMode.BASELINE_FORMATION:
         suppressed.append("baseline_formation_scoring_disabled")
     elif runtime_mode == RuntimeMode.SCHEMA_BREAK_REQUALIFICATION:
@@ -154,7 +160,7 @@ def evaluate_eligibility(
         degraded.append("invalidated_features_present")
 
     if runtime_mode == RuntimeMode.ONLINE_SCORING:
-        if readiness_state not in _READY_BASELINE_STATES:
+        if (not baseline_ready) or readiness_state not in _READY_BASELINE_STATES:
             suppressed.append("baseline_not_ready")
         if contamination_verdict and contamination_verdict not in _CLEAR_CONTAMINATION_STATES:
             if contamination_verdict in {"CONTAMINATED", "FAILED"}:
@@ -183,9 +189,12 @@ def evaluate_eligibility(
 
     learn_allowed = False
     if runtime_mode == RuntimeMode.BASELINE_FORMATION:
-        learn_allowed = not (integrity_blocked or compatibility_blocked)
+        learn_allowed = enough_history_to_proceed and not (integrity_blocked or compatibility_blocked)
+        if baseline_candidate_state in _PENDING_TRUSTED_WINDOW_STATES:
+            learn_allowed = False
+            degraded.append("baseline_trusted_window_pending")
     elif runtime_mode == RuntimeMode.CONTROLLED_ADAPTATION:
-        learn_allowed = (
+        learn_allowed = baseline_ready and (
             shadow_refresh_state in _ADAPTATION_REFRESH_ALLOWED
             and not (integrity_blocked or compatibility_blocked)
         )

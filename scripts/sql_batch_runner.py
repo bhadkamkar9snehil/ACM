@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 import textwrap
@@ -60,6 +61,7 @@ try:
         Console,
         init as init_observability,
         shutdown as shutdown_observability,
+        resolve_runtime_observability_flags,
         record_run,
         record_error,
         start_profiling,
@@ -111,6 +113,14 @@ except Exception:  # pragma: no cover - keeps runner usable without optional obs
     def shutdown_observability(*args: Any, **kwargs: Any) -> None:
         _ = (args, kwargs)
 
+    def resolve_runtime_observability_flags() -> Dict[str, bool]:
+        return {
+            "enable_tracing": True,
+            "enable_metrics": True,
+            "enable_loki": True,
+            "enable_profiling": True,
+        }
+
     def record_run(*args: Any, **kwargs: Any) -> None:
         _ = (args, kwargs)
 
@@ -140,9 +150,12 @@ class RunInspectionSummary:
     """Structured summary of the latest ACM run for an equipment."""
 
     run_id: Optional[str]
+    run_outcome: Optional[str] = None
     run_source: str = "unknown"
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
+    source_window_start: Optional[datetime] = None
+    source_window_end: Optional[datetime] = None
     duration_seconds: Optional[int] = None
     train_row_count: Optional[int] = None
     score_row_count: Optional[int] = None
@@ -172,6 +185,20 @@ class RunInspectionSummary:
     run_log_total: Optional[int] = None
     run_log_warn: Optional[int] = None
     run_log_error: Optional[int] = None
+
+
+_RUN_ID_PATTERNS: Tuple[re.Pattern[str], ...] = (
+    re.compile(r"Finalized RunID=([0-9A-Fa-f-]{36})"),
+    re.compile(r"RUN START:\s+run_id=([0-9A-Fa-f-]{36})"),
+)
+
+
+def _extract_run_id_from_output(stdout_text: str) -> Optional[str]:
+    for pattern in _RUN_ID_PATTERNS:
+        match = pattern.search(stdout_text or "")
+        if match:
+            return str(match.group(1))
+    return None
 
 
 class SQLBatchRunner:
@@ -222,6 +249,20 @@ class SQLBatchRunner:
         "RepresentationSuppressedReasons",
         "RepresentationDegradedReasons",
     )
+
+    @staticmethod
+    def _expand_coldstart_window_end(
+        start_time: datetime,
+        end_time: datetime,
+        max_time: datetime,
+    ) -> datetime:
+        """Expand a coldstart window geometrically when a NOOP run lacks enough rows."""
+        current_span = (end_time - start_time) + timedelta(seconds=1)
+        expanded_span = max(current_span * 2, timedelta(minutes=1))
+        expanded_end = start_time + expanded_span - timedelta(seconds=1)
+        if expanded_end > max_time:
+            expanded_end = max_time
+        return expanded_end
 
     def _log_historian_overview(self, equip_name: str) -> bool:
         """Preflight: Log historian table coverage and return True when data exists.
@@ -710,7 +751,15 @@ class SQLBatchRunner:
         except Exception as e:
             Console.warn(f"Failed to delete models for EquipID={equip_id}: {e}", component="RESET", equip_id=equip_id, error=str(e), error_type=type(e).__name__)
 
-    def _inspect_last_run_outputs(self, equip_name: str) -> Optional[RunInspectionSummary]:
+    def _inspect_last_run_outputs(
+        self,
+        equip_name: str,
+        *,
+        prefer_run_id: Optional[str] = None,
+        source_window_start: Optional[datetime] = None,
+        source_window_end: Optional[datetime] = None,
+        acm_outcome: Optional[str] = None,
+    ) -> Optional[RunInspectionSummary]:
         """
         Lightweight QA: after a batch run, report row counts in key tables for
         the last RunID for this equipment so a dev can spot anomalies.
@@ -722,64 +771,8 @@ class SQLBatchRunner:
                 return None
             with self._get_sql_connection() as conn:
                 cur = conn.cursor()
-                # Prefer deriving the latest RunID from freshly written forecast tables
-                # to avoid mismatches when ACM_Runs ordering differs.
-                run_id = None
-                run_source = None
-                # Try ACM_HealthForecast_TS first
-                try:
-                    cur.execute(
-                        """
-                        IF OBJECT_ID('dbo.ACM_HealthForecast_TS','U') IS NOT NULL
-                        BEGIN
-                          IF EXISTS(SELECT 1 FROM dbo.ACM_HealthForecast_TS WHERE EquipID = ?)
-                          BEGIN
-                            IF COL_LENGTH('dbo.ACM_HealthForecast_TS','CreatedAt') IS NOT NULL
-                              SELECT TOP 1 RunID FROM dbo.ACM_HealthForecast_TS WHERE EquipID = ? GROUP BY RunID ORDER BY MAX(CreatedAt) DESC;
-                            ELSE
-                              SELECT TOP 1 RunID FROM dbo.ACM_HealthForecast_TS WHERE EquipID = ? GROUP BY RunID ORDER BY MAX([Timestamp]) DESC;
-                          END
-                          ELSE SELECT CAST(NULL AS UNIQUEIDENTIFIER);
-                        END
-                        ELSE SELECT CAST(NULL AS UNIQUEIDENTIFIER);
-                        """,
-                        (equip_id, equip_id, equip_id),
-                    )
-                    r = cur.fetchone()
-                    if r and r[0]:
-                        run_id = r[0]
-                        run_source = "ACM_HealthForecast_TS"
-                except Exception:
-                    pass
-
-                # Fallback: derive from ACM_FailureForecast_TS
-                if run_id is None:
-                    try:
-                        cur.execute(
-                            """
-                            IF OBJECT_ID('dbo.ACM_FailureForecast_TS','U') IS NOT NULL
-                            BEGIN
-                              IF EXISTS(SELECT 1 FROM dbo.ACM_FailureForecast_TS WHERE EquipID = ?)
-                              BEGIN
-                                IF COL_LENGTH('dbo.ACM_FailureForecast_TS','CreatedAt') IS NOT NULL
-                                  SELECT TOP 1 RunID FROM dbo.ACM_FailureForecast_TS WHERE EquipID = ? GROUP BY RunID ORDER BY MAX(CreatedAt) DESC;
-                                ELSE
-                                  SELECT TOP 1 RunID FROM dbo.ACM_FailureForecast_TS WHERE EquipID = ? GROUP BY RunID ORDER BY MAX([Timestamp]) DESC;
-                              END
-                              ELSE SELECT CAST(NULL AS UNIQUEIDENTIFIER);
-                            END
-                            ELSE SELECT CAST(NULL AS UNIQUEIDENTIFIER);
-                            """,
-                            (equip_id, equip_id, equip_id),
-                        )
-                        r = cur.fetchone()
-                        if r and r[0]:
-                            run_id = r[0]
-                            run_source = "ACM_FailureForecast_TS"
-                    except Exception:
-                        pass
-
-                # Final fallback: latest in ACM_Runs by StartedAt
+                run_id = str(prefer_run_id).strip() if prefer_run_id else None
+                run_source = "explicit_run_id" if run_id else None
                 started_at = None
                 completed_at = None
                 if run_id is None:
@@ -793,25 +786,29 @@ class SQLBatchRunner:
                         return None
                     run_id, started_at, completed_at = row[0], row[1], row[2]
                     run_source = "ACM_Runs"
-
-                run_id_str = str(run_id) if run_id is not None else None
-
-                # If we derived from forecast tables, try to enrich with window from ACM_Runs
-                if started_at is None or completed_at is None:
+                else:
                     try:
                         cur.execute(
                             "SELECT TOP 1 StartedAt, CompletedAt FROM dbo.ACM_Runs WHERE RunID = ?",
                             (run_id,),
                         )
-                        rw = cur.fetchone()
-                        if rw:
-                            started_at, completed_at = rw[0], rw[1]
+                        row = cur.fetchone()
+                        if row:
+                            started_at, completed_at = row[0], row[1]
                     except Exception:
                         pass
 
+                run_id_str = str(run_id) if run_id is not None else None
+                run_outcome = str(acm_outcome).strip().upper() if acm_outcome else None
+
                 Console.info(
                     f"Inspecting outputs for EquipID={equip_id}, RunID={run_id} (from {run_source}), "
-                    f"window=[{started_at},{completed_at})",
+                    f"exec_window=[{started_at},{completed_at})"
+                    + (
+                        f", source_data_window=[{source_window_start},{source_window_end})"
+                        if source_window_start is not None or source_window_end is not None
+                        else ""
+                    ),
                     component="QA", equip_id=equip_id, run_id=run_id_str
                 )
                 forecast_outputs_required = self._should_expect_forecast_outputs(equip_id, run_id)
@@ -959,6 +956,7 @@ class SQLBatchRunner:
                     representation_columns.get("Authoritative") is True
                     and representation_columns.get("ScoreAllowed") is False
                 )
+                noop_valid = run_outcome == "NOOP"
                 score_derived_tables = {
                     "ACM_Scores_Wide",
                     "ACM_HealthTimeline",
@@ -1026,7 +1024,24 @@ class SQLBatchRunner:
                             f"{'(RunID scoped)' if has_run else ''}",
                             component="QA", table=table_name, count=count_val, equip_id=equip_id
                         )
-                        if score_outputs_suppressed and table_name in score_derived_tables:
+                        if noop_valid:
+                            if count_val == 0:
+                                Console.info(
+                                    f"QA expected: {table_name} has 0 rows because ACM outcome=NOOP produced no persisted batch outputs",
+                                    component="QA",
+                                    table=table_name,
+                                    equip_id=equip_id,
+                                    run_id=str(run_id),
+                                )
+                            elif critical:
+                                Console.warn(
+                                    f"QA note: {table_name} has {count_val} rows even though ACM outcome=NOOP usually produces no persisted batch outputs",
+                                    component="QA",
+                                    table=table_name,
+                                    equip_id=equip_id,
+                                    run_id=str(run_id),
+                                )
+                        elif score_outputs_suppressed and table_name in score_derived_tables:
                             if count_val == 0:
                                 Console.info(
                                     f"QA expected: {table_name} has 0 rows because authoritative representation suppression disabled score-derived persistence",
@@ -1168,9 +1183,12 @@ class SQLBatchRunner:
 
                 summary = RunInspectionSummary(
                     run_id=run_id_str,
+                    run_outcome=run_outcome,
                     run_source=str(run_source or "unknown"),
                     started_at=started_at,
                     completed_at=completed_at,
+                    source_window_start=source_window_start,
+                    source_window_end=source_window_end,
                     duration_seconds=int(runs_columns["DurationSeconds"]) if runs_columns.get("DurationSeconds") is not None else None,
                     train_row_count=int(runs_columns["TrainRowCount"]) if runs_columns.get("TrainRowCount") is not None else None,
                     score_row_count=int(runs_columns["ScoreRowCount"]) if runs_columns.get("ScoreRowCount") is not None else None,
@@ -1518,6 +1536,7 @@ class SQLBatchRunner:
         process.wait()
 
         stdout_text = "".join(captured_lines)
+        run_id = _extract_run_id_from_output(stdout_text)
         # Parse outcome from logs
         outcome = "FAIL"
         if process.returncode == 0:
@@ -1556,7 +1575,13 @@ class SQLBatchRunner:
 
         if success and outcome in ("OK", "DEGRADED", "NOOP"):
             # After a successful batch, inspect SQL outputs for this equipment
-            self._inspect_last_run_outputs(equip_name)
+            self._inspect_last_run_outputs(
+                equip_name,
+                prefer_run_id=run_id,
+                source_window_start=start_time,
+                source_window_end=end_time,
+                acm_outcome=outcome,
+            )
         return success, outcome
 
     def _process_coldstart(self, equip_name: str, *, dry_run: bool = False) -> tuple[bool, Optional[datetime]]:
@@ -1614,8 +1639,31 @@ class SQLBatchRunner:
                 continue
 
             if outcome == "NOOP":
-                Console.warn(f"{equip_name}: Deferred (insufficient data), will retry...", component="COLDSTART", equipment=equip_name)
-                continue
+                expanded_end = self._expand_coldstart_window_end(
+                    coldstart_start,
+                    coldstart_end,
+                    max_ts,
+                )
+                if expanded_end > coldstart_end:
+                    Console.warn(
+                        f"{equip_name}: Deferred (insufficient data), expanding coldstart window to [{coldstart_start} -> {expanded_end}]",
+                        component="COLDSTART",
+                        equipment=equip_name,
+                        start=coldstart_start,
+                        previous_end=coldstart_end,
+                        expanded_end=expanded_end,
+                    )
+                    coldstart_end = expanded_end
+                    continue
+                Console.warn(
+                    f"{equip_name}: Deferred (insufficient data) but full available history is exhausted at {coldstart_end}",
+                    component="COLDSTART",
+                    equipment=equip_name,
+                    start=coldstart_start,
+                    end=coldstart_end,
+                    max_timestamp=max_ts,
+                )
+                return False, last_processed_end
 
             if outcome in ("OK", "DEGRADED"):
                 # Check if coldstart completed
@@ -1850,7 +1898,8 @@ class SQLBatchRunner:
                 episode_display = inspection.table_counts.get("ACM_EpisodeDiagnostics")
             Console.info(
                 f"{equip_name}: ACM run | run_id={inspection.run_id} | source={inspection.run_source} "
-                f"| window=[{_fmt_dt(inspection.started_at)} -> {_fmt_dt(inspection.completed_at)}] "
+                f"| exec_window=[{_fmt_dt(inspection.started_at)} -> {_fmt_dt(inspection.completed_at)}] "
+                f"| source_data_window=[{_fmt_dt(inspection.source_window_start)} -> {_fmt_dt(inspection.source_window_end)}] "
                 f"| duration_s={_fmt_int(inspection.duration_seconds)}",
                 component="SUMMARY",
                 equipment=equip_name,
@@ -2186,21 +2235,24 @@ def main() -> int:
     loki_url = os.environ.get("LOKI_URL", "http://localhost:3100")
     otlp_endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4318")
 
+    obs_flags = resolve_runtime_observability_flags()
+
     init_observability(
         service_name="acm-batch-runner",
         equipment="batch_runner",
         equip_id=0,
         run_id="batch-runner-main",
-        enable_loki=True,
-        enable_tracing=True,
-        enable_metrics=True,
-        enable_profiling=True,
+        enable_loki=obs_flags["enable_loki"],
+        enable_tracing=obs_flags["enable_tracing"],
+        enable_metrics=obs_flags["enable_metrics"],
+        enable_profiling=obs_flags["enable_profiling"],
         loki_endpoint=loki_url,
         otlp_endpoint=otlp_endpoint,
     )
 
     # Start profiling (collect CPU samples for Pyroscope)
-    start_profiling()
+    if obs_flags["enable_profiling"]:
+        start_profiling()
 
     # Create runner
     runner = SQLBatchRunner(

@@ -91,9 +91,8 @@ class ForecastState:
         forecast_quality: Dict with rmse, mae, mape metrics
         
     Note:
-        model_params and residual_variance are retained only for SQL schema compatibility
-        with ACM_ForecastState table. They are not populated or used in runtime logic.
-        Consider removing in future schema migration.
+        model_params and residual_variance are retained only for legacy forecast-state
+        schema compatibility. They are not populated or used in runtime logic.
     """
     equip_id: int
     state_version: int
@@ -738,7 +737,11 @@ class ModelVersionManager:
             )
             return None
 
-    def _load_models_from_sql(self, version: int) -> Optional[Tuple[Dict[str, Any], Dict[str, Any]]]:
+    def _load_models_from_sql(
+        self,
+        version: int,
+        model_types: Optional[List[str]] = None,
+    ) -> Optional[Tuple[Dict[str, Any], Dict[str, Any]]]:
         """
         Load models from SQL ModelRegistry table with metadata reconstruction.
 
@@ -751,7 +754,16 @@ class ModelVersionManager:
         Returns:
             Tuple of (models_dict, manifest_dict) or None if not found
         """
-        Console.info(f"Loading models from SQL ModelRegistry v{version}...", component="MODEL-SQL")
+        selected_model_types = sorted({str(model_type) for model_type in (model_types or []) if str(model_type).strip()})
+        selected_model_suffix = (
+            f" ({', '.join(selected_model_types)})"
+            if selected_model_types
+            else ""
+        )
+        Console.info(
+            f"Loading models from SQL ModelRegistry v{version}{selected_model_suffix}...",
+            component="MODEL-SQL",
+        )
 
         try:
             cursor = self.sql_client.conn.cursor()
@@ -761,10 +773,15 @@ class ModelVersionManager:
             SELECT ModelType, ModelBytes, ParamsJSON, StatsJSON, EntryDateTime
             FROM ModelRegistry 
             WHERE EquipID = ? AND Version = ?
-            ORDER BY ModelType
             """
-            
-            cursor.execute(sql, (self.equip_id, version))
+            params: List[Any] = [self.equip_id, version]
+            if selected_model_types:
+                placeholders = ",".join("?" for _ in selected_model_types)
+                sql += f" AND ModelType IN ({placeholders})"
+                params.extend(selected_model_types)
+            sql += " ORDER BY ModelType"
+
+            cursor.execute(sql, params)
             rows = cursor.fetchall()
             
             if not rows:
@@ -844,7 +861,8 @@ class ModelVersionManager:
     def load_models(
         self,
         version: Optional[int] = None,
-        prefer_sql: bool = True
+        prefer_sql: bool = True,
+        model_types: Optional[List[str]] = None,
     ) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
         """
         Load models from a specific version (SQL first, then filesystem fallback).
@@ -878,7 +896,7 @@ class ModelVersionManager:
             if span_context and hasattr(span_context, '_span') and span_context._span:
                 span_context._span.set_attribute("acm.model_version", version)
 
-            result = self._load_models_from_sql(version)
+            result = self._load_models_from_sql(version, model_types=model_types)
             if result:
                 sql_models, sql_manifest = result
                 if span_context and hasattr(span_context, '_span') and span_context._span:
@@ -1297,6 +1315,7 @@ def load_cached_models_with_validation(
     equip_id: int,
     cfg: Dict[str, Any],
     train_columns: List[str],
+    model_types: Optional[List[str]] = None,
 ) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
     """
     Load cached models from SQL and validate them.
@@ -1327,7 +1346,7 @@ def load_cached_models_with_validation(
             sql_client=sql_client,
             equip_id=equip_id
         )
-        cached_models, cached_manifest = model_manager.load_models()
+        cached_models, cached_manifest = model_manager.load_models(model_types=model_types)
         Console.info(f"Models loaded: {'OK' if cached_models and cached_manifest else 'MISSING'} (models={bool(cached_models)}, manifest={bool(cached_manifest)})", component="MODEL-LOAD")
 
         if cached_models and cached_manifest:
@@ -1393,6 +1412,147 @@ def load_cached_models_with_validation(
         Console.warn(f"Failed to load cached models: {e}", component="MODEL",
                      equip=equip, error_type=type(e).__name__, error=str(e)[:200])
         return None, None
+
+
+def load_cached_raw_signal_medians(
+    *,
+    equip: str,
+    sql_client: Optional[Any],
+    equip_id: int,
+    cfg: Dict[str, Any],
+    input_columns: List[str],
+    logger: Any = Console,
+) -> Optional[Dict[str, float]]:
+    """
+    Load cached training-time raw signal medians for empty-train scoring paths.
+
+    Unlike ``load_cached_models_with_validation()``, this loader validates
+    against raw input columns rather than feature-space ``train_sensors``.
+    """
+    if sql_client is None:
+        return None
+
+    normalized_columns = [str(col) for col in input_columns if str(col).strip()]
+    if not normalized_columns:
+        return None
+
+    try:
+        model_manager = ModelVersionManager(
+            equip=equip,
+            sql_client=sql_client,
+            equip_id=equip_id,
+        )
+        cached_models, cached_manifest = model_manager.load_models(model_types=["raw_signal_medians"])
+        if not cached_models:
+            return None
+
+        raw_signal_medians = cached_models.get("raw_signal_medians")
+        if raw_signal_medians is None:
+            return None
+        if hasattr(raw_signal_medians, "to_dict"):
+            raw_signal_medians = raw_signal_medians.to_dict()
+        if not isinstance(raw_signal_medians, dict):
+            logger.info(
+                "Cached raw signal medians are not usable - ignoring",
+                component="MODEL",
+                equip=equip,
+            )
+            return None
+
+        current_config_sig = str(cfg.get("_signature", "unknown") or "unknown")
+        cached_config_sig = str((cached_manifest or {}).get("config_signature", "") or "")
+        if (
+            current_config_sig
+            and current_config_sig != "unknown"
+            and cached_config_sig
+            and cached_config_sig != current_config_sig
+        ):
+            logger.info(
+                "Cached raw signal medians config signature mismatch - ignoring",
+                component="MODEL",
+                equip=equip,
+            )
+            return None
+
+        missing = [col for col in normalized_columns if col not in raw_signal_medians]
+        if missing:
+            logger.info(
+                f"Cached raw signal medians missing {len(missing)} current columns - ignoring",
+                component="MODEL",
+                equip=equip,
+                missing_cols=len(missing),
+            )
+            return None
+
+        return {
+            col: float(raw_signal_medians[col])
+            for col in normalized_columns
+            if raw_signal_medians.get(col) is not None and not pd.isna(raw_signal_medians.get(col))
+        }
+    except Exception as e:
+        logger.warn(
+            f"Failed to load cached raw signal medians: {e}",
+            component="MODEL",
+            equip=equip,
+            error_type=type(e).__name__,
+            error=str(e)[:200],
+        )
+        return None
+
+
+def load_cached_feature_medians(
+    *,
+    equip: str,
+    sql_client: Optional[Any],
+    equip_id: int,
+    cfg: Dict[str, Any],
+    feature_columns: List[str],
+    logger: Any = Console,
+) -> Optional[Dict[str, float]]:
+    """Load cached feature-space medians aligned to the current feature columns."""
+    normalized_columns = [str(col) for col in feature_columns if str(col).strip()]
+    if not normalized_columns:
+        return None
+
+    cached_models, _ = load_cached_models_with_validation(
+        equip=equip,
+        sql_client=sql_client,
+        equip_id=equip_id,
+        cfg=cfg,
+        train_columns=normalized_columns,
+        model_types=["feature_medians"],
+    )
+    if not cached_models:
+        return None
+
+    feature_medians = cached_models.get("feature_medians")
+    if feature_medians is None:
+        return None
+    if hasattr(feature_medians, "to_dict"):
+        feature_medians = feature_medians.to_dict()
+    if not isinstance(feature_medians, dict):
+        logger.info(
+            "Cached feature medians are not usable - ignoring",
+            component="MODEL",
+            equip=equip,
+        )
+        return None
+
+    missing = [col for col in normalized_columns if col not in feature_medians]
+    if missing:
+        logger.info(
+            f"Cached feature medians missing {len(missing)} feature columns - ignoring",
+            component="MODEL",
+            equip=equip,
+            missing_cols=len(missing),
+        )
+        return None
+
+    return {
+        col: float(feature_medians[col])
+        for col in normalized_columns
+        if feature_medians.get(col) is not None and not pd.isna(feature_medians.get(col))
+    }
 
 
 def align_current_features_to_cached_manifest(
@@ -1524,6 +1684,7 @@ def save_trained_models(
     timing_sections: Optional[Dict[str, Any]] = None,
     run_id: str = "",
     calibrators_dict: Optional[Dict[str, Any]] = None,
+    raw_signal_medians: Optional[Dict[str, float]] = None,
 ) -> Optional[int]:
     """Save all trained models with versioning and metadata.
     
@@ -1546,6 +1707,7 @@ def save_trained_models(
         omr_detector: Fitted OMR detector
         regime_model: Fitted regime model
         col_meds: Feature medians for imputation
+        raw_signal_medians: Raw training-signal medians for score-only feature prep
         regime_quality_ok: Whether regime quality passed threshold
         timing_sections: Optional timing dict with fit section durations
         run_id: Current run identifier
@@ -1595,6 +1757,7 @@ def save_trained_models(
             "omr_model": omr_detector.to_dict() if omr_detector and omr_detector._is_fitted else None,
             "regime_model": regime_model,  # Full RegimeModel object, not just .model
             "feature_medians": col_meds,
+            "raw_signal_medians": raw_signal_medians,
             # v11.9.0: Persist calibration params so scoring batches reuse training-time normalization
             "calibration_params": {
                 name: cal.to_dict() for name, cal in calibrators_dict.items()
@@ -1671,6 +1834,7 @@ def run_model_persistence_and_lifecycle_stage(
     load_model_state_safe_fn: Optional[Any] = None,
     logger: Any = Console,
     save_trained_models_fn: Any = save_trained_models,
+    raw_signal_medians: Optional[Dict[str, float]] = None,
     baseline_contamination_verdict: str = "unknown",
 ) -> "ModelPersistenceStageResult":
     """
@@ -1703,6 +1867,7 @@ def run_model_persistence_and_lifecycle_stage(
             omr_detector=omr_detector,
             regime_model=regime_model,
             col_meds=col_meds,
+            raw_signal_medians=raw_signal_medians,
             regime_quality_ok=regime_quality_ok,
             timing_sections=timing_sections,
             run_id=run_id or "",
@@ -1790,6 +1955,7 @@ def run_model_adaptation_and_persistence_stage(
     update_and_persist_model_lifecycle_fn: Optional[Any] = None,
     load_model_state_safe_fn: Optional[Any] = None,
     force_retrain_requested: bool = False,
+    raw_signal_medians: Optional[Dict[str, float]] = None,
     baseline_contamination_verdict: str = "unknown",
 ) -> ModelAdaptationPersistenceResult:
     """
@@ -1848,6 +2014,7 @@ def run_model_adaptation_and_persistence_stage(
             omr_detector=detectors_out["omr_detector"],
             regime_model=regime_model_out,
             col_meds=col_meds,
+            raw_signal_medians=raw_signal_medians,
             regime_quality_ok=regime_quality_ok,
             timing_sections=timing_sections,
             run_id=run_id,

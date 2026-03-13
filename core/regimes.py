@@ -2761,6 +2761,27 @@ class RegimeBasisBuildResult:
     basis_drift_decision: SchemaDriftDecision = field(default_factory=SchemaDriftDecision)
 
 
+@dataclass
+class RegimeContextPreviewResult:
+    """Validation-mode regime context preview before detector scoring."""
+    available: bool
+    frame: pd.DataFrame
+    context_assignment: ContextAssignment = field(default_factory=ContextAssignment)
+    regime_model: Optional["RegimeModel"] = None
+    score_out: Dict[str, Any] = field(default_factory=dict)
+    train_regime_labels: Optional[np.ndarray] = None
+    score_regime_labels: Optional[np.ndarray] = None
+    regime_quality_ok: bool = True
+
+
+@dataclass
+class RawRegimeContextPreviewStageResult:
+    """Read-only regime preview built from the seasonality-adjusted raw surface."""
+    available: bool
+    basis_result: RegimeBasisBuildResult
+    context_preview: RegimeContextPreviewResult
+
+
 def _extract_cached_regime_basis_contract(regime_model: Optional[RegimeModel]) -> Optional[Dict[str, Any]]:
     """Build a reusable basis contract from a cached regime model, if available."""
     if regime_model is None:
@@ -2912,6 +2933,121 @@ def build_regime_feature_basis_stage(
         regime_model=regime_model,
         degraded=degraded,
         basis_drift_decision=basis_drift_decision,
+    )
+
+
+def preview_regime_context_stage(
+    *,
+    score_df: pd.DataFrame,
+    train_df: pd.DataFrame,
+    cfg: Dict[str, Any],
+    regime_basis_train: Optional[pd.DataFrame],
+    regime_basis_score: Optional[pd.DataFrame],
+    regime_basis_meta: Dict[str, Any],
+    regime_basis_hash: Optional[int],
+    regime_model: Optional[RegimeModel],
+    regime_loaded_from_state: bool,
+    regime_state: Optional[Any],
+    regime_state_version: int,
+    raw_train: Optional[pd.DataFrame],
+) -> RegimeContextPreviewResult:
+    """
+    Preview regime context from the current basis contract before detector scoring.
+
+    This path is intentionally read-only: it reuses the cached regime model when
+    possible, infers context, and avoids any SQL writes or model promotion side
+    effects. It is used only to short-circuit obviously non-scoreable validation
+    runs before detector scoring executes.
+    """
+    preview_frame = pd.DataFrame(index=score_df.index.copy())
+    if regime_basis_train is None or regime_basis_score is None:
+        return RegimeContextPreviewResult(available=False, frame=preview_frame)
+
+    preview_model = regime_model
+    if regime_loaded_from_state and regime_state is not None and regime_basis_train is not None:
+        preview_model = regime_state_to_model(
+            state=regime_state,
+            feature_columns=list(regime_basis_train.columns),
+            raw_tags=list(raw_train.columns) if raw_train is not None else [],
+            train_hash=regime_basis_hash,
+        )
+
+    if preview_model is None:
+        return RegimeContextPreviewResult(available=False, frame=preview_frame)
+
+    regime_ctx: Dict[str, Any] = {
+        "regime_basis_train": regime_basis_train,
+        "regime_basis_score": regime_basis_score,
+        "basis_meta": regime_basis_meta,
+        "regime_model": preview_model,
+        "regime_basis_hash": regime_basis_hash,
+        "X_train": train_df,
+        "model_maturity": None,
+    }
+    regime_out = label(score_df, regime_ctx, {"frame": preview_frame}, cfg)
+    preview_frame = regime_out.get("frame", preview_frame)
+
+    return RegimeContextPreviewResult(
+        available=True,
+        frame=preview_frame,
+        context_assignment=build_context_assignment(preview_frame),
+        regime_model=regime_out.get("regime_model", preview_model),
+        score_out=regime_out,
+        train_regime_labels=regime_out.get("regime_labels_train"),
+        score_regime_labels=regime_out.get("regime_labels"),
+        regime_quality_ok=bool(regime_out.get("regime_quality_ok", True)),
+    )
+
+
+def preview_regime_context_from_raw_stage(
+    *,
+    train_df: pd.DataFrame,
+    score_df: pd.DataFrame,
+    cfg: Dict[str, Any],
+    regime_model: Optional[RegimeModel],
+    regime_state: Optional[Any],
+    regime_loaded_from_state: bool,
+    regime_state_version: int,
+    raw_train: Optional[pd.DataFrame],
+    raw_score: Optional[pd.DataFrame],
+    equip: str,
+    logger: Any = Console,
+) -> RawRegimeContextPreviewStageResult:
+    """Preview regime context before full feature build using the raw basis surface.
+
+    This path is intentionally read-only and is used only on validation-mode
+    runs to short-circuit clearly non-scoreable batches before feature build and
+    detector loading execute.
+    """
+    basis_result = build_regime_feature_basis_stage(
+        train_features=train_df,
+        score_features=score_df,
+        raw_train=raw_train,
+        raw_score=raw_score,
+        pca_detector=None,
+        cfg=cfg,
+        regime_model=regime_model,
+        equip=equip,
+        logger=logger,
+    )
+    context_preview = preview_regime_context_stage(
+        score_df=score_df,
+        train_df=train_df,
+        cfg=cfg,
+        regime_basis_train=basis_result.regime_basis_train,
+        regime_basis_score=basis_result.regime_basis_score,
+        regime_basis_meta=basis_result.regime_basis_meta,
+        regime_basis_hash=basis_result.regime_basis_hash,
+        regime_model=basis_result.regime_model,
+        regime_loaded_from_state=regime_loaded_from_state,
+        regime_state=regime_state,
+        regime_state_version=regime_state_version,
+        raw_train=raw_train,
+    )
+    return RawRegimeContextPreviewStageResult(
+        available=context_preview.available,
+        basis_result=basis_result,
+        context_preview=context_preview,
     )
 
 
@@ -3088,6 +3224,7 @@ def run_scoring_regime_stage(
     resolve_maturity_for_regime_stage_fn: Any,
     record_regime_fn: Optional[Callable[..., Any]] = None,
     logger: Any = Console,
+    basis_result_override: Optional[RegimeBasisBuildResult] = None,
 ) -> ScoringRegimeStageResult:
     """
     Execute scoring and regime stages.
@@ -3099,17 +3236,19 @@ def run_scoring_regime_stage(
     4. Regime labeling
     5. Regime occupancy/transition persistence
     """
-    basis_result = build_regime_feature_basis_stage(
-        train_features=train_df,
-        score_features=score_df,
-        raw_train=raw_train,
-        raw_score=raw_score,
-        pca_detector=pca_detector,
-        cfg=cfg,
-        regime_model=regime_model,
-        equip=equip,
-        logger=logger,
-    )
+    basis_result = basis_result_override
+    if basis_result is None:
+        basis_result = build_regime_feature_basis_stage(
+            train_features=train_df,
+            score_features=score_df,
+            raw_train=raw_train,
+            raw_score=raw_score,
+            pca_detector=pca_detector,
+            cfg=cfg,
+            regime_model=regime_model,
+            equip=equip,
+            logger=logger,
+        )
     regime_basis_train = basis_result.regime_basis_train
     regime_basis_score = basis_result.regime_basis_score
     regime_basis_meta = basis_result.regime_basis_meta

@@ -566,6 +566,35 @@ def _normalize_run_id(run_id: Optional[str]) -> str:
     return value or "unknown"
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def resolve_runtime_observability_flags() -> Dict[str, bool]:
+    """Resolve run-time observability flags from environment.
+
+    This keeps dev-time resource controls centralized so entrypoints do not
+    each grow their own toggle logic.
+    """
+    if _env_bool("ACM_OBS_DISABLE", False):
+        return {
+            "enable_tracing": False,
+            "enable_metrics": False,
+            "enable_loki": False,
+            "enable_profiling": False,
+        }
+
+    return {
+        "enable_tracing": _env_bool("ACM_OBS_ENABLE_TRACING", True),
+        "enable_metrics": _env_bool("ACM_OBS_ENABLE_METRICS", True),
+        "enable_loki": _env_bool("ACM_OBS_ENABLE_LOKI", True),
+        "enable_profiling": _env_bool("ACM_OBS_ENABLE_PROFILING", True),
+    }
+
+
 def _metric_attrs(
     equipment: str = "",
     run_id: str = "",
@@ -1052,6 +1081,7 @@ def init_run_observability(
             addition to Loki.  Safe to call again later via set_sql_log_client().
     """
     log = logger if logger is not None else Console
+    flags = resolve_runtime_observability_flags()
     try:
         init(
             equipment=equip,
@@ -1059,12 +1089,13 @@ def init_run_observability(
             service_name="acm-pipeline",
             otlp_endpoint="http://localhost:4318",
             loki_endpoint="http://localhost:3100",
-            enable_tracing=True,
-            enable_metrics=True,
-            enable_loki=True,
-            enable_profiling=True,
+            enable_tracing=flags["enable_tracing"],
+            enable_metrics=flags["enable_metrics"],
+            enable_loki=flags["enable_loki"],
+            enable_profiling=flags["enable_profiling"],
         )
-        start_profiling()
+        if flags["enable_profiling"]:
+            start_profiling()
     except Exception as e:
         if hasattr(log, "warn"):
             log.warn(

@@ -53,6 +53,7 @@ def test_representation_pipeline_result_score_state_rows_handles_none() -> None:
         equip_id=7,
         train_state=None,
         score_state=None,
+        signal_profiles=(),
         signal_summary=SignalProfileSummary(monitorable_signal_count=0),
         context=ContextAssignment(),
         compatibility=None,  # type: ignore[arg-type]

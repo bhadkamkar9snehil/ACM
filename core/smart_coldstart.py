@@ -16,6 +16,13 @@ from datetime import datetime, timedelta
 from typing import Optional, Tuple, Dict, Any, Callable
 from dataclasses import dataclass
 import pandas as pd
+from core.baseline_governor import (
+    annotate_load_stage_governance_meta,
+    BaselineSeedDecision,
+    resolve_legacy_coldstart_load_decision,
+    seed_baseline as _seed_baseline_governed,
+    seed_baseline_safe as _seed_baseline_safe_governed,
+)
 from core.observability import Console
 from core.run_metadata_writer import zero_day_status_from_noop_reason
 
@@ -145,8 +152,15 @@ def load_and_validate_data_stage(
         historical_replay=historical_replay,
         equipment=equip,
     )
+    gate_reason = getattr(coldstart_manager.state, "gate_reason", "") if getattr(coldstart_manager, "state", None) is not None else ""
 
     if not coldstart_complete:
+        meta = annotate_load_stage_governance_meta(
+            meta,
+            can_proceed=False,
+            is_coldstart_run=True,
+            gate_reason=gate_reason,
+        )
         reason = classify_noop_reason(
             train,
             score,
@@ -174,6 +188,16 @@ def load_and_validate_data_stage(
     record_coldstart_fn(equip)
     train = ensure_local_index_fn(train)
     score = ensure_local_index_fn(score)
+
+    is_coldstart_run = bool(
+        meta.get("is_coldstart_run", False) if isinstance(meta, dict) else getattr(meta, "is_coldstart_run", False)
+    )
+    meta = annotate_load_stage_governance_meta(
+        meta,
+        can_proceed=True,
+        is_coldstart_run=is_coldstart_run,
+        gate_reason=gate_reason,
+    )
 
     train, train_dups = deduplicate_index_fn(train, "TRAIN", equip)
     score, score_dups = deduplicate_index_fn(score, "SCORE", equip)
@@ -248,6 +272,7 @@ class ColdstartState:
         self.data_start_time: Optional[datetime] = None
         self.data_end_time: Optional[datetime] = None
         self.last_error: Optional[str] = None
+        self.gate_reason: Optional[str] = None
         
     def is_ready(self) -> bool:
         """Check if sufficient data has been accumulated for coldstart."""
@@ -281,9 +306,10 @@ class SmartColdstart:
         """
         Check current coldstart status from database.
 
-        Uses ACM_ActiveModels.RegimeMaturityState as the authoritative source:
-        - No row, or state is None/'INITIALIZING' → needs coldstart
-        - Any other state (LEARNING, CONVERGED, DEPRECATED) → scoring path
+        Transitional behavior:
+        - SQL access stays here
+        - interpretation of the legacy `RegimeMaturityState` hint now lives in
+          `core.baseline_governor.py`
 
         The old SP-based gate (ModelRegistry >= 3) was wrong: stale/corrupt models
         with 3+ model types in ModelRegistry would bypass coldstart indefinitely.
@@ -305,13 +331,13 @@ class SmartColdstart:
                 )
                 row = cur.fetchone()
 
-            if row is None or row[0] in (None, "INITIALIZING"):
-                state.needs_coldstart = True
+            decision = resolve_legacy_coldstart_load_decision(row[0] if row is not None else None)
+            state.needs_coldstart = decision.needs_coldstart
+            state.gate_reason = decision.reason_code
+            if state.needs_coldstart:
                 accumulated, attempts = self._load_progress()
                 state.accumulated_rows = accumulated
                 state.attempt_count = attempts
-            else:
-                state.needs_coldstart = False
 
         except Exception as e:
             Console.warn(
@@ -324,6 +350,7 @@ class SmartColdstart:
                 error=str(e)[:200],
             )
             state.needs_coldstart = True  # safe default
+            state.gate_reason = "check_status_failed_safe_default"
 
         self.state = state
         return state
@@ -804,135 +831,20 @@ def seed_baseline(
     equip: str = "",
     is_coldstart: bool = False,
     ensure_local_index_fn: Optional[Any] = None,
-) -> Tuple[pd.DataFrame, pd.DataFrame, Optional[str]]:
-    """
-    Seed training baseline when insufficient data available (batch mode).
-    
-    In batch mode, SmartColdstart returns empty train (all data goes to score).
-    This function loads baseline from:
-    1. ACM_BaselineBuffer table (SQL) - cached baseline from previous runs
-    2. First portion of score data (fallback)
-    3. Split score in half if overlap detected
-    
-    Also handles gap bridging when baseline ends before score starts.
-    
-    Args:
-        train: Training DataFrame (may be empty in batch mode)
-        score: Scoring DataFrame
-        sql_client: SQL client for ACM_BaselineBuffer access
-        equip_id: Equipment ID
-        cfg: Config dict with runtime.baseline settings
-        equip: Equipment name for logging
-        is_coldstart: If True, train/score already split from coldstart - skip re-seeding
-        ensure_local_index_fn: Optional function to normalize datetime index
-        
-    Returns:
-        Tuple of (train, score, source_used) where source_used describes origin
-    """
-    baseline_cfg = (cfg.get("runtime", {}) or {}).get("baseline", {}) or {}
-    min_points = int(baseline_cfg.get("min_points", 300))
-    train_rows = len(train)
-    
-    # On coldstart, DataLoader.load_from_sql() has already split data using
-    # cold_start_split_ratio (default 0.6). Trust that split unconditionally.
-    # The old guard `is_coldstart and train_rows > 300` was wrong: valid coldstart
-    # batches with 300-499 train rows fell through to the score-head seeding path,
-    # overwriting the DataLoader split. Any is_coldstart=True run returns here.
-    if is_coldstart:
-        return train, score, f"coldstart_split ({train_rows} rows)"
-    
-    # Fallback: If train still needs data (non-coldstart or too few rows)
-    if train_rows >= min_points:
-        return train, score, None
-    
-    used: Optional[str] = None
-    extended = False
-    
-    # DISABLED: Baseline buffer loading (v11.2.3 fix)
-    # The pivot operation from long→wide format causes SQL locks/hangs.
-    # Only needed in non-coldstart batch mode with insufficient data.
-    # For now, we rely on score data seeding (Try 2 below).
-    
-    # Try 1: Load from SQL ACM_BaselineBuffer [DISABLED - CAUSES HANGS]
-    # if sql_client:
-    #     try:
-    #         window_hours = float(baseline_cfg.get("window_hours", 72))
-    #         with sql_client.cursor() as cur:
-    #             cur.execute("""
-    #                 SELECT Timestamp, SensorName, SensorValue
-    #                 FROM dbo.ACM_BaselineBuffer
-    #                 WHERE EquipID = ? AND Timestamp >= DATEADD(HOUR, -?, GETDATE())
-    #                 ORDER BY Timestamp
-    #             """, (int(equip_id), int(window_hours)))
-    #             rows = cur.fetchall()
-    #         
-    #         if rows:
-    #             # Transform long format → wide format (pivot) [SLOW - ~1-2 sec for 26K rows]
-    #             baseline_data = {}
-    #             for row in rows:
-    #                 ts = pd.Timestamp(row.Timestamp)
-    #                 sensor = str(row.SensorName)
-    #                 value = float(row.SensorValue)
-    #                 if ts not in baseline_data:
-    #                    baseline_data[ts] = {}
-    #                 baseline_data[ts][sensor] = value
-    #             
-    #             buf = pd.DataFrame.from_dict(baseline_data, orient='index').sort_index()
-    #             if ensure_local_index_fn:
-    #                 buf = ensure_local_index_fn(buf)
-    #             
-    #             # Align to score columns (score guaranteed to be DataFrame by entry validation)
-    #             if hasattr(buf, "columns"):
-    #                 common_cols = [c for c in buf.columns if c in score.columns]
-    #                 if common_cols:
-    #                     buf = buf[common_cols]
-    #             
-    #             train = buf
-    #             used = f"ACM_BaselineBuffer ({len(train)} rows)"
-    #     except Exception as sql_err:
-    #         Console.warn(f"Failed to load from ACM_BaselineBuffer: {sql_err}", component="BASELINE")
-    
-    # Try 2: Seed from score data
-    if used is None and len(score) > 0:
-        seed_n = min(len(score), max(min_points, int(0.2 * len(score))))
-        train = score.iloc[:seed_n]
-        used = f"score head ({seed_n} rows)"
-        
-        # Check for overlap - train must end BEFORE score starts
-        tr_end_ts = pd.to_datetime(train.index.max())
-        sc_start_ts = pd.to_datetime(score.index.min())
-        
-        if tr_end_ts >= sc_start_ts:
-            # Split score in half to avoid overlap
-            split_idx = len(score) // 2
-            if split_idx >= min_points:
-                train = score.iloc[:split_idx]
-                score = score.iloc[split_idx:].copy()
-                used = f"score split (train={split_idx}, no overlap)"
-            else:
-                Console.warn(f"Cannot do 50/50 split (too few rows: {len(score)}), using first {seed_n} for baseline.", component="BASELINE")
-                score = score.iloc[seed_n:].copy()
-    
-    if used:
-        # Gap detection: if baseline ends >1h before score starts, extend it
-        if len(train) > 0:
-            tr_end = pd.to_datetime(train.index.max())
-            sc_start = pd.to_datetime(score.index.min()) if len(score) > 0 else None
-            
-            if sc_start and tr_end < sc_start:
-                gap_hours = (sc_start - tr_end).total_seconds() / 3600
-                if gap_hours > 1.0:
-                    # Extend with first 20% of score
-                    if len(score) > 10:
-                        ext_size = max(10, int(0.2 * len(score)))
-                        extension = score.iloc[:ext_size]
-                        train = pd.concat([train, extension], axis=0).drop_duplicates()
-                        extended = True
-                        used = f"{used} +{ext_size} extension"
-        
-        Console.info(f"Baseline: {used} | extended={extended}", component="BASELINE")
-    
-    return train, score, used
+    apply_non_authoritative_seed: bool = True,
+) -> BaselineSeedDecision:
+    """Compatibility wrapper around the governed baseline-seeding owner."""
+    return _seed_baseline_governed(
+        train=train,
+        score=score,
+        sql_client=sql_client,
+        equip_id=equip_id,
+        cfg=cfg,
+        equip=equip,
+        is_coldstart=is_coldstart,
+        ensure_local_index_fn=ensure_local_index_fn,
+        apply_non_authoritative_seed=apply_non_authoritative_seed,
+    )
 
 
 def seed_baseline_safe(
@@ -944,30 +856,19 @@ def seed_baseline_safe(
     equip: str = "",
     is_coldstart: bool = False,
     ensure_local_index_fn: Optional[Any] = None,
+    apply_non_authoritative_seed: bool = True,
     logger: Any = Console,
-) -> Tuple[pd.DataFrame, pd.DataFrame, Optional[str]]:
-    """
-    Safe wrapper for baseline seeding.
-
-    Returns original train/score on failure and logs a warning.
-    """
-    try:
-        return seed_baseline(
-            train=train,
-            score=score,
-            sql_client=sql_client,
-            equip_id=equip_id,
-            cfg=cfg,
-            equip=equip,
-            is_coldstart=is_coldstart,
-            ensure_local_index_fn=ensure_local_index_fn,
-        )
-    except Exception as e:
-        logger.warn(
-            f"Cold-start baseline setup failed: {e}",
-            component="BASELINE",
-            equip=equip,
-            train_rows=len(train) if train is not None else 0,
-            error=str(e)[:200],
-        )
-        return train, score, None
+) -> BaselineSeedDecision:
+    """Compatibility wrapper around the governed safe baseline-seeding owner."""
+    return _seed_baseline_safe_governed(
+        train=train,
+        score=score,
+        sql_client=sql_client,
+        equip_id=equip_id,
+        cfg=cfg,
+        equip=equip,
+        is_coldstart=is_coldstart,
+        ensure_local_index_fn=ensure_local_index_fn,
+        apply_non_authoritative_seed=apply_non_authoritative_seed,
+        logger=logger,
+    )

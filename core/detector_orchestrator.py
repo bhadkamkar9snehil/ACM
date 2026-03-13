@@ -934,6 +934,69 @@ def load_and_rebuild_detectors_from_sql_cache(
     }
 
 
+def load_cached_regime_preview_from_sql_cache(
+    *,
+    train: pd.DataFrame,
+    score: pd.DataFrame,
+    equip: str,
+    sql_client: Optional[Any],
+    equip_id: int,
+    cfg: Dict[str, Any],
+    logger: Any = Console,
+) -> Dict[str, Any]:
+    """
+    Load the minimum cached regime preview payload needed for validation gating.
+
+    This intentionally avoids deserializing the full detector set. It loads only
+    the cached regime model plus manifest metadata, aligns the feature frame to
+    the cached manifest when possible, and restores persisted regime state if it
+    is needed for preview.
+    """
+    current_sensors = list(train.columns) if hasattr(train, "columns") else []
+    cached_models, cached_manifest = load_cached_models_with_validation(
+        equip=equip,
+        sql_client=sql_client,
+        equip_id=equip_id,
+        cfg=cfg,
+        train_columns=current_sensors,
+        model_types=["regime_model"],
+    )
+    schema_drift_decision = classify_feature_schema_drift(current_sensors, cached_manifest)
+
+    if cached_models:
+        train, score, current_sensors, cache_compatible = align_current_features_to_cached_manifest(
+            train=train,
+            score=score,
+            cached_manifest=cached_manifest,
+            equip=equip,
+            logger=logger,
+        )
+        if not cache_compatible:
+            cached_models = None
+            cached_manifest = None
+
+    regime_model = cached_models.get("regime_model") if cached_models else None
+    regime_state, regime_state_version, regime_loaded_from_state = load_quality_regime_state_if_needed(
+        regime_model=regime_model,
+        equip=equip,
+        equip_id=equip_id,
+        sql_client=sql_client,
+        logger=logger,
+    )
+
+    return {
+        "train": train,
+        "score": score,
+        "current_sensors": current_sensors,
+        "cached_manifest": cached_manifest,
+        "schema_drift_decision": schema_drift_decision,
+        "regime_model": regime_model,
+        "regime_state": regime_state,
+        "regime_state_version": regime_state_version,
+        "regime_loaded_from_state": regime_loaded_from_state,
+    }
+
+
 def get_detector_enable_flags(cfg: Dict[str, Any]) -> Dict[str, bool]:
     """
     Determine which detectors are enabled based on fusion weights.

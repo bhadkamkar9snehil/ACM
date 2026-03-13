@@ -7,6 +7,7 @@ import pytest
 import numpy as np
 import pandas as pd
 import argparse
+import contextlib
 from datetime import datetime, timedelta
 
 
@@ -393,6 +394,470 @@ class TestAcmEntryPoint:
 
         assert acm._representation_blocks_zero_day_scoring(representation_result) is False
 
+    def test_representation_blocks_pre_feature_runtime_on_structural_blockers(self):
+        """Load-time structural blockers should short-circuit the batch before feature prep."""
+        from core import acm
+        from core.representation_contracts import EligibilityDecision
+
+        representation_result = type(
+            "RepresentationResult",
+            (),
+            {
+                "authoritative": True,
+                "eligibility": EligibilityDecision(
+                    authoritative=True,
+                    score_allowed=False,
+                    learn_allowed=False,
+                    suppressed_reason_codes=(
+                        "baseline_not_ready",
+                        "context_unknown",
+                        "context_unassessed",
+                    ),
+                ),
+            },
+        )()
+
+        assert acm._representation_blocks_pre_feature_runtime(representation_result) is True
+
+    def test_representation_blocks_pre_feature_runtime_on_no_score_rows(self):
+        """A post-baseline empty score window should still qualify for structural fast-fail."""
+        from core import acm
+        from core.representation_contracts import EligibilityDecision
+
+        representation_result = type(
+            "RepresentationResult",
+            (),
+            {
+                "authoritative": True,
+                "eligibility": EligibilityDecision(
+                    authoritative=True,
+                    score_allowed=False,
+                    learn_allowed=False,
+                    suppressed_reason_codes=("no_score_rows",),
+                ),
+            },
+        )()
+
+        assert acm._representation_blocks_pre_feature_runtime(representation_result) is True
+
+    def test_representation_blocks_pre_feature_runtime_ignores_contextual_only_blockers(self):
+        """Contextual blockers alone are not eligible for the pre-feature structural fast-fail."""
+        from core import acm
+        from core.representation_contracts import EligibilityDecision
+
+        representation_result = type(
+            "RepresentationResult",
+            (),
+            {
+                "authoritative": True,
+                "eligibility": EligibilityDecision(
+                    authoritative=True,
+                    score_allowed=False,
+                    learn_allowed=False,
+                    suppressed_reason_codes=("context_ambiguous", "context_low_confidence"),
+                ),
+            },
+        )()
+
+        assert acm._representation_blocks_pre_feature_runtime(representation_result) is False
+
+    def test_representation_blocks_pre_feature_runtime_requires_learning_to_be_blocked(self):
+        """Baseline-formation batches that can still learn must not be fast-failed before feature prep."""
+        from core import acm
+        from core.representation_contracts import EligibilityDecision
+
+        representation_result = type(
+            "RepresentationResult",
+            (),
+            {
+                "authoritative": True,
+                "eligibility": EligibilityDecision(
+                    authoritative=True,
+                    score_allowed=False,
+                    learn_allowed=True,
+                    suppressed_reason_codes=("baseline_formation_scoring_disabled",),
+                ),
+            },
+        )()
+
+        assert acm._representation_blocks_pre_feature_runtime(representation_result) is False
+
+    def test_baseline_seed_blocks_pre_feature_runtime_when_shadow_only(self):
+        """Shadow-only score-derived baseline fallback should fast-fail governed validation runs."""
+        from core import acm
+        from core.representation_contracts import EligibilityDecision
+
+        baseline_seed = type(
+            "BaselineSeed",
+            (),
+            {
+                "authoritative": False,
+                "applied_to_runtime": False,
+            },
+        )()
+        representation_result = type(
+            "RepresentationResult",
+            (),
+            {
+                "authoritative": True,
+                "eligibility": EligibilityDecision(
+                    authoritative=True,
+                    score_allowed=False,
+                    learn_allowed=False,
+                    suppressed_reason_codes=("baseline_not_ready",),
+                ),
+            },
+        )()
+
+        assert acm._baseline_seed_blocks_pre_feature_runtime(baseline_seed, representation_result) is True
+
+    def test_baseline_seed_blocks_pre_feature_runtime_ignores_applied_or_authoritative_seed(self):
+        """Applied or authoritative baseline seed decisions should not trigger the shadow-only fast-fail."""
+        from core import acm
+        from core.representation_contracts import EligibilityDecision
+
+        representation_result = type(
+            "RepresentationResult",
+            (),
+            {
+                "authoritative": True,
+                "eligibility": EligibilityDecision(
+                    authoritative=True,
+                    score_allowed=False,
+                    learn_allowed=False,
+                    suppressed_reason_codes=("baseline_not_ready",),
+                ),
+            },
+        )()
+        applied_seed = type("BaselineSeed", (), {"authoritative": False, "applied_to_runtime": True})()
+        authoritative_seed = type("BaselineSeed", (), {"authoritative": True, "applied_to_runtime": False})()
+
+        assert acm._baseline_seed_blocks_pre_feature_runtime(applied_seed, representation_result) is False
+        assert acm._baseline_seed_blocks_pre_feature_runtime(authoritative_seed, representation_result) is False
+
+    def test_representation_blocks_post_regime_runtime_on_context_blockers(self):
+        """Post-regime gating should stop downstream runtime when authoritative context blockers are present."""
+        from core import acm
+        from core.representation_contracts import EligibilityDecision
+
+        representation_result = type(
+            "RepresentationResult",
+            (),
+            {
+                "authoritative": True,
+                "eligibility": EligibilityDecision(
+                    authoritative=True,
+                    score_allowed=False,
+                    learn_allowed=False,
+                    suppressed_reason_codes=("context_ambiguous", "context_transition_active"),
+                ),
+            },
+        )()
+
+        assert acm._representation_blocks_post_regime_runtime(representation_result) is True
+
+    def test_representation_blocks_pre_detector_runtime_on_context_blockers(self):
+        """Pre-score context gating should stop detector scoring when learning is also blocked."""
+        from core import acm
+        from core.representation_contracts import EligibilityDecision
+
+        representation_result = type(
+            "RepresentationResult",
+            (),
+            {
+                "authoritative": True,
+                "eligibility": EligibilityDecision(
+                    authoritative=True,
+                    score_allowed=False,
+                    learn_allowed=False,
+                    suppressed_reason_codes=("context_ambiguous", "context_low_confidence"),
+                ),
+            },
+        )()
+
+        assert acm._representation_blocks_pre_detector_runtime(representation_result) is True
+
+    def test_representation_blocks_pre_detector_runtime_requires_learning_to_be_blocked(self):
+        """Pre-score context gating must not suppress baseline-formation runs that can still learn."""
+        from core import acm
+        from core.representation_contracts import EligibilityDecision
+
+        representation_result = type(
+            "RepresentationResult",
+            (),
+            {
+                "authoritative": True,
+                "eligibility": EligibilityDecision(
+                    authoritative=True,
+                    score_allowed=False,
+                    learn_allowed=True,
+                    suppressed_reason_codes=("context_ambiguous",),
+                ),
+            },
+        )()
+
+        assert acm._representation_blocks_pre_detector_runtime(representation_result) is False
+
+    def test_run_representation_raw_preview_precheck_returns_blocked_result(self, monkeypatch):
+        """Raw pre-feature preview helper should return a blocked result without inlining the orchestration."""
+        from core import acm
+        from core.representation_contracts import EligibilityDecision, RepresentationAuthorityPolicy
+
+        class _Section:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        seasonality_stage = type("SeasonalityStage", (), {"train": "train_df", "score": "score_df"})()
+        monkeypatch.setattr(
+            acm.fast_features,
+            "run_seasonality_preparation_stage",
+            lambda **kwargs: seasonality_stage,
+        )
+        monkeypatch.setattr(
+            acm,
+            "load_quality_regime_state_if_needed",
+            lambda **kwargs: ("state", 1, True),
+        )
+        monkeypatch.setattr(
+            acm.regimes,
+            "preview_regime_context_from_raw_stage",
+            lambda **kwargs: type(
+                "Preview",
+                (),
+                {
+                    "available": True,
+                    "basis_result": type("Basis", (), {"basis_drift_decision": None})(),
+                    "context_preview": type(
+                        "ContextPreview",
+                        (),
+                        {"context_assignment": object()},
+                    )(),
+                },
+            )(),
+        )
+        blocked_representation = type(
+            "RepresentationResult",
+            (),
+            {
+                "authoritative": True,
+                "eligibility": EligibilityDecision(
+                    authoritative=True,
+                    score_allowed=False,
+                    learn_allowed=False,
+                    suppressed_reason_codes=("context_ambiguous",),
+                ),
+            },
+        )()
+        monkeypatch.setattr(
+            acm,
+            "refresh_representation_runtime_authority",
+            lambda *args, **kwargs: blocked_representation,
+        )
+
+        result = acm._run_representation_raw_preview_precheck(
+            representation_result=object(),
+            policy=RepresentationAuthorityPolicy(
+                mode="validation",
+                active=True,
+                reason="historical_replay_validation",
+                historical_replay=True,
+            ),
+            train_df=pd.DataFrame(),
+            score_df=pd.DataFrame(),
+            cfg={},
+            equip="FD_FAN",
+            equip_id=1,
+            run_id="run-1",
+            sql_client=object(),
+            meta=object(),
+            refit_requested=False,
+            section_fn=lambda name: _Section(),
+            logger=type("Logger", (), {"info": lambda *a, **k: None, "warn": lambda *a, **k: None})(),
+        )
+
+        assert result.representation_result is blocked_representation
+        assert result.seasonality_stage is seasonality_stage
+        assert result.blocked is True
+        assert result.zero_day_status is not None
+
+    def test_run_representation_feature_preview_precheck_returns_blocked_result(self, monkeypatch):
+        """Feature-frame preview helper should short-circuit before detector loading when context already blocks scoring."""
+        from core import acm
+        from core.representation_contracts import EligibilityDecision, RepresentationAuthorityPolicy
+
+        idx = pd.date_range("2026-01-01", periods=2, freq="h")
+        train_df = pd.DataFrame({"a": [1.0, 2.0]}, index=idx)
+        score_df = pd.DataFrame({"a": [1.5, 2.5]}, index=idx)
+
+        monkeypatch.setattr(
+            acm,
+            "load_cached_regime_preview_from_sql_cache",
+            lambda **kwargs: {
+                "train": train_df,
+                "score": score_df,
+                "schema_drift_decision": object(),
+                "regime_model": object(),
+                "regime_state": None,
+                "regime_state_version": 4,
+                "regime_loaded_from_state": False,
+            },
+        )
+        monkeypatch.setattr(
+            acm.regimes,
+            "build_regime_feature_basis_stage",
+            lambda **kwargs: type(
+                "Basis",
+                (),
+                {
+                    "regime_basis_train": train_df,
+                    "regime_basis_score": score_df,
+                    "regime_basis_meta": {"basis_signature": "sig-1"},
+                    "regime_basis_hash": 17,
+                    "regime_model": object(),
+                    "basis_drift_decision": None,
+                },
+            )(),
+        )
+        preview_frame = pd.DataFrame({"regime_label": [0, 0]}, index=idx)
+        monkeypatch.setattr(
+            acm.regimes,
+            "preview_regime_context_stage",
+            lambda **kwargs: type(
+                "Preview",
+                (),
+                {
+                    "available": True,
+                    "frame": preview_frame,
+                    "context_assignment": object(),
+                    "score_out": {"frame": preview_frame},
+                    "regime_model": object(),
+                    "train_regime_labels": np.array([0, 0]),
+                    "score_regime_labels": np.array([0, 0]),
+                    "regime_quality_ok": True,
+                },
+            )(),
+        )
+        blocked_representation = type(
+            "RepresentationResult",
+            (),
+            {
+                "authoritative": True,
+                "eligibility": EligibilityDecision(
+                    authoritative=True,
+                    score_allowed=False,
+                    learn_allowed=False,
+                    suppressed_reason_codes=("context_low_confidence",),
+                ),
+            },
+        )()
+        monkeypatch.setattr(
+            acm,
+            "refresh_representation_runtime_authority",
+            lambda *args, **kwargs: blocked_representation,
+        )
+
+        class _Section:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        result = acm._run_representation_feature_preview_precheck(
+            representation_result=object(),
+            policy=RepresentationAuthorityPolicy(
+                mode="validation",
+                active=True,
+                reason="historical_replay_validation",
+                historical_replay=True,
+            ),
+            train_df=train_df,
+            score_df=score_df,
+            raw_train=train_df,
+            raw_score=score_df,
+            cfg={},
+            equip="FD_FAN",
+            equip_id=1,
+            run_id="run-1",
+            sql_client=object(),
+            meta=object(),
+            refit_requested=False,
+            section_fn=lambda name: _Section(),
+            logger=type("Logger", (), {"info": lambda *a, **k: None, "warn": lambda *a, **k: None})(),
+        )
+
+        assert result.representation_result is blocked_representation
+        assert result.preview_used is True
+        assert result.blocked is True
+        assert result.zero_day_status is not None
+        assert result.context_preview is not None
+
+    def test_representation_blocks_post_regime_pretransient_on_context_blockers(self):
+        """Pre-transient gating should stop downstream runtime for already-known context blockers."""
+        from core import acm
+        from core.representation_contracts import EligibilityDecision
+
+        representation_result = type(
+            "RepresentationResult",
+            (),
+            {
+                "authoritative": True,
+                "eligibility": EligibilityDecision(
+                    authoritative=True,
+                    score_allowed=False,
+                    learn_allowed=False,
+                    suppressed_reason_codes=("context_ambiguous", "context_low_confidence"),
+                ),
+            },
+        )()
+
+        assert acm._representation_blocks_post_regime_pretransient(representation_result) is True
+
+    def test_representation_blocks_post_regime_pretransient_ignores_transition_only(self):
+        """Transition-only blockers still require transient detection before post-regime suppression."""
+        from core import acm
+        from core.representation_contracts import EligibilityDecision
+
+        representation_result = type(
+            "RepresentationResult",
+            (),
+            {
+                "authoritative": True,
+                "eligibility": EligibilityDecision(
+                    authoritative=True,
+                    score_allowed=False,
+                    learn_allowed=False,
+                    suppressed_reason_codes=("context_transition_active",),
+                ),
+            },
+        )()
+
+        assert acm._representation_blocks_post_regime_pretransient(representation_result) is False
+
+    def test_representation_blocks_post_regime_runtime_requires_authority(self):
+        """Non-authoritative shadow output must not stop downstream runtime."""
+        from core import acm
+        from core.representation_contracts import EligibilityDecision
+
+        representation_result = type(
+            "RepresentationResult",
+            (),
+            {
+                "authoritative": False,
+                "eligibility": EligibilityDecision(
+                    authoritative=False,
+                    score_allowed=False,
+                    learn_allowed=False,
+                    suppressed_reason_codes=("context_ambiguous",),
+                ),
+            },
+        )()
+
+        assert acm._representation_blocks_post_regime_runtime(representation_result) is False
+
     def test_representation_learning_blocked_helper(self):
         """Learning-block helper should reflect authoritative learn_allowed=False."""
         from core import acm
@@ -564,6 +1029,9 @@ class TestRefactorHelpers:
 
         assert out.should_continue is False
         assert out.coldstart_complete is False
+        assert out.meta["baseline_runtime_mode"] == "BOOTSTRAP_NOT_READY"
+        assert out.meta["enough_history_to_proceed"] is False
+        assert out.meta["baseline_ready"] is False
         assert len(finalize_calls) == 1
         assert finalize_calls[0]["zero_day_status"].status == "inactive_no_data"
         assert finalize_calls[0]["zero_day_status"].scoring_active is False
@@ -652,8 +1120,55 @@ class TestRefactorHelpers:
         assert out.train is not None
         assert out.score is not None
         assert out.meta.dup_timestamps_removed == 3
+        assert out.meta.baseline_runtime_mode == "ONLINE_SCORING"
+        assert out.meta.enough_history_to_proceed is True
+        assert out.meta.baseline_ready is True
         assert len(validate_calls) == 1
         assert coldstart_calls == ["FD_FAN"]
+
+    def test_smart_coldstart_check_status_delegates_legacy_gate_to_baseline_governor(self, monkeypatch):
+        """SmartColdstart should fetch SQL state but delegate lifecycle meaning to baseline_governor."""
+        from core import smart_coldstart as sc
+
+        class _Cursor:
+            def execute(self, query, params):
+                self.query = query
+                self.params = params
+
+            def fetchone(self):
+                return ("LEARNING",)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        class _SqlClient:
+            def cursor(self):
+                return _Cursor()
+
+        calls = []
+
+        def _resolve_gate(value):
+            calls.append(value)
+            return type(
+                "Decision",
+                (),
+                {
+                    "needs_coldstart": False,
+                    "reason_code": "legacy_maturity_ready_for_scoring",
+                },
+            )()
+
+        monkeypatch.setattr(sc, "resolve_legacy_coldstart_load_decision", _resolve_gate)
+
+        manager = sc.SmartColdstart(sql_client=_SqlClient(), equip_id=7, equip_name="FD_FAN")
+        state = manager.check_status(required_rows=500)
+
+        assert calls == ["LEARNING"]
+        assert state.needs_coldstart is False
+        assert state.gate_reason == "legacy_maturity_ready_for_scoring"
 
     def test_write_drift_controller_state_no_output_manager(self):
         """Drift writer should safely no-op when output manager is missing."""
@@ -720,20 +1235,56 @@ class TestRefactorHelpers:
         from core import observability as obs
 
         calls = {"init": 0, "profile": 0}
+        captured = {}
 
         def _init(**kwargs):
             calls["init"] += 1
+            captured.update(kwargs)
 
         def _start_profiling():
             calls["profile"] += 1
 
         monkeypatch.setattr(obs, "init", _init)
         monkeypatch.setattr(obs, "start_profiling", _start_profiling)
+        monkeypatch.delenv("ACM_OBS_DISABLE", raising=False)
+        monkeypatch.delenv("ACM_OBS_ENABLE_TRACING", raising=False)
+        monkeypatch.delenv("ACM_OBS_ENABLE_METRICS", raising=False)
+        monkeypatch.delenv("ACM_OBS_ENABLE_LOKI", raising=False)
+        monkeypatch.delenv("ACM_OBS_ENABLE_PROFILING", raising=False)
 
         obs.init_run_observability(equip="FD_FAN", equip_id=1, logger=None)
 
         assert calls["init"] == 1
         assert calls["profile"] == 1
+        assert captured["enable_tracing"] is True
+        assert captured["enable_metrics"] is True
+        assert captured["enable_loki"] is True
+        assert captured["enable_profiling"] is True
+
+    def test_init_run_observability_respects_env_disable(self, monkeypatch):
+        """Observability startup helper should honor environment-based disable flags."""
+        from core import observability as obs
+
+        captured = {}
+        profiled = {"count": 0}
+
+        def _init(**kwargs):
+            captured.update(kwargs)
+
+        def _start_profiling():
+            profiled["count"] += 1
+
+        monkeypatch.setattr(obs, "init", _init)
+        monkeypatch.setattr(obs, "start_profiling", _start_profiling)
+        monkeypatch.setenv("ACM_OBS_DISABLE", "1")
+
+        obs.init_run_observability(equip="FD_FAN", equip_id=1, logger=None)
+
+        assert captured["enable_tracing"] is False
+        assert captured["enable_metrics"] is False
+        assert captured["enable_loki"] is False
+        assert captured["enable_profiling"] is False
+        assert profiled["count"] == 0
 
     def test_init_run_observability_warns_when_init_fails(self, monkeypatch):
         """Observability startup helper should warn and continue on init errors."""
@@ -1670,6 +2221,50 @@ class TestRefactorHelpers:
         assert out["iforest_detector"] is sentinel
         assert out["cached_calibration_params"] == cached_models["calibration_params"]
         assert out["col_meds"] == {"a": 2.0}
+
+    def test_load_cached_regime_preview_from_sql_cache_uses_regime_only_load(self, monkeypatch):
+        """Feature preview cache loader should request only the regime model payload."""
+        from core import detector_orchestrator as orch
+
+        train = pd.DataFrame({"a": [1.0, 2.0, 3.0]})
+        score = pd.DataFrame({"a": [1.5, 2.5]})
+        regime_model = object()
+        captured = {}
+
+        def _load_cached_models_with_validation(**kwargs):
+            captured["model_types"] = kwargs.get("model_types")
+            return {"regime_model": regime_model}, {"train_sensors": ["a"]}
+
+        monkeypatch.setattr(
+            orch,
+            "load_cached_models_with_validation",
+            _load_cached_models_with_validation,
+        )
+        monkeypatch.setattr(
+            orch,
+            "align_current_features_to_cached_manifest",
+            lambda **kwargs: (kwargs["train"], kwargs["score"], ["a"], True),
+        )
+        monkeypatch.setattr(
+            orch,
+            "load_quality_regime_state_if_needed",
+            lambda **kwargs: ("state", 7, False),
+        )
+
+        out = orch.load_cached_regime_preview_from_sql_cache(
+            train=train,
+            score=score,
+            equip="FD_FAN",
+            sql_client=object(),
+            equip_id=1,
+            cfg={},
+            logger=type("Logger", (), {"info": lambda *a, **k: None, "warn": lambda *a, **k: None})(),
+        )
+
+        assert captured["model_types"] == ["regime_model"]
+        assert out["regime_model"] is regime_model
+        assert out["regime_state"] == "state"
+        assert out["regime_state_version"] == 7
 
     def test_model_version_manager_requires_connected_sql_context(self):
         """ModelVersionManager should fail fast when SQL context invariants are not satisfied."""
@@ -2826,6 +3421,171 @@ class TestRefactorHelpers:
         assert occupancy_called["called"] is True
         assert sections == ["score.detector_score", "regimes.label", "regimes.occupancy"]
 
+    def test_run_scoring_regime_stage_reuses_basis_override(self, monkeypatch):
+        """Basis override should prevent a second basis-build pass."""
+        from core import regimes
+
+        idx = pd.date_range("2026-01-01", periods=2, freq="h")
+        train_df = pd.DataFrame({"a": [1.0, 2.0]}, index=idx)
+        score_df = pd.DataFrame({"a": [1.5, 2.5]}, index=idx)
+
+        def _basis_stage(**kwargs):
+            raise AssertionError("basis stage should not be called when override is supplied")
+
+        def _score_all_detectors_fn(**kwargs):
+            frame = pd.DataFrame({"a": [1.5, 2.5]}, index=idx)
+            return frame, None
+
+        def _resolve_maturity(**kwargs):
+            return "LEARNING"
+
+        def _run_regime_labeling_stage(**kwargs):
+            frame = kwargs["frame"].copy()
+            frame["regime_label"] = [0, 1]
+            return regimes.RegimeLabelingStageResult(
+                frame=frame,
+                score_out={"frame": frame, "regime_quality_ok": True},
+                regime_model=kwargs["regime_model"],
+                train_regime_labels=np.array([0, 0]),
+                score_regime_labels=np.array([0, 1]),
+                regime_quality_ok=True,
+                regime_state_version=kwargs["regime_state_version"],
+                regime_loaded_from_state=kwargs["regime_loaded_from_state"],
+            )
+
+        monkeypatch.setattr(regimes, "build_regime_feature_basis_stage", _basis_stage)
+        monkeypatch.setattr(regimes, "run_regime_labeling_stage", _run_regime_labeling_stage)
+        monkeypatch.setattr(regimes, "write_regime_occupancy_and_transitions", lambda **kwargs: (0, 0))
+
+        basis_override = regimes.RegimeBasisBuildResult(
+            regime_basis_train=train_df,
+            regime_basis_score=score_df,
+            regime_basis_meta={"basis_signature": "sig-1"},
+            regime_basis_hash=7,
+            regime_model=None,
+            degraded=False,
+        )
+
+        result = regimes.run_scoring_regime_stage(
+            train_df=train_df,
+            score_df=score_df,
+            raw_train=train_df,
+            raw_score=score_df,
+            cfg={},
+            pca_detector=None,
+            regime_model=None,
+            regime_state=None,
+            regime_state_version=3,
+            regime_loaded_from_state=False,
+            det_flags={"ar1_enabled": True, "pca_enabled": False, "iforest_enabled": False, "gmm_enabled": False, "omr_enabled": False},
+            detectors={"ar1_detector": object(), "pca_detector": None, "iforest_detector": None, "gmm_detector": None, "omr_detector": None},
+            equip="FD_FAN",
+            equip_id=1,
+            sql_client=object(),
+            output_manager=object(),
+            refit_requested=False,
+            section_fn=lambda name: contextlib.nullcontext(),
+            score_all_detectors_fn=_score_all_detectors_fn,
+            resolve_maturity_for_regime_stage_fn=_resolve_maturity,
+            record_regime_fn=None,
+            basis_result_override=basis_override,
+        )
+
+        assert result.basis_drift_decision is not None
+        assert "regime_label" in result.frame.columns
+
+    def test_preview_regime_context_stage_builds_context_from_cached_model(self, monkeypatch):
+        """Preview helper should infer context from an existing compatible regime model without writes."""
+        from core import regimes
+
+        idx = pd.date_range("2026-01-01", periods=2, freq="h")
+        train_df = pd.DataFrame({"a": [1.0, 2.0]}, index=idx)
+        score_df = pd.DataFrame({"a": [1.5, 2.5]}, index=idx)
+        regime_model = type("RegimeModel", (), {"feature_columns": ["a"], "meta": {"quality_ok": True}})()
+
+        def _label(score_df_arg, ctx, out, cfg):
+            frame = out["frame"].copy()
+            frame["regime_label"] = [0, 0]
+            frame["regime_confidence"] = [0.9, 0.95]
+            frame["regime_is_novel"] = [False, False]
+            return {
+                "frame": frame,
+                "regime_model": ctx["regime_model"],
+                "regime_labels_train": np.array([0, 0]),
+                "regime_labels": np.array([0, 0]),
+                "regime_quality_ok": True,
+            }
+
+        monkeypatch.setattr(regimes, "label", _label)
+
+        preview = regimes.preview_regime_context_stage(
+            score_df=score_df,
+            train_df=train_df,
+            cfg={},
+            regime_basis_train=train_df,
+            regime_basis_score=score_df,
+            regime_basis_meta={"basis_signature": "sig-1"},
+            regime_basis_hash=11,
+            regime_model=regime_model,
+            regime_loaded_from_state=False,
+            regime_state=None,
+            regime_state_version=1,
+            raw_train=train_df,
+        )
+
+        assert preview.available is True
+        assert preview.context_assignment.context_label == "REGIME_0"
+        assert preview.context_assignment.is_ambiguous is False
+        assert list(preview.frame["regime_label"]) == [0, 0]
+
+    def test_preview_regime_context_from_raw_stage_builds_read_only_preview(self, monkeypatch):
+        """Raw-surface regime preview should build basis and context without full detector features."""
+        from core import regimes
+
+        idx = pd.date_range("2026-01-01", periods=2, freq="h")
+        train_df = pd.DataFrame({"a": [1.0, 2.0]}, index=idx)
+        score_df = pd.DataFrame({"a": [1.5, 2.5]}, index=idx)
+
+        basis_result = regimes.RegimeBasisBuildResult(
+            regime_basis_train=train_df,
+            regime_basis_score=score_df,
+            regime_basis_meta={"basis_signature": "sig-raw"},
+            regime_basis_hash=17,
+            regime_model=None,
+            degraded=False,
+        )
+        preview_result = regimes.RegimeContextPreviewResult(
+            available=True,
+            frame=pd.DataFrame({"regime_label": [0, 0]}, index=idx),
+            context_assignment=regimes.ContextAssignment(
+                context_id="regime:0",
+                context_label="REGIME_0",
+                context_confidence=0.9,
+                context_stability="STABLE",
+                transition_status="STEADY",
+            ),
+        )
+
+        monkeypatch.setattr(regimes, "build_regime_feature_basis_stage", lambda **kwargs: basis_result)
+        monkeypatch.setattr(regimes, "preview_regime_context_stage", lambda **kwargs: preview_result)
+
+        preview = regimes.preview_regime_context_from_raw_stage(
+            train_df=train_df,
+            score_df=score_df,
+            cfg={},
+            regime_model=None,
+            regime_state=object(),
+            regime_loaded_from_state=True,
+            regime_state_version=1,
+            raw_train=train_df,
+            raw_score=score_df,
+            equip="FD_FAN",
+        )
+
+        assert preview.available is True
+        assert preview.basis_result.regime_basis_hash == 17
+        assert preview.context_preview.context_assignment.context_label == "REGIME_0"
+
     def test_run_drift_postprocess_stage_orchestrates_drift_and_episode_normalization(self, monkeypatch):
         """Drift postprocess stage should run drift pipeline and normalize episode schema."""
         from core import drift
@@ -2932,6 +3692,39 @@ class TestRefactorHelpers:
         assert result.sensor_correlation_rows == 3
         assert result.sensor_normalized_ts_rows == 4
         assert result.seasonal_pattern_rows == 5
+
+    def test_persist_additional_artifacts_honors_secondary_artifact_flags(self):
+        """Authoritative no-score policy should be able to suppress secondary raw artifacts."""
+        from core.output_manager import OutputManager
+
+        output_manager = OutputManager.__new__(OutputManager)
+        calls = {"detector": False, "corr": False, "normalized": False, "seasonal": False}
+        output_manager.write_detector_correlation_from_scores = lambda _df: calls.__setitem__("detector", True) or 2
+        output_manager.write_sensor_correlations_from_raw = lambda _df: calls.__setitem__("corr", True) or 3
+        output_manager.write_sensor_normalized_ts_from_raw = (
+            lambda _df, max_total_rows=10000: calls.__setitem__("normalized", True) or 4
+        )
+        output_manager.write_seasonal_patterns_from_detected = lambda _p: calls.__setitem__("seasonal", True) or 5
+
+        frame = pd.DataFrame({"ar1_z": [0.1, 0.2], "iforest_z": [0.3, 0.4]})
+        raw_score = pd.DataFrame({"sensor": [1.0, 2.0]})
+        result = output_manager.persist_additional_artifacts(
+            scores_df=frame,
+            raw_score=raw_score,
+            seasonal_patterns={"sensor": []},
+            artifact_flags={
+                "detector_correlation": False,
+                "sensor_correlation": False,
+                "sensor_normalized_ts": False,
+                "seasonal_patterns": False,
+            },
+        )
+
+        assert result.detector_correlation_rows == 0
+        assert result.sensor_correlation_rows == 0
+        assert result.sensor_normalized_ts_rows == 0
+        assert result.seasonal_pattern_rows == 0
+        assert calls == {"detector": False, "corr": False, "normalized": False, "seasonal": False}
 
     def test_persist_core_outputs_aggregates_insert_counts(self):
         """Output manager helper should aggregate inserted counts from scores and episodes writes."""
@@ -3628,7 +4421,7 @@ class TestRefactorHelpers:
             episode_count=3,
         )
         output_manager.persist_additional_artifacts = (
-            lambda scores_df, raw_score, seasonal_patterns, max_total_rows=10000: None
+            lambda scores_df, raw_score, seasonal_patterns, artifact_flags=None, max_total_rows=10000: None
         )
         output_manager.release_persist_memory = (
             lambda raw_train, raw_score, iforest_detector=None, omr_detector=None: (None, None)
@@ -3670,6 +4463,7 @@ class TestRefactorHelpers:
     def test_persist_pipeline_outputs_skips_score_derived_outputs_when_scores_are_suppressed(self):
         """Score-suppressed frames should not persist score-derived tables or analytics."""
         from core.output_manager import OutputManager, PersistCoreOutputsResult
+        from core.representation_contracts import EligibilityDecision
 
         output_manager = OutputManager.__new__(OutputManager)
         output_manager.equip_id = 5010
@@ -3679,7 +4473,7 @@ class TestRefactorHelpers:
             "episodes_rows": None,
             "analytics_called": False,
             "contribution_called": False,
-            "additional_rows": None,
+            "artifact_flags": None,
         }
 
         def _persist_core_outputs(scores_df, episodes_df):
@@ -3696,8 +4490,8 @@ class TestRefactorHelpers:
             lambda **kwargs: captured.__setitem__("contribution_called", True)
         )
         output_manager.persist_additional_artifacts = (
-            lambda scores_df, raw_score, seasonal_patterns, max_total_rows=10000:
-            captured.__setitem__("additional_rows", len(scores_df))
+            lambda scores_df, raw_score, seasonal_patterns, artifact_flags=None, max_total_rows=10000:
+            captured.__setitem__("artifact_flags", artifact_flags)
         )
         output_manager.release_persist_memory = (
             lambda raw_train, raw_score, iforest_detector=None, omr_detector=None: (None, None)
@@ -3727,6 +4521,20 @@ class TestRefactorHelpers:
             fusion_weights_used={"ar1_z": 0.7},
             record_episode_fn=lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("record_episode_fn should not run")),
             equip="FD_FAN",
+            representation_result=type(
+                "RepresentationResult",
+                (),
+                {
+                    "authoritative": True,
+                    "eligibility": EligibilityDecision(
+                        authoritative=True,
+                        score_allowed=False,
+                        learn_allowed=False,
+                        suppressed_reason_codes=("context_ambiguous",),
+                    ),
+                },
+            )(),
+            representation_authority_active=True,
         )
 
         assert result.rows_written_delta == 0
@@ -3736,7 +4544,12 @@ class TestRefactorHelpers:
         assert captured["episodes_rows"] == 0
         assert captured["contribution_called"] is False
         assert captured["analytics_called"] is False
-        assert captured["additional_rows"] == 0
+        assert captured["artifact_flags"] == {
+            "detector_correlation": False,
+            "sensor_correlation": False,
+            "sensor_normalized_ts": False,
+            "seasonal_patterns": False,
+        }
 
     def test_run_persistence_stage_orchestrates_pipeline_outputs_and_sql_artifacts(self, monkeypatch):
         """Output manager persistence stage should run pipeline outputs and SQL artifact writes in order."""
@@ -3744,7 +4557,7 @@ class TestRefactorHelpers:
         from core.output_manager import OutputManager, PersistPipelineOutputsResult
 
         out = OutputManager.__new__(OutputManager)
-        calls = {"sections": [], "pipeline": False, "sql": False}
+        calls = {"sections": [], "pipeline": False, "sql": False, "score_outputs_enabled": None}
 
         class _Section:
             def __init__(self, name):
@@ -3775,6 +4588,7 @@ class TestRefactorHelpers:
         )
         def _fake_write_sql_artifacts(**kwargs):
             calls["sql"] = True
+            calls["score_outputs_enabled"] = kwargs.get("score_outputs_enabled")
             return 88
         monkeypatch.setattr(om_module, "write_sql_artifacts", _fake_write_sql_artifacts)
 
@@ -3820,7 +4634,70 @@ class TestRefactorHelpers:
         assert result.rows_written == 97
         assert result.analytics_table_count == 11
         assert calls["sql"] is True
+        assert calls["score_outputs_enabled"] is True
         assert calls["sections"] == ["persist", "persist.pipeline_outputs"]
+
+    def test_write_sql_artifacts_skips_pca_artifacts_when_score_signal_is_suppressed(self):
+        """Suppressed authoritative runs should not write PCA SQL artifacts."""
+        from core import output_artifacts as oa_module
+
+        calls = {"pca": False, "run_stats": False}
+
+        class _Section:
+            def __init__(self, name):
+                self.name = name
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        class _Timer:
+            def section(self, name):
+                return _Section(name)
+
+        class _OutputManager:
+            def write_run_stats(self, payload):
+                calls["run_stats"] = True
+                calls["run_stats_payload"] = payload
+                return 1
+
+        def _fake_write_pca_artifacts(**kwargs):
+            calls["pca"] = True
+            return (1, 2, 3)
+
+        original = oa_module.write_pca_artifacts
+        oa_module.write_pca_artifacts = _fake_write_pca_artifacts
+        try:
+            rows_written = oa_module.write_sql_artifacts(
+                output_manager=_OutputManager(),
+                frame=pd.DataFrame({"fused": [float("nan"), float("nan")]}),
+                episodes=pd.DataFrame(),
+                train=pd.DataFrame({"sensor": [1.0, 2.0]}),
+                pca_detector=None,
+                sql_client=object(),
+                run_id="run-1",
+                equip_id=1,
+                equip="FD_FAN",
+                cfg={},
+                meta={},
+                win_start=pd.Timestamp("2026-01-01T00:00:00"),
+                win_end=pd.Timestamp("2026-01-01T01:00:00"),
+                rows_read=2,
+                spe_p95_train=0.1,
+                t2_p95_train=0.2,
+                anomaly_count=0,
+                score_outputs_enabled=False,
+                T=_Timer(),
+                culprit_writer_func=None,
+            )
+        finally:
+            oa_module.write_pca_artifacts = original
+
+        assert rows_written == 0
+        assert calls["pca"] is False
+        assert calls["run_stats"] is True
 
     def test_prepare_persistence_inputs_updates_baseline_and_builds_sensor_context(self):
         """Persistence input preparation should update baseline buffer and build sensor context."""
@@ -3940,9 +4817,9 @@ class TestRefactorHelpers:
             representation_authority_active=True,
         )
 
-        assert result.sensor_context == {"ctx": 1}
+        assert result.sensor_context is None
         assert calls["baseline"] is False
-        assert calls["sensor"] is True
+        assert calls["sensor"] is False
         assert calls["sections"] == ["baseline.buffer_write", "sensor.context"]
 
     def test_resolve_run_outcome_from_degradations(self):
@@ -5180,6 +6057,161 @@ class TestRefactorHelpers:
             "features.impute",
             "models.refit_flag",
         ]
+
+    def test_run_feature_preparation_stage_reuses_precomputed_seasonality(self, monkeypatch):
+        """Feature prep should reuse a provided seasonality stage instead of rerunning detect/adjust."""
+        from core import fast_features
+
+        idx = pd.date_range("2026-01-01", periods=2, freq="h")
+        train = pd.DataFrame({"a": [1.0, 2.0]}, index=idx)
+        score = pd.DataFrame({"a": [3.0, 4.0]}, index=idx)
+        calls = {"sections": []}
+
+        class _Section:
+            def __init__(self, name):
+                self.name = name
+            def __enter__(self):
+                calls["sections"].append(self.name)
+                return self
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        def _section_fn(name):
+            return _Section(name)
+
+        def _detect_and_adjust_fn(**kwargs):
+            raise AssertionError("seasonality should not rerun when precomputed result is provided")
+
+        def _run_data_guardrails_fn(**kwargs):
+            return type("GuardrailResult", (), {"low_var_threshold": 0.1})()
+
+        def _load_manifest_protected_columns_fn(**kwargs):
+            return []
+
+        def _build_features_for_pipeline(**kwargs):
+            return kwargs["train"], kwargs["score"]
+
+        def _impute_features(**kwargs):
+            return kwargs["train"], kwargs["score"], []
+
+        monkeypatch.setattr(fast_features, "build_features_for_pipeline", _build_features_for_pipeline)
+        monkeypatch.setattr(fast_features, "impute_features", _impute_features)
+
+        class _OutputManager:
+            def check_refit_request(self):
+                return False
+
+        seasonality_result = fast_features.SeasonalityPreparationResult(
+            train=train.copy(),
+            score=score.copy(),
+            seasonal_patterns={"a": ["daily"]},
+        )
+
+        result = fast_features.run_feature_preparation_stage(
+            train=train,
+            score=score,
+            cfg={},
+            meta={"is_coldstart_run": False},
+            output_manager=_OutputManager(),
+            sql_client=object(),
+            run_id="r2",
+            equip_id=2,
+            equip="FD_FAN",
+            section_fn=_section_fn,
+            detect_and_adjust_fn=_detect_and_adjust_fn,
+            run_data_guardrails_fn=_run_data_guardrails_fn,
+            load_manifest_protected_columns_fn=_load_manifest_protected_columns_fn,
+            seasonality_result=seasonality_result,
+        )
+
+        assert result.seasonal_patterns == {"a": ["daily"]}
+        assert result.raw_train.equals(train)
+        assert result.raw_score.equals(score)
+        assert calls["sections"] == [
+            "data.guardrails",
+            "features.build",
+            "features.impute",
+            "models.refit_flag",
+        ]
+
+    def test_run_feature_preparation_stage_uses_cached_reference_stats_for_empty_train(self, monkeypatch):
+        """Empty-train scoring paths should request cached raw/feature medians."""
+        from core import fast_features
+
+        idx = pd.date_range("2026-01-01", periods=2, freq="h")
+        train = pd.DataFrame({"a": []}, index=pd.DatetimeIndex([], name="ts"))
+        score = pd.DataFrame({"a": [3.0, 4.0]}, index=idx)
+        calls = {"build": None, "impute": None, "raw_loader": 0, "feature_loader": 0}
+
+        class _Section:
+            def __init__(self, name):
+                self.name = name
+            def __enter__(self):
+                return self
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        def _section_fn(name):
+            return _Section(name)
+
+        def _detect_and_adjust_fn(**kwargs):
+            return kwargs["train"], kwargs["score"], {}, False
+
+        def _run_data_guardrails_fn(**kwargs):
+            return type("GuardrailResult", (), {"low_var_threshold": 0.1})()
+
+        def _load_manifest_protected_columns_fn(**kwargs):
+            return ["a_feat"]
+
+        def _load_cached_raw_signal_medians_fn(**kwargs):
+            calls["raw_loader"] += 1
+            return {"a": 1.5}
+
+        def _load_cached_feature_medians_fn(**kwargs):
+            calls["feature_loader"] += 1
+            return {"a_feat": 2.0}
+
+        def _build_features_for_pipeline(**kwargs):
+            calls["build"] = kwargs["raw_fill_values_override"]
+            out_train = pd.DataFrame(index=kwargs["train"].index, columns=["a_feat"], dtype=float)
+            out_score = pd.DataFrame({"a_feat": [6.0, 8.0]}, index=kwargs["score"].index)
+            return out_train, out_score
+
+        def _impute_features(**kwargs):
+            calls["impute"] = kwargs["median_values_override"]
+            return kwargs["train"], kwargs["score"], []
+
+        monkeypatch.setattr(fast_features, "build_features_for_pipeline", _build_features_for_pipeline)
+        monkeypatch.setattr(fast_features, "impute_features", _impute_features)
+
+        class _OutputManager:
+            def check_refit_request(self):
+                return False
+
+        result = fast_features.run_feature_preparation_stage(
+            train=train,
+            score=score,
+            cfg={},
+            meta={"is_coldstart_run": False},
+            output_manager=_OutputManager(),
+            sql_client=object(),
+            run_id="r3",
+            equip_id=3,
+            equip="FD_FAN",
+            section_fn=_section_fn,
+            detect_and_adjust_fn=_detect_and_adjust_fn,
+            run_data_guardrails_fn=_run_data_guardrails_fn,
+            load_manifest_protected_columns_fn=_load_manifest_protected_columns_fn,
+            load_cached_raw_signal_medians_fn=_load_cached_raw_signal_medians_fn,
+            load_cached_feature_medians_fn=_load_cached_feature_medians_fn,
+        )
+
+        assert list(result.train.columns) == ["a_feat"]
+        assert list(result.score.columns) == ["a_feat"]
+        assert calls["raw_loader"] == 1
+        assert calls["feature_loader"] == 1
+        assert calls["build"] == {"a": 1.5}
+        assert calls["impute"] == {"a_feat": 2.0}
 
 
 if __name__ == "__main__":

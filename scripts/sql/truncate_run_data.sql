@@ -159,7 +159,6 @@ IF OBJECT_ID('dbo.ACM_ContributionCurrent', 'U') IS NOT NULL TRUNCATE TABLE ACM_
 IF OBJECT_ID('dbo.ACM_DailyFusedProfile', 'U') IS NOT NULL TRUNCATE TABLE ACM_DailyFusedProfile;
 IF OBJECT_ID('dbo.ACM_DefectSummary', 'U') IS NOT NULL TRUNCATE TABLE ACM_DefectSummary;
 IF OBJECT_ID('dbo.ACM_ForecastingState', 'U') IS NOT NULL TRUNCATE TABLE ACM_ForecastingState;
-IF OBJECT_ID('dbo.ACM_ForecastState', 'U') IS NOT NULL TRUNCATE TABLE ACM_ForecastState;
 IF OBJECT_ID('dbo.ACM_HistorianData', 'U') IS NOT NULL TRUNCATE TABLE ACM_HistorianData;
 IF OBJECT_ID('dbo.ACM_BaselineBuffer', 'U') IS NOT NULL TRUNCATE TABLE ACM_BaselineBuffer;
 

@@ -79,6 +79,55 @@ def _has_authoritative_score_signal(scores_df: Optional[pd.DataFrame]) -> bool:
     return False
 
 
+def _authoritative_no_score_active(
+    *,
+    representation_result: Optional[Any],
+    representation_authority_active: bool,
+    score_outputs_enabled: bool,
+) -> bool:
+    """Return True when representation authority has authoritatively vetoed scoring."""
+    if (
+        not representation_authority_active
+        or score_outputs_enabled
+        or representation_result is None
+    ):
+        return False
+
+    eligibility = getattr(representation_result, "eligibility", None)
+    return bool(
+        getattr(representation_result, "authoritative", False)
+        and eligibility is not None
+        and getattr(eligibility, "score_allowed", None) is False
+    )
+
+
+def _resolve_secondary_artifact_persistence_flags(
+    *,
+    representation_result: Optional[Any],
+    representation_authority_active: bool,
+    score_outputs_enabled: bool,
+) -> Dict[str, bool]:
+    """Decide which secondary artifacts are worth persisting for this run."""
+    if _authoritative_no_score_active(
+        representation_result=representation_result,
+        representation_authority_active=representation_authority_active,
+        score_outputs_enabled=score_outputs_enabled,
+    ):
+        return {
+            "detector_correlation": False,
+            "sensor_correlation": False,
+            "sensor_normalized_ts": False,
+            "seasonal_patterns": False,
+        }
+
+    return {
+        "detector_correlation": True,
+        "sensor_correlation": True,
+        "sensor_normalized_ts": True,
+        "seasonal_patterns": True,
+    }
+
+
 def load_omr_drift_context_service(output_manager: Any, equip_id: int, lookback_hours: int = 24) -> dict:
     """Load OMR and drift context from recent SQL outputs."""
     _ = lookback_hours  # kept for API compatibility
@@ -1066,19 +1115,43 @@ def persist_additional_artifacts_service(
     scores_df: pd.DataFrame,
     raw_score: Optional[pd.DataFrame],
     seasonal_patterns: Optional[Dict[str, List[Any]]],
+    artifact_flags: Optional[Dict[str, bool]] = None,
     max_total_rows: int = 10000,
 ) -> Dict[str, int]:
     """Persist optional secondary artifacts derived from current run data."""
+    flags = {
+        "detector_correlation": True,
+        "sensor_correlation": True,
+        "sensor_normalized_ts": True,
+        "seasonal_patterns": True,
+    }
+    if artifact_flags:
+        flags.update({k: bool(v) for k, v in artifact_flags.items()})
+
     return {
-        "detector_correlation_rows": int(output_manager.write_detector_correlation_from_scores(scores_df)),
-        "sensor_correlation_rows": int(output_manager.write_sensor_correlations_from_raw(raw_score)),
+        "detector_correlation_rows": int(
+            output_manager.write_detector_correlation_from_scores(scores_df)
+            if flags["detector_correlation"]
+            else 0
+        ),
+        "sensor_correlation_rows": int(
+            output_manager.write_sensor_correlations_from_raw(raw_score)
+            if flags["sensor_correlation"]
+            else 0
+        ),
         "sensor_normalized_ts_rows": int(
             output_manager.write_sensor_normalized_ts_from_raw(
                 raw_score,
                 max_total_rows=max_total_rows,
             )
+            if flags["sensor_normalized_ts"]
+            else 0
         ),
-        "seasonal_pattern_rows": int(output_manager.write_seasonal_patterns_from_detected(seasonal_patterns)),
+        "seasonal_pattern_rows": int(
+            output_manager.write_seasonal_patterns_from_detected(seasonal_patterns)
+            if flags["seasonal_patterns"]
+            else 0
+        ),
     }
 
 
@@ -1133,10 +1206,17 @@ def persist_pipeline_outputs_service(
     fusion_weights_used: Optional[Dict[str, float]],
     record_episode_fn: Optional[Callable[..., Any]] = None,
     equip: Optional[str] = None,
+    representation_result: Optional[Any] = None,
+    representation_authority_active: bool = False,
     max_total_rows: int = 10000,
 ) -> Dict[str, Any]:
     """Persist core and optional run artifacts, then release persist-phase memory."""
     score_outputs_enabled = _has_authoritative_score_signal(scores_df)
+    secondary_artifact_flags = _resolve_secondary_artifact_persistence_flags(
+        representation_result=representation_result,
+        representation_authority_active=representation_authority_active,
+        score_outputs_enabled=score_outputs_enabled,
+    )
     score_outputs_df = scores_df if score_outputs_enabled else scores_df.iloc[0:0].copy()
     episodes_for_output = episodes_df
     if episodes_for_output is None:
@@ -1151,6 +1231,13 @@ def persist_pipeline_outputs_service(
             equip_id=output_manager.equip_id,
             run_id=output_manager.run_id,
         )
+        if not any(secondary_artifact_flags.values()):
+            Console.info(
+                "Representation authority skipped non-score secondary artifacts",
+                component="REPRESENTATION",
+                equip_id=output_manager.equip_id,
+                run_id=output_manager.run_id,
+            )
 
     core = output_manager.persist_core_outputs(
         scores_df=score_outputs_df,
@@ -1180,6 +1267,7 @@ def persist_pipeline_outputs_service(
         scores_df=score_outputs_df,
         raw_score=raw_score,
         seasonal_patterns=seasonal_patterns,
+        artifact_flags=secondary_artifact_flags,
         max_total_rows=max_total_rows,
     )
 
@@ -1244,9 +1332,12 @@ def run_persistence_stage_service(
     anomaly_count: int,
     timer: Any,
     culprit_writer_func: Optional[Callable[..., Any]] = None,
+    representation_result: Optional[Any] = None,
+    representation_authority_active: bool = False,
     max_total_rows: int = 10000,
 ) -> Dict[str, Any]:
     """Execute full persistence stage for pipeline outputs and SQL artifacts."""
+    score_outputs_enabled = _has_authoritative_score_signal(scores_df)
     with section_fn("persist"):
         with output_manager.batched_transaction():
             with section_fn("persist.pipeline_outputs"):
@@ -1263,6 +1354,8 @@ def run_persistence_stage_service(
                     fusion_weights_used=fusion_weights_used,
                     record_episode_fn=record_episode_fn,
                     equip=equip,
+                    representation_result=representation_result,
+                    representation_authority_active=representation_authority_active,
                     max_total_rows=max_total_rows,
                 )
                 # analytics_builder already logs "Generated analytics tables (SQL written: N)"
@@ -1284,6 +1377,7 @@ def run_persistence_stage_service(
         spe_p95_train=spe_p95_train,
         t2_p95_train=t2_p95_train,
         anomaly_count=anomaly_count,
+        score_outputs_enabled=score_outputs_enabled,
         timer=timer,
         culprit_writer_func=culprit_writer_func,
     )
@@ -1317,6 +1411,7 @@ def prepare_persistence_inputs_service(
 ) -> Dict[str, Any]:
     """Prepare persistence-stage inputs: baseline buffer update and sensor context."""
     learn_blocked = False
+    score_outputs_enabled = _has_authoritative_score_signal(frame)
     if representation_authority_active and representation_result is not None:
         eligibility = getattr(representation_result, "eligibility", None)
         learn_blocked = bool(
@@ -1341,15 +1436,24 @@ def prepare_persistence_inputs_service(
             )
 
     with section_fn("sensor.context"):
-        sensor_context = build_sensor_analytics_context_fn(
-            raw_train=raw_train,
-            raw_score=raw_score,
-            frame=frame,
-            omr_contributions_data=omr_contributions_data,
-            regime_model=regime_model,
-            logger=logger,
-            equip=equip,
-        )
+        if representation_authority_active and not score_outputs_enabled:
+            Console.info(
+                "Representation authority skipped sensor analytics context build",
+                component="REPRESENTATION",
+                equip_id=output_manager.equip_id,
+                run_id=output_manager.run_id,
+            )
+            sensor_context = None
+        else:
+            sensor_context = build_sensor_analytics_context_fn(
+                raw_train=raw_train,
+                raw_score=raw_score,
+                frame=frame,
+                omr_contributions_data=omr_contributions_data,
+                regime_model=regime_model,
+                logger=logger,
+                equip=equip,
+            )
 
     return {"sensor_context": sensor_context}
 

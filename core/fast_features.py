@@ -1119,6 +1119,7 @@ def build_features_for_pipeline(
     score: pd.DataFrame,
     cfg: Dict[str, Any],
     equip: str = "",
+    raw_fill_values_override: Optional[Dict[str, float]] = None,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
     Build engineered features for ACM pipeline train/score frames.
@@ -1131,13 +1132,38 @@ def build_features_for_pipeline(
     idx_train = train.index
     idx_score = score.index
 
-    # TRAIN-only fill values prevent leakage to SCORE.
-    train_fill_values = train.select_dtypes(include=[np.number]).median().to_dict()
-    Console.info(f"Computed {len(train_fill_values)} fill values from training data", component="FEAT")
-    train_feat = compute_basic_features_pl(
-        pl.from_pandas(train),
-        window=feat_win,
-    )
+    # TRAIN-only fill values prevent leakage to SCORE. Empty-train scoring paths
+    # can reuse cached raw training medians instead of borrowing from score data.
+    train_fill_values: Optional[Dict[str, float]] = None
+    if raw_fill_values_override:
+        train_fill_values = dict(raw_fill_values_override)
+        Console.info(
+            f"Using {len(train_fill_values)} cached raw fill values from training reference",
+            component="FEAT",
+            equip=equip,
+        )
+    elif len(train) > 0:
+        train_fill_values = train.select_dtypes(include=[np.number]).median().to_dict()
+        Console.info(
+            f"Computed {len(train_fill_values)} fill values from training data",
+            component="FEAT",
+            equip=equip,
+        )
+    else:
+        Console.warn(
+            "Train is empty and no cached raw fill values are available; "
+            "score feature build will fall back to score-derived fill values",
+            component="FEAT",
+            equip=equip,
+        )
+
+    if len(train) > 0:
+        train_feat = compute_basic_features_pl(
+            pl.from_pandas(train),
+            window=feat_win,
+        )
+    else:
+        train_feat = pd.DataFrame(index=idx_train)
     score_feat = compute_basic_features_pl(
         pl.from_pandas(score),
         window=feat_win,
@@ -1149,7 +1175,10 @@ def build_features_for_pipeline(
     if not isinstance(score_feat, pd.DataFrame):
         score_feat = score_feat.to_pandas() if hasattr(score_feat, "to_pandas") else pd.DataFrame(score_feat)
 
-    train_feat.index = idx_train
+    if len(train) > 0:
+        train_feat.index = idx_train
+    else:
+        train_feat = pd.DataFrame(index=idx_train, columns=score_feat.columns, dtype=float)
     score_feat.index = idx_score
 
     # Cast only stray object columns (rare) to avoid full-frame conversion overhead.
@@ -1177,6 +1206,7 @@ def impute_features(
     equip_id: int = 0,
     equip: str = "",
     protected_columns: Optional[List[str]] = None,
+    median_values_override: Optional[Dict[str, float]] = None,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, List[str]]:
     """
     Impute missing values and drop unusable columns from feature DataFrames.
@@ -1229,8 +1259,30 @@ def impute_features(
     tr[~np.isfinite(tr)] = np.nan
     sc[~np.isfinite(sc)] = np.nan
 
-    # Compute column medians from train (nanmedian ignores NaN, shape: n_cols)
-    col_meds_np = np.nanmedian(tr, axis=0)  # faster than pd.DataFrame.median()
+    # Compute column medians from train (nanmedian ignores NaN, shape: n_cols).
+    # Empty-train scoring paths can reuse cached feature medians instead of
+    # deriving them from score data.
+    if tr.shape[0] == 0 and train_cols:
+        if median_values_override:
+            col_meds = pd.Series(median_values_override, index=train_cols, dtype=float).reindex(train_cols)
+            col_meds_np = col_meds.to_numpy(dtype=np.float64, copy=True)
+            Console.info(
+                f"Using {int(col_meds.notna().sum())} cached feature medians for score-only imputation",
+                component="FEAT",
+                equip=equip,
+            )
+        else:
+            col_meds_np = np.full(len(train_cols), np.nan, dtype=np.float64)
+            col_meds = pd.Series(col_meds_np, index=train_cols)
+            Console.warn(
+                "Train feature frame is empty and no cached feature medians are available; "
+                "score imputation will fall back to score-derived medians",
+                component="FEAT",
+                equip=equip,
+            )
+    else:
+        col_meds_np = np.nanmedian(tr, axis=0)  # faster than pd.DataFrame.median()
+        col_meds = pd.Series(col_meds_np, index=train_cols)
 
     # Fill NaN in train with column medians (broadcast over rows)
     nan_mask_tr = np.isnan(tr)
@@ -1252,9 +1304,6 @@ def impute_features(
     train = pd.DataFrame(tr, index=train_idx, columns=train_cols)
     score = pd.DataFrame(sc, index=score_idx, columns=train_cols)
 
-    # col_meds as Series for downstream compatibility (all_nan_cols check)
-    col_meds = pd.Series(col_meds_np, index=train_cols)
-    
     # Find columns to drop: all-NaN or low-variance.
     # protected_columns (the saved model's train_sensors) are NEVER dropped — the
     # baseline-derived train split used in scoring batches can temporarily produce
@@ -1331,11 +1380,45 @@ class FeaturePreparationResult:
     refit_requested: bool
 
 
+@dataclass
+class SeasonalityPreparationResult:
+    """Result bundle for the raw seasonality-adjustment stage."""
+    train: pd.DataFrame
+    score: pd.DataFrame
+    seasonal_patterns: Dict[str, List[Any]]
+
+
 def _is_coldstart_meta(meta: Any) -> bool:
     """Return True if current run meta indicates coldstart run."""
     if isinstance(meta, dict):
         return bool(meta.get("is_coldstart_run", False))
     return bool(getattr(meta, "is_coldstart_run", False))
+
+
+def run_seasonality_preparation_stage(
+    *,
+    train: pd.DataFrame,
+    score: pd.DataFrame,
+    cfg: Dict[str, Any],
+    equip: str,
+    section_fn: Any,
+    detect_and_adjust_fn: Any,
+) -> SeasonalityPreparationResult:
+    """Run only the seasonality-detect/adjust stage used ahead of feature prep."""
+    seasonal_patterns: Dict[str, List[Any]] = {}
+    with section_fn("seasonality.detect"):
+        train, score, seasonal_patterns, _ = detect_and_adjust_fn(
+            train=train,
+            score=score,
+            cfg=cfg,
+            logger=Console,
+            equip=equip,
+        )
+    return SeasonalityPreparationResult(
+        train=train,
+        score=score,
+        seasonal_patterns=seasonal_patterns,
+    )
 
 
 def run_feature_preparation_stage(
@@ -1353,6 +1436,9 @@ def run_feature_preparation_stage(
     detect_and_adjust_fn: Any,
     run_data_guardrails_fn: Any,
     load_manifest_protected_columns_fn: Any,
+    load_cached_raw_signal_medians_fn: Optional[Any] = None,
+    load_cached_feature_medians_fn: Optional[Any] = None,
+    seasonality_result: Optional[SeasonalityPreparationResult] = None,
 ) -> FeaturePreparationResult:
     """
     Execute feature preparation sequence used by ACM pipeline.
@@ -1366,15 +1452,18 @@ def run_feature_preparation_stage(
     6. Feature imputation and pruning
     7. Refit flag read
     """
-    seasonal_patterns: Dict[str, List[Any]] = {}
-    with section_fn("seasonality.detect"):
-        train, score, seasonal_patterns, _ = detect_and_adjust_fn(
+    if seasonality_result is None:
+        seasonality_result = run_seasonality_preparation_stage(
             train=train,
             score=score,
             cfg=cfg,
-            logger=Console,
             equip=equip,
+            section_fn=section_fn,
+            detect_and_adjust_fn=detect_and_adjust_fn,
         )
+    train = seasonality_result.train
+    score = seasonality_result.score
+    seasonal_patterns = seasonality_result.seasonal_patterns
 
     low_var_threshold = 1e-4
     with section_fn("data.guardrails"):
@@ -1394,8 +1483,44 @@ def run_feature_preparation_stage(
     raw_train = train.copy()
     raw_score = score.copy()
 
+    cached_raw_fill_values = None
+    if (
+        train.empty
+        and not _is_coldstart_meta(meta)
+        and load_cached_raw_signal_medians_fn is not None
+    ):
+        cached_raw_fill_values = load_cached_raw_signal_medians_fn(
+            equip=equip,
+            sql_client=sql_client,
+            equip_id=equip_id,
+            cfg=cfg,
+            input_columns=list(score.columns),
+            logger=Console,
+        )
+
     with section_fn("features.build"):
-        train, score = build_features_for_pipeline(train=train, score=score, cfg=cfg, equip=equip)
+        train, score = build_features_for_pipeline(
+            train=train,
+            score=score,
+            cfg=cfg,
+            equip=equip,
+            raw_fill_values_override=cached_raw_fill_values,
+        )
+
+    cached_feature_medians = None
+    if (
+        train.empty
+        and not _is_coldstart_meta(meta)
+        and load_cached_feature_medians_fn is not None
+    ):
+        cached_feature_medians = load_cached_feature_medians_fn(
+            equip=equip,
+            sql_client=sql_client,
+            equip_id=equip_id,
+            cfg=cfg,
+            feature_columns=list(score.columns),
+            logger=Console,
+        )
 
     manifest_protected_columns = load_manifest_protected_columns_fn(
         sql_client=sql_client,
@@ -1416,6 +1541,7 @@ def run_feature_preparation_stage(
             equip_id=equip_id,
             equip=equip,
             protected_columns=manifest_protected_columns,
+            median_values_override=cached_feature_medians,
         )
 
     with section_fn("models.refit_flag"):

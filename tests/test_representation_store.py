@@ -2,7 +2,7 @@ from dataclasses import replace
 
 import pandas as pd
 
-from core.representation_contracts import CompatibilityStatus, ContextAssignment
+from core.representation_contracts import CompatibilityStatus, ContextAssignment, SignalProfile
 from core.representation_pipeline import enrich_representation_shadow, run_representation_pipeline
 from core.representation_store import (
     build_baseline_governance_df,
@@ -68,6 +68,44 @@ def test_build_signal_profiles_df_emits_per_signal_rows() -> None:
 
     assert set(df["SignalName"]) == {"sensor_a", "sensor_b"}
     assert set(df["SignalProfileVersion"]) == {result.refs.signal_profile_version}
+
+
+def test_build_signal_profiles_df_uses_canonical_profiles_from_pipeline_result() -> None:
+    result, _score = _shadow_result()
+    canonical = replace(
+        result,
+        signal_profiles=(
+            SignalProfile(
+                signal_name="canonical_only",
+                missing_ratio=0.25,
+                flatline_ratio=0.5,
+                effective_cadence_seconds=3600.0,
+                monitorability_class="WEAK",
+                reason_codes=("from_pipeline",),
+            ),
+        ),
+    )
+
+    df = build_signal_profiles_df(canonical, None)
+
+    assert list(df["SignalName"]) == ["canonical_only"]
+    assert df.loc[0, "ReasonCodesJson"] == '["from_pipeline"]'
+
+
+def test_build_signal_profiles_df_warns_when_falling_back_to_store_time_profiling() -> None:
+    result, score = _shadow_result()
+    fallback_result = replace(result, signal_profiles=())
+    captured = {"warn": []}
+
+    class _Logger:
+        def warn(self, message, **kwargs):
+            captured["warn"].append((message, kwargs))
+
+    df = build_signal_profiles_df(fallback_result, score, logger=_Logger())
+
+    assert not df.empty
+    assert captured["warn"]
+    assert "falling back to store-time reprofiling" in captured["warn"][0][0]
 
 
 def test_build_representation_schema_and_baseline_frames_are_singleton_rows() -> None:
