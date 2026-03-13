@@ -1136,17 +1136,21 @@ class TestRefactorHelpers:
         assert len(validate_calls) == 1
         assert coldstart_calls == ["FD_FAN"]
 
-    def test_smart_coldstart_check_status_delegates_legacy_gate_to_baseline_governor(self, monkeypatch):
-        """SmartColdstart should fetch SQL state but delegate lifecycle meaning to baseline_governor."""
+    def test_smart_coldstart_check_status_prefers_governed_gate_from_baseline_governor(self, monkeypatch):
+        """SmartColdstart should prefer governed runtime mode and only use lifecycle as fallback."""
         from core import smart_coldstart as sc
 
         class _Cursor:
             def execute(self, query, params):
-                self.query = query
+                self.query = str(query)
                 self.params = params
 
             def fetchone(self):
-                return ("LEARNING",)
+                if "ACM_BaselineGovernance" in self.query:
+                    return ("BASELINE_FORMATION",)
+                if "ACM_ActiveModels" in self.query:
+                    return ("LEARNING",)
+                return (123, 4)
 
             def __enter__(self):
                 return self
@@ -1160,25 +1164,25 @@ class TestRefactorHelpers:
 
         calls = []
 
-        def _resolve_gate(value):
-            calls.append(value)
+        def _resolve_gate(*, runtime_mode_hint=None, regime_maturity_state=None):
+            calls.append((runtime_mode_hint, regime_maturity_state))
             return type(
                 "Decision",
                 (),
                 {
-                    "use_existing_models": True,
-                    "reason_code": "legacy_maturity_ready_for_scoring",
+                    "use_existing_models": False,
+                    "reason_code": "governed_runtime_requires_baseline_formation",
                 },
             )()
 
-        monkeypatch.setattr(sc, "resolve_legacy_coldstart_load_decision", _resolve_gate)
+        monkeypatch.setattr(sc, "resolve_coldstart_load_decision", _resolve_gate)
 
         manager = sc.SmartColdstart(sql_client=_SqlClient(), equip_id=7, equip_name="FD_FAN")
         state = manager.check_status(required_rows=500)
 
-        assert calls == ["LEARNING"]
-        assert state.use_existing_models is True
-        assert state.gate_reason == "legacy_maturity_ready_for_scoring"
+        assert calls == [("BASELINE_FORMATION", "LEARNING")]
+        assert state.use_existing_models is False
+        assert state.gate_reason == "governed_runtime_requires_baseline_formation"
 
     def test_write_drift_controller_state_no_output_manager(self):
         """Drift writer should safely no-op when output manager is missing."""

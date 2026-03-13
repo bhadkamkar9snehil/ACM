@@ -3,6 +3,7 @@ from core.baseline_governor import (
     BaselineSeedDecision,
     build_shadow_baseline_governance,
     legacy_regime_maturity_requires_coldstart,
+    resolve_coldstart_load_decision,
     resolve_legacy_coldstart_load_decision,
     seed_baseline,
     resolve_baseline_seed_decision,
@@ -55,6 +56,26 @@ def test_resolve_legacy_coldstart_load_decision_maps_legacy_lifecycle_hint() -> 
     assert baseline_window_path.reason_code == "legacy_maturity_requires_coldstart"
     assert ready_for_scoring.use_existing_models is True
     assert ready_for_scoring.reason_code == "legacy_maturity_ready_for_scoring"
+
+
+def test_resolve_coldstart_load_decision_prefers_governed_runtime_mode() -> None:
+    decision = resolve_coldstart_load_decision(
+        runtime_mode_hint=RuntimeMode.BASELINE_FORMATION.value,
+        regime_maturity_state="LEARNING",
+    )
+
+    assert decision.use_existing_models is False
+    assert decision.reason_code == "governed_runtime_requires_baseline_formation"
+
+
+def test_resolve_coldstart_load_decision_allows_existing_models_for_scoring_modes() -> None:
+    decision = resolve_coldstart_load_decision(
+        runtime_mode_hint=RuntimeMode.ONLINE_SCORING.value,
+        regime_maturity_state="INITIALIZING",
+    )
+
+    assert decision.use_existing_models is True
+    assert decision.reason_code == "governed_runtime_ready_for_scoring"
 
 
 def test_annotate_load_stage_governance_meta_sets_explicit_bootstrap_fields() -> None:

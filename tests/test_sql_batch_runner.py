@@ -127,11 +127,29 @@ def test_process_batches_resume_starts_after_last_batch_end(tmp_path):
     assert starts[0] == datetime(2024, 1, 1, 0, 10, 0)
 
 
-def test_check_coldstart_status_uses_active_model_maturity_state(tmp_path):
+def test_check_coldstart_status_prefers_governed_runtime_mode(tmp_path):
     runner = _make_runner(tmp_path)
     runner._get_config_int = lambda equip_id, path, default=500: 500  # type: ignore[method-assign]
     runner._get_sql_connection = lambda: _SequenceConn([  # type: ignore[method-assign]
         (101,),
+        ("BASELINE_FORMATION", "TRUSTED_WINDOW_PENDING", "WAITING_FOR_TRUSTED_WINDOW"),
+        ("LEARNING",),
+        ("PENDING", 120, 500),
+    ])
+
+    is_complete, accumulated, required = runner._check_coldstart_status("FD_FAN")
+
+    assert is_complete is False
+    assert accumulated == 120
+    assert required == 500
+
+
+def test_check_coldstart_status_falls_back_to_legacy_maturity_when_governed_state_missing(tmp_path):
+    runner = _make_runner(tmp_path)
+    runner._get_config_int = lambda equip_id, path, default=500: 500  # type: ignore[method-assign]
+    runner._get_sql_connection = lambda: _SequenceConn([  # type: ignore[method-assign]
+        (101,),
+        None,
         ("LEARNING",),
         ("PENDING", 120, 500),
     ])
@@ -140,22 +158,6 @@ def test_check_coldstart_status_uses_active_model_maturity_state(tmp_path):
 
     assert is_complete is True
     assert accumulated == 120
-    assert required == 500
-
-
-def test_check_coldstart_status_does_not_trust_complete_without_maturity(tmp_path):
-    runner = _make_runner(tmp_path)
-    runner._get_config_int = lambda equip_id, path, default=500: 500  # type: ignore[method-assign]
-    runner._get_sql_connection = lambda: _SequenceConn([  # type: ignore[method-assign]
-        (101,),
-        ("INITIALIZING",),
-        ("COMPLETE", 500, 500),
-    ])
-
-    is_complete, accumulated, required = runner._check_coldstart_status("FD_FAN")
-
-    assert is_complete is False
-    assert accumulated == 500
     assert required == 500
 
 

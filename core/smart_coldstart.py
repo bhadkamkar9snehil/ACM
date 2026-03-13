@@ -16,7 +16,7 @@ from dataclasses import dataclass
 import pandas as pd
 from core.baseline_governor import (
     annotate_load_stage_governance_meta,
-    resolve_legacy_coldstart_load_decision,
+    resolve_coldstart_load_decision,
 )
 from core.observability import Console
 from core.run_metadata_writer import zero_day_status_from_noop_reason
@@ -305,12 +305,28 @@ class SmartColdstart:
         try:
             with self.sql_client.cursor() as cur:
                 cur.execute(
+                    """
+                    IF OBJECT_ID('dbo.ACM_BaselineGovernance', 'U') IS NOT NULL
+                    BEGIN
+                        SELECT TOP 1 RuntimeMode
+                        FROM dbo.ACM_BaselineGovernance
+                        WHERE EquipID = ?
+                        ORDER BY Timestamp DESC, CreatedAt DESC
+                    END
+                    """,
+                    (self.equip_id,),
+                )
+                governed_row = cur.fetchone()
+                cur.execute(
                     "SELECT RegimeMaturityState FROM dbo.ACM_ActiveModels WHERE EquipID = ?",
                     (self.equip_id,)
                 )
-                row = cur.fetchone()
+                lifecycle_row = cur.fetchone()
 
-            decision = resolve_legacy_coldstart_load_decision(row[0] if row is not None else None)
+            decision = resolve_coldstart_load_decision(
+                runtime_mode_hint=governed_row[0] if governed_row is not None else None,
+                regime_maturity_state=lifecycle_row[0] if lifecycle_row is not None else None,
+            )
             state.use_existing_models = decision.use_existing_models
             state.gate_reason = decision.reason_code
             if not state.use_existing_models:

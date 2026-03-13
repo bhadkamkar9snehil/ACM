@@ -56,6 +56,7 @@ if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
 from core.output_contracts import ALLOWED_TABLES
+from core.baseline_governor import resolve_coldstart_load_decision
 try:
     from core.observability import (
         Console,
@@ -1332,7 +1333,7 @@ class SQLBatchRunner:
             Tuple of (is_complete, accumulated_rows, required_rows)
         """
         Console.info(
-            f"{equip_name}: Checking coldstart status in SQL (ACM_ActiveModels/ACM_ColdstartState)...",
+            f"{equip_name}: Checking coldstart status in SQL (ACM_BaselineGovernance/ACM_ActiveModels/ACM_ColdstartState)...",
             component="COLDSTART",
             equipment=equip_name,
         )
@@ -1352,7 +1353,20 @@ class SQLBatchRunner:
 
             equip_id = row[0]
 
-            # ACM_ActiveModels is the authoritative lifecycle source for coldstart completion.
+            cur.execute(
+                """
+                IF OBJECT_ID('dbo.ACM_BaselineGovernance', 'U') IS NOT NULL
+                BEGIN
+                    SELECT TOP 1 RuntimeMode, BaselineCandidateState, ShadowRefreshState
+                    FROM dbo.ACM_BaselineGovernance
+                    WHERE EquipID = ?
+                    ORDER BY Timestamp DESC, CreatedAt DESC
+                END
+                """,
+                (equip_id,),
+            )
+            baseline_row = cur.fetchone()
+
             cur.execute("""
                 SELECT RegimeMaturityState
                 FROM dbo.ACM_ActiveModels
@@ -1383,63 +1397,60 @@ class SQLBatchRunner:
                 status, accum_rows, req_rows = row
                 required = req_rows or min_required
 
-            has_active_model = maturity_state not in (None, "", "INITIALIZING")
-            if has_active_model:
-                if row and status != 'COMPLETE':
-                    Console.warn(
-                        f"{equip_name}: Active model lifecycle state is {maturity_state} but ACM_ColdstartState "
-                        f"still shows Status={status}. Treating coldstart as complete because lifecycle state is authoritative.",
-                        component="COLDSTART",
-                        equipment=equip_name,
-                        maturity_state=maturity_state,
-                        status=status,
-                        accumulated=accum_rows or 0,
-                        required=required,
-                    )
-                else:
-                    Console.info(
-                        f"{equip_name}: Active model lifecycle state is {maturity_state}; coldstart is complete.",
-                        component="COLDSTART",
-                        equipment=equip_name,
-                        maturity_state=maturity_state,
-                        status=status,
-                        accumulated=accum_rows or 0,
-                        required=required,
-                    )
+            runtime_mode = None
+            baseline_candidate_state = None
+            shadow_refresh_state = None
+            if baseline_row:
+                runtime_mode = str(baseline_row[0] or "").strip().upper() or None
+                baseline_candidate_state = str(baseline_row[1] or "").strip().upper() or None
+                shadow_refresh_state = str(baseline_row[2] or "").strip().upper() or None
+
+            decision = resolve_coldstart_load_decision(
+                runtime_mode_hint=runtime_mode,
+                regime_maturity_state=maturity_state,
+            )
+
+            if decision.use_existing_models:
+                Console.info(
+                    f"{equip_name}: Coldstart is complete.",
+                    component="COLDSTART",
+                    equipment=equip_name,
+                    runtime_mode=runtime_mode or "UNASSESSED",
+                    maturity_state=maturity_state or "INITIALIZING",
+                    baseline_candidate_state=baseline_candidate_state,
+                    shadow_refresh_state=shadow_refresh_state,
+                    status=status or "UNASSESSED",
+                    accumulated=accum_rows or 0,
+                    required=required,
+                    gate_reason=decision.reason_code,
+                )
                 return True, accum_rows or 0, required
 
-            if row:
-                if status == 'COMPLETE':
-                    Console.warn(
-                        f"{equip_name}: ACM_ColdstartState says COMPLETE but ACM_ActiveModels has no mature lifecycle "
-                        "state yet; treating coldstart as incomplete.",
-                        component="COLDSTART",
-                        equipment=equip_name,
-                        maturity_state=maturity_state or "INITIALIZING",
-                        status=status,
-                        accumulated=accum_rows or 0,
-                        required=required,
-                    )
-                else:
-                    Console.info(
-                        f"{equip_name}: Lifecycle state={maturity_state or 'INITIALIZING'}, "
-                        f"Status={status}, AccumulatedRows={accum_rows or 0}, RequiredRows={required}",
-                        component="COLDSTART",
-                        equipment=equip_name,
-                        maturity_state=maturity_state or "INITIALIZING",
-                        status=status,
-                        accumulated=accum_rows or 0,
-                        required=required,
-                    )
+            if row or baseline_row:
+                Console.info(
+                    f"{equip_name}: Coldstart still forming baseline.",
+                    component="COLDSTART",
+                    equipment=equip_name,
+                    runtime_mode=runtime_mode or "UNASSESSED",
+                    maturity_state=maturity_state or "INITIALIZING",
+                    baseline_candidate_state=baseline_candidate_state,
+                    shadow_refresh_state=shadow_refresh_state,
+                    status=status or "UNASSESSED",
+                    accumulated=accum_rows or 0,
+                    required=required,
+                    gate_reason=decision.reason_code,
+                )
                 return False, accum_rows or 0, required
 
             Console.info(
-                f"{equip_name}: No ACM_ColdstartState row and no active model lifecycle state; "
+                f"{equip_name}: No governed baseline-governance row and no active model lifecycle state; "
                 f"using default minimum rows={min_required}",
                 component="COLDSTART",
                 equipment=equip_name,
+                runtime_mode=runtime_mode or "UNASSESSED",
                 maturity_state=maturity_state or "INITIALIZING",
                 min_required=min_required,
+                gate_reason=decision.reason_code,
             )
             return False, 0, min_required
 

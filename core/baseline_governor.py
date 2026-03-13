@@ -73,6 +73,39 @@ def legacy_regime_maturity_requires_coldstart(regime_maturity_state: Any) -> boo
     return state in {"", "INITIALIZING", "NONE", "NULL"}
 
 
+def resolve_coldstart_load_decision(
+    *,
+    runtime_mode_hint: Any = None,
+    regime_maturity_state: Any = None,
+) -> ColdstartLoadDecision:
+    """
+    Resolve whether ACM should use existing models or continue baseline formation.
+
+    Governed runtime mode is authoritative when available. Legacy lifecycle state
+    remains only as a fallback while coldstart ownership finishes converging on
+    baseline-governor semantics.
+    """
+    runtime_mode = str(runtime_mode_hint or "").strip().upper()
+    if runtime_mode in {
+        RuntimeMode.ONLINE_SCORING.value,
+        RuntimeMode.CONTROLLED_ADAPTATION.value,
+        RuntimeMode.SCHEMA_BREAK_REQUALIFICATION.value,
+    }:
+        return ColdstartLoadDecision(
+            use_existing_models=True,
+            reason_code="governed_runtime_ready_for_scoring",
+        )
+    if runtime_mode in {
+        RuntimeMode.BOOTSTRAP_NOT_READY.value,
+        RuntimeMode.BASELINE_FORMATION.value,
+    }:
+        return ColdstartLoadDecision(
+            use_existing_models=False,
+            reason_code="governed_runtime_requires_baseline_formation",
+        )
+    return resolve_legacy_coldstart_load_decision(regime_maturity_state)
+
+
 def resolve_legacy_coldstart_load_decision(regime_maturity_state: Any) -> ColdstartLoadDecision:
     """
     Transitional load-stage owner for whether ACM still needs coldstart batching.
