@@ -18,10 +18,7 @@ from dataclasses import dataclass
 import pandas as pd
 from core.baseline_governor import (
     annotate_load_stage_governance_meta,
-    BaselineSeedDecision,
     resolve_legacy_coldstart_load_decision,
-    seed_baseline as _seed_baseline_governed,
-    seed_baseline_safe as _seed_baseline_safe_governed,
 )
 from core.observability import Console
 from core.run_metadata_writer import zero_day_status_from_noop_reason
@@ -151,7 +148,7 @@ def load_and_validate_data_stage(
     historical_replay = bool(getattr(args, "start_time", None))
     coldstart_cfg = cfg.get("coldstart", {})
     max_attempts = int(coldstart_cfg.get("max_attempts", 3))
-    train, score, meta, coldstart_complete = coldstart_manager.load_with_retry(
+    train, score, meta, can_proceed = coldstart_manager.load_with_retry(
         cfg=cfg,
         output_manager=output_manager,
         start_time=win_start,
@@ -162,7 +159,7 @@ def load_and_validate_data_stage(
     )
     gate_reason = getattr(coldstart_manager.state, "gate_reason", "") if getattr(coldstart_manager, "state", None) is not None else ""
 
-    if not coldstart_complete:
+    if not can_proceed:
         meta = annotate_load_stage_governance_meta(
             meta,
             can_proceed=False,
@@ -821,58 +818,3 @@ class SmartColdstart:
                 except:
                     pass
 
-
-# =============================================================================
-# P4.5: BASELINE SEEDING (moved from acm_main.py)
-# =============================================================================
-
-def seed_baseline(
-    train: pd.DataFrame,
-    score: pd.DataFrame,
-    sql_client: Optional[Any],
-    equip_id: int,
-    cfg: Dict[str, Any],
-    equip: str = "",
-    is_coldstart: bool = False,
-    ensure_local_index_fn: Optional[Any] = None,
-    apply_non_authoritative_seed: bool = True,
-) -> BaselineSeedDecision:
-    """Compatibility wrapper around the governed baseline-seeding owner."""
-    return _seed_baseline_governed(
-        train=train,
-        score=score,
-        sql_client=sql_client,
-        equip_id=equip_id,
-        cfg=cfg,
-        equip=equip,
-        is_coldstart=is_coldstart,
-        ensure_local_index_fn=ensure_local_index_fn,
-        apply_non_authoritative_seed=apply_non_authoritative_seed,
-    )
-
-
-def seed_baseline_safe(
-    train: pd.DataFrame,
-    score: pd.DataFrame,
-    sql_client: Optional[Any],
-    equip_id: int,
-    cfg: Dict[str, Any],
-    equip: str = "",
-    is_coldstart: bool = False,
-    ensure_local_index_fn: Optional[Any] = None,
-    apply_non_authoritative_seed: bool = True,
-    logger: Any = Console,
-) -> BaselineSeedDecision:
-    """Compatibility wrapper around the governed safe baseline-seeding owner."""
-    return _seed_baseline_safe_governed(
-        train=train,
-        score=score,
-        sql_client=sql_client,
-        equip_id=equip_id,
-        cfg=cfg,
-        equip=equip,
-        is_coldstart=is_coldstart,
-        ensure_local_index_fn=ensure_local_index_fn,
-        apply_non_authoritative_seed=apply_non_authoritative_seed,
-        logger=logger,
-    )
