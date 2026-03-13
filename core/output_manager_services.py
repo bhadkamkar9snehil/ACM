@@ -380,6 +380,7 @@ def update_baseline_buffer_service(
     score_numeric: pd.DataFrame,
     cfg: Dict[str, Any],
     coldstart_complete: bool,
+    meta: Optional[Any] = None,
 ) -> bool:
     """Update ACM_BaselineBuffer using periodic refresh policy."""
     if output_manager.sql_client is None:
@@ -393,8 +394,24 @@ def update_baseline_buffer_service(
     should_write_buffer = False
     write_reason = ""
     recent_run_count = 0
+    explicit_runtime_mode = str(
+        meta.get("baseline_runtime_mode", "")
+        if isinstance(meta, dict)
+        else getattr(meta, "baseline_runtime_mode", "")
+    ).strip().upper() if meta is not None else ""
+    baseline_ready = (
+        meta.get("baseline_ready")
+        if isinstance(meta, dict)
+        else getattr(meta, "baseline_ready", None)
+    ) if meta is not None else None
 
-    if not coldstart_complete:
+    if explicit_runtime_mode in {"BOOTSTRAP_NOT_READY", "BASELINE_FORMATION"}:
+        should_write_buffer = True
+        write_reason = explicit_runtime_mode.lower()
+    elif baseline_ready is False:
+        should_write_buffer = True
+        write_reason = "baseline_not_ready"
+    elif not coldstart_complete:
         should_write_buffer = True
         write_reason = "coldstart"
     else:
@@ -1403,6 +1420,7 @@ def prepare_persistence_inputs_service(
     regime_model: Any,
     cfg: Dict[str, Any],
     coldstart_complete: bool,
+    meta: Optional[Any],
     build_sensor_analytics_context_fn: Any,
     logger: Any,
     equip: str,
@@ -1433,6 +1451,7 @@ def prepare_persistence_inputs_service(
                 score_numeric=raw_score,
                 cfg=cfg,
                 coldstart_complete=coldstart_complete,
+                meta=meta,
             )
 
     with section_fn("sensor.context"):

@@ -1942,7 +1942,8 @@ class OutputManager:
         self, 
         score_numeric: pd.DataFrame,
         cfg: Dict[str, Any],
-        coldstart_complete: bool
+        coldstart_complete: bool,
+        meta: Optional[Any] = None,
     ) -> bool:
         """Update ACM_BaselineBuffer using periodic refresh policy."""
         return update_baseline_buffer_service(
@@ -1950,6 +1951,7 @@ class OutputManager:
             score_numeric=score_numeric,
             cfg=cfg,
             coldstart_complete=coldstart_complete,
+            meta=meta,
         )
     
     def _ensure_local_index(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -2400,6 +2402,7 @@ class OutputManager:
         regime_model: Any,
         cfg: Dict[str, Any],
         coldstart_complete: bool,
+        meta: Optional[Any] = None,
         build_sensor_analytics_context_fn: Any,
         logger: Any,
         equip: str,
@@ -2417,6 +2420,7 @@ class OutputManager:
             regime_model=regime_model,
             cfg=cfg,
             coldstart_complete=coldstart_complete,
+            meta=meta,
             build_sensor_analytics_context_fn=build_sensor_analytics_context_fn,
             logger=logger,
             equip=equip,

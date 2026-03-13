@@ -3023,7 +3023,6 @@ def run_health_stage(
                 cfg=cfg,
                 equip_id=equip_id,
                 output_manager=output_manager,
-                coldstart_complete=coldstart_complete,
                 regime_quality_ok=regime_quality_ok,
                 baseline_contamination_verdict=baseline_contamination_verdict,
                 logger=logger,

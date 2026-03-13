@@ -634,7 +634,6 @@ def maybe_update_adaptive_thresholds(
     cfg: Dict[str, Any],
     equip_id: int,
     output_manager: Optional[Any],
-    coldstart_complete: bool,
     regime_quality_ok: bool,
     baseline_contamination_verdict: str = "unknown",
     logger: Any,

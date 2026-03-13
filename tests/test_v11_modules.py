@@ -956,7 +956,6 @@ class TestRefactorHelpers:
             cfg=cfg,
             equip_id=1,
             output_manager=None,
-            coldstart_complete=False,
             regime_quality_ok=False,
             logger=_Logger(),
         )
@@ -4704,7 +4703,7 @@ class TestRefactorHelpers:
         from core.output_manager import OutputManager
 
         out = OutputManager.__new__(OutputManager)
-        calls = {"sections": [], "baseline": False, "sensor": False}
+        calls = {"sections": [], "baseline": False, "sensor": False, "baseline_meta": None}
 
         class _Section:
             def __init__(self, name):
@@ -4720,6 +4719,7 @@ class TestRefactorHelpers:
 
         def _update_baseline_buffer(**kwargs):
             calls["baseline"] = True
+            calls["baseline_meta"] = kwargs.get("meta")
 
         def _build_sensor_context(**kwargs):
             calls["sensor"] = True
@@ -4741,6 +4741,7 @@ class TestRefactorHelpers:
             regime_model=None,
             cfg={},
             coldstart_complete=True,
+            meta={"baseline_runtime_mode": "ONLINE_SCORING", "baseline_ready": True},
             build_sensor_analytics_context_fn=_build_sensor_context,
             logger=type("L", (), {"warn": lambda *a, **k: None})(),
             equip="FD_FAN",
@@ -4748,6 +4749,7 @@ class TestRefactorHelpers:
 
         assert result.sensor_context == {"ctx": 1}
         assert calls["baseline"] is True
+        assert calls["baseline_meta"] == {"baseline_runtime_mode": "ONLINE_SCORING", "baseline_ready": True}
         assert calls["sensor"] is True
         assert calls["sections"] == ["baseline.buffer_write", "sensor.context"]
 
