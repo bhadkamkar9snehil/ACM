@@ -379,7 +379,6 @@ def update_baseline_buffer_service(
     output_manager: Any,
     score_numeric: pd.DataFrame,
     cfg: Dict[str, Any],
-    coldstart_complete: bool,
     meta: Optional[Any] = None,
 ) -> bool:
     """Update ACM_BaselineBuffer using periodic refresh policy."""
@@ -411,9 +410,6 @@ def update_baseline_buffer_service(
     elif baseline_ready is False:
         should_write_buffer = True
         write_reason = "baseline_not_ready"
-    elif not coldstart_complete:
-        should_write_buffer = True
-        write_reason = "coldstart"
     else:
         try:
             with output_manager.sql_client.cursor() as cur:
@@ -1419,7 +1415,6 @@ def prepare_persistence_inputs_service(
     omr_contributions_data: Optional[pd.DataFrame],
     regime_model: Any,
     cfg: Dict[str, Any],
-    coldstart_complete: bool,
     meta: Optional[Any],
     build_sensor_analytics_context_fn: Any,
     logger: Any,
@@ -1450,7 +1445,6 @@ def prepare_persistence_inputs_service(
             output_manager.update_baseline_buffer(
                 score_numeric=raw_score,
                 cfg=cfg,
-                coldstart_complete=coldstart_complete,
                 meta=meta,
             )
 

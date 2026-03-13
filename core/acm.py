@@ -1958,7 +1958,6 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
             omr_contributions_data=omr_contributions_data,
             regime_model=regime_model,
             cfg=cfg,
-            coldstart_complete=coldstart_complete,
             meta=meta,
             build_sensor_analytics_context_fn=build_sensor_analytics_context,
             logger=Console,

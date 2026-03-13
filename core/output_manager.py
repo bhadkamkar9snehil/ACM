@@ -1942,7 +1942,6 @@ class OutputManager:
         self, 
         score_numeric: pd.DataFrame,
         cfg: Dict[str, Any],
-        coldstart_complete: bool,
         meta: Optional[Any] = None,
     ) -> bool:
         """Update ACM_BaselineBuffer using periodic refresh policy."""
@@ -1950,7 +1949,6 @@ class OutputManager:
             self,
             score_numeric=score_numeric,
             cfg=cfg,
-            coldstart_complete=coldstart_complete,
             meta=meta,
         )
     
@@ -2401,7 +2399,6 @@ class OutputManager:
         omr_contributions_data: Optional[pd.DataFrame],
         regime_model: Any,
         cfg: Dict[str, Any],
-        coldstart_complete: bool,
         meta: Optional[Any] = None,
         build_sensor_analytics_context_fn: Any,
         logger: Any,
@@ -2419,7 +2416,6 @@ class OutputManager:
             omr_contributions_data=omr_contributions_data,
             regime_model=regime_model,
             cfg=cfg,
-            coldstart_complete=coldstart_complete,
             meta=meta,
             build_sensor_analytics_context_fn=build_sensor_analytics_context_fn,
             logger=logger,
