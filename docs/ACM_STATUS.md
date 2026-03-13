@@ -9,13 +9,13 @@ Each major ACM slice replaces this file with current repo and runtime truth.
 
 | Item | Current value |
 |---|---|
-| Overall `2026.2` completion | `85%` |
+| Overall `2026.2` completion | `88%` |
 | Architecture / ownership extraction | `91%` |
 | Runtime governed behavior | `87%` |
 | Coldstart / baseline unification | `94%` |
 | SQL / control-plane alignment | `78%` |
 | Replay qualification | `88%` |
-| Dashboard / operator cutover | `50%` |
+| Dashboard / operator cutover | `75%` |
 | Forecast / RUL governed cutover | `20%` |
 | Current branch | `refactor/2026.2-rg-13-audit-hygiene` |
 | Latest validated runtime slice | `manifest-only feature-schema preview gate` |
@@ -25,7 +25,7 @@ Each major ACM slice replaces this file with current repo and runtime truth.
 | Scope | Estimated remaining time |
 |---|---|
 | Core ACM runtime unification | `0.5 to 1 focused day` |
-| Full `2026.2` completion | `1.5 to 3.5 focused days` |
+| Full `2026.2` completion | `1.5 to 3 focused days` |
 
 The remaining work is now concentrated in:
 
@@ -47,6 +47,7 @@ ACM is now a governed representation-aware runtime with:
 - many no-score runs short-circuit before feature, detector, regime, zero-day, and health work
 - additive-growth/schema-blocked batches now able to stop from a manifest-only feature-schema preview before seasonality and feature preparation
 - fleet and observability dashboards now consume governed run-insight views for the top-level operator surface
+- the asset-specific master dashboard now uses governed views for its top summary/status panels
 
 Current repo/runtime truth:
 
@@ -61,11 +62,12 @@ Current repo/runtime truth:
   - else safe default: baseline formation
 - the latest major stop-line improvement is a manifest-only feature-schema preview from raw columns before feature-value build
 - `grafana_dashboards/acm_fleet_overview.json`, `grafana_dashboards/acm_observability.json`, and their `active/` copies now read governed views instead of only legacy score/health tables
+- `grafana_dashboards/acm_master_complete.json` and its `active/` copy now use governed views for current-status summary panels while leaving historical scored panels intact
 
 What ACM is not yet:
 
 - fully representation-first from the earliest possible stop point
-- fully complete in operator-facing dashboards; the fleet/runtime dashboards are partially cut over, but `acm_master_complete` and deeper explanation dashboards are still legacy-heavy
+- fully complete in operator-facing dashboards; fleet/runtime dashboards and master summary panels are now governed-first, but deeper explanation/history dashboards are still legacy-heavy
 - forecast / RUL governed end-to-end
 - fully stripped of transitional legacy owners
 
@@ -113,7 +115,8 @@ Recent validated slices:
 
 | Commit | Summary |
 |---|---|
-| `pending current operator commit` | cut fleet and observability dashboards over to governed views |
+| `pending current operator commit` | cut master dashboard summary panels over to governed views |
+| `03b6541` | cut fleet and observability dashboards over to governed views |
 | `a6b9c44` | add manifest-only feature-schema preview before feature build |
 | `7eb012b` | add cheap unadjusted raw preview gate |
 | `f093677` | remove local coldstart completion semantics |
@@ -126,8 +129,8 @@ Net effect of recent slices:
 - runtime no longer depends on hidden lifecycle meaning inside `smart_coldstart`
 - runner coldstart progression now uses governed coldstart/load authority
 - additive-growth/schema-blocked no-score runs now stop from a manifest-only preview before seasonality / feature prep
-- the fleet/runtime operator surface is now partially governed-first through the fleet and observability dashboards
-- the main runtime-ordering problem has moved deeper into the remaining learnable baseline-formation path, while the remaining operator gap is the asset-specific/master dashboard family
+- the fleet/runtime operator surface is now governed-first through the fleet, observability, and master-summary dashboards
+- the main runtime-ordering problem has moved deeper into the remaining learnable baseline-formation path, while the remaining operator gap is the deeper asset-specific history/explanation dashboard family
 
 ## Remaining Work Burn-Down
 
@@ -137,7 +140,7 @@ Net effect of recent slices:
 | Representation-first runtime ordering | Many governed no-score runs now stop before seasonality / feature prep | Push stop conditions earlier on the remaining learnable baseline-formation and trusted-window paths | High |
 | Zero-day demotion | Zero-day is non-authoritative on governed no-score runs | Remove remaining alternate-personality feel from runtime summaries and operator surfaces | Medium |
 | SQL / control-plane semantics | Governed tables and views are live and useful | Finalize target semantics for `ACM_SignalProfiles` and `ACM_RepresentationSchemas` | Medium |
-| Dashboards / operator truth | Fleet and observability dashboards now use governed views, and active copies are aligned | Finish asset-specific/master dashboard cutover and retire legacy score-first operator assumptions | High |
+| Dashboards / operator truth | Fleet and observability dashboards now use governed views, and master summary panels are governed-first | Finish deeper asset-specific history/explanation dashboard cutover and retire legacy score-first operator assumptions | High |
 | Forecast / RUL | Still mostly legacy | Bring forecast / RUL under governed eligibility and suppression rules | High |
 | Legacy deletion | Some obsolete code and tables already removed | Delete remaining transitional owners only after replay-qualified replacement is proven | Medium |
 
@@ -147,12 +150,12 @@ Ordered by importance:
 
 1. Remaining late cost on learnable baseline-formation runtime
 2. Forecast / RUL governed cutover
-3. Remaining asset-specific/master dashboard cutover
+3. Remaining asset-specific history/explanation dashboard cutover
 4. Final trusted-window package evolution
 5. Final legacy deletion
 
 The main blocker is no longer coldstart authority cleanup.
-The main blocker is finishing runtime ordering on the remaining expensive baseline-formation path, then bringing the remaining asset-specific/operator surfaces and forecast stack under governed ACM.
+The main blocker is finishing runtime ordering on the remaining expensive baseline-formation path, then bringing the remaining deeper asset-specific/operator surfaces and forecast stack under governed ACM.
 
 ## Source Control State
 
@@ -178,7 +181,7 @@ Immediate next slices:
 After that:
 
 4. finish SQL / control-plane semantic cleanup
-5. finish the remaining asset-specific/master dashboard cutover
+5. finish the remaining asset-specific history/explanation dashboard cutover
 6. bring forecast / RUL under governed ACM
 7. delete transitional legacy owners after replay-qualified replacement
 
