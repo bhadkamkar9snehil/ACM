@@ -88,7 +88,7 @@ def build_noop_observability(reason: str) -> Tuple[str, Dict[str, Any]]:
 
     if normalized == "COLDSTART_DEFERRED":
         return (
-            "NOOP - coldstart deferred; insufficient history for legacy detector fit and zero-day scoring is inactive on this run",
+            "NOOP - coldstart deferred; insufficient history for governed baseline formation and zero-day scoring is inactive on this run",
             {
                 "noop_reason": normalized,
                 "zero_day_scoring_active": False,
@@ -113,6 +113,9 @@ class DataLoadStageResult:
     meta: Optional[Any]
     should_continue: bool
     noop_reason: Optional[str] = None
+
+
+_COLDSTART_PROGRESS_STAGE = "score"
 
 
 def load_and_validate_data_stage(
@@ -141,7 +144,6 @@ def load_and_validate_data_stage(
         sql_client=sql_client,
         equip_id=equip_id,
         equip_name=equip,
-        stage="score",
     )
     train, score, meta, can_proceed = coldstart_manager.load_with_retry(
         cfg=cfg,
@@ -255,11 +257,9 @@ def load_and_validate_data_stage(
 class ColdstartState:
     """SQL-backed coldstart progress and load-path state for one equipment."""
     
-    def __init__(self, equip_id: int, stage: str = 'score'):
+    def __init__(self, equip_id: int):
         self.equip_id = equip_id
-        self.stage = stage
         self.use_existing_models = False
-        self.runtime_mode_hint = "BASELINE_FORMATION"
         self.attempt_count = 0
         self.accumulated_rows = 0
         self.required_rows = 500
@@ -285,11 +285,10 @@ class SmartColdstart:
     - never fail the pipeline when the current window is not ready yet
     """
     
-    def __init__(self, sql_client, equip_id: int, equip_name: str, stage: str = 'score'):
+    def __init__(self, sql_client, equip_id: int, equip_name: str):
         self.sql_client = sql_client
         self.equip_id = equip_id
         self.equip_name = equip_name
-        self.stage = stage
         self.state: Optional[ColdstartState] = None
         
     def check_status(self, required_rows: int = 500) -> ColdstartState:
@@ -310,7 +309,7 @@ class SmartColdstart:
         Returns:
             ColdstartState with current status
         """
-        state = ColdstartState(self.equip_id, self.stage)
+        state = ColdstartState(self.equip_id)
         state.required_rows = required_rows
         try:
             with self.sql_client.cursor() as cur:
@@ -322,7 +321,6 @@ class SmartColdstart:
 
             decision = resolve_legacy_coldstart_load_decision(row[0] if row is not None else None)
             state.use_existing_models = decision.use_existing_models
-            state.runtime_mode_hint = decision.runtime_mode_hint.value
             state.gate_reason = decision.reason_code
             if not state.use_existing_models:
                 accumulated, attempts = self._load_progress()
@@ -335,12 +333,11 @@ class SmartColdstart:
                 component="COLDSTART",
                 equip_id=self.equip_id,
                 equip_name=self.equip_name,
-                stage=self.stage,
+                stage=_COLDSTART_PROGRESS_STAGE,
                 error_type=type(e).__name__,
                 error=str(e)[:200],
             )
             state.use_existing_models = False  # safe default
-            state.runtime_mode_hint = "BASELINE_FORMATION"
             state.gate_reason = "check_status_failed_safe_default"
 
         self.state = state
@@ -361,7 +358,7 @@ class SmartColdstart:
                 cur.execute(
                     "SELECT AccumulatedRows, AttemptCount FROM dbo.ACM_ColdstartState "
                     "WHERE EquipID = ? AND Stage = ?",
-                    (self.equip_id, self.stage)
+                    (self.equip_id, _COLDSTART_PROGRESS_STAGE)
                 )
                 row = cur.fetchone()
             if row:
@@ -372,7 +369,7 @@ class SmartColdstart:
                 "Progress counters will reset to zero for this batch.",
                 component="COLDSTART",
                 equip_id=self.equip_id,
-                stage=self.stage,
+                stage=_COLDSTART_PROGRESS_STAGE,
                 error_type=type(e).__name__,
             )
         return 0, 0
@@ -779,7 +776,15 @@ class SmartColdstart:
                 cur.execute(
                     "EXEC dbo.usp_ACM_UpdateColdstartProgress @EquipID=?, @Stage=?, @RowsReceived=?, "
                     "@DataStartTime=?, @DataEndTime=?, @ErrorMessage=?, @Success=?",
-                    (self.equip_id, self.stage, rows_received, data_start, data_end, error_message, success)
+                    (
+                        self.equip_id,
+                        _COLDSTART_PROGRESS_STAGE,
+                        rows_received,
+                        data_start,
+                        data_end,
+                        error_message,
+                        success,
+                    )
                 )
                 self.sql_client.conn.commit()
             except Exception as e:
@@ -788,7 +793,7 @@ class SmartColdstart:
                     "Row accumulation count will not be saved; next batch will re-count from scratch.",
                     component="COLDSTART",
                     equip_id=self.equip_id,
-                    stage=self.stage,
+                    stage=_COLDSTART_PROGRESS_STAGE,
                     rows_received=rows_received,
                     error_type=type(e).__name__,
                     error=str(e)[:200],

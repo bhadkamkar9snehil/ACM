@@ -52,10 +52,8 @@ def test_resolve_legacy_coldstart_load_decision_maps_legacy_lifecycle_hint() -> 
     ready_for_scoring = resolve_legacy_coldstart_load_decision("LEARNING")
 
     assert baseline_window_path.use_existing_models is False
-    assert baseline_window_path.runtime_mode_hint == RuntimeMode.BASELINE_FORMATION
     assert baseline_window_path.reason_code == "legacy_maturity_requires_coldstart"
     assert ready_for_scoring.use_existing_models is True
-    assert ready_for_scoring.runtime_mode_hint == RuntimeMode.ONLINE_SCORING
     assert ready_for_scoring.reason_code == "legacy_maturity_ready_for_scoring"
 
 

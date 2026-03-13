@@ -1167,7 +1167,6 @@ class TestRefactorHelpers:
                 (),
                 {
                     "use_existing_models": True,
-                    "runtime_mode_hint": type("Mode", (), {"value": "ONLINE_SCORING"})(),
                     "reason_code": "legacy_maturity_ready_for_scoring",
                 },
             )()
@@ -1179,7 +1178,6 @@ class TestRefactorHelpers:
 
         assert calls == ["LEARNING"]
         assert state.use_existing_models is True
-        assert state.runtime_mode_hint == "ONLINE_SCORING"
         assert state.gate_reason == "legacy_maturity_ready_for_scoring"
 
     def test_write_drift_controller_state_no_output_manager(self):
