@@ -2397,9 +2397,9 @@ Role after `2026.2`:
 Current condition:
 
 - Partial / transitional
-- existing dashboards and SQL-backed operator views still read mostly from legacy score/health tables plus legacy `ACM_Runs` fields
-- new governed run-insight views now exist live in DB via `scripts/sql/91_create_representation_run_views.sql`, but the existing dashboards are not yet materially using them
-- repo search shows no meaningful current dashboard/view usage of `ACM_RepresentationStatus`, `ACM_BaselineGovernance`, or the new `ACM_Runs.Representation*` columns, so governed no-score runs are not yet operator-clear without SQL or log inspection
+- fleet and observability dashboards now materially use governed run-insight views (`vw_ACM_RunFact`, `vw_ACM_EquipCurrentSnapshot`), and their active copies are aligned
+- asset-specific/master dashboards and the insight/storyboard surfaces still read mostly from legacy score/health tables plus legacy `ACM_Runs` fields
+- governed no-score runs are now operator-clear at the fleet/runtime-summary level, but not yet on the deeper asset-specific explanation surfaces
 
 What to change:
 
@@ -2750,7 +2750,8 @@ Strict repo audit against this plan shows:
 - a direct governed coldstart run on `WFA_TURBINE_38` for `2023-06-22 07:40:00` through `2023-07-17 07:40:00` proved the opposite boundary: because `learn_allowed=True` in `BASELINE_FORMATION`, the new structural fast-fail did not incorrectly short-circuit detector training; ACM trained, labeled regime context, then suppressed later for baseline-formation reasons
 - a full parallel `start-from-beginning` replay is now behaving correctly for both `WFA_TURBINE_0` and `WFA_TURBINE_10`: SQL truth shows that the runner no longer repeats the same first-day deferred coldstart window, both turbines advanced to four-day `BASELINE_FORMATION` windows with `learn_allowed=True`, and both then progressed into later one-day governed no-score windows that short-circuit cleanly after baseline seeding
 - `ACM_RunLogs` has now been confirmed as a practical SQL-backed log source for replay review: the latest `T0` and `T10` governed batches show the exact short-circuit message, proving that we can read real per-run console flow from SQL even when detached Windows runner launches were not teeing to files
-- repo audit against dashboards and SQL-backed operator surfaces still shows a visibility gap, but the SQL-view side is now improved: new source-controlled run-insight views (`vw_ACM_RunOutputCoverage`, `vw_ACM_RunQualityGates`, `vw_ACM_RunFact`, `vw_ACM_RunStory`, `vw_ACM_EquipCurrentSnapshot`) are live and correctly classify both `SUPPRESSED_VALID` and `BASELINE_FORMATION` replay runs; Grafana itself still needs cutover under `RG-15`
+- repo audit against dashboards and SQL-backed operator surfaces still shows a visibility gap, but the SQL-view side is now improved: new source-controlled run-insight views (`vw_ACM_RunOutputCoverage`, `vw_ACM_RunQualityGates`, `vw_ACM_RunFact`, `vw_ACM_RunStory`, `vw_ACM_EquipCurrentSnapshot`) are live and correctly classify both `SUPPRESSED_VALID` and `BASELINE_FORMATION` replay runs
+- Grafana cutover is now partially real in repo: `grafana_dashboards/acm_fleet_overview.json`, `grafana_dashboards/acm_observability.json`, and their `grafana_dashboards/active/` copies now read governed run-insight views for fleet/runtime summary panels; the remaining gap is the asset-specific/master dashboard family under `RG-15`
 - conservative live-schema cleanup is now partly complete:
   - `ACM_ForecastState` is gone from the live DB and from the refreshed comprehensive schema reference
   - `ACM_Forecast_QualityMetrics` is also gone from the live DB and the refreshed schema reference
@@ -2795,7 +2796,8 @@ These items are now promoted from implied debt to explicit execution work:
   - the governed `NOOP` coldstart retry bug is now fixed
   - next runner work should improve long-run readability and operator review, not re-open outcome semantics that are now correct
 - plan `RG-15` dashboard and SQL-view updates explicitly around representation-aware operator truth:
-  - existing dashboards can show that ACM is active, but they still misread governed no-score batches as empty legacy output instead of valid authoritative suppression
+  - the fleet and observability dashboards are now partially cut over and can show governed no-score batches correctly at the run/fleet level
+  - the remaining asset-specific/master dashboards still misread governed no-score batches as empty legacy output instead of valid authoritative suppression
   - replacement dashboard queries should consume `vw_ACM_RunFact`, `vw_ACM_RunStory`, and `vw_ACM_EquipCurrentSnapshot` first, then fall back to legacy score/health views only where needed
   - keep the new run-insight views source-controlled and authoritative for governed operator truth instead of scattering representation logic across dashboard queries
 - extend the zero-day hardening that is already landed:

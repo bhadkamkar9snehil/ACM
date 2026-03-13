@@ -18,7 +18,7 @@
         "y": 0
       },
       "id": 1,
-      "title": "PIPELINE RUN HISTORY & ZERO-DAY STATE",
+      "title": "PIPELINE RUN HISTORY",
       "type": "row"
     },
     {
@@ -53,7 +53,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Status"
+              "options": "HealthStatus"
             },
             "properties": [
               {
@@ -68,7 +68,8 @@
                   {
                     "type": "value",
                     "options": {
-                      "GOOD": {
+                      "OK": {
+                        "text": "OK",
                         "color": "green",
                         "index": 0
                       }
@@ -77,8 +78,9 @@
                   {
                     "type": "value",
                     "options": {
-                      "HEALTHY": {
-                        "color": "green",
+                      "ERROR": {
+                        "text": "ERROR",
+                        "color": "red",
                         "index": 1
                       }
                     }
@@ -86,36 +88,10 @@
                   {
                     "type": "value",
                     "options": {
-                      "WATCH": {
+                      "PARTIAL": {
+                        "text": "PARTIAL",
                         "color": "orange",
                         "index": 2
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "CAUTION": {
-                        "color": "orange",
-                        "index": 3
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "ALERT": {
-                        "color": "red",
-                        "index": 4
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "CRITICAL": {
-                        "color": "red",
-                        "index": 5
                       }
                     }
                   }
@@ -126,169 +102,24 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "ZeroDayStatus"
+              "options": "ProcessingTimeMs"
             },
             "properties": [
               {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "color-background"
-                }
-              },
-              {
-                "id": "mappings",
-                "value": [
-                  {
-                    "type": "value",
-                    "options": {
-                      "active_hdbscan": {
-                        "color": "#73BF69",
-                        "index": 0
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "active_online_pca_binner": {
-                        "color": "#5794F2",
-                        "index": 1
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "active_global_fallback": {
-                        "color": "#FFB357",
-                        "index": 2
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "inactive_unknown": {
-                        "color": "#9FA7B3",
-                        "index": 3
-                      }
-                    }
-                  }
-                ]
+                "id": "unit",
+                "value": "ms"
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "ZDChannels"
+              "options": "ScoreRowCount"
             },
             "properties": [
               {
                 "id": "unit",
                 "value": "short"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "RowsProcessed"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "short"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Episodes"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "short"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Warns"
-            },
-            "properties": [
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "color-background",
-                  "mode": "gradient"
-                }
-              },
-              {
-                "id": "thresholds",
-                "value": {
-                  "mode": "absolute",
-                  "steps": [
-                    {
-                      "color": "green",
-                      "value": null
-                    },
-                    {
-                      "color": "yellow",
-                      "value": 1
-                    },
-                    {
-                      "color": "red",
-                      "value": 5
-                    }
-                  ]
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Errors"
-            },
-            "properties": [
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "color-background",
-                  "mode": "gradient"
-                }
-              },
-              {
-                "id": "thresholds",
-                "value": {
-                  "mode": "absolute",
-                  "steps": [
-                    {
-                      "color": "green",
-                      "value": null
-                    },
-                    {
-                      "color": "red",
-                      "value": 1
-                    }
-                  ]
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "DurationSec"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "s"
               }
             ]
           }
@@ -312,7 +143,7 @@
         "showHeader": true,
         "sortBy": [
           {
-            "displayName": "StartedAt",
+            "displayName": "CreatedAt",
             "desc": true
           }
         ]
@@ -324,13 +155,12 @@
             "uid": "mssql-ds"
           },
           "format": "table",
-          "rawSql": "WITH recent_runs AS (\n  SELECT TOP 30\n    r.RunID,\n    r.EquipID,\n    r.HealthStatus AS Status,\n    r.ZeroDayStatus,\n    r.ZeroDaySurfaceType AS Surface,\n    r.ZeroDayChannelCount AS ZDChannels,\n    r.ScoreRowCount AS RowsProcessed,\n    r.EpisodeCount AS Episodes,\n    r.DurationSeconds AS DurationSec,\n    LEFT(r.ConfigSignature, 12) AS Config,\n    r.StartedAt,\n    LEFT(ISNULL(r.ErrorMessage, ''), 80) AS ErrorMessage\n  FROM dbo.ACM_Runs r\n  WHERE r.StartedAt BETWEEN $__timeFrom() AND $__timeTo()\n  ORDER BY r.StartedAt DESC\n),\nlog_counts AS (\n  SELECT\n    rr.RunID,\n    SUM(CASE WHEN UPPER(rl.Level) IN ('WARN', 'WARNING') THEN 1 ELSE 0 END) AS Warns,\n    SUM(CASE WHEN UPPER(rl.Level) = 'ERROR' THEN 1 ELSE 0 END) AS Errors\n  FROM recent_runs rr\n  LEFT JOIN dbo.ACM_RunLogs rl ON rl.RunID = rr.RunID\n  GROUP BY rr.RunID\n)\nSELECT\n  eq.EquipCode AS Equipment,\n  rr.Status,\n  ISNULL(rr.ZeroDayStatus, 'inactive_unknown') AS ZeroDayStatus,\n  ISNULL(rr.Surface, 'n/a') AS Surface,\n  ISNULL(rr.ZDChannels, 0) AS ZDChannels,\n  ISNULL(rr.RowsProcessed, 0) AS RowsProcessed,\n  ISNULL(rr.Episodes, 0) AS Episodes,\n  ISNULL(lc.Warns, 0) AS Warns,\n  ISNULL(lc.Errors, 0) AS Errors,\n  ISNULL(rr.DurationSec, 0) AS DurationSec,\n  rr.Config,\n  CONVERT(varchar(19), rr.StartedAt, 120) AS StartedAt,\n  rr.ErrorMessage\nFROM recent_runs rr\nJOIN dbo.Equipment eq ON eq.EquipID = rr.EquipID\nLEFT JOIN log_counts lc ON lc.RunID = rr.RunID\nORDER BY rr.StartedAt DESC",
+          "rawSql": "SELECT TOP 30 EquipCode AS Equipment, RunClassification, RepresentationRuntimeMode AS RuntimeMode, ScoreRows AS RowsProcessed, EpisodeRows AS EpisodesDetected, DurationSeconds AS DurationSeconds, WarnCount AS WarnCount, ErrorCount AS ErrorCount, CONVERT(varchar(19), StartedAt, 120) AS StartedAt FROM dbo.vw_ACM_RunFact WHERE StartedAt BETWEEN $__timeFrom() AND $__timeTo() ORDER BY StartedAt DESC",
           "refId": "A"
         }
       ],
-      "title": "Recent ACM Runs",
-      "type": "table",
-      "description": "Recent ACM runs with zero-day fields, SQL warning/error counts, config signature fragment, and error summary."
+      "title": "Recent Pipeline Runs",
+      "type": "table"
     },
     {
       "datasource": {
@@ -452,7 +282,7 @@
             "uid": "mssql-ds"
           },
           "format": "table",
-          "rawSql": "SELECT COUNT(*) AS value FROM dbo.ACM_Runs WHERE ErrorMessage IS NOT NULL AND ErrorMessage <> '' AND StartedAt BETWEEN $__timeFrom() AND $__timeTo()",
+          "rawSql": "SELECT COUNT(*) AS value FROM dbo.vw_ACM_RunFact WHERE RunClassification = 'FAIL' AND StartedAt BETWEEN $__timeFrom() AND $__timeTo()",
           "refId": "A"
         }
       ],
@@ -475,19 +305,27 @@
             "steps": [
               {
                 "color": "green",
-                "value": 0
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 5000
+              },
+              {
+                "color": "red",
+                "value": 30000
               }
             ]
           },
-          "unit": "short"
+          "unit": "ms"
         },
         "overrides": []
       },
       "gridPos": {
-        "x": 8,
-        "y": 8,
+        "h": 3,
         "w": 4,
-        "h": 3
+        "x": 8,
+        "y": 8
       },
       "id": 5,
       "options": {
@@ -497,7 +335,7 @@
         "orientation": "auto",
         "reduceOptions": {
           "calcs": [
-            "sum"
+            "mean"
           ],
           "fields": "",
           "values": false
@@ -511,13 +349,12 @@
             "uid": "mssql-ds"
           },
           "format": "table",
-          "rawSql": "SELECT COUNT(*) AS value FROM dbo.ACM_Runs WHERE ZeroDayScoringActive = 1 AND StartedAt BETWEEN $__timeFrom() AND $__timeTo()",
+          "rawSql": "SELECT AVG(CAST(DurationSeconds AS float)) AS value FROM dbo.ACM_Runs WHERE CompletedAt IS NOT NULL AND StartedAt BETWEEN $__timeFrom() AND $__timeTo()",
           "refId": "A"
         }
       ],
-      "title": "Zero-Day Active Runs",
-      "type": "stat",
-      "description": "Runs in range where ACM explicitly recorded active day-0 scoring."
+      "title": "Avg Processing Time",
+      "type": "stat"
     },
     {
       "datasource": {
@@ -527,16 +364,15 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "fixed",
-            "fixedColor": "#73BF69"
+            "mode": "thresholds"
           },
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "#73BF69",
-                "value": 0
+                "color": "green",
+                "value": null
               }
             ]
           },
@@ -545,14 +381,14 @@
         "overrides": []
       },
       "gridPos": {
-        "x": 12,
-        "y": 8,
+        "h": 3,
         "w": 4,
-        "h": 3
+        "x": 12,
+        "y": 8
       },
       "id": 6,
       "options": {
-        "colorMode": "background",
+        "colorMode": "value",
         "graphMode": "none",
         "justifyMode": "center",
         "orientation": "auto",
@@ -572,13 +408,12 @@
             "uid": "mssql-ds"
           },
           "format": "table",
-          "rawSql": "SELECT COUNT(*) AS value FROM dbo.ACM_Runs WHERE ZeroDayStatus = 'active_hdbscan' AND StartedAt BETWEEN $__timeFrom() AND $__timeTo()",
+          "rawSql": "SELECT ISNULL(SUM(ScoreRowCount), 0) AS value FROM dbo.ACM_Runs WHERE StartedAt BETWEEN $__timeFrom() AND $__timeTo()",
           "refId": "A"
         }
       ],
-      "title": "HDBSCAN Runs",
-      "type": "stat",
-      "description": "Runs in range where mature HDBSCAN regimes were active for zero-day scoring."
+      "title": "Total Rows Scored",
+      "type": "stat"
     },
     {
       "datasource": {
@@ -588,20 +423,23 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "fixed",
-            "fixedColor": "#FFB357"
+            "mode": "thresholds"
           },
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "#FFB357",
-                "value": 0
+                "color": "green",
+                "value": null
               },
               {
-                "color": "#FFB357",
-                "value": 1
+                "color": "orange",
+                "value": 5
+              },
+              {
+                "color": "red",
+                "value": 20
               }
             ]
           },
@@ -610,10 +448,10 @@
         "overrides": []
       },
       "gridPos": {
-        "x": 16,
-        "y": 8,
+        "h": 3,
         "w": 4,
-        "h": 3
+        "x": 16,
+        "y": 8
       },
       "id": 7,
       "options": {
@@ -637,78 +475,12 @@
             "uid": "mssql-ds"
           },
           "format": "table",
-          "rawSql": "SELECT COUNT(*) AS value FROM dbo.ACM_RunLogs WHERE UPPER(Level) IN ('WARN', 'WARNING') AND LoggedAt BETWEEN $__timeFrom() AND $__timeTo()",
+          "rawSql": "SELECT ISNULL(SUM(EpisodeCount), 0) AS value FROM dbo.ACM_Runs WHERE StartedAt BETWEEN $__timeFrom() AND $__timeTo()",
           "refId": "A"
         }
       ],
-      "title": "SQL Warnings",
-      "type": "stat",
-      "description": "Warning-level SQL run-log records in ACM_RunLogs for the active time range."
-    },
-    {
-      "datasource": {
-        "type": "mssql",
-        "uid": "mssql-ds"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "fixed",
-            "fixedColor": "#E24D42"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "#E24D42",
-                "value": 0
-              },
-              {
-                "color": "red",
-                "value": 1
-              }
-            ]
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "x": 20,
-        "y": 8,
-        "w": 4,
-        "h": 3
-      },
-      "id": 8,
-      "options": {
-        "colorMode": "background",
-        "graphMode": "none",
-        "justifyMode": "center",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "sum"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto"
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "mssql",
-            "uid": "mssql-ds"
-          },
-          "format": "table",
-          "rawSql": "SELECT COUNT(*) AS value FROM dbo.ACM_RunLogs WHERE UPPER(Level) = 'ERROR' AND LoggedAt BETWEEN $__timeFrom() AND $__timeTo()",
-          "refId": "A"
-        }
-      ],
-      "title": "SQL Errors",
-      "type": "stat",
-      "description": "Error-level SQL run-log records in ACM_RunLogs for the active time range."
+      "title": "Total Episodes Detected",
+      "type": "stat"
     },
     {
       "collapsed": false,
@@ -1157,7 +929,7 @@
         "y": 55
       },
       "id": 50,
-      "title": "PIPELINE PHASE TIMING & RUN DETAIL",
+      "title": "PIPELINE PHASE TIMING",
       "type": "row"
     },
     {
@@ -1216,14 +988,13 @@
             "type": "prometheus",
             "uid": "prometheus-ds"
           },
-          "expr": "topk(10, sum by (stage) (rate(acm_stage_duration_seconds_sum[5m])) / clamp_min(sum by (stage) (rate(acm_stage_duration_seconds_count[5m])), 1e-9))",
+          "expr": "topk(10, acm_stage_duration_seconds_sum)",
           "legendFormat": "{{stage}}",
           "refId": "A"
         }
       ],
       "title": "Stage Duration (Top 10 Stages)",
-      "type": "timeseries",
-      "description": "Rolling 5-minute mean stage duration by stage, ranked by the highest recent latency"
+      "type": "timeseries"
     },
     {
       "datasource": {
@@ -1257,12 +1028,12 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "DurationSeconds"
+              "options": "ProcessingTimeMs"
             },
             "properties": [
               {
                 "id": "unit",
-                "value": "s"
+                "value": "ms"
               },
               {
                 "id": "custom.cellOptions",
@@ -1273,7 +1044,7 @@
               },
               {
                 "id": "max",
-                "value": 1200
+                "value": 300000
               },
               {
                 "id": "thresholds",
@@ -1286,11 +1057,11 @@
                     },
                     {
                       "color": "orange",
-                      "value": 60
+                      "value": 30000
                     },
                     {
                       "color": "red",
-                      "value": 300
+                      "value": 120000
                     }
                   ]
                 }
@@ -1306,151 +1077,6 @@
               {
                 "id": "unit",
                 "value": "short"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "ZeroDayStatus"
-            },
-            "properties": [
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "color-background"
-                }
-              },
-              {
-                "id": "mappings",
-                "value": [
-                  {
-                    "type": "value",
-                    "options": {
-                      "active_hdbscan": {
-                        "color": "#73BF69",
-                        "index": 0
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "active_online_pca_binner": {
-                        "color": "#5794F2",
-                        "index": 1
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "active_global_fallback": {
-                        "color": "#FFB357",
-                        "index": 2
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "inactive_unknown": {
-                        "color": "#9FA7B3",
-                        "index": 3
-                      }
-                    }
-                  }
-                ]
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "ZDChannels"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "short"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "DataQuality"
-            },
-            "properties": [
-              {
-                "id": "decimals",
-                "value": 2
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Warns"
-            },
-            "properties": [
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "color-background",
-                  "mode": "gradient"
-                }
-              },
-              {
-                "id": "thresholds",
-                "value": {
-                  "mode": "absolute",
-                  "steps": [
-                    {
-                      "color": "green",
-                      "value": null
-                    },
-                    {
-                      "color": "yellow",
-                      "value": 1
-                    },
-                    {
-                      "color": "red",
-                      "value": 5
-                    }
-                  ]
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Errors"
-            },
-            "properties": [
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "color-background",
-                  "mode": "gradient"
-                }
-              },
-              {
-                "id": "thresholds",
-                "value": {
-                  "mode": "absolute",
-                  "steps": [
-                    {
-                      "color": "green",
-                      "value": null
-                    },
-                    {
-                      "color": "red",
-                      "value": 1
-                    }
-                  ]
-                }
               }
             ]
           }
@@ -1471,7 +1097,7 @@
         "showHeader": true,
         "sortBy": [
           {
-            "displayName": "StartedAt",
+            "displayName": "CreatedAt",
             "desc": true
           }
         ]
@@ -1483,13 +1109,12 @@
             "uid": "mssql-ds"
           },
           "format": "table",
-          "rawSql": "WITH recent_runs AS (\n  SELECT TOP 10\n    r.RunID,\n    r.EquipID,\n    r.DurationSeconds,\n    r.ScoreRowCount,\n    r.HealthStatus,\n    r.ZeroDayStatus,\n    r.ZeroDayChannelCount AS ZDChannels,\n    ROUND(CAST(r.DataQualityScore AS float), 2) AS DataQuality,\n    r.StartedAt\n  FROM dbo.ACM_Runs r\n  WHERE r.CompletedAt IS NOT NULL\n    AND r.StartedAt BETWEEN $__timeFrom() AND $__timeTo()\n  ORDER BY r.StartedAt DESC\n),\nlog_counts AS (\n  SELECT\n    rr.RunID,\n    SUM(CASE WHEN UPPER(rl.Level) IN ('WARN', 'WARNING') THEN 1 ELSE 0 END) AS Warns,\n    SUM(CASE WHEN UPPER(rl.Level) = 'ERROR' THEN 1 ELSE 0 END) AS Errors\n  FROM recent_runs rr\n  LEFT JOIN dbo.ACM_RunLogs rl ON rl.RunID = rr.RunID\n  GROUP BY rr.RunID\n)\nSELECT\n  eq.EquipCode AS Equipment,\n  rr.DurationSeconds,\n  rr.ScoreRowCount,\n  rr.HealthStatus,\n  ISNULL(rr.ZeroDayStatus, 'inactive_unknown') AS ZeroDayStatus,\n  ISNULL(rr.ZDChannels, 0) AS ZDChannels,\n  ISNULL(rr.DataQuality, 0) AS DataQuality,\n  ISNULL(lc.Warns, 0) AS Warns,\n  ISNULL(lc.Errors, 0) AS Errors,\n  CONVERT(varchar(19), rr.StartedAt, 120) AS StartedAt\nFROM recent_runs rr\nJOIN dbo.Equipment eq ON eq.EquipID = rr.EquipID\nLEFT JOIN log_counts lc ON lc.RunID = rr.RunID\nORDER BY rr.StartedAt DESC",
+          "rawSql": "SELECT TOP 10\n  eq.EquipCode AS Equipment,\n  r.DurationSeconds,\n  r.ScoreRowCount,\n  r.HealthStatus,\n  CONVERT(varchar(19), r.StartedAt, 120) AS StartedAt\nFROM dbo.ACM_Runs r\nJOIN dbo.Equipment eq ON eq.EquipID = r.EquipID\nWHERE r.CompletedAt IS NOT NULL\n  AND r.StartedAt BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY r.StartedAt DESC",
           "refId": "A"
         }
       ],
-      "title": "Recent Run Detail",
-      "type": "table",
-      "description": "Compact recent-run detail for duration, rows, health outcome, zero-day state, and SQL log pressure."
+      "title": "Recent Run Stats",
+      "type": "table"
     },
     {
       "collapsed": false,
@@ -1500,7 +1125,7 @@
         "y": 64
       },
       "id": 60,
-      "title": "SQL OPERATIONS & RUN LOGS",
+      "title": "SQL OPERATIONS",
       "type": "row"
     },
     {
@@ -1572,203 +1197,52 @@
             "uid": "mssql-ds"
           },
           "format": "table",
-          "rawSql": "SELECT 'ACM_Scores_Wide' AS TableName, COUNT(*) AS TotalRows FROM dbo.ACM_Scores_Wide WHERE Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL\nSELECT 'ACM_HealthTimeline', COUNT(*) FROM dbo.ACM_HealthTimeline WHERE Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL\nSELECT 'ACM_RegimeTimeline', COUNT(*) FROM dbo.ACM_RegimeTimeline WHERE Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL\nSELECT 'ACM_Episodes', COUNT(*) FROM dbo.ACM_Episodes WHERE StartTime BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL\nSELECT 'ACM_Runs', COUNT(*) FROM dbo.ACM_Runs WHERE StartedAt BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL\nSELECT 'ACM_RunLogs', COUNT(*) FROM dbo.ACM_RunLogs WHERE LoggedAt BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL\nSELECT 'ACM_EWMBaseline', COUNT(*) FROM dbo.ACM_EWMBaseline WHERE UpdatedAt BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL\nSELECT 'ACM_RegimeBinnerState', COUNT(*) FROM dbo.ACM_RegimeBinnerState WHERE UpdatedAt BETWEEN $__timeFrom() AND $__timeTo()",
+          "rawSql": "SELECT 'ACM_Runs' AS TableName, COUNT(*) AS TotalRows FROM dbo.ACM_Runs WHERE StartedAt BETWEEN $__timeFrom() AND $__timeTo() UNION ALL SELECT 'ACM_RepresentationStatus', COUNT(*) FROM dbo.ACM_RepresentationStatus WHERE Timestamp BETWEEN $__timeFrom() AND $__timeTo() UNION ALL SELECT 'ACM_BaselineGovernance', COUNT(*) FROM dbo.ACM_BaselineGovernance WHERE Timestamp BETWEEN $__timeFrom() AND $__timeTo() UNION ALL SELECT 'ACM_Scores_Wide', COUNT(*) FROM dbo.ACM_Scores_Wide WHERE Timestamp BETWEEN $__timeFrom() AND $__timeTo() UNION ALL SELECT 'ACM_HealthTimeline', COUNT(*) FROM dbo.ACM_HealthTimeline WHERE Timestamp BETWEEN $__timeFrom() AND $__timeTo() UNION ALL SELECT 'ACM_RegimeTimeline', COUNT(*) FROM dbo.ACM_RegimeTimeline WHERE Timestamp BETWEEN $__timeFrom() AND $__timeTo()",
           "refId": "A"
         }
       ],
-      "title": "Rows Written per ACM Table",
-      "type": "barchart",
-      "description": "Write volume into the core ACM SQL output tables, including ACM_RunLogs, ACM_EWMBaseline, and ACM_RegimeBinnerState."
+      "title": "Rows Written per Table",
+      "type": "barchart"
     },
     {
       "datasource": {
-        "type": "mssql",
-        "uid": "mssql-ds"
+        "type": "loki",
+        "uid": "loki-ds"
       },
       "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "custom": {
-            "align": "auto",
-            "cellOptions": {
-              "type": "auto"
-            },
-            "inspect": false
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "LoggedAt"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 148
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Equipment"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 110
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Level"
-            },
-            "properties": [
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "color-background"
-                }
-              },
-              {
-                "id": "custom.width",
-                "value": 80
-              },
-              {
-                "id": "mappings",
-                "value": [
-                  {
-                    "type": "value",
-                    "options": {
-                      "ERROR": {
-                        "text": "ERROR",
-                        "color": "#E24D42",
-                        "index": 0
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "WARN": {
-                        "text": "WARN",
-                        "color": "#FFB357",
-                        "index": 1
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "WARNING": {
-                        "text": "WARN",
-                        "color": "#FFB357",
-                        "index": 2
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "INFO": {
-                        "text": "INFO",
-                        "color": "#5794F2",
-                        "index": 3
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "SUCCESS": {
-                        "text": "SUCCESS",
-                        "color": "#73BF69",
-                        "index": 4
-                      }
-                    }
-                  }
-                ]
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Component"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 110
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Message"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 420
-              }
-            ]
-          }
-        ]
+        "defaults": {},
+        "overrides": []
       },
       "gridPos": {
-        "x": 12,
-        "y": 65,
+        "h": 8,
         "w": 12,
-        "h": 8
+        "x": 12,
+        "y": 65
       },
       "id": 62,
       "options": {
-        "cellHeight": "sm",
-        "footer": {
-          "show": false
-        },
-        "showHeader": true,
-        "sortBy": [
-          {
-            "displayName": "LoggedAt",
-            "desc": true
-          }
-        ]
+        "dedupStrategy": "none",
+        "enableLogDetails": true,
+        "prettifyLogMessage": false,
+        "showCommonLabels": false,
+        "showLabels": false,
+        "showTime": true,
+        "sortOrder": "Descending",
+        "wrapLogMessage": false
       },
       "targets": [
         {
           "datasource": {
-            "type": "mssql",
-            "uid": "mssql-ds"
+            "type": "loki",
+            "uid": "loki-ds"
           },
-          "editorMode": "code",
-          "format": "table",
-          "rawQuery": true,
-          "rawSql": "SELECT TOP 150\n  CONVERT(varchar(19), rl.LoggedAt, 120) AS LoggedAt,\n  eq.EquipCode AS Equipment,\n  UPPER(rl.Level) AS Level,\n  rl.Component,\n  LEFT(rl.Message, 180) AS Message\nFROM dbo.ACM_RunLogs rl\nLEFT JOIN dbo.ACM_Runs r ON r.RunID = rl.RunID\nLEFT JOIN dbo.Equipment eq ON eq.EquipID = COALESCE(rl.EquipID, r.EquipID)\nWHERE rl.LoggedAt BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY rl.LoggedAt DESC",
+          "expr": "{app=\"acm\"} |~ `(SQL|insert|write|rows)`",
+          "queryType": "range",
           "refId": "A"
         }
       ],
-      "title": "Recent SQL Run Logs",
-      "type": "table",
-      "transformations": null,
-      "description": "Recent SQL-native ACM log tail from ACM_RunLogs, enriched with equipment code."
+      "title": "SQL / Write Logs",
+      "type": "logs"
     },
     {
       "collapsed": false,
@@ -1779,7 +1253,7 @@
         "y": 73
       },
       "id": 70,
-      "title": "DETECTOR SCORES (Global Latest Run)",
+      "title": "DETECTOR SCORES (Latest Run per Equipment)",
       "type": "row"
     },
     {
@@ -1855,179 +1329,12 @@
             "uid": "mssql-ds"
           },
           "format": "time_series",
-          "rawSql": "DECLARE @LatestRun uniqueidentifier = (\n  SELECT TOP 1 RunID\n  FROM dbo.ACM_Runs\n  ORDER BY StartedAt DESC\n);\nSELECT\n  sw.Timestamp AS time,\n  v.metric,\n  v.value\nFROM dbo.ACM_Scores_Wide sw\nCROSS APPLY (VALUES\n  ('AR1', sw.ar1_z),\n  ('PCA_SPE', sw.pca_spe_z),\n  ('PCA_T2', sw.pca_t2_z),\n  ('MHAL', sw.mhal_z),\n  ('IFOREST', sw.iforest_z),\n  ('GMM', sw.gmm_z),\n  ('CUSUM', sw.cusum_z),\n  ('FUSED', sw.fused)\n) v(metric, value)\nWHERE sw.RunID = @LatestRun\n  AND sw.Timestamp BETWEEN $__timeFrom() AND $__timeTo()\n  AND v.value IS NOT NULL\nORDER BY sw.Timestamp ASC, v.metric ASC",
+          "rawSql": "DECLARE @LatestRun uniqueidentifier = (SELECT TOP 1 RunID FROM dbo.vw_ACM_RunFact WHERE ScoreRows > 0 ORDER BY StartedAt DESC); SELECT sw.Timestamp AS time, 'AR1' AS metric, sw.ar1_z AS value FROM dbo.ACM_Scores_Wide sw WHERE sw.RunID = @LatestRun AND sw.Timestamp BETWEEN $__timeFrom() AND $__timeTo() UNION ALL SELECT sw.Timestamp, 'PCA_SPE', sw.pca_spe_z FROM dbo.ACM_Scores_Wide sw WHERE sw.RunID = @LatestRun AND sw.Timestamp BETWEEN $__timeFrom() AND $__timeTo() UNION ALL SELECT sw.Timestamp, 'PCA_T2', sw.pca_t2_z FROM dbo.ACM_Scores_Wide sw WHERE sw.RunID = @LatestRun AND sw.Timestamp BETWEEN $__timeFrom() AND $__timeTo() UNION ALL SELECT sw.Timestamp, 'IForest', sw.iforest_z FROM dbo.ACM_Scores_Wide sw WHERE sw.RunID = @LatestRun AND sw.Timestamp BETWEEN $__timeFrom() AND $__timeTo() UNION ALL SELECT sw.Timestamp, 'GMM', sw.gmm_z FROM dbo.ACM_Scores_Wide sw WHERE sw.RunID = @LatestRun AND sw.Timestamp BETWEEN $__timeFrom() AND $__timeTo() UNION ALL SELECT sw.Timestamp, 'Fused', sw.fused FROM dbo.ACM_Scores_Wide sw WHERE sw.RunID = @LatestRun AND sw.Timestamp BETWEEN $__timeFrom() AND $__timeTo() ORDER BY time ASC",
           "refId": "A"
         }
       ],
-      "title": "Detector & Fused Scores (Global Latest Run)",
-      "type": "timeseries",
-      "description": "All persisted detector z-score series plus fused score for the single most recent ACM run across the fleet"
-    },
-    {
-      "collapsed": false,
-      "gridPos": {
-        "x": 0,
-        "y": 82,
-        "w": 24,
-        "h": 1
-      },
-      "id": 80,
-      "title": "ACM SQL LOG ANALYSIS",
-      "type": "row"
-    },
-    {
-      "datasource": {
-        "type": "mssql",
-        "uid": "mssql-ds"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "fillOpacity": 80,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "lineWidth": 1,
-            "scaleDistribution": {
-              "type": "linear"
-            }
-          },
-          "mappings": [],
-          "unit": "short",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "x": 0,
-        "y": 83,
-        "w": 12,
-        "h": 8
-      },
-      "id": 81,
-      "options": {
-        "barRadius": 0,
-        "barWidth": 0.8,
-        "fullHighlight": false,
-        "groupWidth": 0.7,
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "orientation": "horizontal",
-        "showValue": "auto",
-        "stacking": "none",
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "mssql",
-            "uid": "mssql-ds"
-          },
-          "format": "table",
-          "rawSql": "SELECT TOP 12\n  rl.Component,\n  COUNT(*) AS LogCount\nFROM dbo.ACM_RunLogs rl\nWHERE rl.LoggedAt BETWEEN $__timeFrom() AND $__timeTo()\nGROUP BY rl.Component\nORDER BY LogCount DESC, rl.Component",
-          "refId": "A"
-        }
-      ],
-      "title": "SQL Log Volume by Component",
-      "type": "barchart",
-      "description": "Which ACM components are producing the most SQL log volume in the current time window."
-    },
-    {
-      "datasource": {
-        "type": "mssql",
-        "uid": "mssql-ds"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "fillOpacity": 80,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "lineWidth": 1,
-            "scaleDistribution": {
-              "type": "linear"
-            }
-          },
-          "mappings": [],
-          "unit": "short",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "x": 12,
-        "y": 83,
-        "w": 12,
-        "h": 8
-      },
-      "id": 82,
-      "options": {
-        "barRadius": 0,
-        "barWidth": 0.8,
-        "fullHighlight": false,
-        "groupWidth": 0.7,
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "orientation": "horizontal",
-        "showValue": "auto",
-        "stacking": "none",
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "mssql",
-            "uid": "mssql-ds"
-          },
-          "format": "table",
-          "rawSql": "SELECT TOP 12\n  eq.EquipCode AS Equipment,\n  SUM(CASE WHEN UPPER(rl.Level) IN ('WARN', 'WARNING') THEN 1 ELSE 0 END) AS Warnings,\n  SUM(CASE WHEN UPPER(rl.Level) = 'ERROR' THEN 1 ELSE 0 END) AS Errors\nFROM dbo.ACM_RunLogs rl\nLEFT JOIN dbo.ACM_Runs r ON r.RunID = rl.RunID\nLEFT JOIN dbo.Equipment eq ON eq.EquipID = COALESCE(rl.EquipID, r.EquipID)\nWHERE rl.LoggedAt BETWEEN $__timeFrom() AND $__timeTo()\nGROUP BY eq.EquipCode\nHAVING SUM(CASE WHEN UPPER(rl.Level) IN ('WARN', 'WARNING', 'ERROR') THEN 1 ELSE 0 END) > 0\nORDER BY Errors DESC, Warnings DESC, eq.EquipCode",
-          "refId": "A"
-        }
-      ],
-      "title": "Warnings & Errors by Equipment",
-      "type": "barchart",
-      "description": "Equipment with the highest SQL warning and error pressure in the current time window."
+      "title": "Detector Z-Scores (Latest Run)",
+      "type": "timeseries"
     }
   ],
   "refresh": "30s",
@@ -2051,6 +1358,6 @@
   "timezone": "browser",
   "title": "ACM \u2014 Observability",
   "uid": "acm-observability-v4",
-  "version": 3,
+  "version": 1,
   "weekStart": ""
 }

@@ -216,7 +216,7 @@
         },
         "textMode": "value_and_name"
       },
-      "title": "ALERT",
+      "title": "SCORED",
       "type": "stat",
       "targets": [
         {
@@ -224,7 +224,7 @@
             "type": "mssql",
             "uid": "mssql-ds"
           },
-          "rawSql": "SELECT COUNT(*) AS value FROM (\n  SELECT EquipID, HealthZone AS Zone, ROW_NUMBER() OVER (PARTITION BY EquipID ORDER BY Timestamp DESC) AS rn\n  FROM dbo.ACM_HealthTimeline\n) x WHERE rn = 1 AND Zone = 'ALERT'",
+          "rawSql": "SELECT COUNT(*) AS value FROM dbo.vw_ACM_EquipCurrentSnapshot WHERE RepresentationScoreAllowed = 1",
           "format": "table",
           "refId": "A"
         }
@@ -276,7 +276,7 @@
         },
         "textMode": "value_and_name"
       },
-      "title": "WATCH",
+      "title": "BASELINE",
       "type": "stat",
       "targets": [
         {
@@ -284,7 +284,7 @@
             "type": "mssql",
             "uid": "mssql-ds"
           },
-          "rawSql": "SELECT COUNT(*) AS value FROM (\n  SELECT EquipID, HealthZone AS Zone, ROW_NUMBER() OVER (PARTITION BY EquipID ORDER BY Timestamp DESC) AS rn\n  FROM dbo.ACM_HealthTimeline\n) x WHERE rn = 1 AND Zone = 'WATCH'",
+          "rawSql": "SELECT COUNT(*) AS value FROM dbo.vw_ACM_EquipCurrentSnapshot WHERE RunClassification = 'BASELINE_FORMATION'",
           "format": "table",
           "refId": "A"
         }
@@ -336,7 +336,7 @@
         },
         "textMode": "value_and_name"
       },
-      "title": "GOOD",
+      "title": "SUPPRESSED",
       "type": "stat",
       "targets": [
         {
@@ -344,7 +344,7 @@
             "type": "mssql",
             "uid": "mssql-ds"
           },
-          "rawSql": "SELECT COUNT(*) AS value FROM (\n  SELECT EquipID, HealthZone AS Zone, ROW_NUMBER() OVER (PARTITION BY EquipID ORDER BY Timestamp DESC) AS rn\n  FROM dbo.ACM_HealthTimeline\n) x WHERE rn = 1 AND Zone = 'GOOD'",
+          "rawSql": "SELECT COUNT(*) AS value FROM dbo.vw_ACM_EquipCurrentSnapshot WHERE RunClassification = 'SUPPRESSED_VALID'",
           "format": "table",
           "refId": "A"
         }
@@ -417,7 +417,7 @@
             "type": "mssql",
             "uid": "mssql-ds"
           },
-          "rawSql": "SELECT ROUND(AVG(x.HealthIndex), 1) AS value FROM (\n  SELECT EquipID, HealthIndex, ROW_NUMBER() OVER (PARTITION BY EquipID ORDER BY Timestamp DESC) AS rn\n  FROM dbo.ACM_HealthTimeline\n) x WHERE rn = 1",
+          "rawSql": "SELECT ROUND(AVG(CAST(HealthIndex AS float)), 1) AS value FROM dbo.vw_ACM_EquipCurrentSnapshot WHERE HealthIndex IS NOT NULL",
           "format": "table",
           "refId": "A"
         }
@@ -495,7 +495,7 @@
         "showThresholdMarkers": true,
         "sizing": "auto"
       },
-      "title": "All Equipment Health Index",
+      "title": "All Equipment \u2014 Governed Snapshot",
       "type": "gauge",
       "targets": [
         {
@@ -503,7 +503,7 @@
             "type": "mssql",
             "uid": "mssql-ds"
           },
-          "rawSql": "SELECT\n  eq.EquipCode AS metric,\n  x.HealthIndex\nFROM (\n  SELECT EquipID, HealthIndex, ROW_NUMBER() OVER (PARTITION BY EquipID ORDER BY Timestamp DESC) AS rn\n  FROM dbo.ACM_HealthTimeline\n) x\nJOIN dbo.Equipment eq ON eq.EquipID = x.EquipID\nWHERE x.rn = 1 AND eq.Status = 1\nORDER BY x.HealthIndex ASC",
+          "rawSql": "SELECT EquipCode AS metric, COALESCE(HealthIndex, 0) AS HealthIndex FROM dbo.vw_ACM_EquipCurrentSnapshot ORDER BY CASE WHEN HealthIndex IS NULL THEN 1 ELSE 0 END, HealthIndex ASC, EquipCode ASC",
           "format": "table",
           "refId": "A"
         }
@@ -619,7 +619,7 @@
           "sort": "none"
         }
       },
-      "title": "Fleet Zone Distribution",
+      "title": "Fleet Runtime Classification",
       "type": "piechart",
       "targets": [
         {
@@ -627,7 +627,7 @@
             "type": "mssql",
             "uid": "mssql-ds"
           },
-          "rawSql": "SELECT Zone AS metric, COUNT(*) AS value FROM (\n  SELECT EquipID, HealthZone AS Zone, ROW_NUMBER() OVER (PARTITION BY EquipID ORDER BY Timestamp DESC) AS rn\n  FROM dbo.ACM_HealthTimeline\n) x WHERE rn = 1 GROUP BY Zone ORDER BY value DESC",
+          "rawSql": "SELECT RunClassification AS metric, COUNT(*) AS value FROM dbo.vw_ACM_EquipCurrentSnapshot GROUP BY RunClassification ORDER BY value DESC",
           "format": "table",
           "refId": "A"
         }
@@ -815,153 +815,6 @@
                 }
               }
             ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "ZeroDayStatus"
-            },
-            "properties": [
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "color-background"
-                }
-              },
-              {
-                "id": "mappings",
-                "value": [
-                  {
-                    "type": "value",
-                    "options": {
-                      "active_hdbscan": {
-                        "text": "HDBSCAN",
-                        "color": "#73BF69",
-                        "index": 0
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "active_online_pca_binner": {
-                        "text": "ONLINE PCA",
-                        "color": "#5794F2",
-                        "index": 1
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "active_global_fallback": {
-                        "text": "GLOBAL FALLBACK",
-                        "color": "#FFB357",
-                        "index": 2
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "inactive_coldstart_deferred": {
-                        "text": "COLDSTART",
-                        "color": "#9FA7B3",
-                        "index": 3
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "no_recent_run": {
-                        "text": "NO RECENT RUN",
-                        "color": "#C0C6D0",
-                        "index": 4
-                      }
-                    }
-                  }
-                ]
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "ZDChannels"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "short"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Warn24h"
-            },
-            "properties": [
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "color-background",
-                  "mode": "gradient"
-                }
-              },
-              {
-                "id": "thresholds",
-                "value": {
-                  "mode": "absolute",
-                  "steps": [
-                    {
-                      "color": "green",
-                      "value": null
-                    },
-                    {
-                      "color": "yellow",
-                      "value": 1
-                    },
-                    {
-                      "color": "red",
-                      "value": 10
-                    }
-                  ]
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Error24h"
-            },
-            "properties": [
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "color-background",
-                  "mode": "gradient"
-                }
-              },
-              {
-                "id": "thresholds",
-                "value": {
-                  "mode": "absolute",
-                  "steps": [
-                    {
-                      "color": "green",
-                      "value": null
-                    },
-                    {
-                      "color": "red",
-                      "value": 1
-                    }
-                  ]
-                }
-              }
-            ]
           }
         ]
       },
@@ -986,11 +839,11 @@
         "sortBy": [
           {
             "desc": true,
-            "displayName": "Error24h"
+            "displayName": "ActiveEpisodes"
           }
         ]
       },
-      "title": "All Equipment \u2014 Current Health & Day-0",
+      "title": "All Equipment \u2014 Current Status",
       "type": "table",
       "targets": [
         {
@@ -998,12 +851,11 @@
             "type": "mssql",
             "uid": "mssql-ds"
           },
-          "rawSql": "WITH latest_health AS (\n  SELECT\n    EquipID,\n    HealthIndex,\n    HealthZone AS Zone,\n    Timestamp,\n    ROW_NUMBER() OVER (PARTITION BY EquipID ORDER BY Timestamp DESC) AS rn\n  FROM dbo.ACM_HealthTimeline\n),\nactive_eps AS (\n  SELECT EquipID, COUNT(*) AS ActiveEpisodes\n  FROM dbo.ACM_Episodes\n  WHERE StartTime >= DATEADD(day, -1, GETUTCDATE())\n  GROUP BY EquipID\n),\nlatest_runs AS (\n  SELECT\n    EquipID,\n    ZeroDayStatus,\n    ZeroDayChannelCount,\n    ROW_NUMBER() OVER (PARTITION BY EquipID ORDER BY StartedAt DESC) AS rn\n  FROM dbo.ACM_Runs\n),\nlog_counts AS (\n  SELECT\n    r.EquipID,\n    SUM(CASE WHEN UPPER(rl.Level) IN ('WARN', 'WARNING') THEN 1 ELSE 0 END) AS Warn24h,\n    SUM(CASE WHEN UPPER(rl.Level) = 'ERROR' THEN 1 ELSE 0 END) AS Error24h\n  FROM dbo.ACM_RunLogs rl\n  JOIN dbo.ACM_Runs r ON r.RunID = rl.RunID\n  WHERE r.StartedAt >= DATEADD(day, -1, GETUTCDATE())\n  GROUP BY r.EquipID\n)\nSELECT\n  eq.EquipCode AS Equipment,\n  ROUND(h.HealthIndex, 1) AS HealthIndex,\n  h.Zone,\n  ISNULL(ep.ActiveEpisodes, 0) AS ActiveEpisodes,\n  ISNULL(lr.ZeroDayStatus, 'no_recent_run') AS ZeroDayStatus,\n  ISNULL(lr.ZeroDayChannelCount, 0) AS ZDChannels,\n  ISNULL(lc.Warn24h, 0) AS Warn24h,\n  ISNULL(lc.Error24h, 0) AS Error24h,\n  CONVERT(varchar(19), h.Timestamp, 120) AS LastUpdated\nFROM latest_health h\nJOIN dbo.Equipment eq ON eq.EquipID = h.EquipID\nLEFT JOIN active_eps ep ON ep.EquipID = h.EquipID\nLEFT JOIN latest_runs lr ON lr.EquipID = h.EquipID AND lr.rn = 1\nLEFT JOIN log_counts lc ON lc.EquipID = h.EquipID\nWHERE h.rn = 1 AND eq.Status = 1\nORDER BY h.HealthIndex ASC, lc.Error24h DESC, lc.Warn24h DESC",
+          "rawSql": "SELECT EquipCode AS Equipment, RunClassification, RepresentationRuntimeMode AS RuntimeMode, CAST(RepresentationScoreAllowed AS int) AS ScoreAllowed, CAST(RepresentationLearnAllowed AS int) AS LearnAllowed, ROUND(HealthIndex, 1) AS HealthIndex, COALESCE(HealthZone, 'UNASSESSED') AS HealthZone, CONVERT(varchar(19), COALESCE(CompletedAt, StartedAt), 120) AS LastUpdated FROM dbo.vw_ACM_EquipCurrentSnapshot ORDER BY CASE RunClassification WHEN 'FAIL' THEN 0 WHEN 'SUPPRESSED_VALID' THEN 1 WHEN 'BASELINE_FORMATION' THEN 2 WHEN 'NOOP_VALID' THEN 3 ELSE 4 END, Equipment ASC",
           "format": "table",
           "refId": "A"
         }
-      ],
-      "description": "Current fleet state with latest health, active episodes, zero-day mode, day-0 channel count, and 24-hour SQL log pressure."
+      ]
     },
     {
       "collapsed": false,
@@ -1720,7 +1572,7 @@
         "y": 59
       },
       "id": 70,
-      "title": "Pipeline & Zero-Day Run History (All Equipment)",
+      "title": "Pipeline Run History (All Equipment)",
       "type": "row"
     },
     {
@@ -1770,7 +1622,7 @@
                   {
                     "type": "value",
                     "options": {
-                      "GOOD": {
+                      "OK": {
                         "color": "green",
                         "index": 0
                       }
@@ -1779,8 +1631,8 @@
                   {
                     "type": "value",
                     "options": {
-                      "HEALTHY": {
-                        "color": "green",
+                      "ERROR": {
+                        "color": "red",
                         "index": 1
                       }
                     }
@@ -1788,36 +1640,9 @@
                   {
                     "type": "value",
                     "options": {
-                      "WATCH": {
+                      "PARTIAL": {
                         "color": "orange",
                         "index": 2
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "CAUTION": {
-                        "color": "orange",
-                        "index": 3
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "ALERT": {
-                        "color": "red",
-                        "index": 4
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "CRITICAL": {
-                        "color": "red",
-                        "index": 5
                       }
                     }
                   }
@@ -1828,191 +1653,34 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "ZeroDayStatus"
+              "options": "ProcessingTimeMs"
             },
             "properties": [
               {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "color-background"
-                }
-              },
-              {
-                "id": "mappings",
-                "value": [
-                  {
-                    "type": "value",
-                    "options": {
-                      "active_hdbscan": {
-                        "color": "#73BF69",
-                        "index": 0
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "active_online_pca_binner": {
-                        "color": "#5794F2",
-                        "index": 1
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "active_global_fallback": {
-                        "color": "#FFB357",
-                        "index": 2
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "inactive_unknown": {
-                        "color": "#9FA7B3",
-                        "index": 3
-                      }
-                    }
-                  }
-                ]
+                "id": "unit",
+                "value": "ms"
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "ZDChannels"
+              "options": "ScoreRowCount"
             },
             "properties": [
               {
                 "id": "unit",
                 "value": "short"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "RowsProcessed"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "short"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "EpisodesDetected"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "short"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "DataQuality"
-            },
-            "properties": [
-              {
-                "id": "decimals",
-                "value": 2
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Warns"
-            },
-            "properties": [
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "color-background",
-                  "mode": "gradient"
-                }
-              },
-              {
-                "id": "thresholds",
-                "value": {
-                  "mode": "absolute",
-                  "steps": [
-                    {
-                      "color": "green",
-                      "value": null
-                    },
-                    {
-                      "color": "yellow",
-                      "value": 1
-                    },
-                    {
-                      "color": "red",
-                      "value": 5
-                    }
-                  ]
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Errors"
-            },
-            "properties": [
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "color-background",
-                  "mode": "gradient"
-                }
-              },
-              {
-                "id": "thresholds",
-                "value": {
-                  "mode": "absolute",
-                  "steps": [
-                    {
-                      "color": "green",
-                      "value": null
-                    },
-                    {
-                      "color": "red",
-                      "value": 1
-                    }
-                  ]
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "DurationSec"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "s"
               }
             ]
           }
         ]
       },
       "gridPos": {
-        "x": 0,
-        "y": 60,
+        "h": 7,
         "w": 24,
-        "h": 8
+        "x": 0,
+        "y": 60
       },
       "id": 71,
       "options": {
@@ -2029,11 +1697,11 @@
         "sortBy": [
           {
             "desc": true,
-            "displayName": "StartedAt"
+            "displayName": "CreatedAt"
           }
         ]
       },
-      "title": "Recent ACM Runs (All Equipment, 24h)",
+      "title": "Recent Pipeline Runs (All Equipment, 24h)",
       "type": "table",
       "targets": [
         {
@@ -2041,353 +1709,11 @@
             "type": "mssql",
             "uid": "mssql-ds"
           },
-          "rawSql": "WITH recent_runs AS (\n  SELECT TOP 50\n    r.RunID,\n    r.EquipID,\n    r.HealthStatus AS Status,\n    r.ZeroDayStatus,\n    r.ZeroDayChannelCount AS ZDChannels,\n    r.ScoreRowCount AS RowsProcessed,\n    r.EpisodeCount AS EpisodesDetected,\n    r.DurationSeconds AS DurationSec,\n    ROUND(CAST(r.DataQualityScore AS float), 2) AS DataQuality,\n    r.StartedAt,\n    LEFT(ISNULL(r.ErrorMessage, ''), 80) AS ErrorMessage\n  FROM dbo.ACM_Runs r\n  WHERE r.StartedAt >= DATEADD(day, -1, GETUTCDATE())\n  ORDER BY r.StartedAt DESC\n),\nlog_counts AS (\n  SELECT\n    rr.RunID,\n    SUM(CASE WHEN UPPER(rl.Level) IN ('WARN', 'WARNING') THEN 1 ELSE 0 END) AS Warns,\n    SUM(CASE WHEN UPPER(rl.Level) = 'ERROR' THEN 1 ELSE 0 END) AS Errors\n  FROM recent_runs rr\n  LEFT JOIN dbo.ACM_RunLogs rl ON rl.RunID = rr.RunID\n  GROUP BY rr.RunID\n)\nSELECT\n  eq.EquipCode AS Equipment,\n  rr.Status,\n  ISNULL(rr.ZeroDayStatus, 'inactive_unknown') AS ZeroDayStatus,\n  ISNULL(rr.ZDChannels, 0) AS ZDChannels,\n  ISNULL(rr.RowsProcessed, 0) AS RowsProcessed,\n  ISNULL(rr.EpisodesDetected, 0) AS EpisodesDetected,\n  ISNULL(rr.DataQuality, 0) AS DataQuality,\n  ISNULL(lc.Warns, 0) AS Warns,\n  ISNULL(lc.Errors, 0) AS Errors,\n  ISNULL(rr.DurationSec, 0) AS DurationSec,\n  CONVERT(varchar(19), rr.StartedAt, 120) AS StartedAt,\n  rr.ErrorMessage\nFROM recent_runs rr\nJOIN dbo.Equipment eq ON eq.EquipID = rr.EquipID\nLEFT JOIN log_counts lc ON lc.RunID = rr.RunID\nORDER BY rr.StartedAt DESC",
+          "rawSql": "SELECT TOP 50 EquipCode AS Equipment, RunClassification, RepresentationRuntimeMode AS RuntimeMode, ScoreRows AS ScoreRows, EpisodeRows AS EpisodeRows, DurationSeconds * 1000 AS ProcessingTimeMs, CONVERT(varchar(19), StartedAt, 120) AS StartedAt, LEFT(COALESCE(RepresentationSuppressedReasons, RepresentationDegradedReasons, ''), 120) AS GoverningReasons FROM dbo.vw_ACM_RunFact WHERE StartedAt >= DATEADD(day, -1, GETUTCDATE()) ORDER BY StartedAt DESC",
           "format": "table",
           "refId": "A"
         }
-      ],
-      "description": "Latest ACM run history across the fleet, including zero-day mode, data quality, and SQL warning/error counts."
-    },
-    {
-      "collapsed": false,
-      "gridPos": {
-        "x": 0,
-        "y": 68,
-        "w": 24,
-        "h": 1
-      },
-      "id": 80,
-      "title": "Zero-Day Coverage & SQL Log Pressure",
-      "type": "row"
-    },
-    {
-      "datasource": {
-        "type": "mssql",
-        "uid": "mssql-ds"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": 0
-              }
-            ]
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "x": 0,
-        "y": 69,
-        "w": 3,
-        "h": 7
-      },
-      "id": 81,
-      "options": {
-        "colorMode": "background",
-        "graphMode": "none",
-        "justifyMode": "center",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto"
-      },
-      "title": "Zero-Day Active",
-      "type": "stat",
-      "targets": [
-        {
-          "datasource": {
-            "type": "mssql",
-            "uid": "mssql-ds"
-          },
-          "format": "table",
-          "rawSql": "WITH latest_runs AS (\n  SELECT\n    EquipID,\n    ZeroDayScoringActive,\n    ROW_NUMBER() OVER (PARTITION BY EquipID ORDER BY StartedAt DESC) AS rn\n  FROM dbo.ACM_Runs\n  WHERE StartedAt >= DATEADD(day, -1, GETUTCDATE())\n)\nSELECT COUNT(*) AS value\nFROM latest_runs\nWHERE rn = 1 AND ZeroDayScoringActive = 1",
-          "refId": "A"
-        }
-      ],
-      "description": "Count of assets whose latest run in the last 24 hours actively used day-0 scoring."
-    },
-    {
-      "datasource": {
-        "type": "mssql",
-        "uid": "mssql-ds"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "fixed",
-            "fixedColor": "#73BF69"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "#73BF69",
-                "value": 0
-              }
-            ]
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "x": 3,
-        "y": 69,
-        "w": 3,
-        "h": 7
-      },
-      "id": 82,
-      "options": {
-        "colorMode": "background",
-        "graphMode": "none",
-        "justifyMode": "center",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto"
-      },
-      "title": "HDBSCAN Latest",
-      "type": "stat",
-      "targets": [
-        {
-          "datasource": {
-            "type": "mssql",
-            "uid": "mssql-ds"
-          },
-          "format": "table",
-          "rawSql": "WITH latest_runs AS (\n  SELECT\n    EquipID,\n    ZeroDayStatus,\n    ROW_NUMBER() OVER (PARTITION BY EquipID ORDER BY StartedAt DESC) AS rn\n  FROM dbo.ACM_Runs\n  WHERE StartedAt >= DATEADD(day, -1, GETUTCDATE())\n)\nSELECT COUNT(*) AS value\nFROM latest_runs\nWHERE rn = 1 AND ZeroDayStatus = 'active_hdbscan'",
-          "refId": "A"
-        }
-      ],
-      "description": "Count of assets whose latest run is already using mature HDBSCAN regimes."
-    },
-    {
-      "datasource": {
-        "type": "mssql",
-        "uid": "mssql-ds"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "fixed",
-            "fixedColor": "#5794F2"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "#5794F2",
-                "value": 0
-              }
-            ]
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "x": 6,
-        "y": 69,
-        "w": 3,
-        "h": 7
-      },
-      "id": 83,
-      "options": {
-        "colorMode": "background",
-        "graphMode": "none",
-        "justifyMode": "center",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto"
-      },
-      "title": "Proxy Latest",
-      "type": "stat",
-      "targets": [
-        {
-          "datasource": {
-            "type": "mssql",
-            "uid": "mssql-ds"
-          },
-          "format": "table",
-          "rawSql": "WITH latest_runs AS (\n  SELECT\n    EquipID,\n    ZeroDayStatus,\n    ROW_NUMBER() OVER (PARTITION BY EquipID ORDER BY StartedAt DESC) AS rn\n  FROM dbo.ACM_Runs\n  WHERE StartedAt >= DATEADD(day, -1, GETUTCDATE())\n)\nSELECT COUNT(*) AS value\nFROM latest_runs\nWHERE rn = 1 AND ZeroDayStatus = 'active_online_pca_binner'",
-          "refId": "A"
-        }
-      ],
-      "description": "Count of assets whose latest run is still using the OnlinePCABinner day-0 regime proxy."
-    },
-    {
-      "datasource": {
-        "type": "mssql",
-        "uid": "mssql-ds"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "fixed",
-            "fixedColor": "#FFB357"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "#FFB357",
-                "value": 0
-              }
-            ]
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "x": 9,
-        "y": 69,
-        "w": 3,
-        "h": 7
-      },
-      "id": 84,
-      "options": {
-        "colorMode": "background",
-        "graphMode": "none",
-        "justifyMode": "center",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto"
-      },
-      "title": "Fallback Latest",
-      "type": "stat",
-      "targets": [
-        {
-          "datasource": {
-            "type": "mssql",
-            "uid": "mssql-ds"
-          },
-          "format": "table",
-          "rawSql": "WITH latest_runs AS (\n  SELECT\n    EquipID,\n    ZeroDayStatus,\n    ROW_NUMBER() OVER (PARTITION BY EquipID ORDER BY StartedAt DESC) AS rn\n  FROM dbo.ACM_Runs\n  WHERE StartedAt >= DATEADD(day, -1, GETUTCDATE())\n)\nSELECT COUNT(*) AS value\nFROM latest_runs\nWHERE rn = 1 AND ZeroDayStatus = 'active_global_fallback'",
-          "refId": "A"
-        }
-      ],
-      "description": "Count of assets whose latest run is still scoring against the global fallback regime."
-    },
-    {
-      "datasource": {
-        "type": "mssql",
-        "uid": "mssql-ds"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "Episode Count",
-            "axisPlacement": "auto",
-            "fillOpacity": 80,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "lineWidth": 1,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "x": 12,
-        "y": 69,
-        "w": 12,
-        "h": 7
-      },
-      "id": 85,
-      "options": {
-        "barRadius": 0.1,
-        "barWidth": 0.7,
-        "fullHighlight": false,
-        "groupWidth": 0.7,
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "orientation": "horizontal",
-        "showValue": "auto",
-        "stacking": "none",
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        },
-        "xTickLabelRotation": 0,
-        "xTickLabelSpacing": 200
-      },
-      "title": "Warnings & Errors by Equipment (24h)",
-      "type": "barchart",
-      "targets": [
-        {
-          "datasource": {
-            "type": "mssql",
-            "uid": "mssql-ds"
-          },
-          "format": "table",
-          "rawSql": "SELECT TOP 12\n  eq.EquipCode AS Equipment,\n  SUM(CASE WHEN UPPER(rl.Level) IN ('WARN', 'WARNING') THEN 1 ELSE 0 END) AS Warnings,\n  SUM(CASE WHEN UPPER(rl.Level) = 'ERROR' THEN 1 ELSE 0 END) AS Errors\nFROM dbo.ACM_RunLogs rl\nJOIN dbo.ACM_Runs r ON r.RunID = rl.RunID\nJOIN dbo.Equipment eq ON eq.EquipID = r.EquipID\nWHERE r.StartedAt >= DATEADD(day, -1, GETUTCDATE())\nGROUP BY eq.EquipCode\nHAVING SUM(CASE WHEN UPPER(rl.Level) IN ('WARN', 'WARNING', 'ERROR') THEN 1 ELSE 0 END) > 0\nORDER BY Errors DESC, Warnings DESC, eq.EquipCode",
-          "refId": "A"
-        }
-      ],
-      "description": "Equipment with the highest SQL warning and error pressure in the last 24 hours."
+      ]
     }
   ],
   "refresh": "1m",
@@ -2409,6 +1735,6 @@
   "timezone": "browser",
   "title": "ACM \u2014 Fleet Overview",
   "uid": "acm-fleet-overview-v1",
-  "version": 3,
+  "version": 1,
   "weekStart": ""
 }

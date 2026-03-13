@@ -155,7 +155,7 @@
             "uid": "mssql-ds"
           },
           "format": "table",
-          "rawSql": "SELECT TOP 30\n  eq.EquipCode AS Equipment,\n  r.HealthStatus AS Status,\n  r.ScoreRowCount AS RowsProcessed,\n  r.EpisodeCount AS EpisodesDetected,\n  r.DurationSeconds AS DurationSeconds,\n  LEFT(r.ConfigSignature, 12) AS Config,\n  CONVERT(varchar(19), r.StartedAt, 120) AS StartedAt,\n  LEFT(ISNULL(r.ErrorMessage, ''), 60) AS ErrorMessage\nFROM dbo.ACM_Runs r\nJOIN dbo.Equipment eq ON eq.EquipID = r.EquipID\nWHERE r.StartedAt BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY r.StartedAt DESC",
+          "rawSql": "SELECT TOP 30 EquipCode AS Equipment, RunClassification, RepresentationRuntimeMode AS RuntimeMode, ScoreRows AS RowsProcessed, EpisodeRows AS EpisodesDetected, DurationSeconds AS DurationSeconds, WarnCount AS WarnCount, ErrorCount AS ErrorCount, CONVERT(varchar(19), StartedAt, 120) AS StartedAt FROM dbo.vw_ACM_RunFact WHERE StartedAt BETWEEN $__timeFrom() AND $__timeTo() ORDER BY StartedAt DESC",
           "refId": "A"
         }
       ],
@@ -282,7 +282,7 @@
             "uid": "mssql-ds"
           },
           "format": "table",
-          "rawSql": "SELECT COUNT(*) AS value FROM dbo.ACM_Runs WHERE ErrorMessage IS NOT NULL AND ErrorMessage <> '' AND StartedAt BETWEEN $__timeFrom() AND $__timeTo()",
+          "rawSql": "SELECT COUNT(*) AS value FROM dbo.vw_ACM_RunFact WHERE RunClassification = 'FAIL' AND StartedAt BETWEEN $__timeFrom() AND $__timeTo()",
           "refId": "A"
         }
       ],
@@ -1197,7 +1197,7 @@
             "uid": "mssql-ds"
           },
           "format": "table",
-          "rawSql": "SELECT 'ACM_Scores_Wide' AS TableName, COUNT(*) AS TotalRows FROM dbo.ACM_Scores_Wide WHERE Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL\nSELECT 'ACM_HealthTimeline', COUNT(*) FROM dbo.ACM_HealthTimeline WHERE Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL\nSELECT 'ACM_RegimeTimeline', COUNT(*) FROM dbo.ACM_RegimeTimeline WHERE Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL\nSELECT 'ACM_Episodes', COUNT(*) FROM dbo.ACM_Episodes WHERE StartTime BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL\nSELECT 'ACM_Runs', COUNT(*) FROM dbo.ACM_Runs WHERE StartedAt BETWEEN $__timeFrom() AND $__timeTo()",
+          "rawSql": "SELECT 'ACM_Runs' AS TableName, COUNT(*) AS TotalRows FROM dbo.ACM_Runs WHERE StartedAt BETWEEN $__timeFrom() AND $__timeTo() UNION ALL SELECT 'ACM_RepresentationStatus', COUNT(*) FROM dbo.ACM_RepresentationStatus WHERE Timestamp BETWEEN $__timeFrom() AND $__timeTo() UNION ALL SELECT 'ACM_BaselineGovernance', COUNT(*) FROM dbo.ACM_BaselineGovernance WHERE Timestamp BETWEEN $__timeFrom() AND $__timeTo() UNION ALL SELECT 'ACM_Scores_Wide', COUNT(*) FROM dbo.ACM_Scores_Wide WHERE Timestamp BETWEEN $__timeFrom() AND $__timeTo() UNION ALL SELECT 'ACM_HealthTimeline', COUNT(*) FROM dbo.ACM_HealthTimeline WHERE Timestamp BETWEEN $__timeFrom() AND $__timeTo() UNION ALL SELECT 'ACM_RegimeTimeline', COUNT(*) FROM dbo.ACM_RegimeTimeline WHERE Timestamp BETWEEN $__timeFrom() AND $__timeTo()",
           "refId": "A"
         }
       ],
@@ -1329,7 +1329,7 @@
             "uid": "mssql-ds"
           },
           "format": "time_series",
-          "rawSql": "DECLARE @LatestRun uniqueidentifier = (SELECT TOP 1 RunID FROM dbo.ACM_Runs ORDER BY StartedAt DESC);\nSELECT sw.Timestamp AS time, 'AR1' AS metric, sw.ar1_z AS value FROM dbo.ACM_Scores_Wide sw WHERE sw.RunID = @LatestRun AND sw.Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL SELECT sw.Timestamp, 'PCA_SPE', sw.pca_spe_z FROM dbo.ACM_Scores_Wide sw WHERE sw.RunID = @LatestRun AND sw.Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL SELECT sw.Timestamp, 'PCA_T2', sw.pca_t2_z FROM dbo.ACM_Scores_Wide sw WHERE sw.RunID = @LatestRun AND sw.Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL SELECT sw.Timestamp, 'IForest', sw.iforest_z FROM dbo.ACM_Scores_Wide sw WHERE sw.RunID = @LatestRun AND sw.Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL SELECT sw.Timestamp, 'GMM', sw.gmm_z FROM dbo.ACM_Scores_Wide sw WHERE sw.RunID = @LatestRun AND sw.Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nUNION ALL SELECT sw.Timestamp, 'Fused', sw.fused FROM dbo.ACM_Scores_Wide sw WHERE sw.RunID = @LatestRun AND sw.Timestamp BETWEEN $__timeFrom() AND $__timeTo()\nORDER BY time ASC",
+          "rawSql": "DECLARE @LatestRun uniqueidentifier = (SELECT TOP 1 RunID FROM dbo.vw_ACM_RunFact WHERE ScoreRows > 0 ORDER BY StartedAt DESC); SELECT sw.Timestamp AS time, 'AR1' AS metric, sw.ar1_z AS value FROM dbo.ACM_Scores_Wide sw WHERE sw.RunID = @LatestRun AND sw.Timestamp BETWEEN $__timeFrom() AND $__timeTo() UNION ALL SELECT sw.Timestamp, 'PCA_SPE', sw.pca_spe_z FROM dbo.ACM_Scores_Wide sw WHERE sw.RunID = @LatestRun AND sw.Timestamp BETWEEN $__timeFrom() AND $__timeTo() UNION ALL SELECT sw.Timestamp, 'PCA_T2', sw.pca_t2_z FROM dbo.ACM_Scores_Wide sw WHERE sw.RunID = @LatestRun AND sw.Timestamp BETWEEN $__timeFrom() AND $__timeTo() UNION ALL SELECT sw.Timestamp, 'IForest', sw.iforest_z FROM dbo.ACM_Scores_Wide sw WHERE sw.RunID = @LatestRun AND sw.Timestamp BETWEEN $__timeFrom() AND $__timeTo() UNION ALL SELECT sw.Timestamp, 'GMM', sw.gmm_z FROM dbo.ACM_Scores_Wide sw WHERE sw.RunID = @LatestRun AND sw.Timestamp BETWEEN $__timeFrom() AND $__timeTo() UNION ALL SELECT sw.Timestamp, 'Fused', sw.fused FROM dbo.ACM_Scores_Wide sw WHERE sw.RunID = @LatestRun AND sw.Timestamp BETWEEN $__timeFrom() AND $__timeTo() ORDER BY time ASC",
           "refId": "A"
         }
       ],

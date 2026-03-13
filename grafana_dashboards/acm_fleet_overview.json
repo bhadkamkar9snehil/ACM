@@ -216,7 +216,7 @@
         },
         "textMode": "value_and_name"
       },
-      "title": "ALERT",
+      "title": "SCORED",
       "type": "stat",
       "targets": [
         {
@@ -224,7 +224,7 @@
             "type": "mssql",
             "uid": "mssql-ds"
           },
-          "rawSql": "SELECT COUNT(*) AS value FROM (\n  SELECT EquipID, HealthZone AS Zone, ROW_NUMBER() OVER (PARTITION BY EquipID ORDER BY Timestamp DESC) AS rn\n  FROM dbo.ACM_HealthTimeline\n) x WHERE rn = 1 AND Zone = 'ALERT'",
+          "rawSql": "SELECT COUNT(*) AS value FROM dbo.vw_ACM_EquipCurrentSnapshot WHERE RepresentationScoreAllowed = 1",
           "format": "table",
           "refId": "A"
         }
@@ -276,7 +276,7 @@
         },
         "textMode": "value_and_name"
       },
-      "title": "WATCH",
+      "title": "BASELINE",
       "type": "stat",
       "targets": [
         {
@@ -284,7 +284,7 @@
             "type": "mssql",
             "uid": "mssql-ds"
           },
-          "rawSql": "SELECT COUNT(*) AS value FROM (\n  SELECT EquipID, HealthZone AS Zone, ROW_NUMBER() OVER (PARTITION BY EquipID ORDER BY Timestamp DESC) AS rn\n  FROM dbo.ACM_HealthTimeline\n) x WHERE rn = 1 AND Zone = 'WATCH'",
+          "rawSql": "SELECT COUNT(*) AS value FROM dbo.vw_ACM_EquipCurrentSnapshot WHERE RunClassification = 'BASELINE_FORMATION'",
           "format": "table",
           "refId": "A"
         }
@@ -336,7 +336,7 @@
         },
         "textMode": "value_and_name"
       },
-      "title": "GOOD",
+      "title": "SUPPRESSED",
       "type": "stat",
       "targets": [
         {
@@ -344,7 +344,7 @@
             "type": "mssql",
             "uid": "mssql-ds"
           },
-          "rawSql": "SELECT COUNT(*) AS value FROM (\n  SELECT EquipID, HealthZone AS Zone, ROW_NUMBER() OVER (PARTITION BY EquipID ORDER BY Timestamp DESC) AS rn\n  FROM dbo.ACM_HealthTimeline\n) x WHERE rn = 1 AND Zone = 'GOOD'",
+          "rawSql": "SELECT COUNT(*) AS value FROM dbo.vw_ACM_EquipCurrentSnapshot WHERE RunClassification = 'SUPPRESSED_VALID'",
           "format": "table",
           "refId": "A"
         }
@@ -417,7 +417,7 @@
             "type": "mssql",
             "uid": "mssql-ds"
           },
-          "rawSql": "SELECT ROUND(AVG(x.HealthIndex), 1) AS value FROM (\n  SELECT EquipID, HealthIndex, ROW_NUMBER() OVER (PARTITION BY EquipID ORDER BY Timestamp DESC) AS rn\n  FROM dbo.ACM_HealthTimeline\n) x WHERE rn = 1",
+          "rawSql": "SELECT ROUND(AVG(CAST(HealthIndex AS float)), 1) AS value FROM dbo.vw_ACM_EquipCurrentSnapshot WHERE HealthIndex IS NOT NULL",
           "format": "table",
           "refId": "A"
         }
@@ -495,7 +495,7 @@
         "showThresholdMarkers": true,
         "sizing": "auto"
       },
-      "title": "All Equipment Health Index",
+      "title": "All Equipment \u2014 Governed Snapshot",
       "type": "gauge",
       "targets": [
         {
@@ -503,7 +503,7 @@
             "type": "mssql",
             "uid": "mssql-ds"
           },
-          "rawSql": "SELECT\n  eq.EquipCode AS metric,\n  x.HealthIndex\nFROM (\n  SELECT EquipID, HealthIndex, ROW_NUMBER() OVER (PARTITION BY EquipID ORDER BY Timestamp DESC) AS rn\n  FROM dbo.ACM_HealthTimeline\n) x\nJOIN dbo.Equipment eq ON eq.EquipID = x.EquipID\nWHERE x.rn = 1 AND eq.Status = 1\nORDER BY x.HealthIndex ASC",
+          "rawSql": "SELECT EquipCode AS metric, COALESCE(HealthIndex, 0) AS HealthIndex FROM dbo.vw_ACM_EquipCurrentSnapshot ORDER BY CASE WHEN HealthIndex IS NULL THEN 1 ELSE 0 END, HealthIndex ASC, EquipCode ASC",
           "format": "table",
           "refId": "A"
         }
@@ -619,7 +619,7 @@
           "sort": "none"
         }
       },
-      "title": "Fleet Zone Distribution",
+      "title": "Fleet Runtime Classification",
       "type": "piechart",
       "targets": [
         {
@@ -627,7 +627,7 @@
             "type": "mssql",
             "uid": "mssql-ds"
           },
-          "rawSql": "SELECT Zone AS metric, COUNT(*) AS value FROM (\n  SELECT EquipID, HealthZone AS Zone, ROW_NUMBER() OVER (PARTITION BY EquipID ORDER BY Timestamp DESC) AS rn\n  FROM dbo.ACM_HealthTimeline\n) x WHERE rn = 1 GROUP BY Zone ORDER BY value DESC",
+          "rawSql": "SELECT RunClassification AS metric, COUNT(*) AS value FROM dbo.vw_ACM_EquipCurrentSnapshot GROUP BY RunClassification ORDER BY value DESC",
           "format": "table",
           "refId": "A"
         }
@@ -851,7 +851,7 @@
             "type": "mssql",
             "uid": "mssql-ds"
           },
-          "rawSql": "SELECT\n  eq.EquipCode AS Equipment,\n  ROUND(h.HealthIndex, 1) AS HealthIndex,\n  h.Zone AS HealthZone,\n  ISNULL(ep.ActiveEpisodes, 0) AS ActiveEpisodes,\n  CONVERT(varchar(19), h.Timestamp, 120) AS LastUpdated\nFROM (\n  SELECT EquipID, HealthIndex, HealthZone AS Zone, Timestamp,\n         ROW_NUMBER() OVER (PARTITION BY EquipID ORDER BY Timestamp DESC) AS rn\n  FROM dbo.ACM_HealthTimeline\n) h\nJOIN dbo.Equipment eq ON eq.EquipID = h.EquipID\nLEFT JOIN (\n  SELECT EquipID, COUNT(*) AS ActiveEpisodes\n  FROM dbo.ACM_Episodes\n  WHERE StartTime >= DATEADD(day, -1, GETUTCDATE())\n  GROUP BY EquipID\n) ep ON ep.EquipID = h.EquipID\nWHERE h.rn = 1 AND eq.Status = 1\nORDER BY h.HealthIndex ASC",
+          "rawSql": "SELECT EquipCode AS Equipment, RunClassification, RepresentationRuntimeMode AS RuntimeMode, CAST(RepresentationScoreAllowed AS int) AS ScoreAllowed, CAST(RepresentationLearnAllowed AS int) AS LearnAllowed, ROUND(HealthIndex, 1) AS HealthIndex, COALESCE(HealthZone, 'UNASSESSED') AS HealthZone, CONVERT(varchar(19), COALESCE(CompletedAt, StartedAt), 120) AS LastUpdated FROM dbo.vw_ACM_EquipCurrentSnapshot ORDER BY CASE RunClassification WHEN 'FAIL' THEN 0 WHEN 'SUPPRESSED_VALID' THEN 1 WHEN 'BASELINE_FORMATION' THEN 2 WHEN 'NOOP_VALID' THEN 3 ELSE 4 END, Equipment ASC",
           "format": "table",
           "refId": "A"
         }
@@ -1709,7 +1709,7 @@
             "type": "mssql",
             "uid": "mssql-ds"
           },
-          "rawSql": "SELECT TOP 50\n  eq.EquipCode AS Equipment,\n  r.HealthStatus AS Status,\n  r.ScoreRowCount AS RowsProcessed,\n  r.EpisodeCount AS EpisodesDetected,\n  r.DurationSeconds * 1000 AS ProcessingTimeMs,\n  CONVERT(varchar(19), r.StartedAt, 120) AS StartedAt,\n  LEFT(ISNULL(r.ErrorMessage, ''), 80) AS ErrorMessage\nFROM dbo.ACM_Runs r\nJOIN dbo.Equipment eq ON eq.EquipID = r.EquipID\nWHERE r.StartedAt >= DATEADD(day, -1, GETUTCDATE())\nORDER BY r.StartedAt DESC",
+          "rawSql": "SELECT TOP 50 EquipCode AS Equipment, RunClassification, RepresentationRuntimeMode AS RuntimeMode, ScoreRows AS ScoreRows, EpisodeRows AS EpisodeRows, DurationSeconds * 1000 AS ProcessingTimeMs, CONVERT(varchar(19), StartedAt, 120) AS StartedAt, LEFT(COALESCE(RepresentationSuppressedReasons, RepresentationDegradedReasons, ''), 120) AS GoverningReasons FROM dbo.vw_ACM_RunFact WHERE StartedAt >= DATEADD(day, -1, GETUTCDATE()) ORDER BY StartedAt DESC",
           "format": "table",
           "refId": "A"
         }
