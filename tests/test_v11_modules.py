@@ -1027,7 +1027,6 @@ class TestRefactorHelpers:
         )
 
         assert out.should_continue is False
-        assert out.coldstart_complete is False
         assert out.meta["baseline_runtime_mode"] == "BOOTSTRAP_NOT_READY"
         assert out.meta["enough_history_to_proceed"] is False
         assert out.meta["baseline_ready"] is False

@@ -116,7 +116,6 @@ class DataLoadStageResult:
     train: Optional[pd.DataFrame]
     score: Optional[pd.DataFrame]
     meta: Optional[Any]
-    coldstart_complete: bool
     should_continue: bool
     noop_reason: Optional[str] = None
 
@@ -188,7 +187,6 @@ def load_and_validate_data_stage(
             train=train,
             score=score,
             meta=meta,
-            coldstart_complete=coldstart_complete,
             should_continue=False,
             noop_reason=reason,
         )
@@ -245,7 +243,6 @@ def load_and_validate_data_stage(
             train=train,
             score=score,
             meta=meta,
-            coldstart_complete=coldstart_complete,
             should_continue=False,
             noop_reason="SCORING_NO_DATA",
         )
@@ -261,7 +258,6 @@ def load_and_validate_data_stage(
         train=train,
         score=score,
         meta=meta,
-        coldstart_complete=coldstart_complete,
         should_continue=True,
         noop_reason=None,
     )
