@@ -404,8 +404,25 @@ def assess_baseline_contamination(
     if not z_series:
         return 0.0, 0.0, "ok"
 
-    # Simple mean fusion of available raw scores (no calibration needed for self-assessment)
-    stacked = np.column_stack([np.nan_to_num(z, nan=0.0, posinf=alert_z * 2) for z in z_series])
+    # Normalize each detector's raw scores to z-scale using robust statistics
+    # (median/MAD) before fusing. Raw scores from IForest, GMM, OMR, and AR1
+    # are not z-distributed — comparing them directly against alert_z=3.0 produces
+    # 100% false contamination on every fresh fit. Normalizing per-detector first
+    # makes the threshold meaningful: healthy residuals on a good fit are centered
+    # near 0 with SD~1; contaminated windows have a sustained cluster above the median.
+    normalized: list[np.ndarray] = []
+    for raw in z_series:
+        arr = np.nan_to_num(np.asarray(raw, dtype=float), nan=0.0)
+        med = float(np.median(arr))
+        mad = float(np.median(np.abs(arr - med)))
+        std_robust = mad * 1.4826
+        if std_robust > 0:
+            normalized.append((arr - med) / std_robust)
+        else:
+            # Constant signal — no variance, treat as zero z-score (not anomalous)
+            normalized.append(np.zeros_like(arr))
+
+    stacked = np.column_stack(normalized)
     fused = np.nanmean(stacked, axis=1)
 
     # Contamination rate: fraction of rows above alert_z

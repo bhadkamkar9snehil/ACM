@@ -17,9 +17,27 @@ Release Management:
 - Production deployments use specific tags (never merge commits)
 """
 
-__version__ = "11.17.8"
-__version_date__ = "2026-03-10"
+__version__ = "11.17.9"
+__version_date__ = "2026-03-14"
 __version_author__ = "ACM Development Team"
+
+# v11.17.9 (2026-03-14) — Fix baseline contamination: normalize raw scores before threshold check
+#
+# assess_baseline_contamination() compared un-normalized raw detector outputs
+# directly against alert_z=3.0 (a z-score threshold). GMM negative log-likelihood
+# and IForest anomaly scores are not z-distributed; on a fresh fit their values
+# sit well above 3.0 on healthy data, causing 100% false contamination verdicts
+# on every coldstart for every turbine regardless of actual data quality.
+#
+# 1. core/detector_orchestrator.py: Before stacking and fusing, normalize each
+#    detector's raw score series to z-scale using per-series median/MAD
+#    (std_robust = MAD * 1.4826). Zero-variance series (constant signal) map to
+#    zero z-score instead of divide-by-zero. The fused mean is now a true
+#    z-score comparable against alert_z=3.0. Genuinely contaminated windows
+#    (sustained block of rows far above the median) still yield high contamination
+#    rates; clean windows now correctly return "ok".
+#
+# Co-Authored-By: Claude Sonnet 4.6
 
 # v11.17.8 (2026-03-10) — Review fixes: Codex Polars fallback, PromotionCriteria drift, per-regime thresholds
 #
