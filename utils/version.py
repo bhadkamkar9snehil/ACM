@@ -5,23 +5,25 @@ This module defines the current version of ACM and provides utilities for versio
 across logs, outputs, and database entries. Version follows semantic versioning (MAJOR.MINOR.PATCH).
 
 Versioning Strategy:
-- MAJOR: Significant architecture changes or breaking changes (e.g., v10→v11)
-- MINOR: New features, detector improvements, algorithm enhancements (e.g., v11.0→v11.1)
-- PATCH: Bug fixes, refinements, performance improvements (e.g., v11.0.0→v11.0.1)
+- Main track (merged to main): MAJOR.MINOR.PATCH semver (e.g., v11.17.8)
+- 2026.2 branch track: YYYY.MINOR.PATCH (e.g., 2026.2.3) until merged to integration/main
 
 Release Management:
-- All releases tagged with git annotated tags (e.g., v11.0.0)
+- All releases tagged with git annotated tags (e.g., v11.17.8)
 - Each tag includes comprehensive release notes
 - Feature branches use descriptive names: feature/*, fix/*, refactor/*, docs/*
 - Merges to main use --no-ff to preserve history
 - Production deployments use specific tags (never merge commits)
 """
 
-__version__ = "11.17.11"
+__version__ = "2026.2.3"
 __version_date__ = "2026-03-14"
 __version_author__ = "ACM Development Team"
 
-# v11.17.11 (2026-03-14) -- Fix PCA cached score length mismatch in assess_baseline_contamination
+# 2026.2 branch -- Representation-Governance refactor slice
+# Patch versioning within this branch: 2026.2.N (N increments per fix/feature on this branch)
+
+# 2026.2.3 (2026-03-14) -- Fix PCA cached score length mismatch in assess_baseline_contamination
 #
 # When max_train_samples subsamples the training frame (e.g., 11,037 -> 10,000 rows),
 # pca_train_spe and pca_train_t2 are computed on the 10,000-row subsampled frame but
@@ -34,7 +36,7 @@ __version_author__ = "ACM Development Team"
 #
 # Co-Authored-By: Claude Sonnet 4.6
 
-# v11.17.10 (2026-03-14) -- Cut post-detector runtime on contaminated BASELINE_FORMATION batches
+# 2026.2.2 (2026-03-14) -- Cut post-detector runtime on contaminated BASELINE_FORMATION batches
 #
 # When assess_baseline_contamination() returns "contaminated" on a fresh detector fit,
 # the run previously continued through regime scoring (6 detectors x 4000+ rows), calibration,
@@ -53,7 +55,7 @@ __version_author__ = "ACM Development Team"
 #
 # Co-Authored-By: Claude Sonnet 4.6
 
-# v11.17.9 (2026-03-14) -- Fix baseline contamination: normalize raw scores before threshold check
+# 2026.2.1 (2026-03-14) -- Fix baseline contamination: normalize raw scores before threshold check
 #
 # assess_baseline_contamination() compared un-normalized raw detector outputs
 # directly against alert_z=3.0 (a z-score threshold). GMM negative log-likelihood
