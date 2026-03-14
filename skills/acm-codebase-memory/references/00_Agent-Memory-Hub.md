@@ -1,6 +1,6 @@
 ---
 type: agent-memory
-generated_at: 2026-03-12T13:16:23+00:00
+generated_at: 2026-03-14T05:16:54+00:00
 ---
 
 # ACM Agent Memory Hub
@@ -15,14 +15,14 @@ This note is generated for agent-first ACM context loading.
 5. Read `[[../modules/core.run_metadata_writer]]`
 
 ## Highest Symbol Density Modules
-- [[modules/core.observability|core.observability]] symbols=118
+- [[modules/core.observability|core.observability]] symbols=120
 - [[modules/core.output_manager|core.output_manager]] symbols=106
-- [[modules/core.regimes|core.regimes]] symbols=57
+- [[modules/core.regimes|core.regimes]] symbols=61
 - [[modules/core.fuse|core.fuse]] symbols=51
-- [[modules/core.model_persistence|core.model_persistence]] symbols=41
+- [[modules/core.model_persistence|core.model_persistence]] symbols=44
+- [[modules/core.fast_features|core.fast_features]] symbols=38
 - [[modules/core.degradation_model|core.degradation_model]] symbols=36
-- [[modules/core.fast_features|core.fast_features]] symbols=36
-- [[modules/core.output_manager_services|core.output_manager_services]] symbols=33
+- [[modules/core.output_manager_services|core.output_manager_services]] symbols=35
 - [[modules/core.sensor_attribution|core.sensor_attribution]] symbols=30
 - [[modules/core.sql_client|core.sql_client]] symbols=30
 - [[modules/core.forecast_engine|core.forecast_engine]] symbols=29
