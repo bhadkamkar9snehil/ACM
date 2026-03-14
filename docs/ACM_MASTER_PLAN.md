@@ -455,14 +455,31 @@ It has two workstreams:
 
 The zero-day workstream is first because `2026.2` is not allowed to become authoritative on top of an unclosed runtime validation plan.
 
+### Historian data inventory (verified 2026-03-14)
+
+22 of 24 WFA turbines have historian data. `WFA_TURBINE_11` and `WFA_TURBINE_21` have empty historian tables and cannot be replayed until source data is loaded.
+
+Turbines with data and no ACM runs (highest priority for fresh replay):
+`WFA_TURBINE_3`, `WFA_TURBINE_17`, `WFA_TURBINE_24`, `WFA_TURBINE_25`, `WFA_TURBINE_26`,
+`WFA_TURBINE_42`, `WFA_TURBINE_45`, `WFA_TURBINE_51`, `WFA_TURBINE_68`, `WFA_TURBINE_69`,
+`WFA_TURBINE_71`, `WFA_TURBINE_72`, `WFA_TURBINE_84`, `WFA_TURBINE_92`
+
+Turbines with partial existing runs (need review before re-running):
+`WFA_TURBINE_0` (27 runs, 0 scored rows), `WFA_TURBINE_22` (386 runs, 3-day coverage only),
+`WFA_TURBINE_38` (2 runs, 0 scored rows), `WFA_TURBINE_13`, `WFA_TURBINE_14`, `WFA_TURBINE_40`,
+`WFA_TURBINE_73` (large run counts but stuck in coldstart loop — same H2 pattern as T10)
+
 ### Workstream A: Close the active zero-day runtime
 
 | ID | Task | Priority | Depends On | Exit criteria |
 |---|---|---|---|---|
-| ZD-01 | Fresh replay of `WFA_TURBINE_10` on latest runtime | P0 | None | replay completes end to end and transient labels match the current contract |
-| ZD-02 | SQL verification for `ACM_EWMBaseline`, `ACM_RegimeBinnerState`, `ACM_Runs`, `ACM_RunLogs` | P0 | ZD-01 | no schema/version mismatch and continuity is confirmed |
-| ZD-03 | Replay `WFA_TURBINE_11` | P0 | ZD-02 | replay completes with expected day-0 behavior and no critical degradations |
-| ZD-04 | Replay `WFA_TURBINE_21` | P0 | ZD-02 | replay completes with expected day-0 behavior and no critical degradations |
+| ZD-01 | Fresh replay of `WFA_TURBINE_10` on latest runtime | P0 | None | replay executes end to end; EWM/binner/run SQL tables verified |
+| ZD-02 | SQL verification for `ACM_EWMBaseline`, `ACM_RegimeBinnerState`, `ACM_Runs`, `ACM_RunLogs` | P0 | ZD-01 | no schema/version mismatch and continuity is confirmed — **CONFIRMED PASS 2026-03-14** |
+| ZD-03 | Replay `WFA_TURBINE_17` (clean data, ~385 days, no prior runs) | P0 | ZD-02 | replay completes with expected day-0 behavior and no critical degradations |
+| ZD-04 | Replay `WFA_TURBINE_3` (clean data, ~388 days, no prior runs) | P0 | ZD-02 | replay completes with expected day-0 behavior and no critical degradations |
+| ZD-04b | Replay `WFA_TURBINE_0`, `WFA_TURBINE_22`, `WFA_TURBINE_38` (partial prior runs — reset and replay) | P1 | ZD-02 | all three complete end-to-end without error |
+| ZD-04c | Replay remaining no-run turbines: T24, T25, T26, T42, T45, T51, T68, T69, T71, T72, T84, T92 | P1 | ZD-03, ZD-04 | fleet-wide baseline established |
+| ZD-04d | Load historian data for `WFA_TURBINE_11` and `WFA_TURBINE_21` then replay | P2 | None (data dependency) | source data loaded; replay completes with day-0 behavior |
 | ZD-05 | Per-regime threshold tuning | P1 | ZD-01, ZD-03, ZD-04 | threshold logic validated against replay outputs |
 | ZD-06 | Non-validation environment rollout runbook | P1 | ZD-02 | runbook covers migrations, config refresh, and state cleanup policy |
 | ZD-07 | Optional stale-state cleanup procedure | P2 | ZD-06 | cleanup is executed or explicitly waived per environment |
@@ -483,7 +500,7 @@ The zero-day workstream is first because `2026.2` is not allowed to become autho
 | RG-10 | Build baseline governor | P1 | RG-05, RG-09 | readiness, contamination, freeze, and update decisions share one contract |
 | RG-11 | Build schema drift manager | P1 | RG-07 | compatibility classes and downgrade reasons emitted |
 | RG-12 | Add representation SQL tables and store | P1 | RG-09, RG-10, RG-11 | new tables are written on replay with idempotency coverage |
-| RG-13 | Enable authoritative representation gating for `2026.2` | P0 | ZD-01, ZD-02, ZD-03, ZD-04, RG-12 | non-comparable states no-score correctly and queryably |
+| RG-13 | Enable authoritative representation gating for `2026.2` | P0 | ZD-01, ZD-02, ZD-03, ZD-04, ZD-04b, RG-12 | non-comparable states no-score correctly and queryably |
 | RG-14 | Remove legacy duplicate ownership | P1 | RG-13 | old policy paths deleted without replay regression |
 | RG-15 | Update dashboards and runbook | P2 | RG-12 | operators can interpret new statuses and suppression reasons |
 
