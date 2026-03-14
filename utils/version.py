@@ -17,11 +17,30 @@ Release Management:
 - Production deployments use specific tags (never merge commits)
 """
 
-__version__ = "11.17.9"
+__version__ = "11.17.10"
 __version_date__ = "2026-03-14"
 __version_author__ = "ACM Development Team"
 
-# v11.17.9 (2026-03-14) — Fix baseline contamination: normalize raw scores before threshold check
+# v11.17.10 (2026-03-14) -- Cut post-detector runtime on contaminated BASELINE_FORMATION batches
+#
+# When assess_baseline_contamination() returns "contaminated" on a fresh detector fit,
+# the run previously continued through regime scoring (6 detectors x 4000+ rows), calibration,
+# fusion, EWM, health timeline, and SQL score writes -- 60-180 seconds of work that produces
+# no usable output because the governance layer already knows this window is unlearnable.
+#
+# 1. core/comparability_engine.py: In BASELINE_FORMATION mode, set learn_allowed=False when
+#    contamination_verdict == "CONTAMINATED". "suspect" windows still allow learning and are
+#    not affected. Reason code "baseline_contamination_blocks_learning" added to degraded list.
+# 2. core/acm.py: After detector initialization, when baseline_contamination_verdict ==
+#    "contaminated", refresh representation authority with the real verdict and check
+#    _representation_blocks_post_regime_pretransient. If it fires, set skip_post_regime_runtime
+#    and exit cleanly before regime scoring, calibration, fusion, EWM, and health stages.
+#    The short-circuit is wrapped in try/except so any refresh failure falls through to the
+#    existing post-detector regime-context preview path unchanged.
+#
+# Co-Authored-By: Claude Sonnet 4.6
+
+# v11.17.9 (2026-03-14) -- Fix baseline contamination: normalize raw scores before threshold check
 #
 # assess_baseline_contamination() compared un-normalized raw detector outputs
 # directly against alert_z=3.0 (a z-score threshold). GMM negative log-likelihood

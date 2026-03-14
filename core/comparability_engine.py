@@ -193,6 +193,9 @@ def evaluate_eligibility(
         if baseline_candidate_state in _PENDING_TRUSTED_WINDOW_STATES:
             learn_allowed = False
             degraded.append("baseline_trusted_window_pending")
+        if contamination_verdict == "CONTAMINATED":
+            learn_allowed = False
+            degraded.append("baseline_contamination_blocks_learning")
     elif runtime_mode == RuntimeMode.CONTROLLED_ADAPTATION:
         learn_allowed = baseline_ready and (
             shadow_refresh_state in _ADAPTATION_REFRESH_ALLOWED

@@ -1496,6 +1496,61 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
             baseline_contamination_rate = detector_init.baseline_contamination_rate
             schema_drift_decision = detector_init.schema_drift_decision
 
+        # Post-detector contamination gate: refresh representation authority with the
+        # now-known contamination verdict. When the verdict is "contaminated", the
+        # comparability engine sets learn_allowed=False for BASELINE_FORMATION runs.
+        # _representation_blocks_post_regime_pretransient checks score_allowed=False only,
+        # so it fires here too, allowing a clean exit before regime scoring, detector
+        # scoring, calibration, fusion, EWM, health, and score SQL writes.
+        # "suspect" verdicts do not trigger this path -- those windows still allow learning.
+        if (
+            representation_shadow is not None
+            and representation_authority_policy.active
+            and not skip_post_regime_runtime
+            and baseline_contamination_verdict == "contaminated"
+        ):
+            try:
+                representation_shadow = refresh_representation_runtime_authority(
+                    representation_shadow,
+                    cfg=cfg,
+                    policy=representation_authority_policy,
+                    meta=meta,
+                    feature_schema_drift=schema_drift_decision,
+                    baseline_contamination_verdict=baseline_contamination_verdict,
+                    refit_requested=refit_requested,
+                    logger=Console,
+                )
+                if _representation_blocks_post_regime_pretransient(representation_shadow):
+                    frame = pd.DataFrame()
+                    episodes = pd.DataFrame()
+                    representation_score_suppressed = True
+                    skip_post_regime_runtime = True
+                    quality_ok = False
+                    degradations.append("representation_score_suppressed")
+                    zero_day_status = build_zero_day_run_status(
+                        scoring_active=False,
+                        status="inactive_representation_blocked",
+                        surface_type="none",
+                        channel_count=0,
+                    )
+                    Console.info(
+                        "Representation authority short-circuited regime scoring, calibration, "
+                        "fusion, zero-day, and health stages: contaminated baseline blocks learning",
+                        component="REPRESENTATION",
+                        equip_id=equip_id,
+                        run_id=run_id,
+                        contamination_verdict=baseline_contamination_verdict,
+                    )
+            except Exception as representation_exc:
+                Console.warn(
+                    "Representation authority post-detector contamination check failed; continuing",
+                    component="REPRESENTATION",
+                    equip_id=equip_id,
+                    run_id=run_id,
+                    error_type=type(representation_exc).__name__,
+                    error=str(representation_exc)[:200],
+                )
+
         if (
             representation_shadow is not None
             and representation_authority_policy.active
