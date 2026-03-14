@@ -17,9 +17,22 @@ Release Management:
 - Production deployments use specific tags (never merge commits)
 """
 
-__version__ = "11.17.10"
+__version__ = "11.17.11"
 __version_date__ = "2026-03-14"
 __version_author__ = "ACM Development Team"
+
+# v11.17.11 (2026-03-14) -- Fix PCA cached score length mismatch in assess_baseline_contamination
+#
+# When max_train_samples subsamples the training frame (e.g., 11,037 -> 10,000 rows),
+# pca_train_spe and pca_train_t2 are computed on the 10,000-row subsampled frame but
+# assess_baseline_contamination receives the full 11,037-row train. column_stack then
+# fails with a shape mismatch because AR1/IForest/GMM/OMR score the full frame.
+#
+# 1. core/detector_orchestrator.py: Before using cached PCA scores, validate that their
+#    length matches len(train). If not, fall through to live pca_detector.score(train)
+#    which correctly scores the full frame at the right length.
+#
+# Co-Authored-By: Claude Sonnet 4.6
 
 # v11.17.10 (2026-03-14) -- Cut post-detector runtime on contaminated BASELINE_FORMATION batches
 #

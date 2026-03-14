@@ -372,7 +372,16 @@ def assess_baseline_contamination(
             pass
 
     if pca_enabled and pca_detector is not None:
-        if pca_train_spe is not None and pca_train_t2 is not None:
+        # Only use cached PCA scores when they match the train frame length.
+        # Cached scores come from the subsampled fit frame; if train was not
+        # subsampled identically the lengths differ and column_stack will fail.
+        _pca_cache_valid = (
+            pca_train_spe is not None
+            and pca_train_t2 is not None
+            and len(pca_train_spe) == n
+            and len(pca_train_t2) == n
+        )
+        if _pca_cache_valid:
             z_series.append(np.asarray(pca_train_spe, dtype=float))
             z_series.append(np.asarray(pca_train_t2, dtype=float))
         else:
