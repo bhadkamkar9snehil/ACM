@@ -3,11 +3,18 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Optional, Tuple
+from typing import Any, Optional, Tuple
 
 
 REPRESENTATION_VERSION = "2026.2.0-draft"
 SIGNAL_PROFILE_VERSION = "shadow-v0"
+
+
+def meta_get(meta: Any, key: str, default: Any = None) -> Any:
+    """Safe accessor for pipeline meta objects that may be dict or DataMeta."""
+    if isinstance(meta, dict):
+        return meta.get(key, default)
+    return getattr(meta, key, default)
 
 
 class RuntimeMode(str, Enum):

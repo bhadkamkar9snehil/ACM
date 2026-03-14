@@ -532,7 +532,7 @@ class SmartColdstart:
                 end_time = start_time + timedelta(minutes=required_minutes)
                 
                 Console.info(
-                    f"Coldstart window: {start_time} → +{required_minutes} min ({required_minutes/60:.1f} h). "
+                    f"Coldstart window: {start_time} -> +{required_minutes} min ({required_minutes/60:.1f} h). "
                     f"Expected ~{int(required_minutes / cadence_minutes)} rows at {cadence_minutes:.1f} min/row (target: {required_rows}).",
                     component="COLDSTART",
                 )

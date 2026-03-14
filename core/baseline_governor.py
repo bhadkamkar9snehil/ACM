@@ -13,7 +13,7 @@ from typing import Any, Mapping, Optional
 
 import pandas as pd
 
-from core.representation_contracts import BaselineGovernanceDecision, RuntimeMode
+from core.representation_contracts import BaselineGovernanceDecision, RuntimeMode, meta_get
 from core.observability import Console
 
 _BASELINE_READY_RUNTIME_MODES = {
@@ -38,12 +38,6 @@ class BaselineSeedDecision:
 class ColdstartLoadDecision:
     use_existing_models: bool
     reason_code: str
-
-
-def _meta_get(meta: Any, key: str, default: Any = None) -> Any:
-    if isinstance(meta, dict):
-        return meta.get(key, default)
-    return getattr(meta, key, default)
 
 
 def _normalize_verdict(value: Any, default: str = "UNASSESSED") -> str:
@@ -201,7 +195,7 @@ def resolve_runtime_mode(
     refit_requested: bool = False,
 ) -> RuntimeMode:
     """Resolve the intended runtime mode from existing ACM runtime signals."""
-    explicit_runtime_mode = str(_meta_get(meta, "baseline_runtime_mode", "")).strip().upper()
+    explicit_runtime_mode = str(meta_get(meta, "baseline_runtime_mode", "")).strip().upper()
     if explicit_runtime_mode:
         try:
             explicit_mode = RuntimeMode[explicit_runtime_mode]
@@ -214,10 +208,10 @@ def resolve_runtime_mode(
             }:
                 return explicit_mode
 
-    if bool(_meta_get(meta, "schema_break_requalification", False)):
+    if bool(meta_get(meta, "schema_break_requalification", False)):
         return RuntimeMode.SCHEMA_BREAK_REQUALIFICATION
 
-    if bool(_meta_get(meta, "is_coldstart_run", False)):
+    if bool(meta_get(meta, "is_coldstart_run", False)):
         return RuntimeMode.BASELINE_FORMATION
 
     if bool(refit_requested):
@@ -285,7 +279,7 @@ def _baseline_ready(runtime_mode: RuntimeMode) -> bool:
 
 
 def _normalized_baseline_seed_source(meta: Any) -> str:
-    return str(_meta_get(meta, "baseline_seed_source", "")).strip().upper()
+    return str(meta_get(meta, "baseline_seed_source", "")).strip().upper()
 
 
 def build_shadow_baseline_governance(
@@ -304,7 +298,7 @@ def build_shadow_baseline_governance(
     freeze_state = _freeze_state(freeze_changes)
     shadow_refresh_state = _shadow_refresh_state(runtime_mode, refit_requested)
     baseline_seed_source = _normalized_baseline_seed_source(meta)
-    baseline_seed_authoritative = _meta_get(meta, "baseline_seed_authoritative", None)
+    baseline_seed_authoritative = meta_get(meta, "baseline_seed_authoritative", None)
     baseline_candidate_state = _baseline_candidate_state(runtime_mode)
     baseline_ready = _baseline_ready(runtime_mode)
 

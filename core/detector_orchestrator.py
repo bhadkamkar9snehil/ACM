@@ -473,7 +473,7 @@ def assess_baseline_contamination(
         Console.warn(
             f"Training window may contain some fault data "
             f"({contamination_rate:.0%} elevated rows). "
-            f"Model promoted with suspect flag — calibration filter will be more aggressive.",
+            f"Model promoted with suspect flag -- calibration filter will be more aggressive.",
             component="BASELINE",
             equip=equip,
         )

@@ -1320,7 +1320,7 @@ def fit_regime_model(
             if threshold < floor:
                 Console.info(
                     f"Distance threshold P{distance_percentile:.0f}={threshold:.4f} "
-                    f"below floor ({floor_ratio:.1f}× median={floor:.4f}); clamping up.",
+                    f"below floor ({floor_ratio:.1f}x median={floor:.4f}); clamping up.",
                     component="REGIME",
                 )
                 threshold = floor

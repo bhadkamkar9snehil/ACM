@@ -608,7 +608,7 @@ def update_and_persist_model_lifecycle(
                         output_manager.write_regime_promotion_log(promotion_record)
                     except Exception:
                         pass
-                    suffix = " (suspect baseline — calibration filter will be aggressive)" if baseline_contamination_verdict == "suspect" else ""
+                    suffix = " (suspect baseline -- calibration filter will be aggressive)" if baseline_contamination_verdict == "suspect" else ""
                     logger.ok(
                         f"Model promoted: LEARNING->CONVERGED (runs={model_state.consecutive_runs}, days={model_state.total_days:.1f}){suffix}",
                         component="LIFECYCLE",

@@ -93,7 +93,7 @@ def predict_regime_with_confidence(
                 novel_log = Console.warn if novel_pct >= 25.0 else Console.info
                 novel_log(
                     f"HDBSCAN: {n_novel}/{n_samples} ({novel_pct:.1f}%) score points are outside the training envelope (novel). "
-                    + ("Regime-indexed calibration thresholds may be unreliable — consider widening the training window. " if novel_pct >= 25.0 else "")
+                    + ("Regime-indexed calibration thresholds may be unreliable -- consider widening the training window. " if novel_pct >= 25.0 else "")
                     + "Assigned to nearest cluster.",
                     component="REGIME",
                 )

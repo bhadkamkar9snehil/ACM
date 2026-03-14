@@ -278,7 +278,7 @@ class EWMBaselineManager:
                 changes[key] = "frozen"
                 Console.warn(
                     f"EWM baseline frozen: equip={self.equip_id} regime={regime_id} "
-                    f"sensor={sensor} P50={p50:.2f} P95={p95:.2f} — "
+                    f"sensor={sensor} P50={p50:.2f} P95={p95:.2f} -- "
                     f"baseline is chasing a fault; scoring against frozen baseline",
                     component="EWM_BASELINE",
                 )
@@ -714,7 +714,7 @@ VALUES
             return written
         except Exception as exc:
             Console.warn(
-                f"EWM state NOT persisted to SQL: {exc} — in-memory state retained for this process; next cold-start will use stale SQL baseline",
+                f"EWM state NOT persisted to SQL: {exc} -- in-memory state retained for this process; next cold-start will use stale SQL baseline",
                 component="EWM_BASELINE",
             )
             return 0

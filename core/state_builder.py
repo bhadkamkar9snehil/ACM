@@ -15,14 +15,8 @@ from typing import Any, Optional
 import numpy as np
 import pandas as pd
 
-from core.representation_contracts import ObservationIntegrity, StateSnapshot
+from core.representation_contracts import ObservationIntegrity, StateSnapshot, meta_get
 from core.time_normalizer import native_cadence_secs
-
-
-def _meta_get(meta: Any, key: str, default: Any = None) -> Any:
-    if isinstance(meta, dict):
-        return meta.get(key, default)
-    return getattr(meta, key, default)
 
 
 def _coerce_dt(value: Any) -> Optional[datetime]:
@@ -39,7 +33,7 @@ def _coerce_dt(value: Any) -> Optional[datetime]:
 
 
 def _infer_sampling_seconds(df: pd.DataFrame, meta: Any) -> Optional[float]:
-    meta_sampling = _meta_get(meta, "sampling_seconds", None)
+    meta_sampling = meta_get(meta, "sampling_seconds", None)
     if meta_sampling not in (None, 0):
         try:
             return float(meta_sampling)
@@ -94,8 +88,8 @@ def build_observation_integrity(df: pd.DataFrame, meta: Any) -> ObservationInteg
         effective_signal_count=effective_signal_count,
         expected_rows=expected_rows,
         observed_rows=observed_rows,
-        duplicate_rows_removed=int(_meta_get(meta, "dup_timestamps_removed", 0) or 0),
-        future_rows_dropped=int(_meta_get(meta, "future_rows_dropped", 0) or 0),
+        duplicate_rows_removed=int(meta_get(meta, "dup_timestamps_removed", 0) or 0),
+        future_rows_dropped=int(meta_get(meta, "future_rows_dropped", 0) or 0),
     )
 
 
@@ -114,8 +108,8 @@ def build_state_snapshot(
         source_start = _coerce_dt(df.index.min())
         source_end = _coerce_dt(df.index.max())
     else:
-        source_start = _coerce_dt(_meta_get(meta, "start_ts", None))
-        source_end = _coerce_dt(_meta_get(meta, "end_ts", None))
+        source_start = _coerce_dt(meta_get(meta, "start_ts", None))
+        source_end = _coerce_dt(meta_get(meta, "end_ts", None))
 
     return StateSnapshot(
         asset_id=int(equip_id),
