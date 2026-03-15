@@ -16,12 +16,28 @@ Release Management:
 - Production deployments use specific tags (never merge commits)
 """
 
-__version__ = "2026.2.3"
-__version_date__ = "2026-03-14"
+__version__ = "2026.2.4"
+__version_date__ = "2026-03-15"
 __version_author__ = "ACM Development Team"
 
 # 2026.2 branch -- Representation-Governance refactor slice
 # Patch versioning within this branch: 2026.2.N (N increments per fix/feature on this branch)
+
+# 2026.2.4 (2026-03-15) -- Raise coldstart attempt ceiling to match --max-batches on replays
+#
+# _process_coldstart() had a hardcoded max_coldstart_attempts=10 ceiling. For fresh
+# historical replays with --start-from-beginning, a new asset only reaches ONLINE_SCORING
+# after model lifecycle promotion (LEARNING -> CONVERGED), which requires many more than
+# 10 batches. All 10 attempts produced outcome=OK, but the runner reported "coldstart
+# failed" because governed RuntimeMode was still BASELINE_FORMATION at attempt 10.
+#
+# 1. scripts/sql_batch_runner.py: In __init__, when max_batches is provided, set
+#    max_coldstart_attempts = max(max_coldstart_attempts, max_batches). The full replay
+#    budget now applies to coldstart progression. Production runs without --max-batches
+#    are unaffected (default ceiling stays at 10).
+#
+# Co-Authored-By: Claude Sonnet 4.6
+
 
 # 2026.2.3 (2026-03-14) -- Fix PCA cached score length mismatch in assess_baseline_contamination
 #

@@ -225,10 +225,13 @@ class SQLBatchRunner:
         self.sql_conn_string = sql_conn_string
         self.artifact_root = artifact_root
         self.tick_minutes = tick_minutes
-        self.max_coldstart_attempts = max_coldstart_attempts
         self.progress_file = artifact_root / ".sql_batch_progress.json"
         self.max_batches = max_batches
         self.start_from_beginning = start_from_beginning
+        # When a replay budget is provided, the full budget applies to the coldstart
+        # progression. A fresh asset reaches ONLINE_SCORING only after model lifecycle
+        # promotion (many batches); capping at 10 would abort a valid replay early.
+        self.max_coldstart_attempts = max(max_coldstart_attempts, max_batches) if max_batches else max_coldstart_attempts
         self.representation_authority = str(representation_authority or "shadow").strip().lower()
         self._latest_run_inspection: Dict[str, RunInspectionSummary] = {}
 
