@@ -28,20 +28,20 @@ _Resolved items stay for 30 days, then are archived to `docs/ACM_ARCHITECTURE_DE
 - **Note:** The latest successful `T10` replay confirmed the zero-day overlay is active, but it predated the final transient fix and therefore does not yet close the plateau question
 
 ### H4 — EWM persistence continuity must be verified after migration 016 rollout
-- **Status:** Validated for T17 (2026-03-15) — ACM_EWMBaseline StateVersion=2 rows confirmed written and reused across 51 batches. Pending T3 validation.
+- **Status:** Validated for T17 and T3 (2026-03-15) — ACM_EWMBaseline StateVersion=2 confirmed across both replays. CLOSED for validation environment.
 - **Impact:** The code now expects `ACM_EWMBaseline.StateVersion = 2`. Migration 016 has been applied in the current validation environment.
 - **Root cause:** The new monitoring-surface contract intentionally ignores legacy pre-versioned rows.
 - **Fix:** Verify that new rows are written with `StateVersion = 2` and reused correctly on subsequent runs; any other environment still needs `scripts/sql/migrations/v11/016_acm_ewm_baseline_state_version.sql`
 - **Files:** `core/ewm_baseline.py`, `scripts/sql/migrations/v11/016_acm_ewm_baseline_state_version.sql`
 
 ### H5 — Online regime proxy continuity depends on reusing ACM_RegimeBinnerState
-- **Status:** Validated for T17 (2026-03-15) — ACM_RegimeBinnerState binner_type="OnlinePCABinner" confirmed. Pending T3 validation.
+- **Status:** Validated for T17 and T3 (2026-03-15) — binner_type="OnlinePCABinner" confirmed for both. CLOSED for validation environment.
 - **Impact:** The runtime now uses `OnlinePCABinner` as the day-0 regime proxy, but continuity depends on `ACM_RegimeBinnerState` containing the new `binner_type = "OnlinePCABinner"` payload. Legacy JSON is intentionally discarded.
 - **Fix:** Verify `ACM_RegimeBinnerState` rows repopulate under the new runtime, confirm `binner_type = "OnlinePCABinner"`, and delete obsolete legacy rows if operators want a clean state table.
 - **Files:** `core/regime_binner.py`, `scripts/sql/migrations/v11/015_acm_regime_binner_state.sql`
 
 ### H6 — Explicit day-0 run observability must be verified after migration 017 rollout
-- **Status:** Validated for T17 (2026-03-15) — ZeroDayStatus=active_hdbscan, ZeroDaySurfaceType=ewm_monitoring_raw_numeric, ZeroDayChannelCount=77 confirmed in ACM_Runs. ACM_RunLogs written. Pending T3 validation.
+- **Status:** Validated for T17 and T3 (2026-03-15) — ZeroDayStatus=active_hdbscan, ewm_monitoring_raw_numeric, ACM_RunLogs written for both. CLOSED for validation environment.
 - **Root cause:** Day-0 observability now spans two SQL surfaces with different roles: `ACM_RunLogs` for detailed trace and `ACM_Runs` for explicit per-run summary.
 - **Fix:** Validate both `ACM_Runs` and `ACM_RunLogs` after the next replay; any other environment still needs `scripts/sql/migrations/v11/017_acm_runs_zero_day_status.sql`
 - **Files:** `core/run_metadata_writer.py`, `core/acm.py`, `core/smart_coldstart.py`, `scripts/sql/migrations/v11/017_acm_runs_zero_day_status.sql`
