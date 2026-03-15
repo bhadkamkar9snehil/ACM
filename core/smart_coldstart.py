@@ -810,6 +810,12 @@ class SmartColdstart:
                 )
             finally:
                 try:
+                    # Drain pending SP result sets before closing (prevents HY007).
+                    try:
+                        while cur.nextset():
+                            pass
+                    except Exception:
+                        pass
                     cur.close()
-                except:
+                except Exception:
                     pass

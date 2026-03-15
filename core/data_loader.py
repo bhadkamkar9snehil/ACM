@@ -186,6 +186,18 @@ class DataLoader:
         finally:
             try:
                 if cur is not None:
+                    # Drain any pending result sets from usp_ACM_GetHistorianData_TEMP
+                    # before closing. SQL Server SPs can emit extra result sets (PRINT
+                    # messages, rowcount tokens, etc.). Without draining, pyodbc leaves
+                    # the connection in state HY007 ("Associated statement is not
+                    # prepared"), which corrupts the next cursor opened on the same
+                    # connection -- including the _check_sql_health() SELECT 1 in
+                    # batched_transaction(). Same fix as 2026.2.6 for usp_CleanupBaselineBuffer.
+                    try:
+                        while cur.nextset():
+                            pass
+                    except Exception:
+                        pass
                     cur.close()
             except Exception:
                 pass

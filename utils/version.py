@@ -16,12 +16,28 @@ Release Management:
 - Production deployments use specific tags (never merge commits)
 """
 
-__version__ = "2026.2.10"
+__version__ = "2026.2.11"
 __version_date__ = "2026-03-15"
 __version_author__ = "ACM Development Team"
 
 # 2026.2 branch -- Representation-Governance refactor slice
 # Patch versioning within this branch: 2026.2.N (N increments per fix/feature on this branch)
+
+# 2026.2.11 (2026-03-15) -- Drain SP result sets in data_loader and smart_coldstart (HY007)
+#
+# Between-batch HY007 ("Associated statement is not prepared") errors on T17/T3 replays.
+# usp_ACM_GetHistorianData_TEMP and usp_ACM_UpdateColdstartProgress can emit extra result
+# set tokens (PRINT messages, rowcount rows) after the primary result set is fetched.
+# cur.close() without draining left the shared connection in a corrupt statement state.
+# The next cursor opened on the same connection -- including _check_sql_health() SELECT 1
+# in batched_transaction() -- then raised HY007, failing the entire batch with 0 scored rows.
+# Same root cause and fix as the HY010 fix in 2026.2.6 for usp_CleanupBaselineBuffer.
+#
+# 1. core/data_loader.py: Add `while cur.nextset(): pass` in the finally block before
+#    cur.close() to drain pending result sets from usp_ACM_GetHistorianData_TEMP.
+# 2. core/smart_coldstart.py: Same drain before cur.close() for usp_ACM_UpdateColdstartProgress.
+#
+# Co-Authored-By: Claude Sonnet 4.6
 
 # 2026.2.10 (2026-03-15) -- Fix stale test assertions in analytical_fixes and modules suites
 #
