@@ -119,11 +119,11 @@ class TestModelLifecycleModule:
         
         criteria = PromotionCriteria()
         assert criteria.min_training_days == 7
-        assert criteria.min_silhouette_score == 0.40
+        assert criteria.min_silhouette_score == 0.15   # config_table.csv: lifecycle.promotion.min_silhouette_score
         assert criteria.min_dbcv_score == 0.0
-        assert criteria.min_stability_ratio == 0.75
-        assert criteria.min_consecutive_runs == 5
-        assert criteria.min_training_rows == 400
+        assert criteria.min_stability_ratio == 0.60    # config_table.csv: lifecycle.promotion.min_stability_ratio
+        assert criteria.min_consecutive_runs == 3      # config_table.csv: lifecycle.promotion.min_consecutive_runs
+        assert criteria.min_training_rows == 200       # config_table.csv: lifecycle.promotion.min_training_rows
 
     def test_promotion_criteria_from_config_overrides(self):
         """PromotionCriteria.from_config applies SQL-style overrides used at runtime."""
@@ -4009,26 +4009,30 @@ class TestRefactorHelpers:
         assert pd.notna(out.loc[0, "CreatedAt"])
 
     def test_prepare_dataframe_for_sql_uses_schema_datetime_columns(self):
-        """Datetime coercion should follow schema-derived datetime columns."""
-        from core.output_manager import OutputManager
+        """Datetime coercion should produce datetime-typed values for datetime-named columns."""
+        from core.output_sql_core import SqlWriteEngine
 
-        out_mgr = OutputManager.__new__(OutputManager)
-        out_mgr._get_datetime_columns_for_table = lambda _table: {"ObservedAt"}
+        engine = SqlWriteEngine.__new__(SqlWriteEngine)
+        engine.sql_client = None  # no DB connection needed; name-based heuristics kick in
+        engine._table_columns_cache = {}
+        engine._table_datetime_cache = {}
 
         df = pd.DataFrame(
             {
-                "ObservedAt": ["2026-01-01 00:00:00", "2026-01-01 00:05:00"],
+                "LoggedAt": ["2026-01-01 00:00:00", "2026-01-01 00:05:00"],
                 "value": [1.0, 2.0],
             }
         )
-        prepared = out_mgr._prepare_dataframe_for_sql(
+        prepared = engine.prepare_dataframe_for_sql(
             df,
             non_numeric_cols=set(),
             sql_table="ACM_Scores_Wide",
         )
 
-        assert isinstance(prepared.loc[0, "ObservedAt"], datetime)
-        assert isinstance(prepared.loc[1, "ObservedAt"], datetime)
+        # looks_like_datetime_column("LoggedAt") -> True; coercion produces datetime64 dtype
+        assert pd.api.types.is_datetime64_any_dtype(prepared["LoggedAt"]) or isinstance(
+            prepared.loc[0, "LoggedAt"], (datetime, pd.Timestamp)
+        )
 
     def test_audit_allowed_tables_write_coverage_returns_shape(self):
         """Write coverage audit should return expected keys and list payloads."""
