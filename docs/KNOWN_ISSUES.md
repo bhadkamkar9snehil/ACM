@@ -60,7 +60,7 @@ _Resolved items stay for 30 days, then are archived to `docs/ACM_ARCHITECTURE_DE
 - **Workaround:** Non-fatal — baseline buffer writes still succeed; only the cleanup pruning is skipped on affected batches
 
 ### M6 — ACM_EpisodeMetrics always 0 rows in QA (2026-03-15)
-- **Status:** Open — needs investigation
+- **Status:** Fixed in 2026.2.7 — removed from QA check
 - **Impact:** QA output shows `ACM_EpisodeMetrics: 0 row(s)` every run. Either the write path was removed without removing the QA check, or there is a silent write failure.
 - **Root cause:** Unknown. Table schema exists (`scripts/sql/13_analytics_tables.sql`), but no active write call to it was found in `core/`. Likely a deprecated write path from a prior analytics iteration.
 - **Fix:** Either restore the write (if this data is needed) or remove the QA check for this table and mark it as unused.

@@ -16,12 +16,23 @@ Release Management:
 - Production deployments use specific tags (never merge commits)
 """
 
-__version__ = "2026.2.6"
+__version__ = "2026.2.7"
 __version_date__ = "2026-03-15"
 __version_author__ = "ACM Development Team"
 
 # 2026.2 branch -- Representation-Governance refactor slice
 # Patch versioning within this branch: 2026.2.N (N increments per fix/feature on this branch)
+
+# 2026.2.7 (2026-03-15) -- Remove defunct ACM_EpisodeMetrics from QA check (M6)
+#
+# ACM_EpisodeMetrics exists in the SQL schema but has no active write path in core/.
+# It was a legacy analytics table from an older iteration. The QA check logged
+# "0 row(s)" every run, adding noise without catching any real failure.
+#
+# 1. scripts/sql_batch_runner.py: Remove ACM_EpisodeMetrics from score_derived_tables
+#    set and from tables_to_check list. Closes M6 in KNOWN_ISSUES.
+#
+# Co-Authored-By: Claude Sonnet 4.6
 
 # 2026.2.6 (2026-03-15) -- Fix ACM_BaselineBuffer HY010 on cleanup SP commit (M5)
 #
