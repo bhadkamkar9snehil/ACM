@@ -16,12 +16,25 @@ Release Management:
 - Production deployments use specific tags (never merge commits)
 """
 
-__version__ = "2026.2.5"
+__version__ = "2026.2.6"
 __version_date__ = "2026-03-15"
 __version_author__ = "ACM Development Team"
 
 # 2026.2 branch -- Representation-Governance refactor slice
 # Patch versioning within this branch: 2026.2.N (N increments per fix/feature on this branch)
+
+# 2026.2.6 (2026-03-15) -- Fix ACM_BaselineBuffer HY010 on cleanup SP commit (M5)
+#
+# usp_CleanupBaselineBuffer is called via cur.execute() inside a `with cursor` block.
+# The SP produces a result set; the cursor closed on block exit leaving the connection
+# with a pending result. _commit_if_needed() then triggered HY010 (Function sequence
+# error) because pyodbc disallows commit while results are pending.
+#
+# 1. core/output_manager_services.py: After SP execute, drain all pending result sets
+#    with `while cur.nextset(): pass` before the cursor context exits. Commit now
+#    succeeds. Closes M5 in KNOWN_ISSUES.
+#
+# Co-Authored-By: Claude Sonnet 4.6
 
 # 2026.2.5 (2026-03-15) -- Fix commit-changelog skill for 2026.2 versioning; track new bugs
 #

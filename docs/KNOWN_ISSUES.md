@@ -52,7 +52,7 @@ _Resolved items stay for 30 days, then are archived to `docs/ACM_ARCHITECTURE_DE
 ## MEDIUM (workaround exists or low urgency)
 
 ### M5 — ACM_BaselineBuffer HY010 on cleanup SP exec (2026-03-15)
-- **Status:** Open
+- **Status:** Fixed in 2026.2.6
 - **Impact:** Non-fatal: `SQL commit failed for ACM_BaselineBuffer: HY010 Function sequence error` fires ~3x per 50-batch replay. Run outcome remains OK and scored rows are written correctly. Only the baseline buffer cleanup stored procedure call is affected.
 - **Root cause:** `update_baseline_buffer_service()` in `core/output_manager_services.py` calls `EXEC dbo.usp_CleanupBaselineBuffer` via `cur.execute()` then calls `_commit_if_needed()` without consuming the SP's result set first. pyodbc HY010 = "Function sequence error" when commit is attempted while a result set is pending on the cursor.
 - **Fix:** After `cur.execute(EXEC ...)`, call `cur.fetchall()` (or `nextset()`) to drain the pending result before commit. Or use a separate cursor for the SP call.

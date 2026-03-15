@@ -471,6 +471,11 @@ def update_baseline_buffer_service(
                     "EXEC dbo.usp_CleanupBaselineBuffer @EquipID=?, @RetentionHours=?, @MaxRowsPerEquip=?",
                     (int(output_manager.equip_id), int(window_hours), max_points),
                 )
+                # Drain any pending result sets before the cursor closes.
+                # pyodbc raises HY010 (Function sequence error) if a commit is
+                # attempted while results are still pending on the connection.
+                while cur.nextset():
+                    pass
             output_manager._commit_if_needed("ACM_BaselineBuffer")
         except Exception as cleanup_err:
             Console.warn(
