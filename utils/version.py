@@ -16,12 +16,23 @@ Release Management:
 - Production deployments use specific tags (never merge commits)
 """
 
-__version__ = "2026.2.4"
+__version__ = "2026.2.5"
 __version_date__ = "2026-03-15"
 __version_author__ = "ACM Development Team"
 
 # 2026.2 branch -- Representation-Governance refactor slice
 # Patch versioning within this branch: 2026.2.N (N increments per fix/feature on this branch)
+
+# 2026.2.5 (2026-03-15) -- Fix commit-changelog skill for 2026.2 versioning; track new bugs
+#
+# 1. .claude/skills/commit-changelog/SKILL.md: Updated version-bump table and changelog
+#    format examples to distinguish 2026.2.N (branch track) from MAJOR.MINOR.PATCH (main
+#    track). Prevents recurrence of the v11.17.x naming error on 2026.2 branches. Also
+#    fixed em-dash -> ASCII -- in format examples (CLAUDE.md ASCII-only rule).
+# 2. docs/KNOWN_ISSUES.md: Registered M5 (ACM_BaselineBuffer HY010 on SP exec commit)
+#    and M6 (ACM_EpisodeMetrics always 0 rows) found during ZD-03 replay audit.
+#
+# Co-Authored-By: Claude Sonnet 4.6
 
 # 2026.2.4 (2026-03-15) -- Raise coldstart attempt ceiling to match --max-batches on replays
 #

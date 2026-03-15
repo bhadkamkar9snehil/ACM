@@ -51,6 +51,22 @@ _Resolved items stay for 30 days, then are archived to `docs/ACM_ARCHITECTURE_DE
 
 ## MEDIUM (workaround exists or low urgency)
 
+### M5 — ACM_BaselineBuffer HY010 on cleanup SP exec (2026-03-15)
+- **Status:** Open
+- **Impact:** Non-fatal: `SQL commit failed for ACM_BaselineBuffer: HY010 Function sequence error` fires ~3x per 50-batch replay. Run outcome remains OK and scored rows are written correctly. Only the baseline buffer cleanup stored procedure call is affected.
+- **Root cause:** `update_baseline_buffer_service()` in `core/output_manager_services.py` calls `EXEC dbo.usp_CleanupBaselineBuffer` via `cur.execute()` then calls `_commit_if_needed()` without consuming the SP's result set first. pyodbc HY010 = "Function sequence error" when commit is attempted while a result set is pending on the cursor.
+- **Fix:** After `cur.execute(EXEC ...)`, call `cur.fetchall()` (or `nextset()`) to drain the pending result before commit. Or use a separate cursor for the SP call.
+- **Files:** `core/output_manager_services.py` (`update_baseline_buffer_service`, ~line 468)
+- **Workaround:** Non-fatal — baseline buffer writes still succeed; only the cleanup pruning is skipped on affected batches
+
+### M6 — ACM_EpisodeMetrics always 0 rows in QA (2026-03-15)
+- **Status:** Open — needs investigation
+- **Impact:** QA output shows `ACM_EpisodeMetrics: 0 row(s)` every run. Either the write path was removed without removing the QA check, or there is a silent write failure.
+- **Root cause:** Unknown. Table schema exists (`scripts/sql/13_analytics_tables.sql`), but no active write call to it was found in `core/`. Likely a deprecated write path from a prior analytics iteration.
+- **Fix:** Either restore the write (if this data is needed) or remove the QA check for this table and mark it as unused.
+- **Files:** Check `core/output_manager_services.py`, `core/output_dataframe_builders.py` for removed EpisodeMetrics write
+- **Workaround:** No operational impact — no downstream consumer of this table exists
+
 ### M1 — Per-regime alert thresholds not implemented
 - **Status:** Open — next planned slice after replay validation
 - **Impact:** Global `thresholds.alert_z = 3.0` applies to all regimes. Equipment with different noise levels per operating mode will have false alerts or missed detections.
