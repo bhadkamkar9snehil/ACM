@@ -16,12 +16,26 @@ Release Management:
 - Production deployments use specific tags (never merge commits)
 """
 
-__version__ = "2026.2.8"
+__version__ = "2026.2.9"
 __version_date__ = "2026-03-15"
 __version_author__ = "ACM Development Team"
 
 # 2026.2 branch -- Representation-Governance refactor slice
 # Patch versioning within this branch: 2026.2.N (N increments per fix/feature on this branch)
+
+# 2026.2.9 (2026-03-15) -- Treat max-attempts exhaustion as baseline-built on --start-from-beginning
+#
+# For historical replays (--start-from-beginning), the model stays in BASELINE_FORMATION
+# for many more batches than --max-batches covers. _process_coldstart() exhausted all
+# attempts with outcome=OK but returned False, aborting before the batch phase ran.
+# batches_processed=0 and FAIL summary even though all 50 batches were processed correctly.
+#
+# 1. scripts/sql_batch_runner.py: At max-attempts exhaustion, if start_from_beginning is
+#    True and last_processed_end is not None (at least one batch ran), return True so the
+#    batch phase continues from where coldstart left off. Non-replay runs (no
+#    start_from_beginning) are unaffected and still return False on exhaustion.
+#
+# Co-Authored-By: Claude Sonnet 4.6
 
 # 2026.2.8 (2026-03-15) -- Fix spurious RegimePromotedAt NULL timestamp warning (M4)
 #

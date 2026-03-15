@@ -1696,6 +1696,18 @@ class SQLBatchRunner:
                         coldstart_end = max_ts
 
         Console.warn(f"{equip_name}: Max attempts ({self.max_coldstart_attempts}) reached without completion", component="COLDSTART", equipment=equip_name, max_attempts=self.max_coldstart_attempts)
+        # For --start-from-beginning historical replays the model may still be in
+        # BASELINE_FORMATION after all coldstart batches -- the lifecycle transition to
+        # ONLINE_SCORING requires many more runs than a typical max_batches budget.
+        # All individual batches ran OK, so treat this as a successful baseline-building
+        # phase and let the batch phase continue from where coldstart left off.
+        if self.start_from_beginning and last_processed_end is not None:
+            Console.info(
+                f"{equip_name}: start-from-beginning replay -- treating max-attempts as baseline built; continuing to batch phase",
+                component="COLDSTART",
+                equipment=equip_name,
+            )
+            return True, last_processed_end
         return False, last_processed_end
 
     def _process_batches(self, equip_name: str, start_from: Optional[datetime] = None,
