@@ -85,7 +85,7 @@ _Resolved items stay for 30 days, then are archived to `docs/ACM_ARCHITECTURE_DE
 - **Workaround:** Disabled intentionally — forecasting was causing QA FAILs every run before fix in v11.15.4
 
 ### M4 — RegimePromotedAt NULL parse warning every batch
-- **Status:** Open — low priority
+- **Status:** Fixed in 2026.2.8
 - **Impact:** `[WARN] [OUTPUT] 1 timestamps failed to parse in column RegimePromotedAt` fires every scoring batch for any model stuck in LEARNING (RegimePromotedAt is NULL). Cosmetic only — no data loss.
 - **Root cause:** Output writer does not handle NULL timestamp gracefully in ACM_ActiveModels write path
 - **Workaround:** None needed — output is correct, warning is noise

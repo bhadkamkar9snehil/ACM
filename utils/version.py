@@ -16,12 +16,24 @@ Release Management:
 - Production deployments use specific tags (never merge commits)
 """
 
-__version__ = "2026.2.7"
+__version__ = "2026.2.8"
 __version_date__ = "2026-03-15"
 __version_author__ = "ACM Development Team"
 
 # 2026.2 branch -- Representation-Governance refactor slice
 # Patch versioning within this branch: 2026.2.N (N increments per fix/feature on this branch)
+
+# 2026.2.8 (2026-03-15) -- Fix spurious RegimePromotedAt NULL timestamp warning (M4)
+#
+# output_sql_core.py warned "N timestamps failed to parse in column RegimePromotedAt"
+# on every scoring batch for models in LEARNING state, where RegimePromotedAt is
+# legitimately NULL. pd.to_datetime(None, errors="coerce") -> NaT, not a parse failure.
+#
+# 1. core/output_sql_core.py: Record pre-conversion null count. Only warn when
+#    post - pre > 0 (new NULLs introduced by failed parse). Pre-existing NULLs
+#    are expected and silently pass through. Closes M4 in KNOWN_ISSUES.
+#
+# Co-Authored-By: Claude Sonnet 4.6
 
 # 2026.2.7 (2026-03-15) -- Remove defunct ACM_EpisodeMetrics from QA check (M6)
 #

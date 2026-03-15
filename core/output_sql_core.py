@@ -336,19 +336,23 @@ class SqlWriteEngine:
 
         for col in ts_cols:
             try:
+                pre_null = int(df_clean[col].isna().sum())
                 df_clean[col] = pd.to_datetime(df_clean[col], format="mixed", errors="coerce")
                 try:
                     df_clean[col] = df_clean[col].dt.tz_localize(None)
                 except Exception:
                     pass
-                null_count = int(df_clean[col].isna().sum())
-                if null_count > 0:
+                post_null = int(df_clean[col].isna().sum())
+                # Only warn when new NULLs appeared (parse failures on previously non-null values).
+                # Pre-existing NULLs (e.g. RegimePromotedAt=None for LEARNING models) are expected.
+                new_failures = post_null - pre_null
+                if new_failures > 0:
                     Console.warn(
-                        f"{null_count} timestamps failed to parse in column {col}",
+                        f"{new_failures} timestamps failed to parse in column {col}",
                         component="OUTPUT",
                         table=table_name,
                         column=col,
-                        failed_count=null_count,
+                        failed_count=new_failures,
                     )
             except Exception as ex:
                 Console.warn(
