@@ -2830,6 +2830,102 @@ These items are now promoted from implied debt to explicit execution work:
   - `ACM_RepresentationSchemas` should become a schema/basis registry, not just a run-scoped echo table
   - `ACM_SignalProfiles` now persists canonical pipeline-produced per-signal profiles in the normal path; remaining work is to remove the transitional store-time fallback once replay and backfill safety are proven
 
+### Code review: RG-13 audit hygiene slice (2026-03-14)
+
+Branch reviewed: `refactor/2026.2-rg-13-audit-hygiene`
+Scope: 63 commits, approximately 100 files changed. Full diff against `main`.
+
+#### What the slice delivered
+
+- completed coldstart authority refactor removing `coldstart_complete` from the pipeline API
+  surface and replacing it with governed `BaselineGovernor`-driven readiness checks across
+  runtime, persistence, and runner paths
+- 12 new representation-governance modules now live and replay-validated
+- SQL migrations 018-024 written, idempotent, and applied in the validation environment
+- dashboard summary panels partially cut over to governed run-insight views
+- generated memory and codebase reference artifacts refreshed
+
+#### Architecture findings (all cleared)
+
+All agent-raised architectural concerns were confirmed as false positives after direct
+file verification:
+
+- `set_sql_log_client` exists at `core/observability.py:2442`, exported correctly
+- `_SqlRunLogSink` class defined at `core/observability.py:2363`
+- `OnlinePCABinner.save_to_sql` and `load_from_sql` exist and are wired in
+  `core/acm.py:1837-1867`
+- all 12 new governance modules are asset-agnostic, use no `print()`, no `HAS_POLARS`
+  guards, no hardcoded thresholds, and have single return types
+- SQL migrations 018-024 are idempotent: all guarded with `OBJECT_ID()` or `COL_LENGTH()`
+- the coldstart authority refactor is architecturally correct: `DataLoadStageResult`
+  no longer exposes `coldstart_complete`, `baseline_governor` is now the sole readiness
+  authority, and the runner/runtime cutover is behavior-preserving across 14 parallel
+  governed validation probes
+
+#### Violations found (7 confirmed, must fix before merge)
+
+Non-ASCII characters in runtime log strings. Windows cp1252 console will throw
+`UnicodeEncodeError` and crash ACM when these code paths are hit.
+
+| # | File | Line | Char | Context | Status |
+|---|------|------|------|---------|--------|
+| 1 | `core/context_engine.py` | 96 | em dash U+2014 | `Console.warn` f-string | new in this slice |
+| 2 | `core/detector_orchestrator.py` | 459 | em dash U+2014 | `Console.warn` f-string | new in this slice |
+| 3 | `core/ewm_baseline.py` | 281 | em dash U+2014 | `Console.warn` f-string | new in this slice |
+| 4 | `core/ewm_baseline.py` | 717 | em dash U+2014 | `Console.warn` f-string | new in this slice |
+| 5 | `core/model_lifecycle.py` | 611 | em dash U+2014 | `suffix` string passed to `logger.ok` | new in this slice |
+| 6 | `core/smart_coldstart.py` | 535 | right arrow U+2192 | `Console.info` f-string | pre-existing on main |
+| 7 | `core/regimes.py` | 1323 | times sign U+00D7 | `Console.info` f-string | pre-existing on main |
+
+Non-ASCII in comments and docstrings is not flagged: cp1252 only applies to console output,
+not source file encoding. BOM marks on several files are pre-existing and do not affect runtime.
+
+Fix for each: replace the offending character with its ASCII equivalent (`--`, `->`, `x`).
+
+#### Code quality finding (low priority)
+
+`_meta_get()` is defined identically in both `core/baseline_governor.py:43` and
+`core/state_builder.py:22`. Extract to `meta_get()` in `core/representation_contracts.py`
+and update both callers. No runtime impact.
+
+#### Compliance table
+
+| Rule | Result |
+|------|--------|
+| No `print()` -- use Console | pass |
+| ASCII only in log strings | fail -- 7 violations listed above |
+| Polars hard dependency, no HAS_POLARS | pass |
+| No `return_type` parameters | pass |
+| No wrapper functions | pass |
+| No asset-specific logic | pass |
+| Robust stats: median/MAD not mean/std | pass |
+| Config-driven thresholds only | pass |
+| T-SQL syntax: TOP not LIMIT | pass |
+| SQL migrations idempotent | pass |
+| `meta` safe accessor pattern | pass |
+| Timestamp index and reset_index discipline | pass |
+| `force_retraining` CLI-only | pass |
+
+#### Required fix work
+
+All 7 encoding violations must be resolved before this branch is merged to integration.
+The `meta_get` extraction can follow in the same commit or a subsequent hygiene commit.
+No pipeline logic, detection thresholds, governance behavior, or SQL schema changes are
+needed. This is pure encoding hygiene plus one DRY extraction.
+
+Files to edit:
+
+- `core/context_engine.py` line 96: em dash to double hyphen
+- `core/detector_orchestrator.py` line 459: em dash to double hyphen
+- `core/ewm_baseline.py` lines 281 and 717: em dash to double hyphen
+- `core/model_lifecycle.py` line 611: em dash to double hyphen
+- `core/smart_coldstart.py` line 535: right arrow to ASCII arrow
+- `core/regimes.py` line 1323: times sign to letter x
+- `core/representation_contracts.py`: add `meta_get()` as public module-level function
+- `core/baseline_governor.py`: remove `_meta_get`, import and use `meta_get`
+- `core/state_builder.py`: remove `_meta_get`, import and use `meta_get`
+- `utils/version.py`: bump PATCH, add changelog entry
+
 ### Architecture hygiene review rule
 
 The refactor must include periodic objective code review checkpoints so ACM does not drift into wrapper-heavy or orchestration-heavy complexity.
