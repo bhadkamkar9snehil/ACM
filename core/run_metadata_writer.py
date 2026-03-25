@@ -1,4 +1,4 @@
-﻿"""
+"""
 ACM Run Metadata Writer
 
 Writes comprehensive run-level metadata to ACM_Runs table for:
@@ -840,6 +840,27 @@ def emit_batch_summary(
         _we = win_end.strftime("%H:%M") if win_end is not None else "?"
         _rid = str(run_id)[:8] if run_id else "?"
         _out = outcome if outcome else "?"
+
+        # --- Compact NOOP summary: skip empty scoring fields ---
+        if _out == "NOOP":
+            _zero_day_reason = "?"
+            if zero_day_status is not None:
+                _zero_day_reason = zero_day_status.status or "?"
+            # Timing (even NOOP runs have startup/load_data timers)
+            _timing_str = ""
+            if timer is not None and hasattr(timer, "totals") and timer.totals:
+                _total_t = timer.total_elapsed() if hasattr(timer, "total_elapsed") else sum(timer.totals.values())
+                _top = sorted(timer.totals.items(), key=lambda x: x[1], reverse=True)[:3]
+                _timing_str = f"total={_total_t:.1f}s  " + "  ".join(f"{s}={t:.1f}s" for s, t in _top)
+            console.info(
+                f"Batch summary (NOOP) | {_eq} | RunID={_rid} | [{_ws}-{_we}] | "
+                f"reason={_zero_day_reason} | {_timing_str}",
+                component="SUMMARY",
+                equip=_eq,
+                run_id=_rid,
+                outcome="NOOP",
+            )
+            return
 
         # Health summary
         _health_str = ""

@@ -1,4 +1,4 @@
-﻿"""
+"""
 ACM Smart Coldstart Module
 
 Current responsibilities:
@@ -683,8 +683,8 @@ class SmartColdstart:
 
         rows_in_window = int(len(train) + len(score))
 
-        # Delta to avoid double-counting if the batch window overlaps prior progress
-        delta_rows = max(0, rows_in_window - int(state.accumulated_rows or 0))
+        # Batch runner feeds discrete, non-overlapping windows — all rows are new
+        delta_rows = rows_in_window
         self._update_progress(
             rows_received=delta_rows,
             data_start=cs_start_dt,

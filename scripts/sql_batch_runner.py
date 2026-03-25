@@ -961,6 +961,14 @@ class SQLBatchRunner:
                     and representation_columns.get("ScoreAllowed") is False
                 )
                 noop_valid = run_outcome == "NOOP"
+                deep_score_qa_enabled = not (noop_valid or score_outputs_suppressed)
+                if noop_valid:
+                    Console.info(
+                        f"ACM outcome is NOOP for EquipID={equip_id}, RunID={run_id}. "
+                        "Running row-count inspection only and skipping deep score QA.",
+                        component="QA", equip_id=equip_id, run_id=run_id_str
+                    )
+
                 score_derived_tables = {
                     "ACM_Scores_Wide",
                     "ACM_HealthTimeline",
@@ -1068,88 +1076,94 @@ class SQLBatchRunner:
                     except Exception as tbl_err:
                         Console.warn(f"Skipped {table_name}: {tbl_err}", component="QA", table=table_name, error=str(tbl_err), error_type=type(tbl_err).__name__)
 
-                # ===== New QA Check 1: OMR Culprit Naming =====
-                try:
-                    # Check if there are any episodes first
-                    cur.execute("SELECT COUNT(*) FROM ACM_EpisodeDiagnostics WHERE EquipID = ? AND RunID = ?", (equip_id, run_id))
-                    episode_count = cur.fetchone()[0]
-                    if episode_count > 0:
-                        cur.execute("SELECT StartTime, EndTime, Culprits FROM ACM_EpisodeDiagnostics WHERE EquipID = ? AND RunID = ?", (equip_id, run_id))
-                        episodes = cur.fetchall()
+                if deep_score_qa_enabled:
+                    # ===== New QA Check 1: OMR Culprit Naming =====
+                    try:
+                        # Check if there are any episodes first
+                        cur.execute("SELECT COUNT(*) FROM ACM_EpisodeDiagnostics WHERE EquipID = ? AND RunID = ?", (equip_id, run_id))
+                        episode_count = cur.fetchone()[0]
+                        if episode_count > 0:
+                            cur.execute("SELECT StartTime, EndTime, Culprits FROM ACM_EpisodeDiagnostics WHERE EquipID = ? AND RunID = ?", (equip_id, run_id))
+                            episodes = cur.fetchall()
 
-                        for episode in episodes:
-                            start_time, end_time, culprits = episode
+                            for episode in episodes:
+                                start_time, end_time, culprits = episode
 
-                            # Query scores for the episode window
-                            cur.execute("""
-                                SELECT AVG(ABS(ar1_z)), AVG(ABS(pca_spe_z)), AVG(ABS(pca_t2_z)),
-                                    AVG(ABS(iforest_z)), AVG(ABS(gmm_z)), AVG(ABS(omr_z))
-                                FROM ACM_Scores_Wide
-                                WHERE EquipID = ? AND RunID = ? AND Timestamp BETWEEN ? AND ?
-                            """, (equip_id, run_id, start_time, end_time))
-                            avg_scores = cur.fetchone()
+                                # Query scores for the episode window
+                                cur.execute("""
+                                    SELECT AVG(ABS(ar1_z)), AVG(ABS(pca_spe_z)), AVG(ABS(pca_t2_z)),
+                                        AVG(ABS(iforest_z)), AVG(ABS(gmm_z)), AVG(ABS(omr_z))
+                                    FROM ACM_Scores_Wide
+                                    WHERE EquipID = ? AND RunID = ? AND Timestamp BETWEEN ? AND ?
+                                """, (equip_id, run_id, start_time, end_time))
+                                avg_scores = cur.fetchone()
 
-                            if avg_scores:
-                                detector_scores = {
-                                    'ar1_z': avg_scores[0], 'pca_spe_z': avg_scores[1], 'pca_t2_z': avg_scores[2],
-                                    'iforest_z': avg_scores[3], 'gmm_z': avg_scores[4], 'omr_z': avg_scores[5]
-                                }
-                                # Filter out None values
-                                detector_scores = {k: v for k, v in detector_scores.items() if v is not None}
-                                if not detector_scores:
-                                    continue
+                                if avg_scores:
+                                    detector_scores = {
+                                        'ar1_z': avg_scores[0], 'pca_spe_z': avg_scores[1], 'pca_t2_z': avg_scores[2],
+                                        'iforest_z': avg_scores[3], 'gmm_z': avg_scores[4], 'omr_z': avg_scores[5]
+                                    }
+                                    # Filter out None values
+                                    detector_scores = {k: v for k, v in detector_scores.items() if v is not None}
+                                    if not detector_scores:
+                                        continue
 
-                                primary_detector = max(detector_scores, key=detector_scores.get)
+                                    primary_detector = max(detector_scores, key=detector_scores.get)
 
-                                # Culprits are stored as human-readable labels via format_culprit_label().
-                                # OMR episodes become "Baseline Consistency (OMR)" or
-                                # "Baseline Consistency (OMR) -> <sensor>".
-                                omr_culprit_ok = (
-                                    culprits
-                                    and (
-                                        culprits.startswith('OMR')
-                                        or 'Baseline Consistency (OMR)' in culprits
+                                    # Culprits are stored as human-readable labels via format_culprit_label().
+                                    # OMR episodes become "Baseline Consistency (OMR)" or
+                                    # "Baseline Consistency (OMR) -> <sensor>".
+                                    omr_culprit_ok = (
+                                        culprits
+                                        and (
+                                            culprits.startswith('OMR')
+                                            or 'Baseline Consistency (OMR)' in culprits
+                                        )
                                     )
-                                )
-                                if primary_detector == 'omr_z' and not omr_culprit_ok:
-                                    Console.warn(
-                                        f"QA check failed: OMR episode has incorrect culprit. "
-                                        f"Expected 'Baseline Consistency (OMR)...', got '{culprits}'",
-                                        component="QA", table="ACM_EpisodeDiagnostics", equip_id=equip_id, run_id=str(run_id)
-                                    )
-                except Exception as e:
-                    Console.warn(f"QA check for OMR culprit naming failed: {e}", component="QA")
+                                    if primary_detector == 'omr_z' and not omr_culprit_ok:
+                                        Console.warn(
+                                            f"QA check failed: OMR episode has incorrect culprit. "
+                                            f"Expected 'Baseline Consistency (OMR)...', got '{culprits}'",
+                                            component="QA", table="ACM_EpisodeDiagnostics", equip_id=equip_id, run_id=str(run_id)
+                                        )
+                    except Exception as e:
+                        Console.warn(f"QA check for OMR culprit naming failed: {e}", component="QA")
 
-
-                # ===== New QA Check 2: Hotspot Ranking Logic =====
-                try:
-                    cur.execute("SELECT RankingScore, MaxAbsZ, MaxAbsOMR FROM ACM_SensorHotspots WHERE EquipID = ? AND RunID = ? ORDER BY RankingScore DESC", (equip_id, run_id))
-                    hotspots = cur.fetchall()
-                    if hotspots:
-                        # Check sorting
-                        ranking_scores = [h.RankingScore for h in hotspots]
-                        if not all(ranking_scores[i] >= ranking_scores[i+1] for i in range(len(ranking_scores)-1)):
-                            Console.warn(
-                                "QA check failed: ACM_SensorHotspots is not sorted by RankingScore.",
-                                component="QA", table="ACM_SensorHotspots", equip_id=equip_id, run_id=str(run_id)
-                            )
-
-                        # Check RankingScore calculation
-                        for spot in hotspots:
-                            max_abs_z = spot.MaxAbsZ if spot.MaxAbsZ is not None else 0.0
-                            max_abs_omr = spot.MaxAbsOMR if spot.MaxAbsOMR is not None else 0.0
-                            if not np.isclose(spot.RankingScore, max(max_abs_z, max_abs_omr)):
+                    # ===== New QA Check 2: Hotspot Ranking Logic =====
+                    try:
+                        cur.execute("SELECT RankingScore, MaxAbsZ, MaxAbsOMR FROM ACM_SensorHotspots WHERE EquipID = ? AND RunID = ? ORDER BY RankingScore DESC", (equip_id, run_id))
+                        hotspots = cur.fetchall()
+                        if hotspots:
+                            # Check sorting
+                            ranking_scores = [h.RankingScore for h in hotspots]
+                            if not all(ranking_scores[i] >= ranking_scores[i+1] for i in range(len(ranking_scores)-1)):
                                 Console.warn(
-                                    f"QA check failed: Hotspot RankingScore is incorrect. RankingScore={spot.RankingScore}, MaxAbsZ={spot.MaxAbsZ}, MaxAbsOMR={spot.MaxAbsOMR}",
+                                    "QA check failed: ACM_SensorHotspots is not sorted by RankingScore.",
                                     component="QA", table="ACM_SensorHotspots", equip_id=equip_id, run_id=str(run_id)
                                 )
-                except pyodbc.ProgrammingError as pe:
-                    if "Invalid column name" in str(pe):
-                        Console.warn("QA check for Hotspot Ranking skipped: RankingScore/MaxAbsOMR columns not in ACM_SensorHotspots.", component="QA")
-                    else:
-                        Console.warn(f"QA check for Hotspot Ranking failed: {pe}", component="QA")
-                except Exception as e:
-                    Console.warn(f"QA check for Hotspot Ranking failed: {e}", component="QA")
+
+                            # Check RankingScore calculation
+                            for spot in hotspots:
+                                max_abs_z = spot.MaxAbsZ if spot.MaxAbsZ is not None else 0.0
+                                max_abs_omr = spot.MaxAbsOMR if spot.MaxAbsOMR is not None else 0.0
+                                if not np.isclose(spot.RankingScore, max(max_abs_z, max_abs_omr)):
+                                    Console.warn(
+                                        f"QA check failed: Hotspot RankingScore is incorrect. RankingScore={spot.RankingScore}, MaxAbsZ={spot.MaxAbsZ}, MaxAbsOMR={spot.MaxAbsOMR}",
+                                        component="QA", table="ACM_SensorHotspots", equip_id=equip_id, run_id=str(run_id)
+                                    )
+                    except Exception as e:
+                        programming_error = getattr(pyodbc, "ProgrammingError", None)
+                        if programming_error is not None and isinstance(e, programming_error) and "Invalid column name" in str(e):
+                            Console.warn("QA check for Hotspot Ranking skipped: RankingScore/MaxAbsOMR columns not in ACM_SensorHotspots.", component="QA")
+                        else:
+                            Console.warn(f"QA check for Hotspot Ranking failed: {e}", component="QA")
+                else:
+                    Console.info(
+                        "Skipping deep score QA because row-level score outputs are intentionally absent for this run.",
+                        component="QA",
+                        equip_id=equip_id,
+                        run_id=run_id_str,
+                    )
 
                 run_log_total = None
                 run_log_warn = None
@@ -2239,7 +2253,7 @@ def main() -> int:
         "--representation-authority",
         choices=["shadow", "validation"],
         default="shadow",
-        help="Representation authority mode to pass to replayed ACM runs (default: shadow).",
+        help="Representation authority mode to pass to replayed ACM runs (default: shadow, replaces old --shadow flag).",
     )
     args = parser.parse_args()
 
