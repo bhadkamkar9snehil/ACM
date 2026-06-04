@@ -1,79 +1,64 @@
 # ACM - Automated Condition Monitoring
 
-Version and Changelog: `docs/CHANGELOG.md`
-Last Updated: 2026-02-22
-Operational Entrypoint: `python -m core.acm`
+Version: `11.15.15`
+Version date: `2026-03-08`
+Last README update: `2026-06-04`
+Canonical changelog: `docs/CHANGELOG.md`
+Operational entrypoint: `python -m core.acm`
 
-ACM is a SQL-first condition monitoring system for industrial equipment. It ingests sensor data from historian tables, builds robust feature frames, scores a multi-detector ensemble, applies regime-aware calibration and fusion, detects episodes, computes drift behavior, and persists analytics and run metadata to SQL.
+ACM is a SQL-first condition monitoring system for industrial equipment. It ingests historian data from SQL tables, builds robust feature frames, scores a multi-detector anomaly ensemble, applies regime-aware calibration and fusion, detects episodes, computes drift behavior, and persists analytics plus run metadata back to SQL.
+
+This README is the quick operational map. Detailed architecture lives in `docs/ACM_SYSTEM_OVERVIEW.md`. Version history lives in `docs/CHANGELOG.md`. Database schema reference lives in `docs/sql/COMPREHENSIVE_SCHEMA_REFERENCE.md`.
 
 ## Table of Contents
 
-1. What Problem Does ACM Solve
-2. Runtime Truth
+1. Runtime Truth
+2. What ACM Solves
 3. System Architecture
-4. Core Concepts
-5. Data Flow Pipeline
-6. Detection Algorithms
-7. Health and Confidence Scoring
-8. Episodes and Drift
-9. Configuration Model
-10. Running ACM
-11. Output Tables
-12. Observability
-13. Validation Checklist
-14. Troubleshooting
-15. Documentation Map
+4. Core Runtime Ownership
+5. Active Pipeline Sequence
+6. Detector and Scoring Model
+7. SQL and Configuration Model
+8. Running ACM
+9. Validation Checklist
+10. Agent and AI Workflow
+11. Troubleshooting
+12. Documentation Map
 
-## 1. What Problem Does ACM Solve
-
-Industrial maintenance has a structural decision problem.
-
-```text
-+----------------------------------------------------------------------+
-|                        MAINTENANCE DECISION SPACE                    |
-+----------------------------------------------------------------------+
-|                                                                      |
-| Reactive strategy                 Preventive strategy                |
-| -----------------                 ------------------                 |
-| wait for failure                  replace on schedule                |
-| high downtime risk                over-maintenance cost              |
-| collateral damage risk            unnecessary part and labor spend   |
-|                                                                      |
-| ACM objective                                                          |
-| -------------                                                          |
-| predictive maintenance                                                  |
-| early degradation detection                                             |
-| context-aware interpretation                                            |
-| action-oriented outputs                                                 |
-|                                                                      |
-+----------------------------------------------------------------------+
-```
-
-ACM answers these questions each run:
-1. Is current behavior abnormal?
-2. Is abnormality transient or sustained?
-3. Is this a regime shift or a degradation signal?
-4. How severe is current condition in operational terms?
-
-Run outcomes are strict:
-- `OK`
-- `DEGRADED`
-- `NOOP`
-- `FAIL`
-
-## 2. Runtime Truth
+## 1. Runtime Truth
 
 Current runtime facts for this repository:
-1. Supported runtime command is `python -m core.acm`.
-2. `core/acm_main.py` is not used in active runtime path.
-3. `scripts/sql_batch_runner.py` invokes `core.acm`.
-4. Runtime config source of truth is SQL table `ACM_Config`.
-5. Forecast and RUL stage are currently disabled in active orchestrator flow.
-6. SQL run lifecycle is strict: run start and run finalize are both required.
+
+1. Supported operational command is `python -m core.acm`.
+2. `core/acm.py` is the active top-level orchestrator.
+3. `core/acm_main.py` is not part of the active runtime path.
+4. `scripts/sql_batch_runner.py` invokes `core.acm` for batch execution.
+5. Runtime configuration source of truth is SQL table `ACM_Config`.
+6. Forecast and RUL execution are currently disabled in the active orchestrator flow.
+7. SQL run lifecycle is strict: run start and run finalization are both required.
+8. Valid run outcomes are `OK`, `DEGRADED`, `NOOP`, and `FAIL`.
+
+When documents conflict, prefer this order:
+
+1. Active code in `core/acm.py` and direct owner modules.
+2. `docs/ACM_SYSTEM_OVERVIEW.md`.
+3. `docs/CHANGELOG.md` and `utils/version.py`.
+4. Generated agent memory under `skills/acm-codebase-memory/references/`.
+5. Archived docs only for historical context.
+
+## 2. What ACM Solves
+
+Industrial maintenance sits between reactive failure response and preventive over-maintenance. ACM supports predictive maintenance by answering these questions each run:
+
+1. Is current behavior abnormal?
+2. Is the abnormality transient or sustained?
+3. Is this a regime shift or a degradation signal?
+4. How severe is current condition in operational terms?
+5. Did the run complete cleanly, degrade safely, noop intentionally, or fail?
+
+ACM is difficult because it combines unsupervised time-series modeling, noisy historian data, SQL lifecycle correctness, model persistence, regime context, dashboard compatibility, and observability.
 
 ## 3. System Architecture
-
-### 3.1 High-level view
 
 ```text
 +------------------------+
@@ -81,21 +66,21 @@ Current runtime facts for this repository:
 | raw data + config      |
 +------------------------+
            |
-           |
+           v
 +------------------------+
 | ACM Runtime            |
 | python -m core.acm     |
 | stage orchestrator     |
 +------------------------+
            |
-           |
+           v
 +------------------------+
 | SQL Outputs            |
 | scores episodes runs   |
 | health regime quality  |
 +------------------------+
            |
-           |
+           v
 +------------------------+
 | Observability Stack    |
 | Grafana Loki Tempo     |
@@ -103,10 +88,10 @@ Current runtime facts for this repository:
 +------------------------+
 ```
 
-### 3.2 Technology stack
+Technology stack:
 
 | Layer | Technology | Purpose |
-|-------|------------|---------|
+| --- | --- | --- |
 | Runtime | Python 3.11 | Pipeline orchestration and model execution |
 | Data processing | pandas, NumPy, scikit-learn | Features, detectors, calibration, fusion |
 | Database | SQL Server | Historian source and output persistence |
@@ -114,224 +99,137 @@ Current runtime facts for this repository:
 | Visualization | Grafana | Operational dashboards |
 | Observability | OpenTelemetry stack | Logs, traces, metrics, profiling |
 
-### 3.3 Ownership map for core runtime
+## 4. Core Runtime Ownership
 
-- `core/acm.py`: top-level orchestrator
-- `core/sql_client.py`: SQL connect and run bootstrap
-- `core/smart_coldstart.py`: load, retry, coldstart, noop logic
-- `core/fast_features.py`: feature preparation and imputation
-- `core/detector_orchestrator.py`: detector init, fit, score, calibrate
-- `core/regimes.py`: regime basis, labeling, occupancy, transient analysis
-- `core/model_persistence.py`: adaptation, retrain, model lifecycle persistence
-- `core/fuse.py`: calibration, fusion, episodes, threshold updates
-- `core/drift.py`: drift mode computation and controller persistence
-- `core/output_manager.py`: SQL persistence stage and analytics writes
-- `core/run_metadata_writer.py`: outcome mapping and teardown finalization
+Read these files first for runtime work:
 
-## 4. Core Concepts
+| Area | Owner file | Responsibility |
+| --- | --- | --- |
+| Top-level orchestration | `core/acm.py` | CLI, stage ordering, outcome coordination, teardown |
+| SQL bootstrap | `core/sql_client.py` | SQL connection, config load, run start, runtime policy |
+| Data load and coldstart | `core/smart_coldstart.py` | Historian load, coldstart/noop handling, retry path |
+| Data contracts | `core/pipeline_types.py` | Entry validation and guardrails |
+| Feature preparation | `core/fast_features.py` | Index hygiene, feature engineering, imputation |
+| Detector orchestration | `core/detector_orchestrator.py` | Detector load, fit, score, calibration helpers |
+| Regime modeling | `core/regimes.py` | Regime basis, labeling, occupancy, transitions |
+| Model lifecycle | `core/model_persistence.py` | Adaptation, retrain, active model persistence |
+| Health and fusion | `core/fuse.py` | Calibration, fusion, episodes, adaptive thresholds |
+| Drift | `core/drift.py` | Drift computation and controller state |
+| Output persistence | `core/output_manager.py` | SQL persistence stage and analytics writes |
+| Finalization | `core/run_metadata_writer.py` | Outcome mapping, metadata, teardown finalization |
+| Observability | `core/observability.py` | Logs, traces, metrics, profiling hooks |
 
-### 4.1 Operating regimes
+## 5. Active Pipeline Sequence
 
-Regimes describe how equipment is operating. They are not anomaly labels.
+Current `core.acm` execution order:
+
+1. Initialize run observability.
+2. Connect to SQL fail-fast.
+3. Bootstrap ACM run state.
+4. Resolve runtime policy.
+5. Load and validate data.
+6. Seed baseline when needed.
+7. Prepare features and run guardrails.
+8. Initialize, load, or fit detectors.
+9. Score detectors and label regimes.
+10. Run model adaptation and persistence.
+11. Run calibration, fusion, health, episodes, and threshold updates.
+12. Run drift postprocess.
+13. Prepare persistence inputs.
+14. Persist SQL outputs and analytics.
+15. Resolve final run outcome.
+16. Finalize run metadata, SQL lifecycle, resources, spans, and observability.
+
+Early-exit and failure behavior:
+
+1. Coldstart-deferred or no-data paths finalize as `NOOP`.
+2. Unexpected stage exceptions mark the run as `FAIL`.
+3. Teardown still runs from `finally` so SQL lifecycle closure is attempted.
+4. Partial optional-output failures should degrade safely when designed to do so.
+
+## 6. Detector and Scoring Model
+
+ACM uses multiple detector families because no single detector covers all industrial fault shapes.
+
+| Detector | Signal | Typical strength |
+| --- | --- | --- |
+| AR1 | Local temporal residual change | Abrupt univariate shifts |
+| PCA SPE | Off-subspace novelty | Structure-level deviations |
+| PCA T2 | Latent-space extremity | Extreme latent movement |
+| Isolation Forest | Sparse outlier isolation | High-dimensional sparse anomalies |
+| GMM | Low likelihood under mixture density | Multimodal healthy distributions |
+| OMR | Inter-sensor relationship break | Dependency failures between sensors |
+
+Core scoring path:
+
+1. Generate detector raw scores.
+2. Calibrate detector scores into comparable z-space.
+3. Fuse calibrated evidence into a unified anomaly intensity.
+4. Interpret fused behavior into health, episodes, drift, confidence, and operational outputs.
+
+Regime modeling is context, not anomaly truth:
 
 ```text
-+------------------------------------------------------------------+
-|                       REGIME PRINCIPLE                           |
-+------------------------------------------------------------------+
-| Regime modeling answers: how is machine operating now?           |
-| Detector scoring answers: how abnormal is behavior in context?   |
-|                                                                  |
-| These concerns stay separate to avoid masking true faults.       |
-+------------------------------------------------------------------+
+Regime modeling answers: how is the machine operating?
+Detector scoring answers: how abnormal is behavior in that context?
 ```
 
-### 4.2 Multi-detector fusion
+## 7. SQL and Configuration Model
 
-Different fault shapes require different detectors.
+Runtime configuration:
 
-```text
-+------------------------------------------------------------------+
-|                        DETECTOR ENSEMBLE                         |
-+------------------------------------------------------------------+
-| AR1      : local temporal residual change                         |
-| PCA SPE  : off-subspace novelty                                   |
-| PCA T2   : latent-space extremity                                 |
-| IForest  : sparse outlier isolation                               |
-| GMM      : low likelihood under learned density                   |
-| OMR      : inter-sensor relationship break                        |
-+------------------------------------------------------------------+
-| calibrated detector z-scores are fused into one operational score |
-+------------------------------------------------------------------+
-```
+1. SQL table: `ACM_Config`.
+2. Seed file: `configs/config_table.csv`.
+3. Config seeder: `scripts/sql/populate_acm_config.py`.
+4. SQL connection file: `configs/sql_connection.ini`.
+5. SQL connection file is local-only and should remain gitignored.
 
-### 4.3 Model lifecycle
+Core output categories:
 
-Model state evolves through maturity states in lifecycle logic.
+1. Detector scores and fused signals.
+2. Episode records and culprit context.
+3. Regime labels and regime analytics.
+4. Data quality diagnostics.
+5. Run metadata and closure state.
+6. Model lifecycle and calibration state.
 
-```text
-COLDSTART  LEARNING  CONVERGED  DEPRECATED
-```
+Important operational tables include:
 
-Maturity influences how aggressively adaptation and persistence decisions are applied.
+- `ACM_Runs`
+- `ACM_Scores_Wide`
+- `ACM_Episodes`
+- `ACM_Anomaly_Events`
+- `ACM_HealthTimeline`
+- `ACM_RegimeTimeline`
+- `ACM_DataQuality`
+- `ACM_RunMetadata`
+- `ACM_ActiveModels`
+- `ACM_Config`
+- `ModelRegistry`
 
-## 5. Data Flow Pipeline
+Use `docs/sql/COMPREHENSIVE_SCHEMA_REFERENCE.md` for table details, column definitions, row counts, and schema review.
 
-### 5.1 End-to-end stage sequence
+## 8. Running ACM
 
-```text
-Phase 1  startup and SQL bootstrap
-Phase 2  data load and coldstart/noop resolution
-Phase 3  data contract validation and guardrails
-Phase 4  baseline seed
-Phase 5  feature preparation and imputation
-Phase 6  detector initialization and compatibility checks
-Phase 7  detector scoring and regime labeling
-Phase 8  model adaptation and persistence
-Phase 9  calibration fusion episodes threshold updates
-Phase 10 drift postprocess
-Phase 11 persistence input preparation
-Phase 12 SQL output persistence and analytics
-Phase 13 outcome resolution and teardown finalization
-```
-
-### 5.2 Typical timing shape
-
-Timing varies by equipment, data volume, and cache state, but these usually dominate:
-1. feature preparation
-2. detector fit when retrain occurs
-3. SQL persistence and analytics writes
-
-## 6. Detection Algorithms
-
-### 6.1 AR1 detector
-
-Intent:
-- Detect per-sensor local residual shifts against short-memory expectation.
-
-Strength:
-- Good for abrupt univariate changes.
-
-Typical blind spot:
-- Purely multivariate shifts where no single sensor is individually extreme.
-
-### 6.2 PCA SPE and PCA T2
-
-Intent:
-- SPE detects novelty off learned latent manifold.
-- T2 detects extreme movement inside latent manifold.
-
-Strength:
-- Captures structure-level behavior not visible in one-sensor analysis.
-
-Typical blind spot:
-- Patterns that remain plausible in latent space but are faulty for other reasons.
-
-### 6.3 Isolation Forest
-
-Intent:
-- Detect sparse outliers through random partition isolation behavior.
-
-Strength:
-- Non-parametric outlier sensitivity in high-dimensional frames.
-
-Typical blind spot:
-- Dense collective shifts that are not sparse outliers.
-
-### 6.4 GMM detector
-
-Intent:
-- Score low-probability states under fitted mixture density.
-
-Strength:
-- Useful for multimodal healthy operating distributions.
-
-Typical blind spot:
-- Training contamination can normalize degraded states.
-
-### 6.5 OMR detector
-
-Intent:
-- Detect breakage in inter-sensor consistency relationships.
-
-Strength:
-- Catches dependency break patterns even when individual channels look plausible.
-
-Typical blind spot:
-- Uniform global shifts that preserve relationships.
-
-### 6.6 Why all six are needed
-
-No single detector family covers all realistic failure morphologies. Ensemble agreement is more reliable than single-detector excursions.
-
-## 7. Health and Confidence Scoring
-
-### 7.1 Score transformation
-
-ACM scoring path:
-1. Detector raw score generation.
-2. Detector-level calibration into comparable z-space.
-3. Fusion into a unified anomaly intensity.
-4. Health-oriented downstream interpretation from fused behavior.
-
-Conceptual fusion expression:
-- `fused_z(t) = sum(w_i * z_i(t))`
-
-### 7.2 Confidence and reliability factors
-
-Operational confidence depends on factors such as:
-1. data quality
-2. regime quality
-3. consistency of detector agreement
-4. model maturity and adaptation state
-
-## 8. Episodes and Drift
-
-### 8.1 Episode logic
-
-Episodes capture sustained abnormal intervals, not isolated spikes.
-
-Why this matters:
-1. sustained events are operationally actionable
-2. duration and severity together are better than peak-only scoring
-
-### 8.2 Drift logic
-
-Drift identifies directional behavior change beyond point anomaly level.
-
-Practical distinction:
-- anomaly score: how unusual current behavior is
-- drift mode: whether behavior trend state is moving directionally
-
-## 9. Configuration Model
-
-### 9.1 Runtime source of truth
-
-- SQL table: `ACM_Config`
-
-### 9.2 Config seeding and sync
-
-- Seeder script: `scripts/sql/populate_acm_config.py`
-- Seed source: `configs/config_table.csv`
-
-### 9.3 SQL connection config
-
-- `configs/sql_connection.ini` (gitignored)
-
-## 10. Running ACM
-
-### 10.1 Production-like batch mode
+Production-like batch mode:
 
 ```powershell
 python scripts/sql_batch_runner.py --equip FD_FAN GAS_TURBINE --max-workers 2 --resume
 ```
 
-### 10.2 Single run mode
+Single run mode:
 
 ```powershell
 python -m core.acm --equip FD_FAN --start-time "2024-01-01T00:00:00" --end-time "2024-01-02T00:00:00"
 ```
 
-### 10.3 CLI options
+Help and CLI inspection:
+
+```powershell
+python -m core.acm --help
+```
+
+Supported CLI options include:
 
 ```text
 --equip
@@ -345,45 +243,9 @@ python -m core.acm --equip FD_FAN --start-time "2024-01-01T00:00:00" --end-time 
 --end-time
 ```
 
-## 11. Output Tables
+Note: `--log-file` is ignored by the active runtime. ACM writes logs to SQL and the observability stack.
 
-### 11.1 Core output categories
-
-1. scores and fused signals
-2. episodes and culprits
-3. regime timelines and summaries
-4. data quality diagnostics
-5. run metadata and lifecycle closure
-
-### 11.2 Typical operational tables
-
-- `ACM_Runs`
-- `ACM_Scores_Wide`
-- `ACM_Episodes` and or `ACM_Anomaly_Events`
-- `ACM_HealthTimeline`
-- `ACM_RegimeTimeline`
-- `ACM_DataQuality`
-- `ACM_RunMetadata`
-
-Forecast note:
-- Forecast-related schema may exist.
-- Active orchestrator currently keeps forecast stage disabled.
-
-## 12. Observability
-
-Signals emitted by ACM:
-1. logs for stage and error context
-2. traces for run and stage timing
-3. metrics for outcomes, health, and quality
-
-Typical local endpoints:
-- Grafana: `http://localhost:3000`
-- Loki: `http://localhost:3100`
-- Tempo: `http://localhost:3200`
-- Prometheus: `http://localhost:9090`
-- Pyroscope: `http://localhost:4040`
-
-## 13. Validation Checklist
+## 9. Validation Checklist
 
 Use this after structural or behavior-sensitive changes:
 
@@ -395,62 +257,92 @@ pytest tests/test_v11_modules.py -v
 python scripts/sql_batch_runner.py --equip FD_FAN --dry-run
 ```
 
-Recommended parity checks for refactor slices:
-1. outcome
-2. rows_read
-3. rows_written
-4. episode count
-5. final drift mode
-6. regime quality status
-7. run finalization success
+For refactors, compare these before accepting the change:
 
-## 14. Troubleshooting
+1. Final outcome.
+2. Rows read.
+3. Rows written.
+4. Episode count.
+5. Drift mode.
+6. Regime quality status.
+7. Run finalization success.
+8. Affected SQL tables.
+9. Grafana/dashboard compatibility where relevant.
 
-### 14.1 SQL startup failures
+## 10. Agent and AI Workflow
 
-1. validate `configs/sql_connection.ini`
-2. validate SQL reachability and credentials
-3. run with debug logging for startup context
+This repository already contains agent-facing context.
 
-### 14.2 Unexpected NOOP outcomes
+Required agent entrypoints:
 
-1. validate historian coverage for selected window
-2. check coldstart minimum-data thresholds
-3. inspect batch runner precheck path
+1. `AGENTS.md`.
+2. `skills/acm-codebase-memory/SKILL.md`.
+3. `skills/acm-codebase-memory/references/00_Agent-Memory-Hub.md`.
+4. `skills/acm-codebase-memory/references/01_Runtime-Critical-Path.md`.
+5. `skills/acm-codebase-memory/references/02_Module-Ownership.md`.
+6. `skills/acm-codebase-memory/references/03_SQL-Output-Map.md`.
 
-### 14.3 Unstable adaptation behavior
+Before major changes, refresh and check memory:
 
-1. inspect model cache compatibility logs
-2. inspect regime quality and drift outputs
-3. inspect run metadata and quality records
+```powershell
+python scripts/manage_acm_agent_memory.py refresh --sync-repo-skill --sync-local-skill
+python scripts/manage_acm_agent_memory.py health
+```
 
-### 14.4 Dashboard mismatch
+Agent rules for ACM work:
 
-1. verify query table and field names match active schema
-2. verify panel options and color settings are valid for installed Grafana version
-3. verify selected equipment and time range contain rows
+1. Read runtime-critical memory before planning.
+2. Treat `python -m core.acm` as the active runtime path.
+3. Do not revive `core/acm_main.py` as the active orchestrator.
+4. Inspect owner modules before editing.
+5. Avoid blind patch scripts for behavioral changes.
+6. Keep SQL lifecycle and finalization semantics stable.
+7. Update tests or validation notes for behavior-sensitive changes.
+8. Record diff, commands run, verification result, and remaining risk.
 
-## 15. Documentation Map
+## 11. Troubleshooting
 
-Primary references:
-- `docs/CHANGELOG.md`
-- `docs/ACM_SYSTEM_OVERVIEW.md`
-- `docs/ACM_SINGLE_ENTRYPOINT_REFACTOR_MASTER_PLAN.md`
-- `docs/OUTPUT_MANAGER_REFACTOR_MASTER_PLAN.md`
-- `docs/ACM Main Refactoring Analysis - Action.md`
+### SQL startup failures
 
-Code map for runtime first-read:
-- `core/acm.py`
-- `core/sql_client.py`
-- `core/smart_coldstart.py`
-- `core/fast_features.py`
-- `core/detector_orchestrator.py`
-- `core/regimes.py`
-- `core/fuse.py`
-- `core/drift.py`
-- `core/output_manager.py`
-- `core/run_metadata_writer.py`
+1. Validate `configs/sql_connection.ini`.
+2. Validate SQL Server reachability and credentials.
+3. Confirm `pyodbc` driver availability.
+4. Run `python -m core.acm --help` to separate CLI/import issues from SQL runtime issues.
+
+### Unexpected NOOP outcomes
+
+1. Validate historian coverage for the selected window.
+2. Check coldstart minimum-data thresholds.
+3. Inspect `ACM_ColdstartState` and batch-runner precheck behavior.
+4. Confirm the selected equipment exists in SQL metadata.
+
+### Unstable adaptation or retrain behavior
+
+1. Inspect model cache compatibility logs.
+2. Inspect regime quality and drift outputs.
+3. Inspect `ACM_ActiveModels`, `ModelRegistry`, and run metadata.
+4. Check `ACM_Config` values against `configs/config_table.csv`.
+
+### Dashboard mismatch
+
+1. Verify dashboard queries target active table and field names.
+2. Verify selected equipment and time range contain rows.
+3. Verify Grafana panel options are valid for the installed version.
+4. Use `docs/sql/COMPREHENSIVE_SCHEMA_REFERENCE.md` as the schema reference.
+
+## 12. Documentation Map
+
+Current primary references:
+
+- `docs/CHANGELOG.md` - version history and change rationale.
+- `docs/ACM_SYSTEM_OVERVIEW.md` - active architecture and runtime sequence.
+- `docs/sql/COMPREHENSIVE_SCHEMA_REFERENCE.md` - SQL schema reference.
+- `docs/SOURCE_CONTROL_PRACTICES.md` - source control and release practices.
+- `AGENTS.md` - agent skill discovery and usage rule.
+- `skills/acm-codebase-memory/SKILL.md` - repository-specific agent memory workflow.
+
+Historical or archived docs may exist under `docs/archive/`. Use them only as historical context unless they are explicitly promoted back into active documentation.
 
 ---
 
-This README intentionally keeps release history in `docs/CHANGELOG.md` and keeps runtime truth aligned to active code.
+This README intentionally keeps release history in `docs/CHANGELOG.md`, keeps schema details in `docs/sql/COMPREHENSIVE_SCHEMA_REFERENCE.md`, and keeps active runtime truth aligned to `core/acm.py`.
