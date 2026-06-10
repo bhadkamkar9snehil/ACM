@@ -379,9 +379,13 @@ def evaluate_series(
             if ztr.size < 500:
                 continue
             z0_h = max(alert_z, float(np.quantile(ztr, 0.99)))
-            base_h = float(np.nanmax(rolling_rate(ztr, z0_h)))
+            # 7-day integration window: per-head signatures of slow faults
+            # (transformer overheat, bearing wear) are persistent-but-sparse;
+            # long integration drops the variance of the rate statistic and
+            # separates them from short healthy bursts.
+            base_h = float(np.nanmax(rolling_rate(ztr, z0_h, window=1008)))
             thr_h = float(np.clip(base_h * 1.5, 0.05, 0.9))
-            r_sc = np.nan_to_num(rolling_rate(np.asarray(z_sc, dtype=np.float64), z0_h), nan=0.0)
+            r_sc = np.nan_to_num(rolling_rate(np.asarray(z_sc, dtype=np.float64), z0_h, window=1008), nan=0.0)
             mask_h = sustained_alarm_mask(r_sc, thr_h, 6)
             if mask_h.any():
                 heads_fired.append(name)
