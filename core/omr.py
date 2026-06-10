@@ -496,9 +496,15 @@ class OMRDetector:
                     return zeros, empty_contrib
                 return zeros
             
-            # Validate input
-            is_valid, _ = self._validate_input(X)
-            if not is_valid:
+            # Minimal validation only: empty input cannot be scored. Do NOT
+            # reject on all-NaN columns here — the alignment below reindexes
+            # to training feature_names and imputes from train_medians, so a
+            # dead sensor is handled per-column. The old _validate_input gate
+            # zeroed the ENTIRE detector when any one column was all-NaN,
+            # which also poisoned downstream calibration (calibrators fitted
+            # on an all-zero baseline turn every later raw score into a huge
+            # z — the "chronic OMR elevation" seen on CARE holdouts).
+            if X.empty or X.shape[1] == 0:
                 zeros = np.zeros(n_samples, dtype=np.float32)
                 if return_contributions:
                     empty_contrib = pd.DataFrame(
@@ -508,7 +514,7 @@ class OMRDetector:
                     )
                     return zeros, empty_contrib
                 return zeros
-            
+
             # Store index for later use
             X_index = X.index
             feature_names = self.model.feature_names

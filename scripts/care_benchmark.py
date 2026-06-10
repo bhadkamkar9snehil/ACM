@@ -113,19 +113,32 @@ def sustained_alarm_mask(fused: np.ndarray, alert_z: float, persist: int) -> np.
     return run >= persist
 
 
+def _longest_run(mask: np.ndarray) -> int:
+    longest = streak = 0
+    for a in mask:
+        streak = streak + 1 if a else 0
+        longest = max(longest, streak)
+    return longest
+
+
 def self_tune_alarm_rule(
     train_fused: Optional[np.ndarray],
     alert_z_floor: float,
     persist_floor: int,
     target_fp: float = 0.001,
+    max_persist: int = 72,   # 12h at 10-min cadence
 ) -> tuple[float, int]:
     """Derive the alarm operating point from the asset's OWN unlabelled history.
 
-    Fully unsupervised: pick the smallest (threshold, persistence) pair such
-    that the training period — which the model treats as the asset's normal
-    life, faults and all — would never have raised a sustained alarm. No
-    labels, no human tuning, and contamination in the history automatically
-    makes the rule more conservative rather than poisoning it.
+    Fully unsupervised "low-and-slow" rule: among candidate quantile
+    thresholds of the held-out fused stream, take the LOWEST threshold whose
+    implied persistence — outlasting the longest healthy excursion at that
+    level by a 1.5x safety margin — stays physically sensible (<= max_persist
+    samples). Degradation sustains for days, so a low bar held for hours
+    detects faults far earlier than a high bar held briefly, while anything
+    the healthy history itself produced can never alarm. No labels, no human
+    tuning; contamination in the history makes the rule more conservative
+    rather than poisoning it.
     """
     if train_fused is None or len(train_fused) < 100:
         return alert_z_floor, persist_floor
@@ -133,16 +146,17 @@ def self_tune_alarm_rule(
     tf = tf[np.isfinite(tf)]
     if tf.size < 100:
         return alert_z_floor, persist_floor
-    alert_z = max(alert_z_floor, float(np.quantile(tf, 1.0 - target_fp)))
-    # Longest run at/above the chosen threshold in training; alarm requires
-    # outlasting anything the history ever produced.
-    above = tf >= alert_z
-    longest = streak = 0
-    for a in above:
-        streak = streak + 1 if a else 0
-        longest = max(longest, streak)
-    persist = max(persist_floor, longest + 1)
-    return alert_z, persist
+
+    for q in (0.98, 0.99, 0.995, 0.999):
+        thr = max(alert_z_floor, float(np.quantile(tf, q)))
+        persist = max(persist_floor, int(_longest_run(tf >= thr) * 1.5) + 1)
+        if persist <= max_persist:
+            return thr, persist
+
+    # History too noisy for any low bar: fall back to the strict tail rule.
+    thr = max(alert_z_floor, float(np.quantile(tf, 1.0 - target_fp)))
+    persist = max(persist_floor, _longest_run(tf >= thr) + 1)
+    return thr, persist
 
 
 def run_event(
@@ -187,20 +201,27 @@ def run_event(
         gmm_detector=det.get("gmm_detector"),
         omr_detector=det.get("omr_detector"),
     )
-    calib_frame, _ = orch.score_all_detectors(calib_feat, **det_kwargs,
-                                              return_omr_contributions=False)
     score_frame, omr_contrib = orch.score_all_detectors(score_feat, **det_kwargs)
 
-    cal_q = float((cfg.get("thresholds", {}) or {}).get("q", 0.98))
-    self_tune_cfg = (cfg.get("thresholds", {}) or {}).get("self_tune", {}) or {}
-    score_frame, calibrators = orch.calibrate_all_detectors(
-        train_frame=calib_frame, score_frame=score_frame,
-        cal_q=cal_q, self_tune_cfg=self_tune_cfg,
-        fit_regimes=None, transform_regimes=None,
+    # Production calibration stage (adaptive clip + contamination filter),
+    # fitted on the HELD-OUT slice the detectors never saw.
+    flags = {f"{k}_enabled": True for k in ("ar1", "pca", "iforest", "gmm", "omr")}
+    cal_stage = fuse.run_calibration_stage(
+        train=calib_feat, frame=score_frame, cfg=cfg,
+        regime_quality_ok=False,
+        train_regime_labels=None, score_regime_labels=None,
+        pca_train_spe=None, pca_train_t2=None,
+        detectors=det, detector_flags=flags,
+        cached_calibration_params=None, saved_model_version=None,
+        score_all_detectors_fn=orch.score_all_detectors,
+        calibrate_all_detectors_fn=orch.calibrate_all_detectors,
+        equip=f"event_{event_id}",
     )
-    # Same calibrators applied to holdout scores (fusion threshold baseline)
+    score_frame = cal_stage.frame
+    calib_frame = cal_stage.train_frame
+    # Apply the same calibrators to holdout scores (fusion threshold baseline)
     for raw_col, z_col in Z_MAP:
-        cal = calibrators.get(z_col)
+        cal = cal_stage.calibrators_dict.get(z_col)
         if cal is not None and raw_col in calib_frame.columns:
             calib_frame[z_col] = cal.transform(calib_frame[raw_col].to_numpy(copy=False))
 
@@ -298,17 +319,34 @@ def summarize(results: List[Dict], alert_z: float, persist: int) -> Dict:
     detected = anomalies["detected"].sum() if len(anomalies) else 0
     clean = (~normals["detected"]).sum() if len(normals) else 0
     early = anomalies[anomalies["lead_time_h"] > 0] if len(anomalies) else anomalies
+
+    # Event-level KPI: each dataset is one decision.
+    #   TP = fault detected | FN = fault missed
+    #   FP = normal window alarmed | TN = normal window clean
+    tp, fn = int(detected), int(len(anomalies) - detected)
+    fp, tn = int(len(normals) - clean), int(clean)
+    precision = tp / (tp + fp) if (tp + fp) else float("nan")
+    recall = tp / (tp + fn) if (tp + fn) else float("nan")
+    f1 = (2 * precision * recall / (precision + recall)
+          if np.isfinite(precision) and np.isfinite(recall) and (precision + recall) > 0 else 0.0)
+    # "Respectable" bar: catch >= 80% of faults with event-level F1 >= 0.75.
+    kpi_pass = bool(np.isfinite(recall) and recall >= 0.80 and f1 >= 0.75)
+
     summary = {
         "alert_z": alert_z,
         "persist_samples": persist,
         "anomaly_events": int(len(anomalies)),
-        "anomalies_detected": int(detected),
-        "detection_rate": float(detected / len(anomalies)) if len(anomalies) else np.nan,
+        "anomalies_detected": tp,
+        "detection_rate": float(recall) if np.isfinite(recall) else np.nan,
         "detected_before_event_start": int((anomalies["lead_time_h"] > 0).sum()) if len(anomalies) else 0,
         "median_lead_time_h": float(early["lead_time_h"].median()) if len(early) else np.nan,
         "normal_events": int(len(normals)),
-        "normal_events_clean": int(clean),
-        "false_alarm_event_rate": float(1 - clean / len(normals)) if len(normals) else np.nan,
+        "normal_events_clean": tn,
+        "false_alarm_event_rate": float(fp / len(normals)) if len(normals) else np.nan,
+        "event_precision": float(precision) if np.isfinite(precision) else np.nan,
+        "event_recall": float(recall) if np.isfinite(recall) else np.nan,
+        "event_f1": float(f1),
+        "KPI": "PASS (recall>=0.80 and F1>=0.75)" if kpi_pass else "FAIL (need recall>=0.80 and F1>=0.75)",
     }
     return summary
 
