@@ -179,14 +179,21 @@ def run_event(
     # --- ML core: features -> detectors -> calibration -> fusion ------------
     train_feat, score_feat = build_features_for_pipeline(train_raw, score_raw, cfg)
 
-    # OUT-OF-SAMPLE CALIBRATION: detectors score their own training data
-    # optimistically (in-sample bias), so calibrating z-scores on the fit data
-    # inflates z on ALL future data — healthy periods included. Fit detectors
-    # on the earlier slice, calibrate on the held-out tail they never saw.
+    # OUT-OF-SAMPLE CALIBRATION with an INTERLEAVED split: detectors score
+    # their own training data optimistically, so calibration must use data
+    # they never saw — but a chronological tail holdout is poisonous here:
+    # the last weeks of history sit right before the prediction window and
+    # already contain the fault's early degradation, baking the fault
+    # signature into "normal" and burying detection. Instead, hold out every
+    # 5th block of ~3 days across the WHOLE year: out-of-sample, spans all
+    # seasons, and at most ~20% of any pre-fault degradation.
     holdout_frac = float((cfg.get("thresholds", {}) or {}).get("calibration_holdout_frac", 0.2))
-    n_fit = int(len(train_feat) * (1.0 - holdout_frac))
-    fit_feat = train_feat.iloc[:n_fit]
-    calib_feat = train_feat.iloc[n_fit:]
+    block = 432  # 3 days at 10-min cadence
+    stride = max(2, int(round(1.0 / max(holdout_frac, 1e-6))))
+    idx = np.arange(len(train_feat))
+    calib_mask = (idx // block) % stride == (stride - 1)
+    fit_feat = train_feat.iloc[~calib_mask]
+    calib_feat = train_feat.iloc[calib_mask]
 
     det = orch.fit_all_detectors(
         train=fit_feat, cfg=cfg,
@@ -231,36 +238,98 @@ def run_event(
         cfg=cfg, omr_contributions=omr_contrib,
     )
     fused = np.asarray(fusion.fused_scores, dtype=np.float64)
+    ts = pd.DatetimeIndex(score_frame.index)
+    train_fused = np.asarray(fusion.train_fused, dtype=np.float64) if fusion.train_fused is not None else None
 
-    # Self-tuned alarm operating point from the asset's own history (no labels)
-    alert_z_eff, persist_eff = self_tune_alarm_rule(fusion.train_fused, alert_z, persist)
+    if out_dir is not None:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        series = pd.DataFrame({
+            "time_stamp": ts,
+            "fused": fused,
+            "status_type_id": score_status,
+        })
+        for _, z_col in Z_MAP:
+            if z_col in score_frame.columns:
+                series[z_col] = score_frame[z_col].to_numpy()
+        series.to_csv(out_dir / f"event_{event_id}_scores.csv", index=False)
+        if train_fused is not None:
+            pd.DataFrame({"train_fused": train_fused}).to_csv(
+                out_dir / f"event_{event_id}_train_fused.csv", index=False)
+        if fusion.episodes is not None and len(fusion.episodes) > 0:
+            fusion.episodes.to_csv(out_dir / f"event_{event_id}_episodes.csv", index=False)
 
-    # --- Evaluation (the ONLY place labels are used) -------------------------
-    ts = score_frame.index
-    alarm = sustained_alarm_mask(fused, alert_z_eff, persist_eff)
+    result = evaluate_series(ts, fused, score_status, train_fused, event, alert_z, persist)
+    result.update({"n_train": len(train_raw), "n_score": len(score_raw),
+                   "runtime_s": round(time.time() - t0, 1), "reused": False})
+    return result
+
+
+def rolling_rate(fused: np.ndarray, z0: float, window: int = 144) -> np.ndarray:
+    """Trailing fraction of samples >= z0 over `window` samples (24h default)."""
+    above = (np.asarray(fused, dtype=np.float64) >= z0).astype(float)
+    return pd.Series(above).rolling(window, min_periods=window // 2).mean().to_numpy()
+
+
+def evaluate_series(
+    ts: pd.DatetimeIndex,
+    fused: np.ndarray,
+    score_status: np.ndarray,
+    train_fused: Optional[np.ndarray],
+    event: pd.Series,
+    alert_z: float,
+    persist: int,
+) -> Dict:
+    """Label-aware evaluation of a fused score series (labels used ONLY here).
+
+    Two self-tuned alarm rules, OR-combined:
+      sustained — fused holds above a holdout-quantile threshold longer than
+                  the healthy history ever did (step-change faults);
+      rate      — trailing 24h fraction of high-z samples exceeds 1.5x the
+                  worst 24h the holdout ever produced (intermittent faults
+                  that spike under load between quiet periods).
+    """
+    event_id = int(event["event_id"])
+    label = str(event["event_label"])
+    event_start, event_end = event["event_start"], event["event_end"]
+
+    alert_z_eff, persist_eff = self_tune_alarm_rule(train_fused, alert_z, persist)
+    alarm_sustained = sustained_alarm_mask(fused, alert_z_eff, persist_eff)
+
+    rate_thr = np.nan
+    z0 = alert_z
+    alarm_rate = np.zeros(len(fused), dtype=bool)
+    if train_fused is not None and np.isfinite(train_fused).sum() > 500:
+        tf = np.asarray(train_fused, dtype=np.float64)
+        tf = tf[np.isfinite(tf)]
+        z0 = max(alert_z, float(np.quantile(tf, 0.99)))
+        hold_rate = rolling_rate(tf, z0)
+        base = float(np.nanmax(hold_rate)) if np.isfinite(hold_rate).any() else 0.0
+        rate_thr = float(np.clip(base * 1.5, 0.05, 0.9))
+        score_rate = rolling_rate(fused, z0)
+        alarm_rate = np.nan_to_num(score_rate, nan=0.0) >= rate_thr
+
+    alarm = alarm_sustained | alarm_rate
     normal_op = np.isin(score_status, list(NORMAL_STATUS))
-
-    event_start = event["event_start"]
-    event_end = event["event_end"]
 
     result: Dict = {
         "event_id": event_id,
         "asset": int(event["asset"]),
         "label": label,
         "description": event.get("event_description") if isinstance(event.get("event_description"), str) else "",
-        "n_train": len(train_raw),
-        "n_score": len(score_raw),
         "alert_z_eff": round(float(alert_z_eff), 2),
         "persist_eff": int(persist_eff),
+        "rate_z0": round(float(z0), 2),
+        "rate_thr": round(float(rate_thr), 3) if np.isfinite(rate_thr) else np.nan,
+        "rule_fired": ("sustained" if alarm_sustained.any() else "") +
+                      ("+rate" if alarm_rate.any() else ""),
         "fused_p50": float(np.nanmedian(fused)),
         "fused_max": float(np.nanmax(fused)),
         "alarm_frac": float(alarm.mean()),
-        "runtime_s": 0.0,
     }
 
     if label == "anomaly":
-        first_alarm = ts[alarm][0] if alarm.any() else None
         detected = bool(alarm.any())
+        first_alarm = ts[alarm][0] if detected else None
         result.update({
             "detected": detected,
             "first_alarm": str(first_alarm) if first_alarm is not None else "",
@@ -269,14 +338,13 @@ def run_event(
                 float((event_start - first_alarm).total_seconds() / 3600.0)
                 if first_alarm is not None else np.nan
             ),
-            # fused level inside the labelled fault window
             "fused_max_in_event": float(np.nanmax(
                 fused[(ts >= event_start) & (ts <= event_end)]
             )) if ((ts >= event_start) & (ts <= event_end)).any() else np.nan,
             "false_alarm_frac_normal_op": np.nan,
         })
     else:
-        # Normal event: any sustained alarm during normal operation = false positive
+        # Normal event: any alarm during normal operation = false positive
         fp = alarm & normal_op
         result.update({
             "detected": bool(fp.any()),  # for a normal event, detected == false alarm
@@ -286,28 +354,27 @@ def run_event(
             "fused_max_in_event": np.nan,
             "false_alarm_frac_normal_op": float(fp.sum() / max(normal_op.sum(), 1)),
         })
-
-    result["runtime_s"] = round(time.time() - t0, 1)
-
-    if out_dir is not None:
-        out_dir.mkdir(parents=True, exist_ok=True)
-        series = pd.DataFrame({
-            "time_stamp": ts,
-            "fused": fused,
-            "alarm": alarm.astype(int),
-            "status_type_id": score_status,
-        })
-        for _, z_col in Z_MAP:
-            if z_col in score_frame.columns:
-                series[z_col] = score_frame[z_col].to_numpy()
-        series.to_csv(out_dir / f"event_{event_id}_scores.csv", index=False)
-        if fusion.train_fused is not None:
-            pd.DataFrame({"train_fused": np.asarray(fusion.train_fused)}).to_csv(
-                out_dir / f"event_{event_id}_train_fused.csv", index=False)
-        if fusion.episodes is not None and len(fusion.episodes) > 0:
-            fusion.episodes.to_csv(out_dir / f"event_{event_id}_episodes.csv", index=False)
-
     return result
+
+
+def try_reuse_event(out_dir: Optional[Path], event: pd.Series, alert_z: float, persist: int) -> Optional[Dict]:
+    """Re-evaluate saved score series (crash-proof resume; rules are eval-only)."""
+    if out_dir is None:
+        return None
+    eid = int(event["event_id"])
+    s_path = out_dir / f"event_{eid}_scores.csv"
+    t_path = out_dir / f"event_{eid}_train_fused.csv"
+    if not (s_path.exists() and t_path.exists() and s_path.stat().st_size and t_path.stat().st_size):
+        return None
+    try:
+        s = pd.read_csv(s_path, parse_dates=["time_stamp"])
+        tf = pd.read_csv(t_path)["train_fused"].to_numpy()
+        result = evaluate_series(pd.DatetimeIndex(s["time_stamp"]), s["fused"].to_numpy(),
+                                 s["status_type_id"].to_numpy(), tf, event, alert_z, persist)
+        result.update({"runtime_s": 0.0, "reused": True})
+        return result
+    except Exception:
+        return None
 
 
 def summarize(results: List[Dict], alert_z: float, persist: int) -> Dict:
@@ -351,6 +418,33 @@ def summarize(results: List[Dict], alert_z: float, persist: int) -> Dict:
     return summary
 
 
+def _print_event_line(r: Dict) -> None:
+    if "error" in r:
+        print(f"--- event {r.get('event_id')}: ERROR {r['error'][:120]}", flush=True)
+        return
+    lbl = r["label"]
+    tag = ("DETECTED" if r["detected"] else "MISSED") if lbl == "anomaly" else \
+          ("FALSE ALARM" if r["detected"] else "clean")
+    lead = f" lead={r['lead_time_h']:+.1f}h" if lbl == "anomaly" and r["detected"] else ""
+    src = " [reused]" if r.get("reused") else f" ({r.get('runtime_s', 0)}s)"
+    print(f"--- event {r['event_id']}: {tag}{lead} rule={r.get('rule_fired','') or '-'} "
+          f"fused_max={r['fused_max']:.2f}{src}", flush=True)
+
+
+def _run_event_worker(farm_dir: Path, event_dict: Dict, alert_z: float,
+                      persist: int, out_dir: Optional[Path]) -> Dict:
+    """Process-pool worker: each event is fully independent."""
+    event = pd.Series(event_dict)
+    try:
+        cfg = load_config()
+        return run_event(farm_dir, event, cfg, alert_z, persist, out_dir)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"event_id": int(event_dict.get("event_id", -1)),
+                "label": str(event_dict.get("event_label", "?")), "error": str(e)[:300]}
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--data-dir", required=True, help="Wind Farm directory (contains datasets/ and event_info.csv)")
@@ -358,32 +452,58 @@ def main() -> int:
     ap.add_argument("--out", default=None, help="Output directory for per-event score series + results")
     ap.add_argument("--alert-z", type=float, default=3.0)
     ap.add_argument("--persist", type=int, default=6, help="Consecutive samples above alert-z to raise alarm (6 = 1h)")
+    ap.add_argument("--workers", type=int, default=1, help="Parallel event workers (each event is independent)")
+    ap.add_argument("--force", action="store_true", help="Recompute even if saved score series exist")
     args = ap.parse_args()
 
     farm_dir = Path(args.data_dir)
     out_dir = Path(args.out) if args.out else None
-    cfg = load_config()
     info = load_event_info(farm_dir)
     if args.datasets:
         info = info[info["event_id"].isin(args.datasets)]
+    events = [event for _, event in info.sort_values("event_id").iterrows()]
 
     results: List[Dict] = []
-    for _, event in info.sort_values("event_id").iterrows():
-        eid, lbl = int(event["event_id"]), event["event_label"]
-        print(f"\n=== event {eid} ({lbl}: {event.get('event_description') or 'normal behaviour'}) ===", flush=True)
-        try:
-            r = run_event(farm_dir, event, cfg, args.alert_z, args.persist, out_dir)
-        except Exception as e:  # keep the benchmark running; report the failure
-            import traceback
-            traceback.print_exc()
-            r = {"event_id": eid, "label": lbl, "error": str(e)[:300]}
-        results.append(r)
-        if "error" not in r:
-            tag = ("DETECTED" if r["detected"] else "MISSED") if lbl == "anomaly" else \
-                  ("FALSE ALARM" if r["detected"] else "clean")
-            lead = f" lead={r['lead_time_h']:+.1f}h" if lbl == "anomaly" and r["detected"] else ""
-            print(f"--- event {eid}: {tag}{lead} fused_max={r['fused_max']:.2f} "
-                  f"alarm_frac={r['alarm_frac']:.3f} ({r['runtime_s']}s)", flush=True)
+    pending: List[pd.Series] = []
+    for event in events:
+        r = None if args.force else try_reuse_event(out_dir, event, args.alert_z, args.persist)
+        if r is not None:
+            results.append(r)
+            _print_event_line(r)
+        else:
+            pending.append(event)
+
+    def _flush(res_list: List[Dict]) -> None:
+        if out_dir is not None and res_list:
+            out_dir.mkdir(parents=True, exist_ok=True)
+            pd.DataFrame(res_list).to_csv(out_dir / "results.csv", index=False)
+
+    _flush(results)
+    if pending:
+        if args.workers > 1:
+            import concurrent.futures as cf
+            with cf.ProcessPoolExecutor(max_workers=args.workers) as pool:
+                futs = {pool.submit(_run_event_worker, farm_dir, ev.to_dict(),
+                                    args.alert_z, args.persist, out_dir): int(ev["event_id"])
+                        for ev in pending}
+                for fut in cf.as_completed(futs):
+                    r = fut.result()
+                    results.append(r)
+                    _print_event_line(r)
+                    _flush(results)  # crash-proof: persist after every event
+        else:
+            cfg = load_config()
+            for event in pending:
+                eid, lbl = int(event["event_id"]), event["event_label"]
+                try:
+                    r = run_event(farm_dir, event, cfg, args.alert_z, args.persist, out_dir)
+                except Exception as e:
+                    import traceback
+                    traceback.print_exc()
+                    r = {"event_id": eid, "label": lbl, "error": str(e)[:300]}
+                results.append(r)
+                _print_event_line(r)
+                _flush(results)
 
     ok = [r for r in results if "error" not in r]
     summary = summarize(ok, args.alert_z, args.persist)
