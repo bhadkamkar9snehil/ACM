@@ -1537,8 +1537,14 @@ class SQLBatchRunner:
 
                 coldstart_completed_for_summary = True
                 final_note = "coldstart_completed"
-                # Update progress
+                # Update progress. Persist the coldstart window end as the batch
+                # cursor too: if the process dies before the first batch
+                # completes, a later --resume would otherwise find no
+                # 'last_batch_end' and restart from the earliest timestamp,
+                # re-processing (and duplicating) the entire coldstart span.
                 equip_progress['coldstart_complete'] = True
+                if coldstart_last_end is not None and 'last_batch_end' not in equip_progress:
+                    equip_progress['last_batch_end'] = coldstart_last_end.isoformat()
                 progress[equip_name] = equip_progress
                 if not dry_run:
                     self._save_progress(progress)
@@ -1546,14 +1552,11 @@ class SQLBatchRunner:
             # Phase 2: Batch processing
             # If we just completed coldstart during this run, start the batch phase
             # immediately after the coldstart window to avoid reprocessing the same window.
-            start_from_ts: Optional[datetime] = None
+            # (coldstart_last_end is assigned on BOTH branches above.)
             coldstart_ran_this_session = not (resume and coldstart_complete)
-            try:
-                # Only honor coldstart_last_end when we executed coldstart above and not in resume-fast path
-                if coldstart_ran_this_session and 'coldstart_last_end' in locals() and coldstart_last_end is not None:
-                    start_from_ts = coldstart_last_end + timedelta(seconds=1)
-            except Exception:
-                start_from_ts = None
+            start_from_ts: Optional[datetime] = None
+            if coldstart_last_end is not None:
+                start_from_ts = coldstart_last_end + timedelta(seconds=1)
 
             batch_result = self._process_batches(equip_name, start_from=start_from_ts, dry_run=dry_run, resume=resume)
             batches_processed_for_summary = batch_result.completed

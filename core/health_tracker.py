@@ -343,10 +343,24 @@ class HealthTimeline:
         if "HealthIndex" in df.columns:
             std = df["HealthIndex"].std()
             if std < self.min_std_dev:
-                return HealthQuality.FLAT
+                # Low variance does NOT mean unforecastable: slow degradation
+                # (e.g. -0.5%/week bearing wear) has tiny std but a steady,
+                # fittable drift — exactly when prediction matters most.
+                # Classify FLAT only when there is also no usable trend over
+                # the window.
+                trend_total = 0.0
+                if "Timestamp" in df.columns and len(df) >= 10:
+                    vals = pd.to_numeric(df["HealthIndex"], errors="coerce").to_numpy(dtype=float)
+                    hours = (df["Timestamp"] - df["Timestamp"].iloc[0]).dt.total_seconds().to_numpy() / 3600.0
+                    finite = np.isfinite(vals) & np.isfinite(hours)
+                    if finite.sum() >= 10 and hours[finite][-1] > 0:
+                        slope = float(np.polyfit(hours[finite], vals[finite], 1)[0])
+                        trend_total = abs(slope) * float(hours[finite][-1] - hours[finite][0])
+                if trend_total < self.min_std_dev:
+                    return HealthQuality.FLAT
             if std > self.max_std_dev:
                 return HealthQuality.NOISY
-        
+
         return HealthQuality.OK
     
     def get_statistics(self, df: pd.DataFrame) -> HealthStatistics:

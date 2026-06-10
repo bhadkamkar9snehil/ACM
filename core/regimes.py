@@ -652,8 +652,13 @@ def build_feature_basis(
         if available_operational:
             Console.info(f"Using {len(available_operational)} raw operational sensors for regime clustering: {available_operational[:5]}{'...' if len(available_operational) > 5 else ''}", component="REGIME")
             used_raw_tags = available_operational
-            train_raw = raw_train.reindex(train_features.index)[available_operational].astype(float).ffill().bfill().fillna(0.0)
-            score_raw = raw_score.reindex(score_features.index)[available_operational].astype(float).ffill().bfill().fillna(0.0)
+            # NO ffill/bfill: temporal fill smears neighbouring operating modes
+            # across gaps (bfill leaks future into past). TRAIN medians only.
+            train_raw = raw_train.reindex(train_features.index)[available_operational].astype(float)
+            score_raw = raw_score.reindex(score_features.index)[available_operational].astype(float)
+            _op_medians = train_raw.median(numeric_only=True)
+            train_raw = train_raw.fillna(_op_medians).fillna(0.0)
+            score_raw = score_raw.fillna(_op_medians).fillna(0.0)
             train_parts.append(train_raw)
             score_parts.append(score_raw)
         else:
@@ -702,8 +707,12 @@ def build_feature_basis(
         available_tags = [tag for tag in raw_tags_cfg if tag in raw_train.columns]
         if available_tags:
             used_raw_tags = available_tags
-            train_raw = raw_train.reindex(train_features.index)[available_tags].astype(float).ffill().bfill().fillna(0.0)
-            score_raw = raw_score.reindex(score_features.index)[available_tags].astype(float).ffill().bfill().fillna(0.0)
+            # NO ffill/bfill (temporal leakage) — TRAIN-median imputation only.
+            train_raw = raw_train.reindex(train_features.index)[available_tags].astype(float)
+            score_raw = raw_score.reindex(score_features.index)[available_tags].astype(float)
+            _tag_medians = train_raw.median(numeric_only=True)
+            train_raw = train_raw.fillna(_tag_medians).fillna(0.0)
+            score_raw = score_raw.fillna(_tag_medians).fillna(0.0)
             train_parts.append(train_raw)
             score_parts.append(score_raw)
 
@@ -3081,7 +3090,10 @@ def detect_transient_states(
         Console.warn("Invalid weights detected; falling back to uniform weights", component="TRANSIENT", n_sensors=len(numeric_cols))
     weights /= weights.sum()
 
-    data_numeric = data[numeric_cols].apply(pd.to_numeric, errors="coerce").ffill().bfill()
+    # Keep gaps as NaN: any temporal fill (ffill/bfill) manufactures phantom
+    # rate-of-change at gap boundaries; the weighted nansum below already
+    # excludes NaN cells per column.
+    data_numeric = data[numeric_cols].apply(pd.to_numeric, errors="coerce")
 
     # PERF-OPT: Vectorized ROC calculation instead of column-by-column loop
     # Compute diff and baseline for all columns at once using numpy
@@ -3110,8 +3122,8 @@ def detect_transient_states(
     # Apply weights and sum across columns
     weighted_roc = np.nansum(roc_matrix * weights[np.newaxis, :], axis=1)
     
-    # Fill NaN and smooth
-    aggregate_roc = pd.Series(weighted_roc).ffill().bfill().fillna(0.0)
+    # Fill NaN and smooth (nansum leaves no NaN; fillna(0) is belt-and-braces)
+    aggregate_roc = pd.Series(weighted_roc).fillna(0.0)
     aggregate_roc_smooth = aggregate_roc.rolling(window=max(2, roc_window), min_periods=1).mean()
 
     regime_changes = np.zeros(n_samples, dtype=bool)

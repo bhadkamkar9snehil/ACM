@@ -372,15 +372,25 @@ class AdaptiveThresholdCalculator:
         if threshold > data_max * 1.5:
             return False, f"Threshold {threshold:.3f} exceeds 1.5x max {data_max:.3f}"
         
-        # Check 5: Alert rate
+        # Check 5: Alert rate — bounds adapt to sample size.
+        # Hardcoded 0.1%..10% guaranteed rejection on small datasets (0.1% of
+        # 300 samples = 0.3 samples: a threshold either alerts on >=1 sample
+        # (0.33% — fine) or 0 (0.00% — rejected), so any clean training set
+        # failed validation. The lower bound now accepts zero/low alert counts
+        # whenever the dataset is too small to resolve the target rate, and
+        # the resolvable floor is one observable sample (1/n).
+        n = max(int(len(data)), 1)
         alert_rate = np.mean(data >= threshold)
-        if alert_rate > 0.10:  # More than 10% alerts
+        if alert_rate > 0.10:  # More than 10% alerts: threshold far too loose
             return False, f"Alert rate {alert_rate:.1%} too high (>10%)"
-        if alert_rate < 0.001:  # Less than 0.1% alerts
-            return False, f"Alert rate {alert_rate:.1%} too low (<0.1%)"
-        
+        min_resolvable = 1.0 / n
+        if min_resolvable <= 0.001 and alert_rate < 0.001:
+            # Only enforce the "too tight" floor when the dataset can actually
+            # resolve rates below 0.1% (n > 1000).
+            return False, f"Alert rate {alert_rate:.1%} too low (<0.1%, n={n})"
+
         # All checks passed
-        return True, f"Valid (alert_rate={alert_rate:.2%})"
+        return True, f"Valid (alert_rate={alert_rate:.2%}, n={n})"
     
     def calculate_warn_threshold(
         self,
