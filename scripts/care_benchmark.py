@@ -181,6 +181,9 @@ def run_event(
 
     # --- ML core: features -> detectors -> calibration -> fusion ------------
     train_feat, score_feat = build_features_for_pipeline(train_raw, score_raw, cfg)
+    # float32 halves every downstream allocation; detector math is float32-safe
+    train_feat = train_feat.astype(np.float32)
+    score_feat = score_feat.astype(np.float32)
 
     # OUT-OF-SAMPLE CALIBRATION with an INTERLEAVED split: detectors score
     # their own training data optimistically, so calibration must use data

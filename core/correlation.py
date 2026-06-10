@@ -179,7 +179,11 @@ class PCASubspaceDetector:
                     self.pca.partial_fit(Xs[i:batch_end])  # type: ignore[attr-defined]
             else:
                 # Default batch path
-                self.pca = PCA(n_components=k, svd_solver="full", random_state=17)
+                # "auto" lets sklearn pick randomized SVD for wide matrices;
+                # svd_solver="full" materialized an O(n x p) LAPACK workspace
+                # that OOM-killed fits beyond ~5k features (957-sensor assets
+                # produce 10k+ engineered columns).
+                self.pca = PCA(n_components=k, svd_solver="auto", random_state=17)
                 self.pca.fit(Xs)
                 
             Console.info(f"Fit complete in {Span.__name__}: {k} components, {n_samples} samples, {n_features} features", component="PCA" if "skip_loki" not in locals() else None, skip_loki=True)
