@@ -256,13 +256,19 @@ def run_event(
                 series[z_col] = score_frame[z_col].to_numpy()
         series.to_csv(out_dir / f"event_{event_id}_scores.csv", index=False)
         if train_fused is not None:
-            pd.DataFrame({"train_fused": train_fused}).to_csv(
-                out_dir / f"event_{event_id}_train_fused.csv", index=False)
+            tf_df = pd.DataFrame({"train_fused": train_fused})
+            for _, z_col in Z_MAP:
+                if z_col in calib_frame.columns and len(calib_frame) == len(tf_df):
+                    tf_df[z_col] = calib_frame[z_col].to_numpy()
+            tf_df.to_csv(out_dir / f"event_{event_id}_train_fused.csv", index=False)
         if fusion.episodes is not None and len(fusion.episodes) > 0:
             fusion.episodes.to_csv(out_dir / f"event_{event_id}_episodes.csv", index=False)
 
+    head_z_score = {z: score_frame[z].to_numpy() for _, z in Z_MAP if z in score_frame.columns}
+    head_z_train = {z: calib_frame[z].to_numpy() for _, z in Z_MAP if z in calib_frame.columns}
     result = evaluate_series(ts, fused, score_status, train_fused, event, alert_z, persist,
-                             train_status=train_status)
+                             train_status=train_status,
+                             head_z_score=head_z_score, head_z_train=head_z_train)
     result.update({"n_train": len(train_raw), "n_score": len(score_raw),
                    "runtime_s": round(time.time() - t0, 1), "reused": False})
     return result
@@ -283,6 +289,8 @@ def evaluate_series(
     alert_z: float,
     persist: int,
     train_status: Optional[np.ndarray] = None,
+    head_z_score: Optional[Dict[str, np.ndarray]] = None,
+    head_z_train: Optional[Dict[str, np.ndarray]] = None,
 ) -> Dict:
     """Label-aware evaluation of a fused score series (labels used ONLY here).
 
@@ -355,7 +363,31 @@ def evaluate_series(
             if run >= avail_run_thr:
                 alarm_avail[i] = True
 
-    alarm = alarm_sustained | alarm_rate | alarm_avail
+    # Per-head rate rules: a fault often lives in ONE detector (e.g. OMR for
+    # a transformer-cell overheat) and the weighted fusion dilutes it below
+    # any fused-level rule. Each head self-tunes its own rate threshold from
+    # its own held-out stream — same form as the fused rate rule.
+    heads_fired = []
+    alarm_heads = np.zeros(len(fused), dtype=bool)
+    if head_z_score and head_z_train:
+        for name, z_tr in head_z_train.items():
+            z_sc = head_z_score.get(name)
+            if z_sc is None or len(z_sc) != len(fused):
+                continue
+            ztr = np.asarray(z_tr, dtype=np.float64)
+            ztr = ztr[np.isfinite(ztr)]
+            if ztr.size < 500:
+                continue
+            z0_h = max(alert_z, float(np.quantile(ztr, 0.99)))
+            base_h = float(np.nanmax(rolling_rate(ztr, z0_h)))
+            thr_h = float(np.clip(base_h * 1.5, 0.05, 0.9))
+            r_sc = np.nan_to_num(rolling_rate(np.asarray(z_sc, dtype=np.float64), z0_h), nan=0.0)
+            mask_h = sustained_alarm_mask(r_sc, thr_h, 6)
+            if mask_h.any():
+                heads_fired.append(name)
+                alarm_heads |= mask_h
+
+    alarm = alarm_sustained | alarm_rate | alarm_avail | alarm_heads
     normal_op = np.isin(score_status, list(NORMAL_STATUS))
 
     result: Dict = {
@@ -370,7 +402,8 @@ def evaluate_series(
         "avail_run_thr_h": round(avail_run_thr / 6.0, 1) if avail_run_thr else np.nan,
         "rule_fired": ("sustained" if alarm_sustained.any() else "") +
                       ("+rate" if alarm_rate.any() else "") +
-                      ("+avail" if alarm_avail.any() else ""),
+                      ("+avail" if alarm_avail.any() else "") +
+                      (("+heads:" + ",".join(heads_fired)) if heads_fired else ""),
         "fused_p50": float(np.nanmedian(fused)),
         "fused_max": float(np.nanmax(fused)),
         "alarm_frac": float(alarm.mean()),
@@ -424,9 +457,14 @@ def try_reuse_event(out_dir: Optional[Path], event: pd.Series, alert_z: float, p
             raw = pd.read_csv(farm_dir / "datasets" / f"{eid}.csv", sep=";",
                               usecols=["train_test", "status_type_id"])
             train_status = raw.loc[raw["train_test"] == "train", "status_type_id"].to_numpy()
+        tf_df = pd.read_csv(t_path)
+        head_z_train = {z: tf_df[z].to_numpy() for _, z in Z_MAP if z in tf_df.columns}
+        head_z_score = {z: s[z].to_numpy() for _, z in Z_MAP if z in s.columns}
         result = evaluate_series(pd.DatetimeIndex(s["time_stamp"]), s["fused"].to_numpy(),
                                  s["status_type_id"].to_numpy(), tf, event, alert_z, persist,
-                                 train_status=train_status)
+                                 train_status=train_status,
+                                 head_z_score=head_z_score,
+                                 head_z_train=head_z_train if head_z_train else None)
         result.update({"runtime_s": 0.0, "reused": True})
         return result
     except Exception:
