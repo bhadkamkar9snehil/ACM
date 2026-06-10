@@ -78,6 +78,8 @@ def load_config() -> dict:
 
 def load_event_info(farm_dir: Path) -> pd.DataFrame:
     info = pd.read_csv(farm_dir / "event_info.csv", sep=";")
+    if "asset" not in info.columns and "asset_id" in info.columns:
+        info = info.rename(columns={"asset_id": "asset"})  # Farm B/C header variant
     info["event_start"] = pd.to_datetime(info["event_start"])
     info["event_end"] = pd.to_datetime(info["event_end"])
     return info
