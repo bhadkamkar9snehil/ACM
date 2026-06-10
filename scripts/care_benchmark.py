@@ -175,6 +175,7 @@ def run_event(
     train_raw = sensor_frame(df[df["train_test"] == "train"])
     score_raw = sensor_frame(df[df["train_test"] == "prediction"])
     score_status = df.loc[df["train_test"] == "prediction", "status_type_id"].to_numpy()
+    train_status = df.loc[df["train_test"] == "train", "status_type_id"].to_numpy()
 
     # --- ML core: features -> detectors -> calibration -> fusion ------------
     train_feat, score_feat = build_features_for_pipeline(train_raw, score_raw, cfg)
@@ -258,7 +259,8 @@ def run_event(
         if fusion.episodes is not None and len(fusion.episodes) > 0:
             fusion.episodes.to_csv(out_dir / f"event_{event_id}_episodes.csv", index=False)
 
-    result = evaluate_series(ts, fused, score_status, train_fused, event, alert_z, persist)
+    result = evaluate_series(ts, fused, score_status, train_fused, event, alert_z, persist,
+                             train_status=train_status)
     result.update({"n_train": len(train_raw), "n_score": len(score_raw),
                    "runtime_s": round(time.time() - t0, 1), "reused": False})
     return result
@@ -278,15 +280,22 @@ def evaluate_series(
     event: pd.Series,
     alert_z: float,
     persist: int,
+    train_status: Optional[np.ndarray] = None,
 ) -> Dict:
     """Label-aware evaluation of a fused score series (labels used ONLY here).
 
-    Two self-tuned alarm rules, OR-combined:
-      sustained — fused holds above a holdout-quantile threshold longer than
-                  the healthy history ever did (step-change faults);
-      rate      — trailing 24h fraction of high-z samples exceeds 1.5x the
-                  worst 24h the holdout ever produced (intermittent faults
-                  that spike under load between quiet periods).
+    Three self-tuned alarm rules, OR-combined:
+      sustained    — fused holds above a holdout-quantile threshold longer
+                     than the healthy history ever did (step-change faults);
+      rate         — trailing 24h fraction of high-z samples exceeds 1.5x the
+                     worst 24h the holdout ever produced (intermittent faults
+                     that spike under load between quiet periods);
+      availability — the asset has been continuously NON-operating (SCADA
+                     status outside normal operation/idling) longer than 1.5x
+                     the longest stop in its entire healthy history. Failures
+                     park the asset: in CARE Farm A, 10 of 12 fault windows
+                     contain ZERO operating samples — there is no behaviour
+                     left to deviate, and the outage itself is the symptom.
     """
     event_id = int(event["event_id"])
     label = str(event["event_label"])
@@ -306,9 +315,45 @@ def evaluate_series(
         base = float(np.nanmax(hold_rate)) if np.isfinite(hold_rate).any() else 0.0
         rate_thr = float(np.clip(base * 1.5, 0.05, 0.9))
         score_rate = rolling_rate(fused, z0)
-        alarm_rate = np.nan_to_num(score_rate, nan=0.0) >= rate_thr
+        # Require the exceedance itself to persist (1h): a single rolling-
+        # window sample grazing the threshold is noise; real degradation
+        # holds the trailing rate up for days.
+        alarm_rate = sustained_alarm_mask(np.nan_to_num(score_rate, nan=0.0), rate_thr, 6)
 
-    alarm = alarm_sustained | alarm_rate
+    avail_run_thr = None
+    alarm_avail = np.zeros(len(fused), dtype=bool)
+    if train_status is not None and len(train_status) > 1000:
+        nonop_train = ~np.isin(np.asarray(train_status), list(NORMAL_STATUS))
+        # Stop-duration DISTRIBUTION, not the maximum: the longest stop in a
+        # t=0 history is usually a PREVIOUS fault's multi-week outage, which
+        # would set the bar above any future fault. p95 of stop durations is
+        # robust to those outliers (codebase convention: robust stats over
+        # extremes). Floor of 24h keeps micro-stops from producing a hair
+        # trigger.
+        stops, run = [], 0
+        for a in nonop_train:
+            if a:
+                run += 1
+            elif run:
+                stops.append(run)
+                run = 0
+        if run:
+            stops.append(run)
+        # Domain prior, not a fitted constant: continuous unplanned
+        # non-operation >= 48h is a reportable condition on any asset.
+        # p95 escalation handles assets whose ROUTINE stops run longer —
+        # but with few stops/year p95 degenerates to the max (a prior
+        # fault's outage), so it can only RAISE the bar, floored at 48h.
+        p95_stop = float(np.percentile(stops, 95)) if len(stops) >= 20 else 0.0
+        avail_run_thr = max(288, int(p95_stop * 1.5) + 1)  # >= 48h at 10-min cadence
+        nonop_score = ~np.isin(np.asarray(score_status), list(NORMAL_STATUS))
+        run = 0
+        for i, a in enumerate(nonop_score):
+            run = run + 1 if a else 0
+            if run >= avail_run_thr:
+                alarm_avail[i] = True
+
+    alarm = alarm_sustained | alarm_rate | alarm_avail
     normal_op = np.isin(score_status, list(NORMAL_STATUS))
 
     result: Dict = {
@@ -320,8 +365,10 @@ def evaluate_series(
         "persist_eff": int(persist_eff),
         "rate_z0": round(float(z0), 2),
         "rate_thr": round(float(rate_thr), 3) if np.isfinite(rate_thr) else np.nan,
+        "avail_run_thr_h": round(avail_run_thr / 6.0, 1) if avail_run_thr else np.nan,
         "rule_fired": ("sustained" if alarm_sustained.any() else "") +
-                      ("+rate" if alarm_rate.any() else ""),
+                      ("+rate" if alarm_rate.any() else "") +
+                      ("+avail" if alarm_avail.any() else ""),
         "fused_p50": float(np.nanmedian(fused)),
         "fused_max": float(np.nanmax(fused)),
         "alarm_frac": float(alarm.mean()),
@@ -357,7 +404,8 @@ def evaluate_series(
     return result
 
 
-def try_reuse_event(out_dir: Optional[Path], event: pd.Series, alert_z: float, persist: int) -> Optional[Dict]:
+def try_reuse_event(out_dir: Optional[Path], event: pd.Series, alert_z: float, persist: int,
+                    farm_dir: Optional[Path] = None) -> Optional[Dict]:
     """Re-evaluate saved score series (crash-proof resume; rules are eval-only)."""
     if out_dir is None:
         return None
@@ -369,8 +417,14 @@ def try_reuse_event(out_dir: Optional[Path], event: pd.Series, alert_z: float, p
     try:
         s = pd.read_csv(s_path, parse_dates=["time_stamp"])
         tf = pd.read_csv(t_path)["train_fused"].to_numpy()
+        train_status = None
+        if farm_dir is not None:
+            raw = pd.read_csv(farm_dir / "datasets" / f"{eid}.csv", sep=";",
+                              usecols=["train_test", "status_type_id"])
+            train_status = raw.loc[raw["train_test"] == "train", "status_type_id"].to_numpy()
         result = evaluate_series(pd.DatetimeIndex(s["time_stamp"]), s["fused"].to_numpy(),
-                                 s["status_type_id"].to_numpy(), tf, event, alert_z, persist)
+                                 s["status_type_id"].to_numpy(), tf, event, alert_z, persist,
+                                 train_status=train_status)
         result.update({"runtime_s": 0.0, "reused": True})
         return result
     except Exception:
@@ -466,7 +520,7 @@ def main() -> int:
     results: List[Dict] = []
     pending: List[pd.Series] = []
     for event in events:
-        r = None if args.force else try_reuse_event(out_dir, event, args.alert_z, args.persist)
+        r = None if args.force else try_reuse_event(out_dir, event, args.alert_z, args.persist, farm_dir=farm_dir)
         if r is not None:
             results.append(r)
             _print_event_line(r)
