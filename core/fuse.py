@@ -2557,10 +2557,24 @@ def prepare_fusion_inputs(
     avail = set(frame.columns)
     missing = [k for k in weights.keys() if k not in avail]
     present = {k: frame[k].to_numpy(copy=False) for k in weights.keys() if k in avail}
-    
+
+    # SELF-CORRECTION: drop dead streams (constant / zero-variance z-scores,
+    # e.g. a detector whose raw scores saturated and calibrated to a flat 0).
+    # A dead stream silently dilutes the fused score by its full weight —
+    # a fault seen at z=8 by live detectors fuses to less than half that.
+    dead = []
+    for k, v in list(present.items()):
+        finite = v[np.isfinite(v)]
+        if finite.size == 0 or float(np.nanstd(finite)) < 1e-9:
+            dead.append(k)
+            del present[k]
+    if dead:
+        Console.warn(f"Dropping dead detector streams from fusion: {dead}", component="FUSE")
+        missing = missing + dead
+
     if not present:
         raise RuntimeError("No valid input streams for fusion")
-    
+
     # Renormalize weights for present streams only
     if missing:
         present_weights = {k: weights[k] for k in present.keys()}
@@ -2569,7 +2583,7 @@ def prepare_fusion_inputs(
             weights = {k: v / total for k, v in present_weights.items()}
         else:
             weights = {k: 1.0 / len(present) for k in present.keys()}
-    
+
     return present, dict(weights), missing
 
 

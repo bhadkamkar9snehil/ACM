@@ -281,7 +281,12 @@ def rolling_spectral_energy(df: pl.DataFrame, window: int, cols: Optional[List[s
         start = window - 1
         for b_idx, (lo, hi) in enumerate(bands):
             mask = (freqs >= lo) & (freqs < hi)
-            out[start:, b_idx] = spec[:, mask].sum(axis=1)
+            # log1p compression: raw band power scales with signal amplitude
+            # SQUARED, giving features a dynamic range of 1e12+ on physical
+            # units (kW, kvar). StandardScaler-based consumers (PCA, GMM)
+            # saturated on these columns — PCA-SPE's median exceeded its 1e6
+            # clip even on TRAIN data, flattening the detector to a constant.
+            out[start:, b_idx] = np.log1p(spec[:, mask].sum(axis=1))
         return out
 
     n_rows = len(df)
