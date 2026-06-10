@@ -244,10 +244,29 @@ class LinearTrendModel(BaseDegradationModel):
         is_flatline = (span < self.flatline_epsilon) or (variance < self.flatline_epsilon ** 2)
         
         # Initialize level and trend
-        # v11.3.1 FIX: Use actual first gap, not median dt_hours
-        # This prevents Nx errors when first interval differs from median
+        # UNIT FIX: trend is health-per-STEP throughout this model (the Holt
+        # loop updates it per observation and forecast() applies it as
+        # `horizons * trend` where horizons are step counts). The old init
+        # divided by first_gap_hours, producing a per-HOUR value that was
+        # wrong by a factor of dt_hours whenever cadence != 1h.
+        # ROBUSTNESS FIX: a single noisy first interval used to set the whole
+        # initial trend; use the median per-hour slope over the first few
+        # gaps instead, then convert to per-step.
         self.level = float(health_values.iloc[0])
-        self.trend = (float(health_values.iloc[1]) - float(health_values.iloc[0])) / first_gap_hours if n > 1 else 0.0
+        self.trend = 0.0
+        if n > 1:
+            k = min(n, 10)
+            diffs = np.diff(health_values.iloc[:k].to_numpy(dtype=float))
+            if isinstance(health_series.index, pd.DatetimeIndex):
+                gaps_h = np.diff(health_series.index[:k].view(np.int64)) / 3.6e12
+            else:
+                gaps_h = np.full(len(diffs), self.dt_hours, dtype=float)
+            valid = np.isfinite(diffs) & np.isfinite(gaps_h) & (gaps_h > 0)
+            if valid.any():
+                per_hour = float(np.median(diffs[valid] / gaps_h[valid]))
+                self.trend = per_hour * self.dt_hours
+            else:
+                self.trend = (float(health_values.iloc[1]) - float(health_values.iloc[0])) * (self.dt_hours / first_gap_hours)
         
         if is_flatline:
             self.trend = 0.0
@@ -304,7 +323,7 @@ class LinearTrendModel(BaseDegradationModel):
             self.std_error = 1.0
         
         Console.info(
-            f"Fitted [{self.label}]: level={self.level:.2f}, trend={self.trend:.4f}/hr, "
+            f"Fitted [{self.label}]: level={self.level:.2f}, trend={self.trend:.4f}/step, "
             f"std_error={self.std_error:.2f}, n={n}",
             component="DEGRADE"
         )
@@ -479,7 +498,7 @@ class LinearTrendModel(BaseDegradationModel):
         
         self._is_warmed = True
         Console.info(
-            f"Restored state [{self.label}]: level={self.level:.2f}, trend={self.trend:.4f}/hr, "
+            f"Restored state [{self.label}]: level={self.level:.2f}, trend={self.trend:.4f}/step, "
             f"std_error={self.std_error:.2f}",
             component="DEGRADE"
         )
@@ -724,8 +743,9 @@ class LinearTrendModel(BaseDegradationModel):
             train_data = health_arr[:train_end]
             
             # Vectorized Holt's exponential smoothing
+            # UNIT FIX: per-step trend (consecutive samples are one step apart)
             level = train_data[0]
-            trend = (train_data[1] - train_data[0]) / self.dt_hours if len(train_data) > 1 else 0.0
+            trend = (train_data[1] - train_data[0]) if len(train_data) > 1 else 0.0
             
             # Process all observations (can't fully vectorize due to recursive nature)
             # But we use numpy scalar ops which are faster
@@ -796,8 +816,9 @@ class LinearTrendModel(BaseDegradationModel):
             return float("inf")
         
         # Initialize
+        # UNIT FIX: per-step trend (consecutive samples are one step apart)
         level = float(health_values.iloc[0])
-        trend = (float(health_values.iloc[1]) - float(health_values.iloc[0])) / self.dt_hours if n > 1 else 0.0
+        trend = (float(health_values.iloc[1]) - float(health_values.iloc[0])) if n > 1 else 0.0
         
         errors = []
         

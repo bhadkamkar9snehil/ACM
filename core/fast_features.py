@@ -588,6 +588,7 @@ def compute_basic_features_pl(df: 'pl.DataFrame', window: int = 3, cols: Optiona
     # FIX: Match Pandas behavior - create rz columns even if med/mad missing (use fallback values)
     eps = 1e-9
     rz_exprs = []
+    zeroed_rz_cols = []
     for c in cols:
         med_col = f"{c}_med"
         mad_col = f"{c}_mad"
@@ -601,7 +602,17 @@ def compute_basic_features_pl(df: 'pl.DataFrame', window: int = 3, cols: Optiona
             # Fallback case: med or mad missing - create zero-valued rz column to match Pandas
             # This ensures deterministic feature count across Polars/Pandas implementations
             rz = pl.lit(0.0).alias(f"{c}_rz")
+            zeroed_rz_cols.append(c)
         rz_exprs.append(rz)
+
+    if zeroed_rz_cols:
+        # Surface silent feature corruption: a zeroed _rz column carries no
+        # signal, so detectors lose that input without any other indication.
+        Console.warn(
+            f"{len(zeroed_rz_cols)} robust z-score feature(s) zeroed (rolling med/mad missing): "
+            f"{zeroed_rz_cols[:5]}{'...' if len(zeroed_rz_cols) > 5 else ''}",
+            component="FEATURES",
+        )
 
     # Select all original feature columns and the new rz columns
     final_cols = [p.columns for p in parts]

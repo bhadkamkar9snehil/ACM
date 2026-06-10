@@ -322,14 +322,18 @@ class OMRDetector:
             if self.healthy_regime_label is not None:
                 healthy_regime = self.healthy_regime_label
             else:
-                # Choose majority regime as healthy if not specified
-                healthy_regime = pd.Series(regime_labels).mode().iloc[0]
-            healthy_mask = regime_labels == healthy_regime
-            n_healthy = int(np.sum(healthy_mask))
-            
-            if n_healthy >= self.min_samples:
-                X = X.iloc[healthy_mask]
-                Console.info(f"Filtered to healthy regime {healthy_regime}: {n_healthy} samples", component="OMR")
+                # Choose majority regime as healthy if not specified.
+                # mode() returns an empty Series when labels are empty/all-NaN;
+                # in that case skip regime filtering instead of crashing.
+                mode_vals = pd.Series(regime_labels).mode()
+                healthy_regime = mode_vals.iloc[0] if len(mode_vals) > 0 else None
+            if healthy_regime is not None:
+                healthy_mask = regime_labels == healthy_regime
+                n_healthy = int(np.sum(healthy_mask))
+
+                if n_healthy >= self.min_samples:
+                    X = X.iloc[healthy_mask]
+                    Console.info(f"Filtered to healthy regime {healthy_regime}: {n_healthy} samples", component="OMR")
         
         # Prepare data
         X_clean, feature_names = self._prepare_data(X)

@@ -118,11 +118,12 @@ class TestModelLifecycleModule:
         
         criteria = PromotionCriteria()
         assert criteria.min_training_days == 7
-        assert criteria.min_silhouette_score == 0.40
+        # Defaults match configs/config_table.csv (single source of truth)
+        assert criteria.min_silhouette_score == 0.15
         assert criteria.min_dbcv_score == 0.0
-        assert criteria.min_stability_ratio == 0.75
-        assert criteria.min_consecutive_runs == 5
-        assert criteria.min_training_rows == 400
+        assert criteria.min_stability_ratio == 0.60
+        assert criteria.min_consecutive_runs == 3
+        assert criteria.min_training_rows == 200
 
     def test_promotion_criteria_from_config_overrides(self):
         """PromotionCriteria.from_config applies SQL-style overrides used at runtime."""

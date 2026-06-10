@@ -940,21 +940,26 @@ def tune_detector_weights(
         
             # Exponential moving average
             blended = (1 - learning_rate) * old_weight + learning_rate * new_weight
-            
-            # P0-FIX: Check for excessive drift (FLAW #1 stability guard)
+
+            # Stability guard: CLAMP per-detector drift to max_drift_threshold
+            # instead of rejecting the whole tune. Hard rejection froze the
+            # weights permanently whenever true detector importance shifted
+            # (every subsequent tune exceeded the threshold too), so the
+            # system could never adapt. Clamping keeps each batch's change
+            # bounded while still converging over multiple batches.
             if old_weight > 0.01:  # Only check if old_weight is meaningful
                 drift = abs(blended - old_weight) / old_weight
                 if drift > max_drift_threshold:
-                    Console.warn(
-                        f"Excessive weight drift for {detector_name}: {old_weight:.3f} -> {blended:.3f} "
-                        f"(drift={drift:.1%} > {max_drift_threshold:.1%}). Rejecting tune.",
-                        component="TUNE", detector=detector_name, old_weight=old_weight, 
-                        new_weight=blended, drift=drift
+                    clamped = old_weight * (1.0 + np.sign(blended - old_weight) * max_drift_threshold)
+                    Console.info(
+                        f"Weight drift clamped for {detector_name}: {old_weight:.3f} -> {clamped:.3f} "
+                        f"(raw target {blended:.3f}, drift={drift:.1%} > {max_drift_threshold:.1%})",
+                        component="TUNE", detector=detector_name, old_weight=old_weight,
+                        new_weight=clamped, raw_weight=blended, drift=drift
                     )
-                    diagnostics["reason"] = "excessive_drift"
-                    diagnostics["excessive_drift_detector"] = detector_name
-                    return current_weights, diagnostics
-        
+                    diagnostics.setdefault("clamped_detectors", []).append(detector_name)
+                    blended = clamped
+
             # Enforce minimum weight
             tuned_weights[detector_name] = max(blended, min_weight)
     

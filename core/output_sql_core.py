@@ -210,14 +210,20 @@ class SqlWriteEngine:
         df: pd.DataFrame,
         non_numeric_cols: Optional[set] = None,
         sql_table: Optional[str] = None,
+        datetime_cols: Optional[set] = None,
     ) -> pd.DataFrame:
-        """Prepare DataFrame for SQL insertion with robust type coercion (SQL Server safe)."""
+        """Prepare DataFrame for SQL insertion with robust type coercion (SQL Server safe).
+
+        datetime_cols: optional pre-resolved schema datetime columns; when
+        provided they take precedence over the engine's own schema lookup so
+        callers (e.g. OutputManager) can supply their own resolution.
+        """
         if df.empty:
             return df
 
         out = df.copy()
         non_numeric_cols = set(non_numeric_cols or set())
-        schema_dt_cols = self.get_datetime_columns_for_table(sql_table)
+        schema_dt_cols = datetime_cols if datetime_cols is not None else self.get_datetime_columns_for_table(sql_table)
 
         # 1) Normalize datetime columns
         for col in out.columns:

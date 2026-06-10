@@ -305,6 +305,10 @@ class RULEstimator:
         n_steps = len(baseline_forecast)
         start_health = float(current_health) if current_health is not None else float(baseline_forecast[0])
         init_regime = int(current_regime) if current_regime is not None else 0
+        # Regime labels can be arbitrary (e.g. -1 for UNKNOWN). An unclipped
+        # label indexes rates_arr/tm out of bounds or wraps via negative
+        # indexing, silently applying the wrong degradation rate.
+        init_regime = int(np.clip(init_regime, 0, n_regimes - 1))
 
         # Build rate lookup array indexed by regime label
         rates_arr = np.array([
@@ -346,8 +350,11 @@ class RULEstimator:
             # tm[regimes] → (n_simulations, n_regimes) transition probs
             cum_probs = np.cumsum(tm[regimes], axis=1)  # (n_simulations, n_regimes)
             u = np.random.uniform(size=(self.n_simulations, 1))
-            # argmax finds first regime where cumulative prob >= u
-            regimes = np.argmax(cum_probs >= u, axis=1).astype(np.int32)
+            # CDF inversion: count of cumulative probs strictly below u gives the
+            # index of the first cum_prob >= u. Unlike argmax(cum_probs >= u),
+            # rounding error (all False) lands on the LAST regime after clipping
+            # rather than silently resetting every simulation to regime 0.
+            regimes = (cum_probs < u).sum(axis=1).astype(np.int32)
             regimes = np.clip(regimes, 0, n_regimes - 1)
 
         # Build health trajectories via cumulative sum of increments

@@ -206,7 +206,6 @@ class GMMDetector:
             trials = [dict(covariance_type=cov_type, reg_covar=reg_covar)]
 
             last_err = None
-            last_err = None
             for params in trials:
                 k = safe_k
                 while k >= 2:

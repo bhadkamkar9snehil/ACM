@@ -431,9 +431,27 @@ class OutputManager:
             return False
         return bool(payload)
 
+    def _ensure_sql_engine(self) -> "SqlWriteEngine":
+        """Return the SQL write engine, lazily creating one if absent.
+
+        Pure DataFrame helpers (metadata population, type coercion) must work
+        even on a partially constructed manager (e.g. restored state or
+        test doubles) where __init__ never ran.
+        """
+        eng = getattr(self, "_sql_engine", None)
+        if eng is None:
+            eng = SqlWriteEngine(
+                sql_client=getattr(self, "sql_client", None),
+                run_id=getattr(self, "run_id", None),
+                equip_id=getattr(self, "equip_id", None),
+                batch_size=getattr(self, "batch_size", 1000),
+            )
+            self._sql_engine = eng
+        return eng
+
     def _get_datetime_columns_for_table(self, table_name: Optional[str]) -> set[str]:
         """Return datetime-typed columns from SQL schema for a table."""
-        return self._sql_engine.get_datetime_columns_for_table(table_name)
+        return self._ensure_sql_engine().get_datetime_columns_for_table(table_name)
 
     @staticmethod
     def _looks_like_datetime_column(col_name: str) -> bool:
@@ -447,7 +465,15 @@ class OutputManager:
         sql_table: Optional[str] = None,
     ) -> pd.DataFrame:
         """Prepare DataFrame for SQL insertion with robust type coercion (SQL Server safe)."""
-        return self._sql_engine.prepare_dataframe_for_sql(df, non_numeric_cols, sql_table)
+        # Resolve datetime columns via the manager's own (overridable) lookup;
+        # delegating that to the engine silently broke subclass/test overrides
+        # of _get_datetime_columns_for_table after the Phase A extraction.
+        return self._ensure_sql_engine().prepare_dataframe_for_sql(
+            df,
+            non_numeric_cols,
+            sql_table,
+            datetime_cols=self._get_datetime_columns_for_table(sql_table),
+        )
     
     
     def _should_auto_flush(self) -> bool:
@@ -731,7 +757,7 @@ class OutputManager:
 
     def _populate_standard_metadata(self, df: pd.DataFrame) -> pd.DataFrame:
         """Populate standard metadata (RunID, EquipID, CreatedAt) during payload generation."""
-        return self._sql_engine.populate_standard_metadata(df)
+        return self._ensure_sql_engine().populate_standard_metadata(df)
 
     def audit_allowed_tables_write_integrity(
         self,

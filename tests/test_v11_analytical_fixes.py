@@ -339,7 +339,7 @@ class TestModelLifecycleForecastQuality:
             maturity=MaturityState.LEARNING,
             created_at=datetime.now(),
             training_days=10.0,
-            silhouette_score=0.3,
+            regime_quality_score=0.3,
             stability_ratio=0.7,
             consecutive_runs=5,
             training_rows=500,
@@ -358,7 +358,7 @@ class TestModelLifecycleForecastQuality:
             maturity=MaturityState.LEARNING,
             created_at=datetime.now(),
             training_days=10.0,
-            silhouette_score=0.3,
+            regime_quality_score=0.3,
             stability_ratio=0.7,
             consecutive_runs=5,
             training_rows=500,
@@ -378,7 +378,7 @@ class TestModelLifecycleForecastQuality:
             maturity=MaturityState.LEARNING,
             created_at=datetime.now(),
             training_days=10.0,
-            silhouette_score=0.3,
+            regime_quality_score=0.3,
             stability_ratio=0.7,
             consecutive_runs=5,
             training_rows=500,
@@ -426,12 +426,12 @@ class TestModelLifecycleForecastQuality:
             maturity=MaturityState.LEARNING,
             created_at=datetime.now(),
             training_days=10.0,
-            silhouette_score=0.3,
+            regime_quality_score=0.3,
             stability_ratio=0.7,
             consecutive_runs=5,
             training_rows=500,
-            forecast_mape=40.0,  # Passes default but fails strict
-            forecast_rmse=12.0   # Passes default but fails strict
+            forecast_mape=32.0,  # Passes default (35) but fails strict (30)
+            forecast_rmse=11.0   # Passes default (12) but fails strict (10)
         )
         
         # Default criteria should pass

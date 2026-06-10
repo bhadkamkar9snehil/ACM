@@ -28,10 +28,6 @@ except ImportError:
     hdbscan = None  # type: ignore
     HDBSCAN_AVAILABLE = False
 
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-
 from core.observability import Console, Span
 import hashlib
 from utils.config_dict import cfg_get as _cfg_get

@@ -265,3 +265,7 @@ class AR1Detector:
         inst = cls(payload.get("cfg"))
         inst.phimap = dict(payload.get("phimap", {}))
         inst.sdmap = dict(payload.get("sdmap", {}))
+        # A restored detector with coefficients is fitted; without this flag
+        # score() silently returns all-zero scores.
+        inst._is_fitted = bool(inst.phimap)
+        return inst
