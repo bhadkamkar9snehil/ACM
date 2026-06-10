@@ -593,29 +593,31 @@ def compute_basic_features_pl(df: 'pl.DataFrame', window: int = 3, cols: Optiona
     # FIX: Match Pandas behavior - create rz columns even if med/mad missing (use fallback values)
     eps = 1e-9
     rz_exprs = []
-    zeroed_rz_cols = []
+    global_rz_cols = []
     for c in cols:
         med_col = f"{c}_med"
         mad_col = f"{c}_mad"
-        # Check if columns exist, otherwise use fallback values
         if med_col in combined_df.columns and mad_col in combined_df.columns:
-            # Normal case: both med and mad exist
+            # Normal case: both rolling med and mad exist
             denom = (pl.col(mad_col) * 1.4826)
             denom_safe = pl.when(denom > eps).then(denom).otherwise(eps)
             rz = ((pl.col(c) - pl.col(med_col)) / (denom_safe + eps)).clip(-1e2, 1e2).alias(f"{c}_rz")
         else:
-            # Fallback case: med or mad missing - create zero-valued rz column to match Pandas
-            # This ensures deterministic feature count across Polars/Pandas implementations
-            rz = pl.lit(0.0).alias(f"{c}_rz")
-            zeroed_rz_cols.append(c)
+            # Rolling stats unavailable: fall back to GLOBAL robust z over the
+            # available history (median/MAD broadcast as scalars). The old
+            # pl.lit(0.0) fallback silently fed detectors a dead column —
+            # signal loss with no error.
+            g_med = pl.col(c).median()
+            g_mad = (pl.col(c) - pl.col(c).median()).abs().median() * 1.4826
+            g_denom = pl.when(g_mad > eps).then(g_mad).otherwise(eps)
+            rz = ((pl.col(c) - g_med) / (g_denom + eps)).clip(-1e2, 1e2).alias(f"{c}_rz")
+            global_rz_cols.append(c)
         rz_exprs.append(rz)
 
-    if zeroed_rz_cols:
-        # Surface silent feature corruption: a zeroed _rz column carries no
-        # signal, so detectors lose that input without any other indication.
+    if global_rz_cols:
         Console.warn(
-            f"{len(zeroed_rz_cols)} robust z-score feature(s) zeroed (rolling med/mad missing): "
-            f"{zeroed_rz_cols[:5]}{'...' if len(zeroed_rz_cols) > 5 else ''}",
+            f"{len(global_rz_cols)} robust z-score feature(s) using global (non-rolling) stats: "
+            f"{global_rz_cols[:5]}{'...' if len(global_rz_cols) > 5 else ''}",
             component="FEATURES",
         )
 

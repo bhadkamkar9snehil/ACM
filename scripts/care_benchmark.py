@@ -165,8 +165,17 @@ def run_event(
     # --- ML core: features -> detectors -> calibration -> fusion ------------
     train_feat, score_feat = build_features_for_pipeline(train_raw, score_raw, cfg)
 
+    # OUT-OF-SAMPLE CALIBRATION: detectors score their own training data
+    # optimistically (in-sample bias), so calibrating z-scores on the fit data
+    # inflates z on ALL future data — healthy periods included. Fit detectors
+    # on the earlier slice, calibrate on the held-out tail they never saw.
+    holdout_frac = float((cfg.get("thresholds", {}) or {}).get("calibration_holdout_frac", 0.2))
+    n_fit = int(len(train_feat) * (1.0 - holdout_frac))
+    fit_feat = train_feat.iloc[:n_fit]
+    calib_feat = train_feat.iloc[n_fit:]
+
     det = orch.fit_all_detectors(
-        train=train_feat, cfg=cfg,
+        train=fit_feat, cfg=cfg,
         ar1_enabled=True, pca_enabled=True, iforest_enabled=True,
         gmm_enabled=True, omr_enabled=True,
     )
@@ -178,26 +187,26 @@ def run_event(
         gmm_detector=det.get("gmm_detector"),
         omr_detector=det.get("omr_detector"),
     )
-    train_frame, _ = orch.score_all_detectors(train_feat, **det_kwargs,
+    calib_frame, _ = orch.score_all_detectors(calib_feat, **det_kwargs,
                                               return_omr_contributions=False)
     score_frame, omr_contrib = orch.score_all_detectors(score_feat, **det_kwargs)
 
     cal_q = float((cfg.get("thresholds", {}) or {}).get("q", 0.98))
     self_tune_cfg = (cfg.get("thresholds", {}) or {}).get("self_tune", {}) or {}
     score_frame, calibrators = orch.calibrate_all_detectors(
-        train_frame=train_frame, score_frame=score_frame,
+        train_frame=calib_frame, score_frame=score_frame,
         cal_q=cal_q, self_tune_cfg=self_tune_cfg,
         fit_regimes=None, transform_regimes=None,
     )
-    # Same calibrators applied to train scores (fusion threshold baseline)
+    # Same calibrators applied to holdout scores (fusion threshold baseline)
     for raw_col, z_col in Z_MAP:
         cal = calibrators.get(z_col)
-        if cal is not None and raw_col in train_frame.columns:
-            train_frame[z_col] = cal.transform(train_frame[raw_col].to_numpy(copy=False))
+        if cal is not None and raw_col in calib_frame.columns:
+            calib_frame[z_col] = cal.transform(calib_frame[raw_col].to_numpy(copy=False))
 
     fusion = fuse.run_fusion_pipeline(
-        frame=score_frame, train_frame=train_frame,
-        score_data=score_feat, train_data=train_feat,
+        frame=score_frame, train_frame=calib_frame,
+        score_data=score_feat, train_data=calib_feat,
         cfg=cfg, omr_contributions=omr_contrib,
     )
     fused = np.asarray(fusion.fused_scores, dtype=np.float64)

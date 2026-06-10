@@ -714,8 +714,12 @@ def build_feature_basis(
 
     train_basis = pd.concat(train_parts, axis=1)
     score_basis = pd.concat(score_parts, axis=1)
-    train_basis = train_basis.ffill().bfill().fillna(0.0)
-    score_basis = score_basis.ffill().bfill().fillna(0.0)
+    # Impute gaps from TRAIN medians only. ffill/bfill smeared values across
+    # time (bfill leaks the future into the past), so a missing stretch took
+    # on whatever operating mode happened to border it and clustered wrong.
+    train_basis_medians = train_basis.median(numeric_only=True)
+    train_basis = train_basis.fillna(train_basis_medians).fillna(0.0)
+    score_basis = score_basis.fillna(train_basis_medians).fillna(0.0)
 
     # v11.1.6 FIX #2: Apply UNIFORM scaling to the ENTIRE basis (PCA + raw)
     # Previously, only raw columns were scaled while PCA columns were left as-is.

@@ -74,38 +74,25 @@ def health_to_failure_probability(
 def compute_survival_curve(failure_probabilities: np.ndarray) -> np.ndarray:
     """
     Compute survival curve (reliability function) from failure probabilities.
-    
+
     Mathematical Definition:
     - S(t) = 1 - F(t) = P(T > t)
     - Where F(t) is cumulative failure probability
     - S(t) represents probability equipment survives to time t
-    
-    Properties:
-    - S(0) = 1 (certain survival at t=0)
-    - S(∞) = 0 (eventual failure)
-    - S(t) is monotonically decreasing
-    
-    References:
-    - Reliability Theory (Barlow & Proschan 1975)
-    - Survival Analysis (Cox & Oakes 1984)
-    
+
+    NOTE: monotonicity is intentionally NOT enforced. The curve is derived
+    from a health FORECAST, not from time-to-event data — when the forecast
+    improves (transient passed, maintenance reset, recovery), survival is
+    allowed to rise so RUL can recover. The old in-place flattening locked
+    every transient spike into a permanently pessimistic curve.
+
     Args:
         failure_probabilities: Cumulative failure probabilities F(t)
-    
+
     Returns:
         Survival probabilities S(t) = 1 - F(t)
     """
-    survival_probs = 1.0 - failure_probabilities
-    
-    # Guard against numerical issues (S(t) must be in [0, 1])
-    survival_probs = np.clip(survival_probs, 0.0, 1.0)
-    
-    # Enforce monotonicity (survival can only decrease)
-    for i in range(1, len(survival_probs)):
-        if survival_probs[i] > survival_probs[i - 1]:
-            survival_probs[i] = survival_probs[i - 1]
-    
-    return survival_probs
+    return np.clip(1.0 - failure_probabilities, 0.0, 1.0)
 
 
 def compute_hazard_rate(
