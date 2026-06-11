@@ -18,8 +18,6 @@ BRANCH="${BRANCH:-claude/charming-cerf-3mt13j}"
 WORKDIR="${WORKDIR:-$PWD/acm_care_bench}"
 FARMS="${FARMS:-A}"
 DATASETS="${DATASETS:-}"
-ALERT_Z="${ALERT_Z:-3.0}"
-PERSIST="${PERSIST:-6}"
 
 # 1. Code
 if [ -d "$WORKDIR/ACM/.git" ]; then
@@ -55,7 +53,6 @@ for farm in $FARMS; do
         # shellcheck disable=SC2206
         EXTRA=(--datasets $DATASETS)
     fi
-    python3 scripts/care_benchmark.py --data-dir "$DATA_DIR" --out "$OUT_DIR" \
-        --alert-z "$ALERT_Z" --persist "$PERSIST" "${EXTRA[@]}"
+    python3 scripts/care_benchmark.py --data-dir "$DATA_DIR" --out "$OUT_DIR" --workers 3 "${EXTRA[@]}"
     echo "Results: $OUT_DIR/results.csv | $OUT_DIR/summary.json"
 done

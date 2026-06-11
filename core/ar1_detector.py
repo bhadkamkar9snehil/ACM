@@ -51,7 +51,9 @@ class AR1Detector:
         # An absolute 1e-6 floor let near-constant channels turn sub-LSB wiggles
         # into z ~ 1e6, pegging the fused score on healthy data.
         self._sd_floor_rel: float = float(self.cfg.get("sd_floor_rel", 0.01))
-        self._fuse: Literal["mean", "median", "p95"] = self.cfg.get("fuse", "mean")
+        # p95 across per-sensor z: a single faulty sensor among hundreds must
+        # surface; the mean diluted it by 1/n_features.
+        self._fuse: Literal["mean", "median", "p95"] = self.cfg.get("fuse", "p95")
         
         # Trained parameters per column: (phi, mu)
         self.phimap: Dict[str, Tuple[float, float]] = {}

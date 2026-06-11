@@ -24,8 +24,6 @@ param(
     [string]$WorkDir   = "$PWD\acm_care_bench",
     [string[]]$Farms   = @("A"),
     [string]$Datasets  = "",     # space-separated event IDs; empty = all
-    [double]$AlertZ    = 3.0,
-    [int]$Persist      = 6
 )
 
 $ErrorActionPreference = "Stop"
@@ -59,7 +57,6 @@ foreach ($farm in $Farms) {
     Write-Host "`n== Benchmarking Wind Farm $farm =="
     $extra = @()
     if ($Datasets -ne "") { $extra = @("--datasets") + ($Datasets -split " ") }
-    python scripts/care_benchmark.py --data-dir $dataDir --out $outDir `
-        --alert-z $AlertZ --persist $Persist @extra
+    python scripts/care_benchmark.py --data-dir $dataDir --out $outDir @extra
     Write-Host "Results: $outDir\results.csv | $outDir\summary.json"
 }

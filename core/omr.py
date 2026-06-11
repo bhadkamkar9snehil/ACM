@@ -41,8 +41,10 @@ class OMRModel:
     scaler: StandardScaler
     model_type: str  # "pls", "linear", "pca"
     feature_names: List[str]
-    train_residual_std: float  # For z-score normalization
+    train_residual_std: float  # For z-score normalization (legacy row-L2 scale)
     n_components: int  # Number of latent components (PLS/PCA)
+    feature_resid_med: Optional[np.ndarray] = None    # per-feature residual median
+    feature_resid_scale: Optional[np.ndarray] = None  # per-feature residual MAD*1.4826
     linear_models: Optional[List[Dict[str, Any]]] = None  # Stored ridge sub-models for linear mode
     train_samples: int = 0  # Track training sample count
     train_features: int = 0  # Track training feature count
@@ -395,6 +397,19 @@ class OMRDetector:
             
             # Enforce lower bound to prevent division by zero
             train_residual_std = max(train_residual_std, self.MIN_RESIDUAL_STD)
+
+            # PER-FEATURE residual scales (median + MAD per column). The row-L2
+            # statistic dilutes a single faulty channel by sqrt(n_features):
+            # one bearing temperature at 8 sigma among 88 features moved the
+            # row norm ~30% — invisible. Scoring uses the MAX per-feature
+            # scaled residual instead: "which sensor stopped following the
+            # others, and how badly". Floor each scale at 1% of the feature's
+            # robust spread so quantized channels cannot explode.
+            feat_med = np.median(residuals, axis=0)
+            feat_mad = np.median(np.abs(residuals - feat_med), axis=0) * 1.4826
+            feat_spread = np.subtract(*np.percentile(X_scaled, [97.5, 2.5], axis=0)) * -1.0
+            feat_scale = np.maximum(feat_mad, np.maximum(0.01 * np.abs(feat_spread),
+                                                         self.MIN_RESIDUAL_STD))
             
             self.model = OMRModel(
                 model=model,
@@ -402,6 +417,8 @@ class OMRDetector:
                 model_type=selected_model,
                 feature_names=feature_names,
                 train_residual_std=train_residual_std,
+                feature_resid_med=feat_med,
+                feature_resid_scale=feat_scale,
                 n_components=n_components,
                 linear_models=linear_models if selected_model == ModelType.LINEAR.value else None,
                 train_samples=n_samples,
@@ -569,14 +586,28 @@ class OMRDetector:
             
             # Now X_scaled contains residuals
             residuals = X_scaled  # Just an alias, no copy
-            
-            # Compute z-scores and contributions
+
+            # Z-SCORE: top-3 mean of per-feature scaled residuals ("which
+            # sensors stopped following the others, and how badly").
+            # - row-L2 diluted a single faulty channel by sqrt(n_features);
+            # - a plain max is an extreme-value statistic whose HEALTHY tail
+            #   grows with feature count, crushing calibration contrast.
+            # Top-3 needs three simultaneously elevated features: noise rarely
+            # provides that, while one faulty channel elevates all ~11 of its
+            # engineered descendants.
+            if (self.model.feature_resid_scale is not None
+                    and len(self.model.feature_resid_scale) == residuals.shape[1]):
+                scaled = np.abs(residuals - self.model.feature_resid_med) / self.model.feature_resid_scale
+                k = min(3, scaled.shape[1])
+                omr_z = np.mean(np.partition(scaled, -k, axis=1)[:, -k:], axis=1)
+                del scaled
+            else:
+                omr_z = np.linalg.norm(residuals, axis=1) / self.model.train_residual_std
+
+            # Contributions (per-sensor attribution)
             if return_contributions:
                 # Need squared residuals for contributions - compute in-place
                 squared_residuals = np.square(residuals)  # residuals ** 2
-                
-                # L2 norm from squared residuals (sum then sqrt)
-                residual_norm = np.sqrt(np.sum(squared_residuals, axis=1))
                 
                 # Normalize contributions by feature variance
                 feature_variances = np.var(squared_residuals, axis=0) + 1e-9
@@ -599,14 +630,8 @@ class OMRDetector:
                 )
                 del squared_residuals
             else:
-                # Just need L2 norm - no need to store squared residuals
-                residual_norm = np.linalg.norm(residuals, axis=1)
                 del residuals, X_scaled
-            
-            # Normalize by training std to get z-score
-            omr_z = residual_norm / self.model.train_residual_std
-            del residual_norm
-            
+
             # Clip z-scores to prevent extreme values
             np.clip(omr_z, -self.max_z_score, self.max_z_score, out=omr_z)
             omr_z = omr_z.astype(np.float32, copy=False)
