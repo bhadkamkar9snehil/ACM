@@ -180,7 +180,18 @@ def run_event(
     train_status = df.loc[df["train_test"] == "train", "status_type_id"].to_numpy()
 
     # --- ML core: features -> detectors -> calibration -> fusion ------------
-    train_feat, score_feat = build_features_for_pipeline(train_raw, score_raw, cfg)
+    # Channel-aware engineering: SCADA exports ship pre-derived statistic
+    # channels (10-min _min/_max/_std per sensor). Rolling features ON TOP of
+    # those (std-of-std, energy-of-min) are redundant noise that exploded
+    # 957 channels into 10,472 columns — quadrupling runtime and degrading
+    # the high-capacity heads (GMM/OMR drift). Engineer rolling features on
+    # PRIMARY channels only; derived channels join the matrix raw.
+    derived_cols = [c for c in train_raw.columns if c.endswith(("_min", "_max", "_std"))]
+    train_feat, score_feat = build_features_for_pipeline(
+        train_raw.drop(columns=derived_cols), score_raw.drop(columns=derived_cols), cfg)
+    if derived_cols:
+        train_feat = pd.concat([train_feat, train_raw[derived_cols]], axis=1)
+        score_feat = pd.concat([score_feat, score_raw[derived_cols]], axis=1)
     # float32 halves every downstream allocation; detector math is float32-safe
     train_feat = train_feat.astype(np.float32)
     score_feat = score_feat.astype(np.float32)
@@ -394,6 +405,20 @@ def evaluate_series(
                 heads_fired.append(name)
                 alarm_heads |= mask_h
 
+    # SELF-DISTRUST GATE (unsupervised): genuine behavioural faults fire
+    # intermittently or escalate; only a broken baseline flags the majority
+    # of a multi-week window. Any behaviour rule whose mask covers >50% of
+    # the window is declared miscalibrated and discarded (availability is
+    # exempt: a failed asset IS down for most of the window).
+    distrusted = []
+    if alarm_sustained.mean() > 0.5:
+        distrusted.append("sustained"); alarm_sustained = np.zeros_like(alarm_sustained)
+    if alarm_rate.mean() > 0.5:
+        distrusted.append("rate"); alarm_rate = np.zeros_like(alarm_rate)
+    if alarm_heads.mean() > 0.5:
+        distrusted.append("heads:" + ",".join(heads_fired))
+        heads_fired = []; alarm_heads = np.zeros_like(alarm_heads)
+
     alarm = alarm_sustained | alarm_rate | alarm_avail | alarm_heads
     normal_op = np.isin(score_status, list(NORMAL_STATUS))
 
@@ -410,7 +435,8 @@ def evaluate_series(
         "rule_fired": ("sustained" if alarm_sustained.any() else "") +
                       ("+rate" if alarm_rate.any() else "") +
                       ("+avail" if alarm_avail.any() else "") +
-                      (("+heads:" + ",".join(heads_fired)) if heads_fired else ""),
+                      (("+heads:" + ",".join(heads_fired)) if heads_fired else "") +
+                      (("(distrusted:" + ";".join(distrusted) + ")") if distrusted else ""),
         "fused_p50": float(np.nanmedian(fused)),
         "fused_max": float(np.nanmax(fused)),
         "alarm_frac": float(alarm.mean()),
