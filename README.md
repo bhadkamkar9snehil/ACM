@@ -74,8 +74,19 @@ an onset — a drifted baseline, not a detection.
 ## Validation
 
 **Public benchmark** — CARE-to-Compare ([zenodo.org/records/15846963](https://zenodo.org/records/15846963)),
-labelled wind-farm faults, zero labels shown to the model. Reproduce:
-`.\scripts\run_care_benchmark.ps1` (event-level KPI: recall ≥ 0.80, F1 ≥ 0.75).
+labelled wind-farm faults, zero labels shown to the model, one universal
+ruleset, cold-start from t=0:
+
+| Farm | Faults detected | Normals clean | F1 |
+|---|---|---|---|
+| A (onshore, 86 ch) | 12/12 | 8/10 | 0.92 |
+| B (offshore, 257 ch) | 3/6 | 7/9 | 0.55 |
+| **Pooled (33 events)** | **15/18** | **15/19** | **0.81 — KPI PASS** |
+
+Reproduce: `.\scripts\run_care_benchmark.ps1` (KPI: recall ≥ 0.80, F1 ≥ 0.75).
+Additional machines: `scripts/download_validation_datasets.py` ships SKAB
+(pump rig; first run: 8/34 windows, 1.1% FP — open ML target) and MetroPT-3
+(air compressor) adapters.
 
 **ML test suite** — synthetic plants with *injected* faults that must be
 caught and clean continuations that must stay quiet
