@@ -303,207 +303,6 @@ def rolling_spectral_energy(df: pl.DataFrame, window: int, cols: Optional[List[s
     return pl.DataFrame(pl_cols) if pl_cols else pl.DataFrame()
 
 
-def rolling_xcorr(df: pl.DataFrame, window: int, target_col: str, ref_cols: Optional[List[str]] = None,
-                min_periods: int = 1) -> pl.DataFrame:
-    """Compute rolling cross-correlation between target column and reference columns.
-    Requires Polars DataFrame input. Returns pl.DataFrame with <ref_col>_xcorr columns.
-    """
-    if not isinstance(df, pl.DataFrame):
-        raise TypeError("rolling_xcorr requires a Polars DataFrame input")
-    if ref_cols is None:
-        ref_cols = [c for c in df.columns if c != target_col]
-    if target_col not in df.columns:
-        raise ValueError(f"Target column '{target_col}' not found in dataframe")
-    exprs = [
-        pl.rolling_corr(pl.col(target_col), pl.col(ref), window_size=window, min_samples=min_periods).alias(f"{ref}_xcorr")
-        for ref in ref_cols
-    ]
-    return df.select(exprs)
-
-
-# rolling_spectral_energy_pl is identical to rolling_spectral_energy (kept for call-site compat)
-rolling_spectral_energy_pl = rolling_spectral_energy
-
-
-def rolling_pairwise_lag(df: pl.DataFrame, max_lag: int = 3, cols: Optional[List[str]] = None,
-                         window: Optional[int] = None, min_periods: int = 1) -> pl.DataFrame:
-    """Generate rolling pairwise lag features between all ordered column pairs.
-
-    For each ordered pair (a, b) where a != b, and for each lag in [0, max_lag],
-    compute the rolling correlation between a and b shifted by `lag`. Name columns
-    as `<a>__<b>_lag<lag>_corr`.
-
-    Note: For large numbers of columns, consider using batched_pairwise_lag() which
-    provides memory-efficient batching and correlation thresholding.
-
-    Parameters
-    ----------
-    df : DataFrame
-        Input dataframe (polars or pandas)
-    max_lag : int, default=3
-        Maximum lag to compute (inclusive). Will generate features for lags 0...max_lag.
-    cols : List[str], optional
-        Columns to process. Defaults to all columns.
-    window : int, optional
-        Window size for rolling correlation. If None, uses max_lag + 1.
-    min_periods : int, default=1
-        Minimum number of valid observations required to calculate correlation.
-    return_type : Literal["pandas", "polars"], default="pandas"
-        Whether to return a pandas or polars DataFrame.
-
-    Returns
-    -------
-    DataFrame
-        DataFrame with columns named <a>__<b>_lag<lag>_corr containing correlations.
-        The number of features is len(cols) * (len(cols)-1) * (max_lag+1).
-
-    Examples
-    --------
-    >>> import polars as pl
-    >>> import numpy as np
-    >>> # Create sample data with time-lagged relationships
-    >>> df = pl.DataFrame({
-    ...     'sensor1': np.random.randn(100),
-    ...     'sensor2': np.roll(np.random.randn(100), 2)  # lags sensor1 by 2
-    ... })
-    >>> # Compute pairwise lags up to lag 3
-    >>> lag_feats = rolling_pairwise_lag(df, max_lag=3, window=10,
-    ...                                 return_type="polars")
-    >>> # Show correlation at lag 2 (should be strongest)
-    >>> lag_feats.select("sensor1__sensor2_lag2_corr")
-    """
-    if cols is None:
-        cols = list(df.columns)
-    if window is None:
-        window = max_lag + 1
-
-    if not isinstance(df, pl.DataFrame):
-        raise TypeError("rolling_pairwise_lag requires a Polars DataFrame input")
-    exprs = []
-    for a in cols:
-        for b in cols:
-            if a == b:
-                continue
-            for lag in range(0, max_lag + 1):
-                exprs.append(
-                    pl.rolling_corr(pl.col(a), pl.col(b).shift(lag), window_size=window, min_samples=min_periods)
-                    .alias(f"{a}__{b}_lag{lag}_corr")
-                )
-    return df.select(exprs)
-
-
-def batched_pairwise_lag(df: pl.DataFrame, max_lag: int = 3, cols: Optional[List[str]] = None,
-                        window: Optional[int] = None, min_periods: int = 1, batch_size: int = 100,
-                        min_corr: float = 0.0, unique_pairs: bool = True) -> pl.DataFrame:
-    """Generate rolling pairwise lag features between column pairs with optional batching and pruning.
-
-    For each unique (unordered) pair (a, b) where a != b, compute rolling correlation between a and b
-    shifted by lags 0...max_lag. Optional correlation threshold and unique-pairs mode reduce memory use.
-    Features are named as '<a>__<b>_lag<lag>_corr' or vice versa depending on ordering in unique mode.
-    
-    Parameters
-    ----------
-    df : DataFrame
-        Input dataframe (polars or pandas)
-    max_lag : int, default=3
-        Maximum lag to compute (inclusive). Will generate features for lags 0...max_lag.
-    cols : List[str], optional
-        Columns to process. Defaults to all columns.
-    window : int, optional
-        Window size for rolling correlation. If None, uses max_lag + 1.
-    min_periods : int, default=1
-        Minimum number of valid observations required to calculate correlation.
-    batch_size : int, default=100
-        Maximum number of column pairs to process at once. Lower this if memory is tight.
-    min_corr : float, default=0.0
-        Minimum absolute correlation threshold. Only pairs reaching this threshold
-        (for any lag) are included in output. Set to 0 to keep all pairs.
-    unique_pairs : bool, default=True
-        If True, only compute each unordered pair once and use consistent column ordering.
-        If False, compute all ordered pairs (a,b) and (b,a) separately.
-    return_type : Literal["pandas", "polars"], default="pandas"
-        Whether to return a pandas or polars DataFrame.
-    
-    Returns
-    -------
-    DataFrame
-        DataFrame with columns named <a>__<b>_lag<lag>_corr containing correlations
-        above min_corr threshold. With unique_pairs=True, a < b lexicographically.
-    
-    Examples
-    --------
-    >>> import polars as pl
-    >>> import numpy as np
-    >>> np.random.seed(42)
-    >>> n = 1000
-    >>> # Create sample data with time-lagged relationships
-    >>> df = pl.DataFrame({
-    ...     'x': np.random.randn(n),
-    ...     'y': np.roll(np.random.randn(n), 2),  # y lags x by 2
-    ...     'z': np.random.randn(n)  # independent
-    ... })
-    >>> # Compute pairwise lags, keeping only stronger correlations
-    >>> lag_feats = batched_pairwise_lag(df, max_lag=3, min_corr=0.2,
-    ...                                  return_type="polars")
-    >>> # Show non-zero correlations
-    >>> lag_feats.select([
-    ...     pl.col("*").filter(pl.col("*").abs() > 0.2)
-    ... ])
-    """
-    if cols is None:
-        cols = list(df.columns)
-    if window is None:
-        window = max_lag + 1
-
-    # Sort column names for consistent ordering in unique mode
-    cols = sorted(cols)
-    
-    # Generate pairs to process
-    pairs = []
-    for i, a in enumerate(cols):
-        for j, b in enumerate(cols):
-            if unique_pairs:
-                # Only process each unordered pair once, maintaining lexicographic order
-                if i >= j:  # Skip if we've seen this pair or it's the same column
-                    continue
-            else:
-                # Process all ordered pairs except self-pairs
-                if a == b:
-                    continue
-            pairs.append((a, b))
-    
-    if not isinstance(df, pl.DataFrame):
-        raise TypeError("batched_pairwise_lag requires a Polars DataFrame input")
-
-    # Process pairs in batches to limit memory use
-    all_results: list = []
-    for batch_start in range(0, len(pairs), batch_size):
-        batch_pairs = pairs[batch_start:batch_start + batch_size]
-        exprs = []
-        for a, b in batch_pairs:
-            for lag in range(max_lag + 1):
-                exprs.append(
-                    pl.rolling_corr(pl.col(a), pl.col(b).shift(lag), window_size=window, min_samples=min_periods)
-                    .alias(f"{a}__{b}_lag{lag}_corr")
-                )
-        batch_result = df.select(exprs)
-        if min_corr > 0:
-            keep_cols = [
-                col for col in batch_result.columns
-                if batch_result.select(pl.col(col).abs().max()).item() >= min_corr
-            ]
-            if not keep_cols:
-                continue
-            batch_result = batch_result.select(keep_cols)
-        if len(batch_result.columns) > 0:
-            all_results.append(batch_result)
-
-    if not all_results:
-        return pl.DataFrame()
-
-    return pl.concat(all_results, how="horizontal")
-
-
 def compute_basic_features_pl(df: 'pl.DataFrame', window: int = 3, cols: Optional[List[str]] = None, 
                                fill_values: Optional[dict] = None) -> 'pl.DataFrame':
     """Polars-native version of `compute_basic_features`.
@@ -577,11 +376,9 @@ def compute_basic_features_pl(df: 'pl.DataFrame', window: int = 3, cols: Optiona
     sk     = rolling_skew_kurt(pl_filled, window, cols, min_periods=1)
     se     = rolling_spectral_energy(pl_filled, window, cols, min_periods=1)
 
-    # Combine all parts first, then compute robust z-score
+    # Combine all parts first, then compute robust z-score. Polars ONLY —
+    # every rolling helper returns pl.DataFrame or raises.
     parts = [med, mad, ms, slopes, sk, se]
-    # Defensive normalization while migration is in progress:
-    # avoid pl.concat failures if any helper accidentally returns pandas.
-    parts = [pl.from_pandas(p) if isinstance(p, pd.DataFrame) else p for p in parts]
     parts = [p for p in parts if p is not None and len(p.columns) > 0]
     if not parts:
         return pl.DataFrame()
@@ -1181,6 +978,87 @@ def normalize_with_confidence_gating(
 # Pipeline feature build wrapper (moved from core/acm.py)
 # =============================================================================
 
+# Common historian suffixes for pre-derived window statistics. These are only
+# HINTS — a channel is treated as derived ONLY when the mathematical
+# relationship is verified on the actual data below.
+_DERIVED_SUFFIXES = {
+    "min": ("_min", "_minimum"),
+    "max": ("_max", "_maximum"),
+    "std": ("_std", "_stddev", "_sd", "_stdev"),
+}
+_BASE_SUFFIXES = ("_avg", "_average", "_mean", "")
+
+
+def detect_channel_roles(df: pd.DataFrame, sample_rows: int = 5000) -> Dict[str, List[str]]:
+    """Classify channels as PRIMARY (engineer rolling features) or DERIVED
+    (pre-computed window statistics of a sibling channel; include raw only).
+
+    Generic and data-driven — works for any historian, any asset:
+      1. Group channels by name stem (suffix conventions are only candidates).
+      2. VERIFY the claimed relationship on the data itself:
+         min:  x_min <= base  for ~all samples
+         max:  x_max >= base  for ~all samples
+         std:  x_std >= 0     for ~all samples, and median(x_std) < spread(base)
+      3. Anything unverified — no sibling base channel, relation does not
+         hold — is PRIMARY. The safe default is to engineer a channel, never
+         to silently drop information based on its name.
+
+    Why this exists: computing rolling statistics ON TOP of channels that are
+    already window statistics (std-of-std, spectral energy of a min trace)
+    multiplies dimensionality with redundant noise — 957 raw channels became
+    10,472 columns on one wind farm, degrading the high-capacity detectors
+    and quadrupling runtime. Real-world raw-sensor feeds have no derived
+    channels and pass through this function untouched.
+    """
+    cols = list(df.columns)
+    sample = df.iloc[:: max(1, len(df) // sample_rows)] if len(df) > sample_rows else df
+
+    def _stem(name: str) -> Tuple[str, str]:
+        low = name.lower()
+        for role, suffixes in _DERIVED_SUFFIXES.items():
+            for suf in suffixes:
+                if low.endswith(suf):
+                    return name[: len(name) - len(suf)], role
+        for suf in _BASE_SUFFIXES:
+            if suf and low.endswith(suf):
+                return name[: len(name) - len(suf)], "base"
+        return name, "base"
+
+    groups: Dict[str, Dict[str, str]] = {}
+    for c in cols:
+        stem, role = _stem(c)
+        groups.setdefault(stem, {})[c] = role
+
+    derived: List[str] = []
+    for stem, members in groups.items():
+        bases = [c for c, r in members.items() if r == "base"]
+        if not bases:
+            continue  # no base sibling -> everything in the group is primary
+        base = pd.to_numeric(sample[bases[0]], errors="coerce")
+        base_spread = float(np.nanstd(base.to_numpy(dtype=np.float64)))
+        for c, role in members.items():
+            if role == "base":
+                continue
+            v = pd.to_numeric(sample[c], errors="coerce")
+            both = base.notna() & v.notna()
+            if both.sum() < 50:
+                continue  # not enough overlap to verify -> stay primary
+            vb, bb = v[both].to_numpy(np.float64), base[both].to_numpy(np.float64)
+            eps = 1e-6 + 1e-3 * max(base_spread, 1.0)
+            ok = False
+            if role == "min":
+                ok = float(np.mean(vb <= bb + eps)) > 0.98
+            elif role == "max":
+                ok = float(np.mean(vb >= bb - eps)) > 0.98
+            elif role == "std":
+                ok = float(np.mean(vb >= -eps)) > 0.99 and float(np.nanmedian(vb)) <= max(base_spread * 3.0, eps)
+            if ok:
+                derived.append(c)
+
+    primary = [c for c in cols if c not in set(derived)]
+    return {"primary": primary, "derived": derived}
+
+
 def build_features_for_pipeline(
     train: pd.DataFrame,
     score: pd.DataFrame,
@@ -1192,7 +1070,7 @@ def build_features_for_pipeline(
 
     Keeps fill-value derivation strictly from TRAIN data to avoid leakage.
     """
-    feat_win = int((cfg.get("features", {}) or {}).get("window", 3))
+    feat_win = int((cfg.get("features", {}) or {}).get("window", 16))
     Console.info(f"Building features with window={feat_win}", component="FEAT", equip=equip)
 
     idx_train = train.index

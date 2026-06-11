@@ -2689,63 +2689,6 @@ class TestRefactorHelpers:
             assert contract.mode == "replace"
             assert tuple(contract.key_columns) == ("RunID", "EquipID")
 
-    def test_regime_conditioned_estimate_excludes_legacy_hazard_payload(self, monkeypatch):
-        """Regime-conditioned estimate should not emit legacy ACM_RegimeHazard payload keys."""
-        from core import forecast_engine as fe
-
-        class _FakeRul:
-            def __init__(self, p50):
-                self.p10_lower_bound = p50 - 2.0
-                self.p50_median = p50
-                self.p90_upper_bound = p50 + 2.0
-                self.confidence_level = 0.9
-
-        class _FakeEstimator:
-            def __init__(self, **kwargs):
-                _ = kwargs
-
-            def estimate_rul(self, current_health, dt_hours, max_horizon_hours):
-                _ = (current_health, dt_hours, max_horizon_hours)
-                return _FakeRul(24.0)
-
-        monkeypatch.setattr(fe, "RULEstimator", _FakeEstimator)
-
-        forecaster = fe.RegimeConditionedForecaster(
-            sql_client=None,
-            output_manager=None,
-            equip_id=1,
-            run_id="r-test",
-            config={"failure_threshold": 70.0},
-        )
-        forecaster.compute_regime_stats = lambda lookback_days=90: {
-            1: fe.RegimeStats(
-                regime_label=1,
-                health_state="healthy",
-                degradation_rate=0.2,
-                degradation_rate_lower=0.1,
-                degradation_rate_upper=0.3,
-                degradation_r_squared=0.8,
-                health_mean=85.0,
-                health_std=3.0,
-                dwell_fraction=0.6,
-                transition_count=3,
-                failure_threshold=70.0,
-                sample_count=120,
-            )
-        }
-
-        out = forecaster.estimate_rul_by_regime(
-            current_health=88.0,
-            degradation_model=object(),
-            current_regime=1,
-            forecast_config={"dt_hours": 1.0, "max_forecast_hours": 48.0},
-        )
-
-        assert "rul_global" in out
-        assert "rul_by_regime" in out
-        assert "rul_conditioned" in out
-        assert "regime_hazards" not in out
-
     def test_generate_all_analytics_with_context_injects_fusion_weights(self):
         """Analytics helper should inject fusion weights and delegate to analytics writer."""
         from core.output_manager import OutputManager

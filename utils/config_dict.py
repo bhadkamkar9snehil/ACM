@@ -82,12 +82,18 @@ class ConfigDict(MutableMapping):
         Load config from CSV table. Merges global defaults (EquipID=0) 
         with asset-specific overrides (EquipID=equip_id).
         """
+        from core.ml_defaults import ML_DEFAULTS
+        import copy
+        # ML behaviour is code, not configuration: start from the canonical
+        # ML defaults; the CSV contributes only human-operable settings
+        # (data sources, SQL, runtime, reporting) plus any explicit override.
+        base = copy.deepcopy(ML_DEFAULTS)
         if not path.exists():
             Console.warn(f"CSV config not found: {path}", component="CONFIG")
-            return {}
-        
+            return base
+
         try:
-            config = {}
+            config = base
             with path.open("r", encoding="utf-8") as f:
                 reader = csv.DictReader(f)
                 

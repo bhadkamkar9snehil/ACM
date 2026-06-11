@@ -62,6 +62,33 @@ CREATE TABLE IF NOT EXISTS alarms (
     asset_key TEXT, start_ts TEXT, end_ts TEXT, duration_h REAL, peak_fused REAL);
 CREATE TABLE IF NOT EXISTS summary (
     farm TEXT, ingested_at TEXT, metrics_json TEXT);
+CREATE TABLE IF NOT EXISTS runs (
+    asset_key TEXT, run_id TEXT, started_at TEXT, duration_s REAL,
+    status TEXT, alert_z REAL, persist INTEGER, rules_fired TEXT, notes TEXT);
+CREATE TABLE IF NOT EXISTS run_log (
+    asset_key TEXT, ts TEXT, level TEXT, stage TEXT, message TEXT);
+CREATE INDEX IF NOT EXISTS ix_runlog_asset ON run_log(asset_key, ts);
+
+-- LIVE MONITORING (human view): one row per asset, current state
+CREATE VIEW IF NOT EXISTS v_asset_now AS
+SELECT a.asset_key, a.farm, a.asset_id, a.verdict, a.rules_fired,
+       (SELECT MAX(ts) FROM scores s WHERE s.asset_key = a.asset_key)   AS last_ts,
+       (SELECT fused FROM scores s WHERE s.asset_key = a.asset_key
+        ORDER BY ts DESC LIMIT 1)                                        AS last_fused,
+       (SELECT COUNT(*) FROM alarms al WHERE al.asset_key = a.asset_key) AS alarm_episodes,
+       (SELECT MAX(end_ts) FROM alarms al WHERE al.asset_key = a.asset_key) AS last_alarm_end
+FROM assets a;
+
+-- DATA SCIENCE (daily aggregates): trend material per asset per day
+CREATE VIEW IF NOT EXISTS v_daily_stats AS
+SELECT asset_key, substr(ts, 1, 10) AS day,
+       COUNT(*)    AS n,
+       AVG(fused)  AS fused_mean,
+       MAX(fused)  AS fused_max,
+       AVG(CASE WHEN fused >= 3.0 THEN 1.0 ELSE 0.0 END) AS rate_z3,
+       SUM(alarm)  AS alarm_samples,
+       AVG(CASE WHEN status IN (0,2) THEN 1.0 ELSE 0.0 END) AS availability
+FROM scores GROUP BY asset_key, substr(ts, 1, 10);
 """
 
 # T-SQL: no IF NOT EXISTS on CREATE TABLE; OBJECT_ID guards instead.
@@ -82,7 +109,33 @@ IF OBJECT_ID('dbo.acm_alarms') IS NULL CREATE TABLE dbo.acm_alarms (
     duration_h FLOAT, peak_fused FLOAT);
 IF OBJECT_ID('dbo.acm_summary') IS NULL CREATE TABLE dbo.acm_summary (
     farm NVARCHAR(16), ingested_at DATETIME2, metrics_json NVARCHAR(MAX));
+IF OBJECT_ID('dbo.acm_runs') IS NULL CREATE TABLE dbo.acm_runs (
+    asset_key NVARCHAR(64), run_id NVARCHAR(64), started_at DATETIME2,
+    duration_s FLOAT, status NVARCHAR(16), alert_z FLOAT, persist INT,
+    rules_fired NVARCHAR(256), notes NVARCHAR(MAX));
+IF OBJECT_ID('dbo.acm_run_log') IS NULL CREATE TABLE dbo.acm_run_log (
+    asset_key NVARCHAR(64), ts DATETIME2, level NVARCHAR(8),
+    stage NVARCHAR(32), message NVARCHAR(MAX),
+    INDEX ix_acm_runlog_asset (asset_key, ts));
 """
+
+# Views created separately on mssql (CREATE VIEW must be first in batch)
+DDL_MSSQL_VIEWS = [
+    """IF OBJECT_ID('dbo.acm_v_asset_now') IS NULL EXEC('CREATE VIEW dbo.acm_v_asset_now AS
+SELECT a.asset_key, a.farm, a.asset_id, a.verdict, a.rules_fired,
+       (SELECT MAX(ts) FROM dbo.acm_scores s WHERE s.asset_key = a.asset_key) AS last_ts,
+       (SELECT TOP 1 fused FROM dbo.acm_scores s WHERE s.asset_key = a.asset_key ORDER BY ts DESC) AS last_fused,
+       (SELECT COUNT(*) FROM dbo.acm_alarms al WHERE al.asset_key = a.asset_key) AS alarm_episodes,
+       (SELECT MAX(end_ts) FROM dbo.acm_alarms al WHERE al.asset_key = a.asset_key) AS last_alarm_end
+FROM dbo.acm_assets a')""",
+    """IF OBJECT_ID('dbo.acm_v_daily_stats') IS NULL EXEC('CREATE VIEW dbo.acm_v_daily_stats AS
+SELECT asset_key, CAST(ts AS DATE) AS day, COUNT(*) AS n,
+       AVG(fused) AS fused_mean, MAX(fused) AS fused_max,
+       AVG(CASE WHEN fused >= 3.0 THEN 1.0 ELSE 0.0 END) AS rate_z3,
+       SUM(CAST(alarm AS FLOAT)) AS alarm_samples,
+       AVG(CASE WHEN status IN (0,2) THEN 1.0 ELSE 0.0 END) AS availability
+FROM dbo.acm_scores GROUP BY asset_key, CAST(ts AS DATE)')""",
+]
 
 
 class Store:
@@ -101,6 +154,8 @@ class Store:
             for stmt in DDL_MSSQL.split(");"):
                 if stmt.strip():
                     cur.execute(stmt + ");")
+            for v in DDL_MSSQL_VIEWS:
+                cur.execute(v)
             self.con.commit()
             self.prefix = "dbo.acm_"
         else:
@@ -188,6 +243,23 @@ def ingest(results_dir: Path, farm: str, store: Store) -> None:
         if eps:
             store.executemany(f"INSERT INTO {store.t('alarms')} VALUES (?,?,?,?,?)",
                               [(key, *e) for e in eps])
+
+        # Observability: every processing run is itself a record.
+        store.execute(f"DELETE FROM {store.t('runs')} WHERE asset_key = ?", (key,))
+        store.execute(
+            f"INSERT INTO {store.t('runs')} VALUES (?,?,?,?,?,?,?,?,?)",
+            (key, f"{key}@ingest", datetime.now(timezone.utc).isoformat(sep=' ', timespec='seconds'),
+             _none(r.get("runtime_s")), "OK", _none(r.get("alert_z_eff")),
+             int(r.get("persist_eff", 0)) if pd.notna(r.get("persist_eff")) else None,
+             r.get("rule_fired", ""), ""))
+        log_path = results_dir / f"event_{eid}_runlog.csv"
+        store.execute(f"DELETE FROM {store.t('run_log')} WHERE asset_key = ?", (key,))
+        if log_path.exists():
+            lg = pd.read_csv(log_path)
+            store.executemany(
+                f"INSERT INTO {store.t('run_log')} VALUES (?,?,?,?,?)",
+                [(key, str(row.ts), str(row.level), str(row.stage), str(row.message))
+                 for row in lg.itertuples()])
         n_assets += 1
 
     summary_path = results_dir / "summary.json"

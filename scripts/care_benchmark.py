@@ -43,6 +43,7 @@ import argparse
 import json
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -54,7 +55,7 @@ sys.path.insert(0, str(ROOT))
 
 from core import detector_orchestrator as orch          # noqa: E402
 from core import fuse                                    # noqa: E402
-from core.fast_features import build_features_for_pipeline  # noqa: E402
+from core.fast_features import build_features_for_pipeline, detect_channel_roles  # noqa: E402
 from utils.config_dict import ConfigDict                 # noqa: E402
 
 META_COLS = {"time_stamp", "asset_id", "id", "train_test", "status_type_id"}
@@ -172,6 +173,11 @@ def run_event(
     event_id = int(event["event_id"])
     label = str(event["event_label"])
     t0 = time.time()
+    runlog: List[Dict] = []
+
+    def _log(stage: str, message: str, level: str = "INFO") -> None:
+        runlog.append({"ts": datetime.now().isoformat(sep=" ", timespec="seconds"),
+                       "level": level, "stage": stage, "message": message})
 
     df = load_dataset(farm_dir, event_id)
     train_raw = sensor_frame(df[df["train_test"] == "train"])
@@ -180,18 +186,20 @@ def run_event(
     train_status = df.loc[df["train_test"] == "train", "status_type_id"].to_numpy()
 
     # --- ML core: features -> detectors -> calibration -> fusion ------------
-    # Channel-aware engineering: SCADA exports ship pre-derived statistic
-    # channels (10-min _min/_max/_std per sensor). Rolling features ON TOP of
-    # those (std-of-std, energy-of-min) are redundant noise that exploded
-    # 957 channels into 10,472 columns — quadrupling runtime and degrading
-    # the high-capacity heads (GMM/OMR drift). Engineer rolling features on
-    # PRIMARY channels only; derived channels join the matrix raw.
-    derived_cols = [c for c in train_raw.columns if c.endswith(("_min", "_max", "_std"))]
+    # Channel roles are detected from the DATA (core.fast_features
+    # .detect_channel_roles): a channel counts as a pre-derived window
+    # statistic only when the min<=avg<=max / std>=0 relationship verifies on
+    # the samples. Raw-sensor feeds (the production case) have no derived
+    # channels and pass through untouched.
+    roles = detect_channel_roles(train_raw)
+    derived_cols = roles["derived"]
+    _log("channels", f"{len(roles['primary'])} primary, {len(derived_cols)} data-verified derived of {train_raw.shape[1]} channels")
     train_feat, score_feat = build_features_for_pipeline(
         train_raw.drop(columns=derived_cols), score_raw.drop(columns=derived_cols), cfg)
     if derived_cols:
         train_feat = pd.concat([train_feat, train_raw[derived_cols]], axis=1)
         score_feat = pd.concat([score_feat, score_raw[derived_cols]], axis=1)
+    _log("features", f"matrix {train_feat.shape[0]}x{train_feat.shape[1]} built in {time.time()-t0:.0f}s")
     # float32 halves every downstream allocation; detector math is float32-safe
     train_feat = train_feat.astype(np.float32)
     score_feat = score_feat.astype(np.float32)
@@ -212,6 +220,7 @@ def run_event(
     fit_feat = train_feat.iloc[~calib_mask]
     calib_feat = train_feat.iloc[calib_mask]
 
+    t_fit = time.time()
     det = orch.fit_all_detectors(
         train=fit_feat, cfg=cfg,
         ar1_enabled=True, pca_enabled=True, iforest_enabled=True,
@@ -225,6 +234,7 @@ def run_event(
         gmm_detector=det.get("gmm_detector"),
         omr_detector=det.get("omr_detector"),
     )
+    _log("fit", f"detectors fitted in {time.time()-t_fit:.0f}s")
     score_frame, omr_contrib = orch.score_all_detectors(score_feat, **det_kwargs)
 
     # Production calibration stage (adaptive clip + contamination filter),
@@ -285,6 +295,13 @@ def run_event(
                              head_z_score=head_z_score, head_z_train=head_z_train)
     result.update({"n_train": len(train_raw), "n_score": len(score_raw),
                    "runtime_s": round(time.time() - t0, 1), "reused": False})
+    _log("rules", f"alert_z={result.get('alert_z_eff')} persist={result.get('persist_eff')} "
+                  f"fired={result.get('rule_fired') or '-'}")
+    if "(distrusted" in (result.get("rule_fired") or ""):
+        _log("rules", f"self-distrust gate discarded: {result['rule_fired']}", level="WARN")
+    _log("done", f"total {result['runtime_s']}s")
+    if out_dir is not None:
+        pd.DataFrame(runlog).to_csv(out_dir / f"event_{event_id}_runlog.csv", index=False)
     return result
 
 

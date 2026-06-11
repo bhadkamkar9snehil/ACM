@@ -17,10 +17,42 @@ Release Management:
 - Production deployments use specific tags (never merge commits)
 """
 
-__version__ = "11.15.16"
-__version_date__ = "2026-06-10"
+__version__ = "12.0.0"
+__version_date__ = "2026-06-11"
 __version_author__ = "ACM Development Team"
 
+# v12.0.0: AUTONOMOUS ML, SQL-NATIVE RESULTS, PRODUCT SLIMDOWN
+#
+# ML (validated against CARE-to-Compare, 95 labelled events, zero labels used):
+#   - Self-tuned alarm rules: sustained, 24h rate, per-head 7-day rate,
+#     48h availability, self-distrust gate. All thresholds derived per asset
+#     from its own unlabelled history.
+#   - Out-of-sample interleaved calibration (in-sample bias + chronological
+#     tail contamination both eliminated).
+#   - Data-verified channel role detection (core/fast_features
+#     .detect_channel_roles): pre-derived _min/_max/_std channels pass through
+#     raw; raw-sensor feeds untouched.
+#   - ML parameters promoted from config into code (core/ml_defaults.py).
+#     configs/config_table.csv now carries HUMAN-operable settings only.
+#   - Farm A: 12/12 faults, F1 0.86. Farm B: 4/6, F1 0.62. Median early
+#     warning 12h where operating data exists pre-fault.
+#
+# Product:
+#   - Canonical SQL results store (scripts/acm_store.py): assets/scores/
+#     alarms/runs/run_log + v_asset_now / v_daily_stats views; SQLite and
+#     SQL Server backends, same schema.
+#   - Self-contained HTML reports with asset selection (scripts/acm_report.py).
+#   - One-command Windows setup (setup_acm.ps1). No Docker.
+#
+# Removed:
+#   - Grafana/observability stack (dashboards, docker compose, scripts, skill).
+#   - Disabled & unvalidated forecast chain (forecast_engine,
+#     multivariate_forecast, rul_estimator, failure_probability,
+#     degradation_model, health_tracker, metrics).
+#   - Legacy regime labeling path, pandas fallbacks (Polars only),
+#     unused xcorr/pairwise-lag features, rust_bridge placeholder,
+#     dev-memory/Obsidian tooling, dead analysis scripts.
+#
 # v11.15.16: AUTONOMY HARDENING — fail-safe lifecycle, restore/RUL/forecast fixes,
 #            dead distilled-runtime removal
 #

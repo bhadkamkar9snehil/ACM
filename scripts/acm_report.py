@@ -139,6 +139,23 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
             f"<div class='card' id='{meta.asset_key}'>"
             f"<img src='data:image/png;base64,{asset_figure(s, meta)}'/></div>")
 
+    # Operations: what ACM did, per run, per asset
+    runs = read_sql(con, f"SELECT * FROM {prefix}runs ORDER BY started_at DESC")
+    runs = runs[runs["asset_key"].isin(assets["asset_key"])]
+    ops_rows = "".join(
+        f"<tr><td>{r.asset_key}</td><td>{r.started_at}</td><td>{'' if pd.isna(r.duration_s) else f'{r.duration_s:.0f}s'}</td>"
+        f"<td>{r.status}</td><td>{'' if pd.isna(r.alert_z) else f'{r.alert_z:.2f}'}</td>"
+        f"<td>{r.rules_fired or ''}</td></tr>"
+        for r in runs.itertuples())
+    logs = read_sql(con, f"SELECT * FROM {prefix}run_log ORDER BY asset_key, ts")
+    logs = logs[logs["asset_key"].isin(assets["asset_key"])]
+    log_html = ""
+    for key, grp in logs.groupby("asset_key"):
+        lines = "".join(
+            f"<div class='{str(l.level).lower()}'>{l.ts} [{l.stage}] {l.message}</div>"
+            for l in grp.itertuples())
+        log_html += f"<details><summary>{key} — {len(grp)} log entries</summary><pre>{lines}</pre></details>"
+
     summaries = read_sql(con, f"SELECT * FROM {prefix}summary ORDER BY ingested_at DESC")
     if farm:
         summaries = summaries[summaries["farm"] == farm]
@@ -153,6 +170,7 @@ td,th{{border:1px solid #d0d7de;padding:4px 9px;font-size:12px}}
 th{{background:#f6f8fa;text-align:left}}
 .card{{margin:14px 0;border:1px solid #d0d7de;border-radius:6px;padding:6px}}
 img{{width:100%}} pre{{background:#f6f8fa;padding:10px;border-radius:6px;font-size:11px}}
+details{{margin:6px 0}} .warn{{color:#bf8700}} .error{{color:#cf222e}}
 </style></head><body>
 <h2>ACM — asset condition results ({scope})</h2>
 <p>Unsupervised, cold-start, self-tuned. Generated from the canonical SQL results store.</p>
@@ -162,6 +180,10 @@ img{{width:100%}} pre{{background:#f6f8fa;padding:10px;border-radius:6px;font-si
 <th>lead</th><th>rules fired</th></tr>{''.join(rows_html)}</table>
 <h3>Timelines (start to end)</h3>
 {''.join(figs_html)}
+<h3>Operations — what ACM did</h3>
+<table><tr><th>asset</th><th>run started</th><th>duration</th><th>status</th>
+<th>self-tuned z</th><th>rules fired</th></tr>{ops_rows}</table>
+{log_html}
 </body></html>"""
     out.write_text(html)
     print(f"Report written: {out} ({len(figs_html)} assets, {out.stat().st_size/1e6:.1f} MB)")

@@ -438,7 +438,7 @@ class RegimeModel:
 def _compute_training_distances(
     model: RegimeModel,
     train_basis: pd.DataFrame,
-    distance_percentile: float = 95.0,
+    distance_percentile: float = 99.0,
 ) -> Tuple[float, np.ndarray]:
     """
     Compute training-derived distance threshold for UNKNOWN detection.
@@ -457,7 +457,7 @@ def _compute_training_distances(
     Args:
         model: Fitted RegimeModel with scaler and centers
         train_basis: Training data used to fit the model
-        distance_percentile: Percentile for threshold (default 95)
+        distance_percentile: Percentile for threshold (default 99)
         
     Returns:
         Tuple of (threshold, all_distances)
