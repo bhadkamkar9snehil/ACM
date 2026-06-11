@@ -28,12 +28,24 @@ import pandas as pd
 NORMAL_STATUS = {0, 2}  # normal operation / idling
 
 ALERT_Z_FLOOR = 3.0
-PERSIST_FLOOR = 6          # 1h at 10-min cadence
-RATE_WINDOW = 144          # 24h
-HEAD_RATE_WINDOW = 1008    # 7d
-AVAIL_RUN_FLOOR = 288      # 48h
 SAFETY = 1.5
 DISTRUST_COVERAGE = 0.5
+
+# Rule horizons are defined in TIME and converted to sample counts from the
+# asset's own cadence. Sample-count constants silently broke semantics off
+# the 10-minute SCADA cadence: at 1 Hz, a "24h" 144-sample window was 2.4
+# minutes. Defaults reproduce the validated 10-min numbers exactly
+# (persist 6, rate 144, head 1008, avail 288).
+PERSIST_FLOOR_S = 3600.0          # 1h
+RATE_WINDOW_S = 24 * 3600.0       # 24h
+HEAD_RATE_WINDOW_S = 7 * 86400.0  # 7d
+AVAIL_RUN_FLOOR_S = 48 * 3600.0   # 48h
+MAX_PERSIST_S = 12 * 3600.0       # 12h cap for the sustained rule
+DEFAULT_CADENCE_S = 600.0
+
+
+def _samples(seconds: float, cadence_s: float, floor: int = 3) -> int:
+    return max(floor, int(round(seconds / max(cadence_s, 1e-9))))
 
 
 def longest_run(mask: np.ndarray) -> int:
@@ -57,7 +69,7 @@ def sustained_alarm_mask(values: np.ndarray, threshold: float, persist: int) -> 
     return run >= persist
 
 
-def rolling_rate(values: np.ndarray, z0: float, window: int = RATE_WINDOW) -> np.ndarray:
+def rolling_rate(values: np.ndarray, z0: float, window: int = 144) -> np.ndarray:
     """Trailing fraction of samples >= z0 over `window` samples."""
     above = (np.asarray(values, dtype=np.float64) >= z0).astype(float)
     return pd.Series(above).rolling(window, min_periods=window // 2).mean().to_numpy()
@@ -66,7 +78,7 @@ def rolling_rate(values: np.ndarray, z0: float, window: int = RATE_WINDOW) -> np
 def self_tune_alarm_rule(
     train_fused: Optional[np.ndarray],
     alert_z_floor: float = ALERT_Z_FLOOR,
-    persist_floor: int = PERSIST_FLOOR,
+    persist_floor: int = 6,
     target_fp: float = 0.001,
     max_persist: int = 72,
 ) -> tuple[float, int]:
@@ -97,7 +109,7 @@ class AlarmDecision:
     alarm_avail: np.ndarray
     alarm_heads: np.ndarray
     alert_z: float = ALERT_Z_FLOOR
-    persist: int = PERSIST_FLOOR
+    persist: int = 6
     rate_z0: float = ALERT_Z_FLOOR
     rate_thr: float = float("nan")
     avail_run_thr: Optional[int] = None
@@ -122,11 +134,25 @@ def apply_alarm_rules(
     head_z_score: Optional[Dict[str, np.ndarray]] = None,
     head_z_train: Optional[Dict[str, np.ndarray]] = None,
     alert_z_floor: float = ALERT_Z_FLOOR,
-    persist_floor: int = PERSIST_FLOOR,
+    cadence_s: float = DEFAULT_CADENCE_S,
 ) -> AlarmDecision:
-    """Run all self-tuned rules over one scored window. Fully unsupervised."""
+    """Run all self-tuned rules over one scored window. Fully unsupervised.
+
+    cadence_s: sampling interval of the data; all time-defined horizons are
+    converted to sample counts with it.
+    """
     n = len(fused)
-    alert_z, persist = self_tune_alarm_rule(train_fused, alert_z_floor, persist_floor)
+    persist_floor = _samples(PERSIST_FLOOR_S, cadence_s)
+    # Horizons longer than the scored window are structurally dead (all-NaN
+    # rolling output). Cap to the data so the rules stay alive on short
+    # windows; the 1h persistence floor — ACM's declared detection floor for
+    # DEVELOPING faults — is never weakened.
+    rate_window = min(_samples(RATE_WINDOW_S, cadence_s, floor=12), max(12, n // 4))
+    head_window = min(_samples(HEAD_RATE_WINDOW_S, cadence_s, floor=24), max(24, n // 3))
+    avail_floor = _samples(AVAIL_RUN_FLOOR_S, cadence_s, floor=12)
+    max_persist = _samples(MAX_PERSIST_S, cadence_s, floor=persist_floor)
+    alert_z, persist = self_tune_alarm_rule(train_fused, alert_z_floor, persist_floor,
+                                            max_persist=max_persist)
     alarm_sustained = sustained_alarm_mask(fused, alert_z, persist)
 
     # z0 is the universal "clearly elevated" level on the CALIBRATED scale:
@@ -139,13 +165,13 @@ def apply_alarm_rules(
     if train_fused is not None and np.isfinite(train_fused).sum() > 500:
         tf = np.asarray(train_fused, dtype=np.float64)
         tf = tf[np.isfinite(tf)]
-        base = float(np.nanmax(rolling_rate(tf, z0)))
+        base = float(np.nanmax(rolling_rate(tf, z0, window=rate_window)))
         # multiplicative margin alone gives no headroom when healthy base
         # rates are small (4% -> 6%): benign novelty grazes it. Additive +5pp
         # headroom; genuine faults run at 30-50%+ rates.
         rate_thr = float(np.clip(base * SAFETY + 0.05, 0.05, 0.9))
-        score_rate = np.nan_to_num(rolling_rate(fused, z0), nan=0.0)
-        alarm_rate = sustained_alarm_mask(score_rate, rate_thr, PERSIST_FLOOR)
+        score_rate = np.nan_to_num(rolling_rate(fused, z0, window=rate_window), nan=0.0)
+        alarm_rate = sustained_alarm_mask(score_rate, rate_thr, persist_floor)
 
     avail_run_thr = None
     alarm_avail = np.zeros(n, dtype=bool)
@@ -162,7 +188,7 @@ def apply_alarm_rules(
         # p95 of stop durations only when estimable (>=20 stops); with few
         # stops the max IS the prior fault's outage and would poison the bar.
         p95_stop = float(np.percentile(stops, 95)) if len(stops) >= 20 else 0.0
-        avail_run_thr = max(AVAIL_RUN_FLOOR, int(p95_stop * SAFETY) + 1)
+        avail_run_thr = max(avail_floor, int(p95_stop * SAFETY) + 1)
         nonop_score = ~np.isin(np.asarray(score_status), list(NORMAL_STATUS))
         run = 0
         for i, a in enumerate(nonop_score):
@@ -182,11 +208,11 @@ def apply_alarm_rules(
             if ztr.size < 500:
                 continue
             z0_h = alert_z_floor
-            base_h = float(np.nanmax(rolling_rate(ztr, z0_h, window=HEAD_RATE_WINDOW)))
+            base_h = float(np.nanmax(rolling_rate(ztr, z0_h, window=head_window)))
             thr_h = float(np.clip(base_h * SAFETY + 0.05, 0.05, 0.9))
             r_sc = np.nan_to_num(rolling_rate(np.asarray(z_sc, dtype=np.float64), z0_h,
-                                              window=HEAD_RATE_WINDOW), nan=0.0)
-            mask_h = sustained_alarm_mask(r_sc, thr_h, PERSIST_FLOOR)
+                                              window=head_window), nan=0.0)
+            mask_h = sustained_alarm_mask(r_sc, thr_h, persist_floor)
             if mask_h.any():
                 heads_fired.append(name)
                 alarm_heads |= mask_h
@@ -206,9 +232,9 @@ def apply_alarm_rules(
     distrusted: List[str] = []
     if _broken_baseline(alarm_sustained, persist):
         distrusted.append("sustained"); alarm_sustained = np.zeros(n, dtype=bool)
-    if _broken_baseline(alarm_rate, RATE_WINDOW // 2 + PERSIST_FLOOR):
+    if _broken_baseline(alarm_rate, rate_window // 2 + persist_floor):
         distrusted.append("rate"); alarm_rate = np.zeros(n, dtype=bool)
-    if _broken_baseline(alarm_heads, HEAD_RATE_WINDOW // 2 + PERSIST_FLOOR):
+    if _broken_baseline(alarm_heads, head_window // 2 + persist_floor):
         distrusted.append("heads:" + ",".join(heads_fired))
         heads_fired, alarm_heads = [], np.zeros(n, dtype=bool)
 

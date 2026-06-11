@@ -138,7 +138,10 @@ def try_reuse_event(out_dir: Optional[Path], farm_dir: Path, event: pd.Series) -
         tf_df = pd.read_csv(t_path)
         raw = pd.read_csv(farm_dir / "datasets" / f"{eid}.csv", sep=";",
                           usecols=["train_test", "status_type_id"])
+        diffs = s["time_stamp"].diff().dt.total_seconds().dropna()
+        cadence_s = float(diffs[diffs > 0].median()) if len(diffs) else 600.0
         d = apply_alarm_rules(
+            cadence_s=cadence_s,
             fused=s["fused"].to_numpy(),
             train_fused=tf_df["train_fused"].to_numpy(),
             score_status=s["status_type_id"].to_numpy(),
