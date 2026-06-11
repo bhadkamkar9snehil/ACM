@@ -56,6 +56,8 @@ class PipelineResult:
     head_z_train: Dict[str, np.ndarray]
     decision: AlarmDecision
     score_status: Optional[np.ndarray]
+    culprits: List[str] = field(default_factory=list)   # top channels driving alarms
+    cadence_s: float = 600.0
     runlog: List[Dict] = field(default_factory=list)
     runtime_s: float = 0.0
 
@@ -163,12 +165,35 @@ def score_asset(
     head_z_score = {z: score_frame[z].to_numpy() for _, z in Z_MAP if z in score_frame.columns}
     head_z_train = {z: calib_frame[z].to_numpy() for _, z in Z_MAP if z in calib_frame.columns}
 
-    # 7. alarm rules (self-tuned, label-free)
+    # 7. alarm rules (self-tuned, label-free). Horizons are time-defined and
+    # converted with the cadence inferred from the data's own timestamps —
+    # sample-count rules silently broke off the 10-minute cadence.
+    diffs = pd.Series(pd.DatetimeIndex(score_frame.index)).diff().dt.total_seconds().to_numpy()
+    diffs = diffs[np.isfinite(diffs) & (diffs > 0)]
+    cadence_s = float(np.median(diffs)) if diffs.size else 600.0
+    _log("cadence", f"{cadence_s:.0f}s sampling interval inferred from timestamps")
     decision = apply_alarm_rules(
         fused=fused, train_fused=train_fused,
         score_status=score_status, train_status=train_status,
         head_z_score=head_z_score, head_z_train=head_z_train,
+        cadence_s=cadence_s,
     )
+
+    # Culprit attribution: which CHANNELS drove the alarms (OMR per-feature
+    # residual contributions, mapped back to base channel names).
+    culprits: List[str] = []
+    if decision.alarm.any() and omr_contrib is not None and len(omr_contrib) == len(fused):
+        import re
+        share = omr_contrib.loc[decision.alarm].mean(axis=0).sort_values(ascending=False)
+        seen: List[str] = []
+        for feat in share.index:
+            base = re.sub(r"_(med|mad|mean|std|slope|skew|kurt|rz|energy_\d+)$", "", str(feat))
+            if base not in seen:
+                seen.append(base)
+            if len(seen) >= 3:
+                break
+        culprits = seen
+        _log("culprits", f"alarm driven by: {', '.join(culprits)}")
     _log("rules", f"alert_z={decision.alert_z:.2f} persist={decision.persist} "
                   f"fired={decision.rule_fired or '-'}")
     if decision.distrusted:
@@ -179,5 +204,6 @@ def score_asset(
     return PipelineResult(
         ts=pd.DatetimeIndex(score_frame.index), fused=fused, scores=scores,
         train_fused=train_fused, head_z_train=head_z_train, decision=decision,
-        score_status=score_status, runlog=runlog, runtime_s=round(time.time() - t0, 1),
+        score_status=score_status, culprits=culprits, cadence_s=cadence_s,
+        runlog=runlog, runtime_s=round(time.time() - t0, 1),
     )

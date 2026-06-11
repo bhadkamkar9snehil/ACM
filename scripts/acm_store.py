@@ -309,9 +309,10 @@ def ingest_result(store: "Store", group: str, asset_key: str, res) -> None:
                           [(key, *e) for e in eps])
 
     store.execute(f"DELETE FROM {store.t('runs')} WHERE asset_key = ?", (key,))
+    notes = ("culprits: " + ", ".join(res.culprits)) if getattr(res, "culprits", None) else ""
     store.execute(f"INSERT INTO {store.t('runs')} VALUES (?,?,?,?,?,?,?,?,?)",
                   (key, f"{key}@{now}", now, float(res.runtime_s), "OK",
-                   round(float(d.alert_z), 2), int(d.persist), d.rule_fired, ""))
+                   round(float(d.alert_z), 2), int(d.persist), d.rule_fired, notes))
     store.execute(f"DELETE FROM {store.t('run_log')} WHERE asset_key = ?", (key,))
     if res.runlog:
         store.executemany(f"INSERT INTO {store.t('run_log')} VALUES (?,?,?,?,?)",
