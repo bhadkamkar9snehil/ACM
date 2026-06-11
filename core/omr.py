@@ -322,14 +322,18 @@ class OMRDetector:
             if self.healthy_regime_label is not None:
                 healthy_regime = self.healthy_regime_label
             else:
-                # Choose majority regime as healthy if not specified
-                healthy_regime = pd.Series(regime_labels).mode().iloc[0]
-            healthy_mask = regime_labels == healthy_regime
-            n_healthy = int(np.sum(healthy_mask))
-            
-            if n_healthy >= self.min_samples:
-                X = X.iloc[healthy_mask]
-                Console.info(f"Filtered to healthy regime {healthy_regime}: {n_healthy} samples", component="OMR")
+                # Choose majority regime as healthy if not specified.
+                # mode() returns an empty Series when labels are empty/all-NaN;
+                # in that case skip regime filtering instead of crashing.
+                mode_vals = pd.Series(regime_labels).mode()
+                healthy_regime = mode_vals.iloc[0] if len(mode_vals) > 0 else None
+            if healthy_regime is not None:
+                healthy_mask = regime_labels == healthy_regime
+                n_healthy = int(np.sum(healthy_mask))
+
+                if n_healthy >= self.min_samples:
+                    X = X.iloc[healthy_mask]
+                    Console.info(f"Filtered to healthy regime {healthy_regime}: {n_healthy} samples", component="OMR")
         
         # Prepare data
         X_clean, feature_names = self._prepare_data(X)
@@ -492,9 +496,15 @@ class OMRDetector:
                     return zeros, empty_contrib
                 return zeros
             
-            # Validate input
-            is_valid, _ = self._validate_input(X)
-            if not is_valid:
+            # Minimal validation only: empty input cannot be scored. Do NOT
+            # reject on all-NaN columns here — the alignment below reindexes
+            # to training feature_names and imputes from train_medians, so a
+            # dead sensor is handled per-column. The old _validate_input gate
+            # zeroed the ENTIRE detector when any one column was all-NaN,
+            # which also poisoned downstream calibration (calibrators fitted
+            # on an all-zero baseline turn every later raw score into a huge
+            # z — the "chronic OMR elevation" seen on CARE holdouts).
+            if X.empty or X.shape[1] == 0:
                 zeros = np.zeros(n_samples, dtype=np.float32)
                 if return_contributions:
                     empty_contrib = pd.DataFrame(
@@ -504,7 +514,7 @@ class OMRDetector:
                     )
                     return zeros, empty_contrib
                 return zeros
-            
+
             # Store index for later use
             X_index = X.index
             feature_names = self.model.feature_names

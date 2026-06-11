@@ -112,15 +112,19 @@ class PromotionCriteria:
         lifecycle = cfg.get("lifecycle", {}) or {}
         promotion = lifecycle.get("promotion", {}) or {}
 
+        # Fall back to the dataclass defaults (single source of truth, matches
+        # config_table.csv). This method previously embedded a second, stricter
+        # default set (0.40/0.75/5/400) that silently blocked promotion whenever
+        # config keys were missing.
         return cls(
-            min_training_days=int(promotion.get("min_training_days", 7)),
-            min_silhouette_score=float(promotion.get("min_silhouette_score", 0.40)),
-            min_dbcv_score=float(promotion.get("min_dbcv_score", 0.0)),
-            min_stability_ratio=float(promotion.get("min_stability_ratio", 0.75)),
-            min_consecutive_runs=int(promotion.get("min_consecutive_runs", 5)),
-            min_training_rows=int(promotion.get("min_training_rows", 400)),
-            max_forecast_mape=float(promotion.get("max_forecast_mape", 35.0)),
-            max_forecast_rmse=float(promotion.get("max_forecast_rmse", 12.0)),
+            min_training_days=int(promotion.get("min_training_days", cls.min_training_days)),
+            min_silhouette_score=float(promotion.get("min_silhouette_score", cls.min_silhouette_score)),
+            min_dbcv_score=float(promotion.get("min_dbcv_score", cls.min_dbcv_score)),
+            min_stability_ratio=float(promotion.get("min_stability_ratio", cls.min_stability_ratio)),
+            min_consecutive_runs=int(promotion.get("min_consecutive_runs", cls.min_consecutive_runs)),
+            min_training_rows=int(promotion.get("min_training_rows", cls.min_training_rows)),
+            max_forecast_mape=float(promotion.get("max_forecast_mape", cls.max_forecast_mape)),
+            max_forecast_rmse=float(promotion.get("max_forecast_rmse", cls.max_forecast_rmse)),
         )
 
 
@@ -230,17 +234,23 @@ def _regime_quality_criterion_met(
 
     if metric in _BOOLEAN_ONLY_METRICS:
         # Raw score is not on a fixed scale; rely on the quality_ok boolean.
-        if quality_ok is False:
-            s = score if score is not None else 0.0
-            return False, f"regime_quality_ok=False ({metric}={s:.3f})"
-        # quality_ok=True or quality_ok=None (unknown) -> pass
-        return True, None
-
-    # Unknown metric - trust quality_ok if available, otherwise pass.
-    if quality_ok is False:
+        # FAIL-SAFE: promotion freezes the baseline, so unknown quality
+        # (quality_ok=None) must NOT promote — only an explicit True passes.
+        if quality_ok is True:
+            return True, None
         s = score if score is not None else 0.0
+        if quality_ok is False:
+            return False, f"regime_quality_ok=False ({metric}={s:.3f})"
+        return False, f"regime_quality_ok unknown ({metric}={s:.3f}) - deferring promotion"
+
+    # Unknown metric - FAIL-SAFE: require an explicit quality_ok=True.
+    # Promoting on a metric we don't understand risks freezing a bad baseline.
+    if quality_ok is True:
+        return True, None
+    s = score if score is not None else 0.0
+    if quality_ok is False:
         return False, f"regime_quality_ok=False ({metric}={s:.3f})"
-    return True, None
+    return False, f"unknown metric '{metric}' with no quality_ok flag - deferring promotion"
 
 
 def check_promotion_eligibility(
@@ -555,7 +565,9 @@ def update_and_persist_model_lifecycle(
             training_end=train_end,
             silhouette_score=regime_fit_score,
             regime_quality_metric=regime_fit_metric,
-            regime_quality_ok=regime_quality_ok if regime_quality_ok is not None else True,
+            # Pass None through unchanged: coercing unknown quality to True
+            # let models with unevaluated regime quality promote to CONVERGED.
+            regime_quality_ok=regime_quality_ok,
             run_id=run_id,
         )
     else:
@@ -566,7 +578,7 @@ def update_and_persist_model_lifecycle(
             run_success=True,
             silhouette_score=regime_fit_score,
             regime_quality_metric=regime_fit_metric,
-            regime_quality_ok=regime_quality_ok if regime_quality_ok is not None else True,
+            regime_quality_ok=regime_quality_ok,
             stability_ratio=actual_stability,
             additional_rows=len(train_data),
             additional_days=training_days,
@@ -590,8 +602,12 @@ def update_and_persist_model_lifecycle(
                         "TotalDays": model_state.total_days,
                     }]
                     output_manager.write_regime_promotion_log(promotion_record)
-                except Exception:
-                    pass
+                except Exception as promo_err:
+                    logger.warn(
+                        f"Promotion audit write failed (promotion still applied): {promo_err}",
+                        component="LIFECYCLE",
+                        error=str(promo_err)[:200],
+                    )
                 logger.ok(
                     f"Model promoted: LEARNING->CONVERGED (runs={model_state.consecutive_runs}, days={model_state.total_days:.1f})",
                     component="LIFECYCLE",

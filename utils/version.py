@@ -17,10 +17,99 @@ Release Management:
 - Production deployments use specific tags (never merge commits)
 """
 
-__version__ = "11.15.15"
-__version_date__ = "2026-03-08"
+__version__ = "12.0.0"
+__version_date__ = "2026-06-11"
 __version_author__ = "ACM Development Team"
 
+# v12.0.0: AUTONOMOUS ML, SQL-NATIVE RESULTS, PRODUCT SLIMDOWN
+#
+# ML (validated against CARE-to-Compare, 95 labelled events, zero labels used):
+#   - Self-tuned alarm rules: sustained, 24h rate, per-head 7-day rate,
+#     48h availability, self-distrust gate. All thresholds derived per asset
+#     from its own unlabelled history.
+#   - Out-of-sample interleaved calibration (in-sample bias + chronological
+#     tail contamination both eliminated).
+#   - Data-verified channel role detection (core/fast_features
+#     .detect_channel_roles): pre-derived _min/_max/_std channels pass through
+#     raw; raw-sensor feeds untouched.
+#   - ML parameters promoted from config into code (core/ml_defaults.py).
+#     configs/config_table.csv now carries HUMAN-operable settings only.
+#   - Farm A: 12/12 faults, F1 0.86. Farm B: 4/6, F1 0.62. Median early
+#     warning 12h where operating data exists pre-fault.
+#
+# Product:
+#   - Canonical SQL results store (scripts/acm_store.py): assets/scores/
+#     alarms/runs/run_log + v_asset_now / v_daily_stats views; SQLite and
+#     SQL Server backends, same schema.
+#   - Self-contained HTML reports with asset selection (scripts/acm_report.py).
+#   - One-command Windows setup (setup_acm.ps1). No Docker.
+#
+# Removed:
+#   - Grafana/observability stack (dashboards, docker compose, scripts, skill).
+#   - Disabled & unvalidated forecast chain (forecast_engine,
+#     multivariate_forecast, rul_estimator, failure_probability,
+#     degradation_model, health_tracker, metrics).
+#   - Legacy regime labeling path, pandas fallbacks (Polars only),
+#     unused xcorr/pairwise-lag features, rust_bridge placeholder,
+#     dev-memory/Obsidian tooling, dead analysis scripts.
+#
+# v11.15.16: AUTONOMY HARDENING — fail-safe lifecycle, restore/RUL/forecast fixes,
+#            dead distilled-runtime removal
+#
+# Goal: fully self-learning / self-correcting operation with no human intervention
+# and unsupervised fault prediction (no labelled inputs).
+#
+# Fixes:
+#   1. core/ar1_detector.py from_dict(): never returned the instance (fell off the
+#      end -> None) and never set _is_fitted. Any consumer of this API got a None
+#      detector; even if patched externally, a restored detector scored all-zeros.
+#   2. core/omr.py fit(): pd.Series(regime_labels).mode().iloc[0] crashed with
+#      IndexError when labels were empty/all-NaN. Now skips healthy-regime
+#      filtering instead of crashing the OMR fit.
+#   3. core/model_lifecycle.py: FAIL-SAFE promotion. regime_quality_ok=None was
+#      coerced to True at both call sites, and _regime_quality_criterion_met()
+#      passed on unknown metrics/flags — models with UNEVALUATED regime quality
+#      could promote to CONVERGED, freezing a possibly-degraded baseline (the
+#      "health plateau" failure: faults become the new normal and are invisible).
+#      Boolean-only and unknown metrics now require an explicit quality_ok=True.
+#   4. core/acm.py: regime_quality_ok now initialized False (was True) so early
+#      pipeline exits can never report good regime quality they didn't measure.
+#   5. core/model_lifecycle.py: promotion audit write no longer swallows
+#      exceptions silently (bare except: pass -> logged warning).
+#   6. core/rul_estimator.py: (a) initial regime label was used unclipped to
+#      index rates_arr/transition matrix — an UNKNOWN regime (-1) silently
+#      wrapped to the LAST regime's degradation rate; now clipped to range.
+#      (b) Markov CDF inversion via argmax(cum>=u) collapsed to regime 0 on
+#      rounding shortfall; replaced with (cum<u).sum() which lands on the last
+#      regime instead.
+#   7. core/degradation_model.py: trend UNIT mismatch. Holt loop and forecast()
+#      treat trend as health-per-STEP, but initialization divided by gap HOURS —
+#      initial trend off by 1/dt_hours at non-hourly cadence (e.g. 6x at
+#      10-min data). Also replaced single-interval init (one noisy first gap set
+#      the whole starting trend) with median slope over the first <=10 gaps.
+#      Same per-step fix applied in CV evaluation and grid-search paths.
+#   8. core/fuse.py auto-tune: excessive weight drift now CLAMPS the per-detector
+#      change to max_weight_drift instead of rejecting the entire tune. Hard
+#      rejection froze weights forever once true detector importance shifted
+#      (every later tune exceeded the threshold too) — auto-tuning could never
+#      converge to the new optimum.
+#   9. core/confidence.py check_rul_reliability(): concept-drift check moved
+#      before maturity early-returns; a LEARNING model with drift_z above the
+#      threshold is now NOT_RELIABLE (was reported as merely LEARNING).
+#  10. core/fast_features.py: zero-filled *_rz fallback columns (rolling med/mad
+#      missing) are now logged — previously detectors silently lost features.
+#  11. core/outliers.py: removed duplicated last_err initialization.
+#
+# Removed (dead "weird branches"):
+#   - run_distilled_batch.py, run_distilled_quick.sh, README_DISTILLED.md,
+#     examples/acm_distilled_demo.py: parallel "distilled" runtime invoking
+#     acm_distilled.py which does not exist in the repo.
+#   - scripts/v11_3_0_test_suite.py, scripts/test_v11_3_0_online.ps1,
+#     scripts/test_v11_3_0_comprehensive.ps1: drive the CLI with --mode online,
+#     removed in v11.8.0.
+#   - configs/config_table.csv models.mahl.regularization (EquipID 0 and 1):
+#     Mahalanobis detector removed in v10.2.0; no code reads models.mahl.*.
+#
 # v11.15.15: StandardScaler-0-features crash fix + OMR correlation disable
 #
 # Fixes:

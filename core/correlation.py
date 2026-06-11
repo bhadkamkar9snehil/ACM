@@ -53,8 +53,20 @@ class RobustStandardScaler(RobustScaler):
     def fit(self, X, y=None):
         super().fit(X, y)
         if self.with_scaling and hasattr(self, 'scale_') and self.scale_ is not None:
-            # Floor scale_ to prevent division by near-zero IQR
-            # This prevents Z-scores >100 when scale collapses
+            # Degenerate-IQR fallback: quantized channels (>=75% identical
+            # values, e.g. power at standstill) have IQR == 0 while std >> 0.
+            # Clamping their scale to epsilon (1e-6) divided real spread by a
+            # millionth — every scaled row landed 1e4-1e6 units out and the
+            # PCA-SPE statistic saturated its clip on 100% of samples,
+            # flattening the detector. Fall back to the column's std, then to
+            # its robust range, before resorting to epsilon.
+            degenerate = self.scale_ <= self.epsilon
+            if np.any(degenerate):
+                X_arr = np.asarray(X, dtype=np.float64)
+                col_std = np.nanstd(X_arr, axis=0)
+                col_range = np.nanmax(X_arr, axis=0) - np.nanmin(X_arr, axis=0)
+                fallback = np.where(col_std > self.epsilon, col_std, col_range)
+                self.scale_ = np.where(degenerate, np.maximum(fallback, self.epsilon), self.scale_)
             self.scale_ = np.maximum(self.scale_, self.epsilon)
         return self
 
@@ -74,6 +86,14 @@ class PCASubspaceDetector:
         # Note: RobustScaler uses with_centering/with_scaling (not with_mean/with_std)
         self.scaler = RobustStandardScaler(epsilon=1e-6, with_centering=True, with_scaling=True)
         self.pca: Optional[PCA] | Any = None  # Allow IncrementalPCA too
+
+        # Winsorize scaled values to +/- this many robust units before PCA
+        # (fit AND score). Heavy-tailed features (_rz spikes to +/-100,
+        # rolling kurtosis to 1000s) put single cells at 1e3-1e4 scaled units;
+        # SPE squares and sums them, saturating its 1e6 clip on healthy data.
+        # Beyond ~8 robust sigma, magnitude adds nothing to a correlation-
+        # structure detector — but it destroys the subspace geometry.
+        self.scaled_clip: float = float(self.cfg.get("scaled_clip", 8.0))
 
         self.keep_cols: List[str] = []
         self.col_medians: Optional[pd.Series] = None
@@ -106,13 +126,15 @@ class PCASubspaceDetector:
             else:
                 arr = arr[:, kept_indices]
             
-            # Compute medians for kept columns and impute in-place
+            # Compute medians for kept columns and impute in-place.
+            # Impute by NaN mask directly — the old nan_to_num(0.0) +
+            # "replace zeros with median" corrupted every LEGITIMATE zero
+            # reading (power at standstill, closed valves) into the median.
             self.col_medians = pd.Series(np.nanmedian(arr, axis=0), index=self.keep_cols)
-            np.nan_to_num(arr, copy=False, nan=0.0)  # Fill NaN with 0 temporarily
-            for i, med in enumerate(self.col_medians.values):
-                col = arr[:, i]
-                mask = col == 0.0
-                col[mask] = med
+            nan_rows, nan_cols = np.where(np.isnan(arr))
+            if nan_rows.size:
+                arr[nan_rows, nan_cols] = np.take(self.col_medians.values, nan_cols)
+            np.nan_to_num(arr, copy=False, nan=0.0)  # medians can be NaN if all-NaN col
             # Clip in-place
             np.clip(arr, -1e6, 1e6, out=arr)
             
@@ -132,6 +154,8 @@ class PCASubspaceDetector:
             # Scale - fit_transform modifies in-place when possible
             Xs = self.scaler.fit_transform(arr)
             del arr  # Free original array
+            if self.scaled_clip > 0:
+                np.clip(Xs, -self.scaled_clip, self.scaled_clip, out=Xs)
 
             # Choose a safe n_components
             user_nc = self.cfg.get("n_components", 5)
@@ -155,7 +179,11 @@ class PCASubspaceDetector:
                     self.pca.partial_fit(Xs[i:batch_end])  # type: ignore[attr-defined]
             else:
                 # Default batch path
-                self.pca = PCA(n_components=k, svd_solver="full", random_state=17)
+                # "auto" lets sklearn pick randomized SVD for wide matrices;
+                # svd_solver="full" materialized an O(n x p) LAPACK workspace
+                # that OOM-killed fits beyond ~5k features (957-sensor assets
+                # produce 10k+ engineered columns).
+                self.pca = PCA(n_components=k, svd_solver="auto", random_state=17)
                 self.pca.fit(Xs)
                 
             Console.info(f"Fit complete in {Span.__name__}: {k} components, {n_samples} samples, {n_features} features", component="PCA" if "skip_loki" not in locals() else None, skip_loki=True)
@@ -192,9 +220,11 @@ class PCASubspaceDetector:
                 mask = np.isnan(col)
                 col[mask] = med
             
-            # Scale
+            # Scale (+ same winsorization as fit — keeps SPE on the same scale)
             Xs = self.scaler.transform(arr)
             del arr  # Free input array
+            if getattr(self, "scaled_clip", 0) > 0:
+                np.clip(Xs, -self.scaled_clip, self.scaled_clip, out=Xs)
 
             # Project to latent space
             Z = self.pca.transform(Xs)

@@ -131,10 +131,15 @@ def compute_data_quality_confidence(
         # FIXED: Sigmoid function instead of linear interpolation
         # Maps min_samples -> 0.1, optimal_samples -> 1.0 smoothly
         threshold = (min_samples + optimal_samples) / 2.0
-        scale = (optimal_samples - min_samples) / 6.0  # 3-sigma rule
+        scale = (optimal_samples - min_samples) / 4.0  # +/-2 sigma over the range (gentle slope)
         sigmoid = 1.0 / (1.0 + np.exp(-(sample_count - threshold) / scale))
-        # Rescale sigmoid [0,1] to [0.1, 1.0]
-        sample_factor = 0.1 + 0.9 * sigmoid
+        # Rescale the sigmoid's actual range over [min, optimal] (sig(-2)..sig(+2))
+        # to [0.1, 1.0] so the boundaries are hit exactly. Without this the
+        # function returned ~0.143 at min_samples and jumped discontinuously
+        # to 1.0 at optimal_samples.
+        sig_lo = 1.0 / (1.0 + np.exp(2.0))
+        sig_hi = 1.0 / (1.0 + np.exp(-2.0))
+        sample_factor = 0.1 + 0.9 * (sigmoid - sig_lo) / (sig_hi - sig_lo)
     
     # Combine with coverage
     return sample_factor * max(0.1, min(1.0, coverage_ratio))
@@ -178,14 +183,19 @@ def compute_prediction_confidence(
     
     spread = abs(p90 - p10)
     relative_spread = spread / max(abs(p50), 1.0)
-    
+
     # Sigmoid-like mapping: small spread = high confidence
     # relative_spread of 0 -> 1.0, relative_spread of 2.0 -> 0.5
-    base_confidence = 1.0 / (1.0 + relative_spread)
+    # (implementation previously used 1/(1+rs), giving 0.33 at rs=2.0,
+    # contradicting the documented mapping above)
+    base_confidence = 1.0 / (1.0 + relative_spread / 2.0)
     
-    # FIXED: Add exponential decay for prediction horizon
+    # FIXED: Add exponential decay for prediction horizon.
+    # exp(-h / 2*tau) retains ~61% confidence at the characteristic horizon,
+    # matching the documented intent ("63% confidence at 7-day horizon");
+    # the previous exp(-h/tau) retained only 37% there (it decayed BY 63%).
     if prediction_horizon_hours > 0:
-        horizon_factor = np.exp(-prediction_horizon_hours / characteristic_horizon)
+        horizon_factor = np.exp(-prediction_horizon_hours / (2.0 * characteristic_horizon))
         final_confidence = base_confidence * horizon_factor
     else:
         final_confidence = base_confidence
@@ -233,19 +243,21 @@ def check_rul_reliability(
     """
     maturity_upper = str(maturity_state).upper()
     
-    # Check maturity first
-    if maturity_upper == 'COLDSTART':
-        return ReliabilityStatus.NOT_RELIABLE, "Model in COLDSTART state - no baseline established"
-    
-    if maturity_upper == 'LEARNING':
-        return ReliabilityStatus.LEARNING, "Model still LEARNING - predictions may be unreliable"
-    
-    if maturity_upper == 'DEPRECATED':
-        return ReliabilityStatus.NOT_RELIABLE, "Model DEPRECATED - needs refresh"
-    
-    # FIXED: Check for concept drift (stale model)
+    # Concept drift overrides maturity: a LEARNING model experiencing drift
+    # must be NOT_RELIABLE, not merely "LEARNING" (which downstream treats as
+    # provisionally usable). Checked before the maturity early-returns.
     if drift_z is not None and abs(drift_z) > drift_threshold:
         return ReliabilityStatus.NOT_RELIABLE, f"Model drift detected: drift_z={drift_z:.2f} > {drift_threshold} (concept drift)"
+
+    # Check maturity
+    if maturity_upper == 'COLDSTART':
+        return ReliabilityStatus.NOT_RELIABLE, "Model in COLDSTART state - no baseline established"
+
+    if maturity_upper == 'LEARNING':
+        return ReliabilityStatus.LEARNING, "Model still LEARNING - predictions may be unreliable"
+
+    if maturity_upper == 'DEPRECATED':
+        return ReliabilityStatus.NOT_RELIABLE, "Model DEPRECATED - needs refresh"
     
     # Check data requirements for CONVERGED model
     if training_rows < min_training_rows:
@@ -289,12 +301,14 @@ def compute_health_confidence(
     """
     # Compute detector agreement if scores provided
     if detector_zscores and len(detector_zscores) > 1:
-        # Normalize z-scores to [-1, 1] range for comparison
-        normalized = [min(1.0, max(-1.0, z / 10.0)) for z in detector_zscores]
-        std_norm = np.std(normalized)
-        # Agreement: low std = high agreement
-        # std of 0 -> agreement 1.0, std of 1.0 -> agreement 0.0
-        agreement_factor = max(0.1, 1.0 - std_norm)
+        # Relative dispersion: spread of detector z-scores relative to their
+        # typical magnitude. The previous z/10 normalization squashed real
+        # disagreement (e.g. one detector at z=8 with the rest near 0 yielded
+        # agreement ~0.73 — effectively no penalty after harmonic-mean fusion).
+        z_arr = np.asarray(detector_zscores, dtype=float)
+        z_std = float(np.std(z_arr))
+        typical = float(np.median(np.abs(z_arr))) + 1.0
+        agreement_factor = max(0.1, 1.0 - z_std / typical)
     else:
         agreement_factor = 1.0  # No disagreement if single detector
     
@@ -337,7 +351,7 @@ def compute_episode_confidence(
     
     Reference:
         Rise time factor: sharp onset (rise < 10% duration) = 1.0
-        Slow onset (rise > 50% duration) = 0.5
+        Slow onset (rise > 50% duration) = 0.25
     """
     # Duration factor: longer episodes = more confident
     if episode_duration_seconds < min_duration_seconds:
@@ -353,14 +367,17 @@ def compute_episode_confidence(
     if rise_time_seconds is not None and episode_duration_seconds > 0:
         rise_fraction = rise_time_seconds / episode_duration_seconds
         # Sharp onset (rise < 10% of duration) = high confidence
-        # Slow onset (rise > 50% of duration) = lower confidence
+        # Slow onset (rise > 50% of duration) = lower confidence.
+        # Floor is 0.25 (not 0.5): overall() takes a harmonic mean across four
+        # factors, so a single 0.5 factor only moved overall to ~0.8 — a slow,
+        # fuzzy onset carried almost no penalty.
         if rise_fraction < 0.1:
             rise_factor = 1.0
         elif rise_fraction > 0.5:
-            rise_factor = 0.5
+            rise_factor = 0.25
         else:
             # Linear interpolation between 0.1 and 0.5
-            rise_factor = 1.0 - (rise_fraction - 0.1) / 0.4 * 0.5
+            rise_factor = 1.0 - (rise_fraction - 0.1) / 0.4 * 0.75
     else:
         rise_factor = 1.0  # Assume sharp if not provided
     

@@ -265,7 +265,10 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
     regime_model: Optional[regimes.RegimeModel] = None
     raw_train: Optional[pd.DataFrame] = None
     raw_score: Optional[pd.DataFrame] = None
-    regime_quality_ok: bool = True
+    # FAIL-SAFE default: assume regime quality is NOT ok until the scoring/
+    # regime stage explicitly reports it. A True default let models promote
+    # to CONVERGED (freezing the baseline) when the stage never ran.
+    regime_quality_ok: bool = False
     refit_requested: bool = False
 
     # Update observability context with run_id for trace/metric/log tagging.

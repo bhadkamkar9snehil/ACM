@@ -47,6 +47,10 @@ class AR1Detector:
         self._eps: float = float(self.cfg.get("eps", 1e-9))
         self._phi_cap: float = float(self.cfg.get("phi_cap", 0.999))
         self._sd_floor: float = float(self.cfg.get("sd_floor", 1e-6))
+        # Residual scale floor as a fraction of the sensor's operational range.
+        # An absolute 1e-6 floor let near-constant channels turn sub-LSB wiggles
+        # into z ~ 1e6, pegging the fused score on healthy data.
+        self._sd_floor_rel: float = float(self.cfg.get("sd_floor_rel", 0.01))
         self._fuse: Literal["mean", "median", "p95"] = self.cfg.get("fuse", "mean")
         
         # Trained parameters per column: (phi, mu)
@@ -78,6 +82,7 @@ class AR1Detector:
         clamped_cols = []
         insufficient_cols = []
         overflow_cols = []  # Track columns with values that would overflow variance
+        degenerate_cols = []  # Zero residual spread: excluded from scoring entirely
         
         # Maximum value threshold for safe variance computation in float64
         # Values > 1e150 will overflow when squared (1e300 > float64 max ~1.8e308)
@@ -95,21 +100,27 @@ class AR1Detector:
                 # Clip values to prevent overflow, but still fit the model
                 x = np.clip(x, -MAX_SAFE_VALUE, MAX_SAFE_VALUE)
             
+            # Floor for the residual scale, RELATIVE to the channel's
+            # operational range (robust p2.5..p97.5 span). A fully constant
+            # channel (zero range) carries no usable signal — excluded.
+            col_range = float(np.subtract(*np.percentile(x, [97.5, 2.5]))) if x.size >= MIN_AR1_SAMPLES else 0.0
+            sd_floor_c = max(self._sd_floor, self._sd_floor_rel * col_range)
+
             if x.size < MIN_AR1_SAMPLES:
                 # ROBUST: Use median instead of mean for baseline
                 mu = float(np.nanmedian(col)) if x.size else 0.0
                 if not np.isfinite(mu):
                     mu = 0.0
                 phi = 0.0
-                self.phimap[c] = (phi, mu)
                 resid = (x - mu) if x.size else np.array([0.0], dtype=np.float64)
                 # ROBUST: Use MAD instead of std
-                if resid.size > 0:
-                    mad = float(np.median(np.abs(resid - np.median(resid))))
-                    sd = mad * 1.4826 if mad > 0 else self._sd_floor
-                else:
-                    sd = self._sd_floor
-                self.sdmap[c] = max(sd, self._sd_floor)
+                mad = float(np.median(np.abs(resid - np.median(resid)))) if resid.size > 0 else 0.0
+                rng = float(np.max(x) - np.min(x)) if x.size else 0.0
+                if mad <= 0 and rng <= 0:
+                    degenerate_cols.append(c)
+                    continue
+                self.phimap[c] = (phi, mu)
+                self.sdmap[c] = max(mad * 1.4826, max(self._sd_floor, self._sd_floor_rel * rng))
                 continue
             
             # ROBUST: Use median instead of mean for baseline
@@ -135,9 +146,7 @@ class AR1Detector:
             
             if len(x) < MIN_FORECAST_SAMPLES:
                 insufficient_cols.append((c, len(x)))
-            
-            self.phimap[c] = (phi, mu)
-            
+
             # Compute TRAIN residuals & std for normalization during score()
             x_shift = np.empty_like(x, dtype=np.float64)
             x_shift[0] = mu
@@ -148,8 +157,15 @@ class AR1Detector:
             # ROBUST: Use MAD instead of std for residual normalization
             # This makes AR1 scoring robust to training data containing faults
             mad = float(np.median(np.abs(resid_for_sd - np.median(resid_for_sd))))
-            sd = mad * 1.4826 if mad > 0 else self._sd_floor
-            self.sdmap[c] = max(sd, self._sd_floor)
+            if mad <= 0 and col_range <= 0:
+                # Fully constant channel: no operational range, no residual
+                # spread — nothing to score. With the old absolute 1e-6 floor,
+                # 3 such columns out of 891 produced median |z| ~1e6 on healthy
+                # data and pegged the fused AR1 score at its clip.
+                degenerate_cols.append(c)
+                continue
+            self.phimap[c] = (phi, mu)
+            self.sdmap[c] = max(mad * 1.4826, sd_floor_c)
         
         # Emit batched warnings (single SQL insert instead of 100s)
         if overflow_cols:
@@ -166,6 +182,9 @@ class AR1Detector:
         if insufficient_cols:
             n = len(insufficient_cols)
             Console.warn(f"{n} columns with <{MIN_FORECAST_SAMPLES} samples (unstable coefficients)", component="AR1")
+        if degenerate_cols:
+            n = len(degenerate_cols)
+            Console.warn(f"{n} columns with zero residual spread excluded from AR1 scoring: {degenerate_cols[:3]}{'...' if n > 3 else ''}", component="AR1")
         
         self._is_fitted = True
         return self
@@ -265,3 +284,7 @@ class AR1Detector:
         inst = cls(payload.get("cfg"))
         inst.phimap = dict(payload.get("phimap", {}))
         inst.sdmap = dict(payload.get("sdmap", {}))
+        # A restored detector with coefficients is fitted; without this flag
+        # score() silently returns all-zero scores.
+        inst._is_fitted = bool(inst.phimap)
+        return inst

@@ -28,10 +28,6 @@ except ImportError:
     hdbscan = None  # type: ignore
     HDBSCAN_AVAILABLE = False
 
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-
 from core.observability import Console, Span
 import hashlib
 from utils.config_dict import cfg_get as _cfg_get
@@ -442,7 +438,7 @@ class RegimeModel:
 def _compute_training_distances(
     model: RegimeModel,
     train_basis: pd.DataFrame,
-    distance_percentile: float = 95.0,
+    distance_percentile: float = 99.0,
 ) -> Tuple[float, np.ndarray]:
     """
     Compute training-derived distance threshold for UNKNOWN detection.
@@ -461,7 +457,7 @@ def _compute_training_distances(
     Args:
         model: Fitted RegimeModel with scaler and centers
         train_basis: Training data used to fit the model
-        distance_percentile: Percentile for threshold (default 95)
+        distance_percentile: Percentile for threshold (default 99)
         
     Returns:
         Tuple of (threshold, all_distances)
@@ -656,8 +652,13 @@ def build_feature_basis(
         if available_operational:
             Console.info(f"Using {len(available_operational)} raw operational sensors for regime clustering: {available_operational[:5]}{'...' if len(available_operational) > 5 else ''}", component="REGIME")
             used_raw_tags = available_operational
-            train_raw = raw_train.reindex(train_features.index)[available_operational].astype(float).ffill().bfill().fillna(0.0)
-            score_raw = raw_score.reindex(score_features.index)[available_operational].astype(float).ffill().bfill().fillna(0.0)
+            # NO ffill/bfill: temporal fill smears neighbouring operating modes
+            # across gaps (bfill leaks future into past). TRAIN medians only.
+            train_raw = raw_train.reindex(train_features.index)[available_operational].astype(float)
+            score_raw = raw_score.reindex(score_features.index)[available_operational].astype(float)
+            _op_medians = train_raw.median(numeric_only=True)
+            train_raw = train_raw.fillna(_op_medians).fillna(0.0)
+            score_raw = score_raw.fillna(_op_medians).fillna(0.0)
             train_parts.append(train_raw)
             score_parts.append(score_raw)
         else:
@@ -706,8 +707,12 @@ def build_feature_basis(
         available_tags = [tag for tag in raw_tags_cfg if tag in raw_train.columns]
         if available_tags:
             used_raw_tags = available_tags
-            train_raw = raw_train.reindex(train_features.index)[available_tags].astype(float).ffill().bfill().fillna(0.0)
-            score_raw = raw_score.reindex(score_features.index)[available_tags].astype(float).ffill().bfill().fillna(0.0)
+            # NO ffill/bfill (temporal leakage) — TRAIN-median imputation only.
+            train_raw = raw_train.reindex(train_features.index)[available_tags].astype(float)
+            score_raw = raw_score.reindex(score_features.index)[available_tags].astype(float)
+            _tag_medians = train_raw.median(numeric_only=True)
+            train_raw = train_raw.fillna(_tag_medians).fillna(0.0)
+            score_raw = score_raw.fillna(_tag_medians).fillna(0.0)
             train_parts.append(train_raw)
             score_parts.append(score_raw)
 
@@ -718,8 +723,12 @@ def build_feature_basis(
 
     train_basis = pd.concat(train_parts, axis=1)
     score_basis = pd.concat(score_parts, axis=1)
-    train_basis = train_basis.ffill().bfill().fillna(0.0)
-    score_basis = score_basis.ffill().bfill().fillna(0.0)
+    # Impute gaps from TRAIN medians only. ffill/bfill smeared values across
+    # time (bfill leaks the future into the past), so a missing stretch took
+    # on whatever operating mode happened to border it and clustered wrong.
+    train_basis_medians = train_basis.median(numeric_only=True)
+    train_basis = train_basis.fillna(train_basis_medians).fillna(0.0)
+    score_basis = score_basis.fillna(train_basis_medians).fillna(0.0)
 
     # v11.1.6 FIX #2: Apply UNIFORM scaling to the ENTIRE basis (PCA + raw)
     # Previously, only raw columns were scaled while PCA columns were left as-is.
@@ -2479,102 +2488,6 @@ def smooth_transitions(
 
     return result
 
-# -----------------------------------
-# Core: fit auto-k with safe heuristics (v11.1.0: Uses GMM, not K-Means)
-# DEPRECATED: Legacy path - use fit_regime_model() instead
-# TO-DO Remove this deprecated function from code altogether.
-# -----------------------------------
-def _fit_auto_k(
-    X: np.ndarray,
-    *,
-    k_min: int = 2,
-    k_max: int = 6,
-    pca_dim: int = 20,
-    sil_sample: int = 4000,
-    random_state: int = 17,
-) -> Tuple[GaussianMixture, Optional[PCA], int, float, str]:
-    """Legacy auto-k fitting using GMM (v11.1.0: K-Means removed)."""
-    Console.warn("Using deprecated _fit_auto_k - migrate to fit_regime_model()", component="REGIME")
-    X = _finite_impute_inplace(X)
-    n, d = X.shape
-
-    if n < 4:
-        # Degenerate case: single cluster
-        gmm = GaussianMixture(n_components=1, random_state=random_state)
-        gmm.fit(X)
-        return gmm, None, 1, 0.0, "degenerate"
-
-    Xp_f64: Optional[np.ndarray] = None
-    pca_obj: Optional[PCA] = None
-    max_components = max(1, min(pca_dim, d, n - 1))
-    if d > pca_dim and max_components >= 1:
-        X_safe = _robust_scale_clip(X, clip_pct=99.9)
-        pca = PCA(
-            n_components=int(max_components),
-            svd_solver="randomized",
-            iterated_power=2,
-            random_state=random_state,
-        )
-        Xp = pca.fit_transform(X_safe)
-        bad = ~np.isfinite(Xp)
-        if bad.any():
-            Xp[bad] = 0.0
-        Xp_f64 = Xp
-        pca_obj = pca
-    else:
-        Xp_f64 = _robust_scale_clip(X, clip_pct=99.9)
-
-    k_min = max(2, int(k_min))
-    k_max = max(k_min, int(k_max))
-
-    best_model: Optional[GaussianMixture] = None
-    best_k = k_min
-    best_score = -1.0
-    best_metric = "silhouette"
-
-    for k in range(k_min, k_max + 1):
-        try:
-            gmm = GaussianMixture(
-                n_components=k,
-                covariance_type="full",
-                n_init=3,
-                random_state=random_state,
-            )
-            labels = gmm.fit_predict(Xp_f64)
-
-            uniq = np.unique(labels).size
-            if uniq < 2 or uniq >= len(labels):
-                score = -1.0
-                metric = "silhouette"
-            else:
-                try:
-                    ss = min(int(sil_sample), n)
-                    score = silhouette_score(
-                        Xp_f64, labels, metric="euclidean", sample_size=ss, random_state=random_state
-                    )
-                    metric = "silhouette"
-                except Exception:
-                    score = calinski_harabasz_score(Xp_f64, labels)
-                    metric = "calinski_harabasz"
-
-            if score > best_score:
-                best_score = float(score)
-                best_model = gmm
-                best_k = int(k)
-                best_metric = metric
-        except Exception:
-            continue
-
-    if best_model is None:
-        # Fallback: single component GMM
-        best_model = GaussianMixture(n_components=1, random_state=random_state)
-        best_model.fit(Xp_f64)
-        best_k = 1
-        best_score = 0.0
-        best_metric = "fallback"
-    
-    return best_model, pca_obj, best_k, best_score, best_metric
-
 # ------------------------------------------------
 # State Persistence Helpers
 # ------------------------------------------------
@@ -2886,110 +2799,10 @@ def label(score_df, ctx: Dict[str, Any], score_out: Dict[str, Any], cfg: Dict[st
             out["frame"] = frame
         return out
 
-    if bool(_cfg_get(cfg, "regimes.allow_legacy_label", False)):
-        Console.warn(
-            "Using legacy regime labeling path (regimes.allow_legacy_label=True). "
-            "This path is deprecated and will be removed. Ensure regime model is valid before scoring.",
-            component="REGIME",
-            n_samples=len(score_df) if hasattr(score_df, "__len__") else 0,
-        )
-        return _legacy_label(score_df, ctx, out, cfg)
-    raise RuntimeError("Regime model unavailable and legacy path disabled (regimes.allow_legacy_label=False)")
+    # Legacy GMM relabeling path removed: it bypassed regime quality
+    # evaluation entirely (hardcoded regime_quality_ok=True).
+    raise RuntimeError("Regime model unavailable - refit required before scoring")
 
-# TO-DO Why is this needed and why is _fit_auto_k used here?
-def _legacy_label(score_df, ctx: Dict[str, Any], out: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, Any]:
-    k_min = _cfg_get(cfg, "regimes.auto_k.k_min", 2)
-    k_max = _cfg_get(cfg, "regimes.auto_k.k_max", 6)
-    pca_dim = _cfg_get(cfg, "regimes.auto_k.pca_dim", 20)
-    sil_sample = _cfg_get(cfg, "regimes.auto_k.sil_sample", 4000)
-    random_state = _cfg_get(cfg, "regimes.auto_k.random_state", 17)
-
-    X_score = _finite_impute_inplace(score_df.to_numpy(copy=False))
-    raw_train = ctx.get("X_train", None)
-    X_train_arr: Optional[np.ndarray] = None
-    if raw_train is not None:
-        try:
-            candidate = getattr(raw_train, "to_numpy", lambda **_: raw_train)(copy=False)
-        except Exception:
-            candidate = raw_train
-        if isinstance(candidate, np.ndarray):
-            X_train_arr = _finite_impute_inplace(candidate)
-
-    use_train = isinstance(X_train_arr, np.ndarray) and X_train_arr.ndim == 2 and X_train_arr.shape[0] >= 4
-    X_fit = X_train_arr if use_train and X_train_arr is not None else X_score
-
-    model, pca_obj, k, sel_score, metric = _fit_auto_k(
-        X_fit,
-        k_min=k_min,
-        k_max=k_max,
-        pca_dim=pca_dim,
-        sil_sample=sil_sample,
-        random_state=random_state,
-    )
-
-    if pca_obj is not None:
-        Xs = _robust_scale_clip(X_score, clip_pct=99.9)
-        try:
-            Xp = pca_obj.transform(Xs)
-        except Exception:
-            Xp = Xs[:, : int(pca_obj.n_components_)]
-        bad = ~np.isfinite(Xp)
-        if bad.any():
-            Xp[bad] = 0.0
-        X_pred = Xp
-    else:
-        X_pred = _robust_scale_clip(X_score, clip_pct=99.9)
-
-    labels = model.predict(X_pred).astype(np.int32, copy=False)
-    if use_train and X_train_arr is not None:
-        if pca_obj is not None:
-            Xt = _robust_scale_clip(X_train_arr, clip_pct=99.9)
-            try:
-                Xt = pca_obj.transform(Xt)
-            except Exception:
-                Xt = Xt[:, : int(pca_obj.n_components_)]
-        else:
-            Xt = _robust_scale_clip(X_train_arr, clip_pct=99.9)
-        out["regime_labels_train"] = model.predict(Xt).astype(np.int32, copy=False)
-
-    out["regime_labels"] = labels
-    out["regime_k"] = int(k)
-    out["regime_score"] = float(sel_score)
-    out["regime_metric"] = str(metric)
-    # Smoothing controls
-    smooth_cfg = _cfg_get(cfg, "regimes.smoothing", {}) or {}
-    passes = int(smooth_cfg.get("passes", 1))
-    min_dwell_samples = int(smooth_cfg.get("min_dwell_samples", 0) or 0)
-    min_dwell_seconds = smooth_cfg.get("min_dwell_seconds", None)
-    try:
-        min_dwell_seconds = float(min_dwell_seconds) if min_dwell_seconds is not None else None
-    except Exception:
-        min_dwell_seconds = None
-    labels = smooth_labels(labels, passes=passes)
-    out["regime_labels"] = labels
-    if "regime_labels_train" in out:
-        train_labels = np.asarray(out["regime_labels_train"])  # type: ignore[assignment]
-        train_labels = smooth_labels(train_labels, passes=passes)
-        out["regime_labels_train"] = train_labels
-    # Apply transition smoothing if we have timestamps
-    ts_pred = score_df.index if isinstance(score_df.index, pd.DatetimeIndex) else None
-    labels = smooth_transitions(labels, timestamps=ts_pred,
-                                min_dwell_samples=min_dwell_samples, min_dwell_seconds=min_dwell_seconds)
-    out["regime_labels"] = labels
-    if "regime_labels_train" in out:
-        tr = np.asarray(out["regime_labels_train"])  # type: ignore[assignment]
-        ts_train = ctx.get("X_train_index") if isinstance(ctx.get("X_train_index"), pd.DatetimeIndex) else None
-        tr = smooth_transitions(tr, timestamps=ts_train,
-                                min_dwell_samples=min_dwell_samples, min_dwell_seconds=min_dwell_seconds)
-        out["regime_labels_train"] = tr
-    out["regime_quality_ok"] = True
-    # GaussianMixture uses means_ not cluster_centers_
-    out["regime_centers"] = _as_f32(model.means_)
-    frame = out.get("frame")
-    if frame is not None:
-        frame["regime_label"] = labels
-        out["frame"] = frame
-    return out
 
 # ----------------------------
 # Model Persistence Functions
@@ -3081,7 +2894,10 @@ def detect_transient_states(
         Console.warn("Invalid weights detected; falling back to uniform weights", component="TRANSIENT", n_sensors=len(numeric_cols))
     weights /= weights.sum()
 
-    data_numeric = data[numeric_cols].apply(pd.to_numeric, errors="coerce").ffill().bfill()
+    # Keep gaps as NaN: any temporal fill (ffill/bfill) manufactures phantom
+    # rate-of-change at gap boundaries; the weighted nansum below already
+    # excludes NaN cells per column.
+    data_numeric = data[numeric_cols].apply(pd.to_numeric, errors="coerce")
 
     # PERF-OPT: Vectorized ROC calculation instead of column-by-column loop
     # Compute diff and baseline for all columns at once using numpy
@@ -3110,8 +2926,8 @@ def detect_transient_states(
     # Apply weights and sum across columns
     weighted_roc = np.nansum(roc_matrix * weights[np.newaxis, :], axis=1)
     
-    # Fill NaN and smooth
-    aggregate_roc = pd.Series(weighted_roc).ffill().bfill().fillna(0.0)
+    # Fill NaN and smooth (nansum leaves no NaN; fillna(0) is belt-and-braces)
+    aggregate_roc = pd.Series(weighted_roc).fillna(0.0)
     aggregate_roc_smooth = aggregate_roc.rolling(window=max(2, roc_window), min_periods=1).mean()
 
     regime_changes = np.zeros(n_samples, dtype=bool)
