@@ -1,0 +1,157 @@
+#!/usr/bin/env python3
+"""
+ACM production runner — score any assets, in parallel, straight into SQL.
+
+Input per asset is ANY tabular sensor history: a CSV file (timestamp column +
+numeric channels, optional status column) or a SQL Server table/query. The
+history before --score-from is the asset's unlabelled baseline; everything
+after is scored. Results (scores, alarms, runs, run_log) land in the
+canonical store (SQLite by default, SQL Server with --backend mssql) and are
+immediately visible in v_asset_now / the HTML report.
+
+Examples:
+  # one asset from CSV: train on everything before May, score May onward
+  python scripts/acm_run.py --csv pump7.csv --asset PUMP7 \
+      --timestamp-col time --status-col status --score-from 2026-05-01 \
+      --db acm_results.db
+
+  # a fleet in parallel (one CSV per asset, score the last 30 days)
+  python scripts/acm_run.py --csv data/*.csv --score-days 30 --workers 3 \
+      --db acm_results.db --report fleet.html
+
+  # from SQL Server historian, results back into SQL Server
+  python scripts/acm_run.py --backend mssql --conn "DRIVER={...};SERVER=...;DATABASE=ACM" \
+      --query "SELECT * FROM Historian WHERE EquipID=5010" --asset WFA_T10 \
+      --timestamp-col EntryDateTime --score-days 30
+"""
+from __future__ import annotations
+
+import argparse
+import glob
+import sys
+from pathlib import Path
+from typing import Dict, List, Optional
+
+import numpy as np
+import pandas as pd
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from core.pipeline import Z_COLS, score_asset                       # noqa: E402
+from scripts.acm_store import Store, alarm_episodes, ingest_result  # noqa: E402
+
+
+def load_frame(args, source: str) -> pd.DataFrame:
+    if args.query or args.table:
+        import pyodbc
+        con = pyodbc.connect(args.conn)
+        sql = args.query or f"SELECT * FROM {args.table}"
+        df = pd.read_sql(sql, con)
+        con.close()
+    else:
+        df = pd.read_csv(source)
+    if args.timestamp_col not in df.columns:
+        raise SystemExit(f"timestamp column '{args.timestamp_col}' not in {source} "
+                         f"(columns: {list(df.columns)[:8]}...)")
+    df[args.timestamp_col] = pd.to_datetime(df[args.timestamp_col])
+    return df.sort_values(args.timestamp_col)
+
+
+def run_one(args, source: str, asset_key: str) -> Dict:
+    df = load_frame(args, source)
+    ts = df[args.timestamp_col]
+    if args.score_from:
+        cut = pd.Timestamp(args.score_from)
+    else:
+        cut = ts.iloc[-1] - pd.Timedelta(days=args.score_days)
+    train_df, score_df = df[ts < cut], df[ts >= cut]
+    if len(train_df) < 1000 or len(score_df) < 50:
+        return {"asset_key": asset_key,
+                "error": f"insufficient data (train={len(train_df)}, score={len(score_df)})"}
+
+    status_col = args.status_col if args.status_col in df.columns else None
+    drop = [args.timestamp_col] + ([status_col] if status_col else [])
+
+    def sensors(d: pd.DataFrame) -> pd.DataFrame:
+        out = d.drop(columns=drop).apply(pd.to_numeric, errors="coerce")
+        out.index = pd.DatetimeIndex(d[args.timestamp_col], name="EntryDateTime")
+        return out.replace([np.inf, -np.inf], np.nan).dropna(axis=1, how="all")
+
+    res = score_asset(
+        train_raw=sensors(train_df), score_raw=sensors(score_df),
+        train_status=train_df[status_col].to_numpy() if status_col else None,
+        score_status=score_df[status_col].to_numpy() if status_col else None,
+    )
+    return {"asset_key": asset_key, "result": res}
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    src = ap.add_argument_group("input")
+    src.add_argument("--csv", nargs="*", default=None, help="CSV file(s); one asset per file (globs ok)")
+    src.add_argument("--table", default=None, help="SQL table to read (mssql)")
+    src.add_argument("--query", default=None, help="SQL query to read (mssql)")
+    src.add_argument("--asset", default=None, help="asset key (default: CSV stem)")
+    src.add_argument("--timestamp-col", default="time_stamp")
+    src.add_argument("--status-col", default="status_type_id",
+                     help="operating-status column (0/2=normal); enables the availability rule")
+    split = ap.add_argument_group("train/score split")
+    split.add_argument("--score-from", default=None, help="score everything from this timestamp")
+    split.add_argument("--score-days", type=float, default=30.0,
+                       help="score the trailing N days (default 30)")
+    out = ap.add_argument_group("output")
+    out.add_argument("--backend", choices=["sqlite", "mssql"], default="sqlite")
+    out.add_argument("--db", default="acm_results.db")
+    out.add_argument("--conn", default=None, help="pyodbc connection string (mssql)")
+    out.add_argument("--group", default="fleet", help="asset group name in the store")
+    out.add_argument("--report", default=None, help="also write an HTML report here")
+    ap.add_argument("--workers", type=int, default=1)
+    args = ap.parse_args()
+
+    sources: List[tuple] = []
+    if args.csv:
+        files = [f for pat in args.csv for f in sorted(glob.glob(pat))]
+        if not files:
+            raise SystemExit(f"no CSV files match {args.csv}")
+        sources = [(f, args.asset or Path(f).stem) for f in files]
+    elif args.query or args.table:
+        sources = [(args.table or "query", args.asset or "asset")]
+    else:
+        raise SystemExit("provide --csv files or --table/--query with --conn")
+
+    outputs: List[Dict] = []
+    if args.workers > 1 and len(sources) > 1:
+        import concurrent.futures as cf
+        with cf.ProcessPoolExecutor(max_workers=args.workers) as pool:
+            futs = [pool.submit(run_one, args, s, k) for s, k in sources]
+            outputs = [f.result() for f in cf.as_completed(futs)]
+    else:
+        outputs = [run_one(args, s, k) for s, k in sources]
+
+    store = Store(args.backend, db=args.db, conn_str=args.conn)
+    try:
+        for o in outputs:
+            if "error" in o:
+                print(f"--- {o['asset_key']}: SKIPPED ({o['error']})", flush=True)
+                continue
+            res = o["result"]
+            ingest_result(store, args.group, o["asset_key"], res)
+            d = res.decision
+            state = "ALARM" if d.alarm.any() else "ok"
+            print(f"--- {o['asset_key']}: {state} rule={d.rule_fired or '-'} "
+                  f"alert_z={d.alert_z:.2f} ({res.runtime_s}s)", flush=True)
+    finally:
+        store.close()
+
+    if args.report:
+        import subprocess
+        subprocess.run([sys.executable, str(ROOT / "scripts" / "acm_report.py"),
+                        "--backend", args.backend, "--db", args.db,
+                        *( ["--conn", args.conn] if args.conn else []),
+                        "--out", args.report], check=False)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

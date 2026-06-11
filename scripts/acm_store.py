@@ -69,6 +69,10 @@ CREATE TABLE IF NOT EXISTS run_log (
     asset_key TEXT, ts TEXT, level TEXT, stage TEXT, message TEXT);
 CREATE INDEX IF NOT EXISTS ix_runlog_asset ON run_log(asset_key, ts);
 
+CREATE TABLE IF NOT EXISTS config (
+    category TEXT, param_path TEXT, param_value TEXT, value_type TEXT,
+    updated_at TEXT, PRIMARY KEY (category, param_path));
+
 -- LIVE MONITORING (human view): one row per asset, current state
 CREATE VIEW IF NOT EXISTS v_asset_now AS
 SELECT a.asset_key, a.farm, a.asset_id, a.verdict, a.rules_fired,
@@ -117,6 +121,10 @@ IF OBJECT_ID('dbo.acm_run_log') IS NULL CREATE TABLE dbo.acm_run_log (
     asset_key NVARCHAR(64), ts DATETIME2, level NVARCHAR(8),
     stage NVARCHAR(32), message NVARCHAR(MAX),
     INDEX ix_acm_runlog_asset (asset_key, ts));
+IF OBJECT_ID('dbo.acm_config') IS NULL CREATE TABLE dbo.acm_config (
+    category NVARCHAR(32), param_path NVARCHAR(128), param_value NVARCHAR(MAX),
+    value_type NVARCHAR(16), updated_at DATETIME2,
+    CONSTRAINT pk_acm_config PRIMARY KEY (category, param_path));
 """
 
 # Views created separately on mssql (CREATE VIEW must be first in batch)
@@ -270,22 +278,88 @@ def ingest(results_dir: Path, farm: str, store: Store) -> None:
     print(f"Ingested {n_assets} assets from {results_dir} ({store.backend})")
 
 
+def ingest_result(store: "Store", group: str, asset_key: str, res) -> None:
+    """Write one core.pipeline.PipelineResult straight into the store."""
+    key = f"{group}/{asset_key}"
+    d = res.decision
+    now = datetime.now(timezone.utc).isoformat(sep=" ", timespec="seconds")
+
+    store.execute(f"DELETE FROM {store.t('assets')} WHERE asset_key = ?", (key,))
+    store.execute(
+        f"INSERT INTO {store.t('assets')} VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        (key, group, None, None, "", "ALARM" if d.alarm.any() else "OK", None,
+         d.rule_fired, round(float(d.alert_z), 2), int(d.persist), len(res.fused)))
+
+    rows = list(zip(
+        [key] * len(res.fused), [str(t) for t in res.ts],
+        [float(v) for v in res.fused],
+        *[[None if not np.isfinite(v) else float(v) for v in res.scores[z]]
+          for z in Z_COLS],
+        ([int(v) for v in res.score_status] if res.score_status is not None
+         else [None] * len(res.fused)),
+        [int(v) for v in d.alarm],
+    ))
+    store.execute(f"DELETE FROM {store.t('scores')} WHERE asset_key = ?", (key,))
+    store.executemany(f"INSERT INTO {store.t('scores')} VALUES (?,?,?,?,?,?,?,?,?,?,?)", rows)
+
+    store.execute(f"DELETE FROM {store.t('alarms')} WHERE asset_key = ?", (key,))
+    eps = alarm_episodes(pd.Series(res.ts), d.alarm, res.fused)
+    if eps:
+        store.executemany(f"INSERT INTO {store.t('alarms')} VALUES (?,?,?,?,?)",
+                          [(key, *e) for e in eps])
+
+    store.execute(f"DELETE FROM {store.t('runs')} WHERE asset_key = ?", (key,))
+    store.execute(f"INSERT INTO {store.t('runs')} VALUES (?,?,?,?,?,?,?,?,?)",
+                  (key, f"{key}@{now}", now, float(res.runtime_s), "OK",
+                   round(float(d.alert_z), 2), int(d.persist), d.rule_fired, ""))
+    store.execute(f"DELETE FROM {store.t('run_log')} WHERE asset_key = ?", (key,))
+    if res.runlog:
+        store.executemany(f"INSERT INTO {store.t('run_log')} VALUES (?,?,?,?,?)",
+                          [(key, r["ts"], r["level"], r["stage"], r["message"])
+                           for r in res.runlog])
+    store.commit()
+
+
+def sync_config(store: "Store", csv_path: Path) -> None:
+    """Sync the human config file (configs/config_table.csv) into SQL so what
+    ACM runs with is visible next to its results."""
+    import csv as _csv
+    now = datetime.now(timezone.utc).isoformat(sep=" ", timespec="seconds")
+    with open(csv_path, encoding="utf-8-sig") as f:
+        rows = [r for r in _csv.DictReader(f)]
+    store.execute(f"DELETE FROM {store.t('config')}")
+    dedup = {}
+    for r in rows:
+        if r.get("EquipID") in ("0", None):
+            dedup[(r["Category"], r["ParamPath"])] = (r["ParamValue"], r["ValueType"])
+    store.executemany(
+        f"INSERT INTO {store.t('config')} VALUES (?,?,?,?,?)",
+        [(c, p, v, t, now) for (c, p), (v, t) in dedup.items()])
+    store.commit()
+    print(f"Synced {len(rows)} config rows from {csv_path} ({store.backend})")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    p = sub.add_parser("ingest")
+    p = sub.add_parser("ingest", help="load benchmark artifacts into the store")
     p.add_argument("--results-dir", required=True)
     p.add_argument("--farm", required=True)
-    p.add_argument("--backend", choices=["sqlite", "mssql"], default="sqlite")
-    p.add_argument("--db", default="acm_results.db", help="SQLite file (sqlite backend)")
-    p.add_argument("--conn", default=None, help="pyodbc connection string (mssql backend)")
+    c = sub.add_parser("sync-config", help="sync configs/config_table.csv into the store")
+    c.add_argument("--config-csv", default=str(Path(__file__).resolve().parents[1] / "configs" / "config_table.csv"))
+    for sp in (p, c):
+        sp.add_argument("--backend", choices=["sqlite", "mssql"], default="sqlite")
+        sp.add_argument("--db", default="acm_results.db")
+        sp.add_argument("--conn", default=None, help="pyodbc connection string (mssql backend)")
     args = ap.parse_args()
-    if args.cmd == "ingest":
-        store = Store(args.backend, db=args.db, conn_str=args.conn)
-        try:
+    store = Store(args.backend, db=args.db, conn_str=args.conn)
+    try:
+        if args.cmd == "ingest":
             ingest(Path(args.results_dir), args.farm, store)
-        finally:
-            store.close()
+        elif args.cmd == "sync-config":
+            sync_config(store, Path(args.config_csv))
+    finally:
+        store.close()
     return 0
 
 
