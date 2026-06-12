@@ -50,7 +50,7 @@ def load_frame(args, source: str) -> pd.DataFrame:
         df = pd.read_sql(sql, con)
         con.close()
     else:
-        df = pd.read_csv(source)
+        df = pd.read_csv(source, sep=None, engine='python')
     if args.timestamp_col not in df.columns:
         raise SystemExit(f"timestamp column '{args.timestamp_col}' not in {source} "
                          f"(columns: {list(df.columns)[:8]}...)")

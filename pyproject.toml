@@ -77,7 +77,7 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
-addopts = "-v"
+addopts = "-v --basetemp=.pytest_basetemp"
 
 [tool.acm]
 entry = "core/acm.py"

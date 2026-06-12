@@ -276,7 +276,7 @@ body {
 }
 .tabpane.active { display: flex; }
 .panel-scroll {
-  flex: 1; overflow-y: auto; padding: 12px 14px 16px;
+  flex: 1; display: flex; flex-direction: column; overflow: hidden; padding: 12px 14px 16px;
 }
 
 /* ── Cards ──────────────────────────────────────────────── */
@@ -524,9 +524,9 @@ table.data tr.is-alarm td { background: var(--bad-lo); }
 #eng-heatmap { display: block; image-rendering: pixelated; flex: 1; border: 1px solid var(--line); }
 
 /* ── Operator tab — left col fixed height ────────────────── */
-#tab-operator .g24 { flex: 1; overflow: hidden; }
-#tab-operator .g24 .col { overflow: hidden; }
-#tab-operator .g24 .col .card { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+#tab-operator .g24 { flex: 1; overflow: hidden; min-height: 0; }
+#tab-operator .g24 .col { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+#tab-operator .g24 .col .card { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
 #tab-operator .g24 .col .card .tbl-wrap { flex: 1; overflow-y: auto; }
 
 /* ── Engineer tab — scrollable inner ────────────────────── */

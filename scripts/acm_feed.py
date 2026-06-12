@@ -66,7 +66,7 @@ class CacheInfo:
 def load_increment(spec: SourceSpec, since: Optional[pd.Timestamp]) -> pd.DataFrame:
     """Pull rows newer than `since` from the source (everything when None)."""
     if spec.source_kind == "csv":
-        df = pd.read_csv(spec.source_ref)
+        df = pd.read_csv(spec.source_ref, sep=None, engine='python')
         if spec.timestamp_col not in df.columns:
             raise ValueError(f"timestamp column '{spec.timestamp_col}' not in "
                              f"{spec.source_ref} (columns: {list(df.columns)[:8]}...)")
