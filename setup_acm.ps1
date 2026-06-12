@@ -23,7 +23,14 @@ $Log = Join-Path ([System.IO.Path]::GetTempPath()) "setup_acm.log"
 function Step($name, [scriptblock]$body) {
     Write-Host ("  {0,-46}" -f $name) -NoNewline
     try {
+        $oldEAP = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        $global:LASTEXITCODE = 0
         & $body *>> $Log
+        $ErrorActionPreference = $oldEAP
+        if ($LASTEXITCODE -ne 0) {
+            throw "Command failed with exit code $LASTEXITCODE"
+        }
         Write-Host "OK" -ForegroundColor Green
     } catch {
         Write-Host "FAILED" -ForegroundColor Red
@@ -50,7 +57,7 @@ function Ensure-Python {
         # No winget (Server editions, stripped images): official installer
         $url = "https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe"
         $exe = Join-Path $env:TEMP "python-3.11.9-amd64.exe"
-        Invoke-WebRequest $url -OutFile $exe
+        Invoke-WebRequest $url -OutFile $exe -ErrorAction Stop
         Start-Process $exe -ArgumentList "/quiet InstallAllUsers=0 PrependPath=1 Include_test=0" -Wait
     }
     Refresh-Path
@@ -67,7 +74,7 @@ function Ensure-Git {
     } else {
         $url = "https://github.com/git-for-windows/git/releases/download/v2.45.2.windows.1/Git-2.45.2-64-bit.exe"
         $exe = Join-Path $env:TEMP "git-installer.exe"
-        Invoke-WebRequest $url -OutFile $exe
+        Invoke-WebRequest $url -OutFile $exe -ErrorAction Stop
         Start-Process $exe -ArgumentList "/VERYSILENT /NORESTART" -Wait
     }
     Refresh-Path
@@ -99,7 +106,7 @@ Step "Verify imports"    {
     python -c "import pandas, numpy, polars, sklearn, matplotlib, fastapi, uvicorn; import core.pipeline, scripts.acm_store, scripts.acm_service"
 }
 Step "Self-test (quiet)" {
-    python -m pytest tests/ -q --no-header -p no:warnings 2>&1 | Select-Object -Last 1
+    python -m pytest tests/ -q --no-header -p no:warnings --basetemp="$InstallDir\.pytest_basetemp" 2>&1 | Select-Object -Last 1
 }
 
 $drivers = ""
