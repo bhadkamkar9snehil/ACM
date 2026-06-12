@@ -327,7 +327,7 @@ async function refreshEngineer() {
   const width = $("#eng-chart").clientWidth || 980;
   if (plot) plot.destroy();
   plot = new uPlot({
-    width, height: 280,
+    width, height: 200,
     cursor: { y: false },
     series: [
       {},
