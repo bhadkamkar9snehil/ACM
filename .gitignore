@@ -57,3 +57,7 @@ nul
 batchrunlogs_TEMP.md
 plans/CONTINUOUS_LEARNING_AUDIT_2026_02_24.md
 plans/DASHBOARD_ISSUES_AND_FIX_PLAN.md
+
+## Service raw-data cache and local results store
+data_cache/
+*.db

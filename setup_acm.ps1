@@ -93,10 +93,10 @@ Set-Location $InstallDir
 Step "Python packages"   {
     python -m pip install --quiet --upgrade pip
     python -m pip install --quiet pandas numpy polars pyarrow scikit-learn scipy `
-        structlog matplotlib remotezip pytest
+        structlog matplotlib remotezip pytest fastapi uvicorn httpx
 }
 Step "Verify imports"    {
-    python -c "import pandas, numpy, polars, sklearn, matplotlib; import core.pipeline, scripts.acm_store"
+    python -c "import pandas, numpy, polars, sklearn, matplotlib, fastapi, uvicorn; import core.pipeline, scripts.acm_store, scripts.acm_service"
 }
 Step "Self-test (quiet)" {
     python -m pytest tests/ -q --no-header -p no:warnings 2>&1 | Select-Object -Last 1
@@ -116,7 +116,12 @@ if ($drivers) {
     Write-Host "No SQL Server detected - using SQLite (zero setup). That is fine."
 }
 Write-Host ""
-Write-Host "Try it on your own data:"
+Write-Host "Start the always-on service (scheduler + control panel):"
+Write-Host "  python scripts\acm_service.py"
+Write-Host "  then open http://localhost:8765 and onboard assets from the Admin tab."
+Write-Host "  (run at boot: Task Scheduler 'At startup' task, or wrap with NSSM)"
+Write-Host ""
+Write-Host "One-shot scoring on your own data:"
 Write-Host "  python scripts\acm_run.py --csv your_asset.csv --timestamp-col time --score-days 30 --report report.html"
 Write-Host "Or reproduce the public wind-farm benchmark:"
 Write-Host "  .\scripts\run_care_benchmark.ps1"

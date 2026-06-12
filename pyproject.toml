@@ -25,6 +25,10 @@ dependencies = [
   "psutil>=5.9",  # Resource monitoring
   "structlog>=24.0",  # Structured logging
   "rich>=13.0",  # Colorful console output, progress bars
+  "polars>=1.0",  # Feature engineering
+  "pyarrow>=15.0",  # Raw-data cache (parquet)
+  "fastapi>=0.110",  # Always-on service: API + control panel
+  "uvicorn>=0.29",  # Service web server
 ]
 
 [project.optional-dependencies]

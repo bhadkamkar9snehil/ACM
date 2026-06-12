@@ -59,7 +59,8 @@ CREATE TABLE IF NOT EXISTS scores (
     status INTEGER, alarm INTEGER);
 CREATE INDEX IF NOT EXISTS ix_scores_asset_ts ON scores(asset_key, ts);
 CREATE TABLE IF NOT EXISTS alarms (
-    asset_key TEXT, start_ts TEXT, end_ts TEXT, duration_h REAL, peak_fused REAL);
+    asset_key TEXT, start_ts TEXT, end_ts TEXT, duration_h REAL, peak_fused REAL,
+    ack_by TEXT, ack_at TEXT, ack_note TEXT);
 CREATE TABLE IF NOT EXISTS summary (
     farm TEXT, ingested_at TEXT, metrics_json TEXT);
 CREATE TABLE IF NOT EXISTS runs (
@@ -73,15 +74,35 @@ CREATE TABLE IF NOT EXISTS config (
     category TEXT, param_path TEXT, param_value TEXT, value_type TEXT,
     updated_at TEXT, PRIMARY KEY (category, param_path));
 
+-- SERVICE LAYER: asset registry, single-row service state, config audit trail
+CREATE TABLE IF NOT EXISTS monitored_assets (
+    asset_key TEXT PRIMARY KEY, grp TEXT DEFAULT 'fleet', enabled INTEGER DEFAULT 1,
+    source_kind TEXT, source_ref TEXT, conn_ref TEXT,
+    timestamp_col TEXT, status_col TEXT, added_at TEXT, retired_at TEXT,
+    state TEXT DEFAULT 'NEW', state_detail TEXT,
+    last_run_at TEXT, last_score_ts TEXT, last_runtime_s REAL);
+CREATE TABLE IF NOT EXISTS service_state (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    paused INTEGER DEFAULT 0, tick_minutes INTEGER DEFAULT 15,
+    last_tick_at TEXT, last_tick_duration_s REAL, started_at TEXT);
+CREATE TABLE IF NOT EXISTS config_audit (
+    changed_at TEXT, changed_by TEXT, category TEXT, param_path TEXT,
+    old_value TEXT, new_value TEXT, note TEXT);
+
 -- LIVE MONITORING (human view): one row per asset, current state
-CREATE VIEW IF NOT EXISTS v_asset_now AS
+DROP VIEW IF EXISTS v_asset_now;
+CREATE VIEW v_asset_now AS
 SELECT a.asset_key, a.farm, a.asset_id, a.verdict, a.rules_fired,
+       m.state, m.enabled, m.last_run_at,
        (SELECT MAX(ts) FROM scores s WHERE s.asset_key = a.asset_key)   AS last_ts,
        (SELECT fused FROM scores s WHERE s.asset_key = a.asset_key
         ORDER BY ts DESC LIMIT 1)                                        AS last_fused,
        (SELECT COUNT(*) FROM alarms al WHERE al.asset_key = a.asset_key) AS alarm_episodes,
+       (SELECT COUNT(*) FROM alarms al WHERE al.asset_key = a.asset_key
+        AND al.ack_at IS NULL)                                           AS unacked_alarms,
        (SELECT MAX(end_ts) FROM alarms al WHERE al.asset_key = a.asset_key) AS last_alarm_end
-FROM assets a;
+FROM assets a
+LEFT JOIN monitored_assets m ON a.asset_key = m.grp || '/' || m.asset_key;
 
 -- DATA SCIENCE (daily aggregates): trend material per asset per day
 CREATE VIEW IF NOT EXISTS v_daily_stats AS
@@ -110,7 +131,8 @@ IF OBJECT_ID('dbo.acm_scores') IS NULL CREATE TABLE dbo.acm_scores (
     INDEX ix_acm_scores_asset_ts (asset_key, ts));
 IF OBJECT_ID('dbo.acm_alarms') IS NULL CREATE TABLE dbo.acm_alarms (
     asset_key NVARCHAR(64), start_ts DATETIME2, end_ts DATETIME2,
-    duration_h FLOAT, peak_fused FLOAT);
+    duration_h FLOAT, peak_fused FLOAT,
+    ack_by NVARCHAR(64), ack_at DATETIME2, ack_note NVARCHAR(MAX));
 IF OBJECT_ID('dbo.acm_summary') IS NULL CREATE TABLE dbo.acm_summary (
     farm NVARCHAR(16), ingested_at DATETIME2, metrics_json NVARCHAR(MAX));
 IF OBJECT_ID('dbo.acm_runs') IS NULL CREATE TABLE dbo.acm_runs (
@@ -125,18 +147,43 @@ IF OBJECT_ID('dbo.acm_config') IS NULL CREATE TABLE dbo.acm_config (
     category NVARCHAR(32), param_path NVARCHAR(128), param_value NVARCHAR(MAX),
     value_type NVARCHAR(16), updated_at DATETIME2,
     CONSTRAINT pk_acm_config PRIMARY KEY (category, param_path));
+IF OBJECT_ID('dbo.acm_monitored_assets') IS NULL CREATE TABLE dbo.acm_monitored_assets (
+    asset_key NVARCHAR(64) PRIMARY KEY, grp NVARCHAR(32) DEFAULT 'fleet',
+    enabled INT DEFAULT 1, source_kind NVARCHAR(8), source_ref NVARCHAR(MAX),
+    conn_ref NVARCHAR(MAX), timestamp_col NVARCHAR(64), status_col NVARCHAR(64),
+    added_at DATETIME2, retired_at DATETIME2,
+    state NVARCHAR(16) DEFAULT 'NEW', state_detail NVARCHAR(256),
+    last_run_at DATETIME2, last_score_ts DATETIME2, last_runtime_s FLOAT);
+IF OBJECT_ID('dbo.acm_service_state') IS NULL CREATE TABLE dbo.acm_service_state (
+    id INT PRIMARY KEY CHECK (id = 1),
+    paused INT DEFAULT 0, tick_minutes INT DEFAULT 15,
+    last_tick_at DATETIME2, last_tick_duration_s FLOAT, started_at DATETIME2);
+IF OBJECT_ID('dbo.acm_config_audit') IS NULL CREATE TABLE dbo.acm_config_audit (
+    changed_at DATETIME2, changed_by NVARCHAR(64), category NVARCHAR(32),
+    param_path NVARCHAR(128), old_value NVARCHAR(MAX), new_value NVARCHAR(MAX),
+    note NVARCHAR(MAX));
 """
 
-# Views created separately on mssql (CREATE VIEW must be first in batch)
+# Stores created before the ack columns existed get them added explicitly.
+DDL_MSSQL_MIGRATIONS = [
+    "IF COL_LENGTH('dbo.acm_alarms', 'ack_by') IS NULL "
+    "ALTER TABLE dbo.acm_alarms ADD ack_by NVARCHAR(64), ack_at DATETIME2, ack_note NVARCHAR(MAX)",
+]
+
+# Views created separately on mssql (CREATE VIEW must be first in batch);
+# CREATE OR ALTER so view upgrades reach existing stores.
 DDL_MSSQL_VIEWS = [
-    """IF OBJECT_ID('dbo.acm_v_asset_now') IS NULL EXEC('CREATE VIEW dbo.acm_v_asset_now AS
+    """EXEC('CREATE OR ALTER VIEW dbo.acm_v_asset_now AS
 SELECT a.asset_key, a.farm, a.asset_id, a.verdict, a.rules_fired,
+       m.state, m.enabled, m.last_run_at,
        (SELECT MAX(ts) FROM dbo.acm_scores s WHERE s.asset_key = a.asset_key) AS last_ts,
        (SELECT TOP 1 fused FROM dbo.acm_scores s WHERE s.asset_key = a.asset_key ORDER BY ts DESC) AS last_fused,
        (SELECT COUNT(*) FROM dbo.acm_alarms al WHERE al.asset_key = a.asset_key) AS alarm_episodes,
+       (SELECT COUNT(*) FROM dbo.acm_alarms al WHERE al.asset_key = a.asset_key AND al.ack_at IS NULL) AS unacked_alarms,
        (SELECT MAX(end_ts) FROM dbo.acm_alarms al WHERE al.asset_key = a.asset_key) AS last_alarm_end
-FROM dbo.acm_assets a')""",
-    """IF OBJECT_ID('dbo.acm_v_daily_stats') IS NULL EXEC('CREATE VIEW dbo.acm_v_daily_stats AS
+FROM dbo.acm_assets a
+LEFT JOIN dbo.acm_monitored_assets m ON a.asset_key = m.grp + ''/'' + m.asset_key')""",
+    """EXEC('CREATE OR ALTER VIEW dbo.acm_v_daily_stats AS
 SELECT asset_key, CAST(ts AS DATE) AS day, COUNT(*) AS n,
        AVG(fused) AS fused_mean, MAX(fused) AS fused_max,
        AVG(CASE WHEN fused >= 3.0 THEN 1.0 ELSE 0.0 END) AS rate_z3,
@@ -152,7 +199,11 @@ class Store:
     def __init__(self, backend: str, db: str | None = None, conn_str: str | None = None):
         self.backend = backend
         if backend == "sqlite":
-            self.con = sqlite3.connect(db or "acm_results.db")
+            # check_same_thread=False: the service API may touch the store
+            # from a worker thread; all writes are serialized by design
+            # (single writer in the tick, API writes on the event loop).
+            self.con = sqlite3.connect(db or "acm_results.db", check_same_thread=False)
+            self._migrate_sqlite()
             self.con.executescript(DDL_SQLITE)
             self.prefix = ""
         elif backend == "mssql":
@@ -162,6 +213,8 @@ class Store:
             for stmt in DDL_MSSQL.split(");"):
                 if stmt.strip():
                     cur.execute(stmt + ");")
+            for m in DDL_MSSQL_MIGRATIONS:
+                cur.execute(m)
             for v in DDL_MSSQL_VIEWS:
                 cur.execute(v)
             self.con.commit()
@@ -169,11 +222,29 @@ class Store:
         else:
             raise ValueError(f"unknown backend {backend}")
 
+    def _migrate_sqlite(self) -> None:
+        """Stores created before the ack columns existed get them added."""
+        tables = {r[0] for r in self.con.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        if "alarms" in tables:
+            cols = {r[1] for r in self.con.execute("PRAGMA table_info(alarms)")}
+            if "ack_by" not in cols:
+                for col in ("ack_by TEXT", "ack_at TEXT", "ack_note TEXT"):
+                    self.con.execute(f"ALTER TABLE alarms ADD COLUMN {col}")
+                self.con.commit()
+
     def t(self, name: str) -> str:
         return f"{self.prefix}{name}" if self.backend == "mssql" else name
 
     def execute(self, sql: str, params: tuple = ()) -> None:
         self.con.cursor().execute(sql, params) if self.backend == "mssql" else self.con.execute(sql, params)
+
+    def fetch(self, sql: str, params: tuple = ()) -> list[dict]:
+        """Rows as dicts — works identically on sqlite and pyodbc cursors."""
+        cur = self.con.cursor()
+        cur.execute(sql, params)
+        cols = [d[0] for d in cur.description]
+        return [dict(zip(cols, r)) for r in cur.fetchall()]
 
     def executemany(self, sql: str, rows: list[tuple]) -> None:
         cur = self.con.cursor()
@@ -249,8 +320,10 @@ def ingest(results_dir: Path, farm: str, store: Store) -> None:
         store.execute(f"DELETE FROM {store.t('alarms')} WHERE asset_key = ?", (key,))
         eps = alarm_episodes(s["time_stamp"], alarm.astype(bool), s["fused"].to_numpy())
         if eps:
-            store.executemany(f"INSERT INTO {store.t('alarms')} VALUES (?,?,?,?,?)",
-                              [(key, *e) for e in eps])
+            store.executemany(
+                f"INSERT INTO {store.t('alarms')} "
+                f"(asset_key, start_ts, end_ts, duration_h, peak_fused) VALUES (?,?,?,?,?)",
+                [(key, *e) for e in eps])
 
         # Observability: every processing run is itself a record.
         store.execute(f"DELETE FROM {store.t('runs')} WHERE asset_key = ?", (key,))
@@ -278,11 +351,22 @@ def ingest(results_dir: Path, farm: str, store: Store) -> None:
     print(f"Ingested {n_assets} assets from {results_dir} ({store.backend})")
 
 
-def ingest_result(store: "Store", group: str, asset_key: str, res) -> None:
-    """Write one core.pipeline.PipelineResult straight into the store."""
+def ingest_result(store: "Store", group: str, asset_key: str, res,
+                  keep_history: bool = False) -> None:
+    """Write one core.pipeline.PipelineResult straight into the store.
+
+    keep_history=False (batch/benchmark): each ingest replaces the asset's
+    scores/alarms/runs/run_log wholesale — byte-identical to the original
+    behaviour.
+    keep_history=True (service, sliding windows): only the re-scored overlap
+    (ts >= window start) is replaced; older scores, alarm episodes (with
+    their acknowledgements, re-attached by start_ts) and the run history
+    survive across ticks.
+    """
     key = f"{group}/{asset_key}"
     d = res.decision
     now = datetime.now(timezone.utc).isoformat(sep=" ", timespec="seconds")
+    window_start = str(res.ts[0])
 
     store.execute(f"DELETE FROM {store.t('assets')} WHERE asset_key = ?", (key,))
     store.execute(
@@ -299,25 +383,104 @@ def ingest_result(store: "Store", group: str, asset_key: str, res) -> None:
          else [None] * len(res.fused)),
         [int(v) for v in d.alarm],
     ))
-    store.execute(f"DELETE FROM {store.t('scores')} WHERE asset_key = ?", (key,))
+    if keep_history:
+        store.execute(f"DELETE FROM {store.t('scores')} WHERE asset_key = ? AND ts >= ?",
+                      (key, window_start))
+    else:
+        store.execute(f"DELETE FROM {store.t('scores')} WHERE asset_key = ?", (key,))
     store.executemany(f"INSERT INTO {store.t('scores')} VALUES (?,?,?,?,?,?,?,?,?,?,?)", rows)
 
-    store.execute(f"DELETE FROM {store.t('alarms')} WHERE asset_key = ?", (key,))
+    acks = {}
+    if keep_history:
+        cur = store.con.cursor()
+        cur.execute(f"SELECT start_ts, ack_by, ack_at, ack_note FROM {store.t('alarms')} "
+                    f"WHERE asset_key = ? AND ack_at IS NOT NULL", (key,))
+        acks = {str(r[0]): (r[1], r[2], r[3]) for r in cur.fetchall()}
+        store.execute(f"DELETE FROM {store.t('alarms')} WHERE asset_key = ? AND start_ts >= ?",
+                      (key, window_start))
+    else:
+        store.execute(f"DELETE FROM {store.t('alarms')} WHERE asset_key = ?", (key,))
     eps = alarm_episodes(pd.Series(res.ts), d.alarm, res.fused)
     if eps:
-        store.executemany(f"INSERT INTO {store.t('alarms')} VALUES (?,?,?,?,?)",
-                          [(key, *e) for e in eps])
+        store.executemany(
+            f"INSERT INTO {store.t('alarms')} "
+            f"(asset_key, start_ts, end_ts, duration_h, peak_fused, ack_by, ack_at, ack_note) "
+            f"VALUES (?,?,?,?,?,?,?,?)",
+            [(key, *e, *acks.get(str(e[0]), (None, None, None))) for e in eps])
 
-    store.execute(f"DELETE FROM {store.t('runs')} WHERE asset_key = ?", (key,))
+    if not keep_history:
+        store.execute(f"DELETE FROM {store.t('runs')} WHERE asset_key = ?", (key,))
+        store.execute(f"DELETE FROM {store.t('run_log')} WHERE asset_key = ?", (key,))
     notes = ("culprits: " + ", ".join(res.culprits)) if getattr(res, "culprits", None) else ""
     store.execute(f"INSERT INTO {store.t('runs')} VALUES (?,?,?,?,?,?,?,?,?)",
                   (key, f"{key}@{now}", now, float(res.runtime_s), "OK",
                    round(float(d.alert_z), 2), int(d.persist), d.rule_fired, notes))
-    store.execute(f"DELETE FROM {store.t('run_log')} WHERE asset_key = ?", (key,))
     if res.runlog:
         store.executemany(f"INSERT INTO {store.t('run_log')} VALUES (?,?,?,?,?)",
                           [(key, r["ts"], r["level"], r["stage"], r["message"])
                            for r in res.runlog])
+    store.commit()
+
+
+def record_run_error(store: "Store", key: str, message: str) -> None:
+    """A failed run is itself a record — visible in the runs/run_log tables."""
+    now = datetime.now(timezone.utc).isoformat(sep=" ", timespec="seconds")
+    store.execute(f"INSERT INTO {store.t('runs')} VALUES (?,?,?,?,?,?,?,?,?)",
+                  (key, f"{key}@{now}", now, None, "ERROR", None, None, "", message[:500]))
+    store.execute(f"INSERT INTO {store.t('run_log')} VALUES (?,?,?,?,?)",
+                  (key, now, "ERROR", "service", message[:2000]))
+    store.commit()
+
+
+def ack_alarm(store: "Store", asset_key: str, start_ts: str, by: str, note: str) -> int:
+    """Acknowledge one alarm episode (identified by its start timestamp)."""
+    now = datetime.now(timezone.utc).isoformat(sep=" ", timespec="seconds")
+    cur = store.con.cursor()
+    cur.execute(f"UPDATE {store.t('alarms')} SET ack_by = ?, ack_at = ?, ack_note = ? "
+                f"WHERE asset_key = ? AND start_ts = ?",
+                (by, now, note, asset_key, start_ts))
+    n = cur.rowcount
+    store.commit()
+    return n
+
+
+def get_service_state(store: "Store", default_tick_minutes: int = 15) -> dict:
+    """Single-row service state; seeded on first read."""
+    cur = store.con.cursor()
+    cur.execute(f"SELECT paused, tick_minutes, last_tick_at, last_tick_duration_s, started_at "
+                f"FROM {store.t('service_state')} WHERE id = 1")
+    row = cur.fetchone()
+    if row is None:
+        now = datetime.now(timezone.utc).isoformat(sep=" ", timespec="seconds")
+        store.execute(f"INSERT INTO {store.t('service_state')} "
+                      f"(id, paused, tick_minutes, started_at) VALUES (1, 0, ?, ?)",
+                      (int(default_tick_minutes), now))
+        store.commit()
+        return {"paused": 0, "tick_minutes": int(default_tick_minutes),
+                "last_tick_at": None, "last_tick_duration_s": None, "started_at": now}
+    return {"paused": int(row[0]), "tick_minutes": int(row[1]),
+            "last_tick_at": str(row[2]) if row[2] is not None else None,
+            "last_tick_duration_s": float(row[3]) if row[3] is not None else None,
+            "started_at": str(row[4]) if row[4] is not None else None}
+
+
+def set_service_state(store: "Store", **fields) -> None:
+    allowed = {"paused", "tick_minutes", "last_tick_at", "last_tick_duration_s", "started_at"}
+    bad = set(fields) - allowed
+    if bad:
+        raise ValueError(f"unknown service_state fields: {bad}")
+    sets = ", ".join(f"{k} = ?" for k in fields)
+    store.execute(f"UPDATE {store.t('service_state')} SET {sets} WHERE id = 1",
+                  tuple(fields.values()))
+    store.commit()
+
+
+def prune_history(store: "Store", retention_days: float) -> None:
+    """Drop runs/run_log older than the retention horizon (service path only)."""
+    cutoff = pd.Timestamp.now(tz=timezone.utc).tz_localize(None) - pd.Timedelta(days=retention_days)
+    cut = cutoff.isoformat(sep=" ", timespec="seconds")
+    store.execute(f"DELETE FROM {store.t('runs')} WHERE started_at < ?", (cut,))
+    store.execute(f"DELETE FROM {store.t('run_log')} WHERE ts < ?", (cut,))
     store.commit()
 
 
