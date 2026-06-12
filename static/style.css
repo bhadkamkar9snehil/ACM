@@ -529,9 +529,21 @@ table.data tr.is-alarm td { background: var(--bad-lo); }
 #tab-operator .g24 .col .card { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
 #tab-operator .g24 .col .card .tbl-wrap { flex: 1; overflow-y: auto; }
 
-/* ── Engineer tab — scrollable inner ────────────────────── */
-#tab-engineer > .panel-scroll > .g2 .card .tbl-wrap { max-height: 220px; }
+/* ── Engineer tab — fixed layout ────────────────────────── */
+#tab-engineer > .panel-scroll > .card { flex: 0 0 auto; }
+#tab-engineer > .panel-scroll > #eng-culprits { flex: 0 0 auto; }
+#tab-engineer > .panel-scroll > .g2 { flex: 1; min-height: 0; }
+#tab-engineer > .panel-scroll > .g2 > .card { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+#tab-engineer > .panel-scroll > .g2 > .card .tbl-wrap { flex: 1; overflow-y: auto; max-height: none; }
 
+/* ── Admin tab fixed layout ──────────────────────────────── */
+#tab-admin .g2 { flex: 1; min-height: 0; }
+#tab-admin .col { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+#tab-admin .card { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+#tab-admin .col > .card { flex: 1; }
+#tab-admin > .panel-scroll > .g2 > .card { flex: 1; }
+#tab-admin .col:first-child > .card:first-child { flex: 0 0 auto; margin-bottom: 10px; }
+#tab-admin .tbl-wrap, #tab-admin .term { flex: 1; overflow-y: auto; }
 /* ── Responsive ─────────────────────────────────────────── */
 @media (max-width: 900px) {
   .g2, .g24 { grid-template-columns: 1fr; }
