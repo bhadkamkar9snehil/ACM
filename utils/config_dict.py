@@ -373,14 +373,15 @@ class ConfigDict(MutableMapping):
             param_value = str(value) if value is not None else ""
         
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
-        # Read all rows
+
+        # Read all rows; header comes from the FILE so optional trailing
+        # columns (e.g. UpdatedDateTime) survive the rewrite.
         rows = []
-        header = ["EquipID", "Category", "ParamPath", "ParamValue", "ValueType", "LastUpdated", "UpdatedBy", "ChangeReason"]
         updated = False
-        
-        with self._csv_path.open("r", encoding="utf-8") as f:
+
+        with self._csv_path.open("r", encoding="utf-8-sig") as f:
             reader = csv.DictReader(f)
+            header = list(reader.fieldnames or [])
             for row in reader:
                 # Update existing row if matches
                 if (int(row["EquipID"]) == self._equip_id and 
@@ -394,9 +395,10 @@ class ConfigDict(MutableMapping):
                     updated = True
                 rows.append(row)
         
-        # If not found, append new row
+        # If not found, append new row (blank any extra file columns)
         if not updated:
-            rows.append({
+            new_row = {k: "" for k in header}
+            new_row.update({
                 "EquipID": str(self._equip_id),
                 "Category": category,
                 "ParamPath": param_path,
@@ -406,6 +408,7 @@ class ConfigDict(MutableMapping):
                 "UpdatedBy": updated_by,
                 "ChangeReason": reason
             })
+            rows.append(new_row)
         
         # Write back
         with self._csv_path.open("w", newline="", encoding="utf-8") as f:

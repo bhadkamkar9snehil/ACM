@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ACM — Asset Condition Monitor</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230d1117'/%3E%3Cpath d='M4 20 L9 20 L12 10 L16 26 L20 14 L22 20 L28 20' stroke='%234da3ff' stroke-width='2.4' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/vendor/uplot.min.css">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <svg class="logo" viewBox="0 0 32 32" width="30" height="30" aria-hidden="true">
+      <rect width="32" height="32" rx="7" fill="#0d1117"/>
+      <path class="logo-pulse" d="M4 20 L9 20 L12 10 L16 26 L20 14 L22 20 L28 20"
+            stroke="#4da3ff" stroke-width="2.4" fill="none"
+            stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <div>
+      <h1>ACM</h1>
+      <div class="sub">Asset Condition Monitor</div>
+    </div>
+  </div>
+
+  <nav id="tabs">
+    <button class="tab active" data-tab="operator">
+      <span class="tab-ico">◉</span> Operator</button>
+    <button class="tab" data-tab="engineer">
+      <span class="tab-ico">∿</span> Reliability Engineer</button>
+    <button class="tab" data-tab="admin">
+      <span class="tab-ico">⚙</span> Admin / ML Ops</button>
+  </nav>
+
+  <div id="svc-controls">
+    <div id="svc-pill" class="pill"><span class="dot"></span><span id="svc-pill-text">…</span></div>
+    <span id="svc-tick-info" class="muted"></span>
+    <button id="btn-pause" class="ghost">⏸ Pause</button>
+    <button id="btn-resume" class="ghost hidden">▶ Resume</button>
+    <button id="btn-runnow" class="primary">⟳ Run now</button>
+    <label class="tickctl">every <input id="inp-tick" type="number" min="1"> min</label>
+  </div>
+</header>
+
+<main>
+  <!-- ============================================================ OPERATOR -->
+  <section id="tab-operator" class="tabpane">
+    <div id="kpis" class="kpis">
+      <div class="kpi" data-kpi="total"><div class="kpi-num">—</div><div class="kpi-cap">assets</div></div>
+      <div class="kpi ok" data-kpi="ok"><div class="kpi-num">—</div><div class="kpi-cap">healthy</div></div>
+      <div class="kpi alarm" data-kpi="alarm"><div class="kpi-num">—</div><div class="kpi-cap">in alarm</div></div>
+      <div class="kpi warn" data-kpi="attention"><div class="kpi-num">—</div><div class="kpi-cap">need attention</div></div>
+      <div class="kpi accent" data-kpi="unacked"><div class="kpi-num">—</div><div class="kpi-cap">unacked alarms</div></div>
+    </div>
+
+    <div class="cols">
+      <div class="col grow2">
+        <div class="panel">
+          <div class="panel-head"><h2>Fleet</h2><span id="fleet-count" class="muted"></span></div>
+          <table id="fleet-table" class="data">
+            <thead><tr><th>Asset</th><th>State</th><th>Trend (daily max z)</th>
+                       <th class="num">Fused</th><th>Last data</th>
+                       <th class="num">Unacked</th></tr></thead>
+            <tbody></tbody>
+          </table>
+          <div id="fleet-empty" class="empty hidden">
+            No assets yet — onboard your first asset from the <b>Admin</b> tab.
+          </div>
+        </div>
+      </div>
+      <div class="col">
+        <div class="panel">
+          <div class="panel-head"><h2>Unacknowledged alarms</h2></div>
+          <table id="alarm-table" class="data">
+            <thead><tr><th>Asset</th><th>Start</th><th class="num">Hours</th>
+                       <th class="num">Peak</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+          <div id="alarm-empty" class="empty hidden">All clear — nothing waiting on a human. ✓</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ ENGINEER -->
+  <section id="tab-engineer" class="tabpane hidden">
+    <div class="toolbar panel slim">
+      <label>Asset <select id="eng-asset"></select></label>
+      <label>Window <select id="eng-days">
+        <option value="7">7 days</option>
+        <option value="30" selected>30 days</option>
+        <option value="90">90 days</option>
+        <option value="36500">everything</option>
+      </select></label>
+      <div id="eng-chips" class="chips"></div>
+    </div>
+
+    <div id="eng-culprits" class="banner hidden"></div>
+
+    <div class="panel">
+      <div class="panel-head"><h2>Fused anomaly score</h2>
+        <span class="legend"><i class="sw" style="background:#4da3ff"></i> fused z
+          <i class="sw dash"></i> self-tuned alert level
+          <i class="sw" style="background:rgba(232,80,79,.35)"></i> alarm</span></div>
+      <div id="eng-chart"></div>
+      <div id="eng-heatwrap">
+        <div id="eng-heatlabels"></div>
+        <canvas id="eng-heatmap" height="108"></canvas>
+      </div>
+    </div>
+
+    <div class="cols">
+      <div class="col">
+        <div class="panel">
+          <div class="panel-head"><h2>Alarm episodes</h2></div>
+          <table id="eng-episodes" class="data">
+            <thead><tr><th>Start</th><th>End</th><th class="num">Hours</th>
+                       <th class="num">Peak</th><th>Ack</th></tr></thead>
+            <tbody></tbody>
+          </table>
+          <div id="eng-eps-empty" class="empty hidden">No alarm episodes in store.</div>
+        </div>
+      </div>
+      <div class="col">
+        <div class="panel">
+          <div class="panel-head"><h2>Daily stats</h2></div>
+          <table id="eng-daily" class="data">
+            <thead><tr><th>Day</th><th class="num">Fused max</th><th class="num">Rate z≥3</th>
+                       <th class="num">Alarm</th><th class="num">Availability</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- =============================================================== ADMIN -->
+  <section id="tab-admin" class="tabpane hidden">
+    <div class="cols">
+      <div class="col">
+        <div class="panel">
+          <div class="panel-head"><h2>Service health</h2></div>
+          <div id="adm-health"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h2>Monitored assets</h2>
+            <button id="btn-onboard" class="primary">+ Onboard asset</button></div>
+          <table id="adm-assets" class="data">
+            <thead><tr><th>Asset</th><th>State</th><th>Source</th><th>Last run</th>
+                       <th class="num">s</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+          <div id="adm-assets-empty" class="empty hidden">Nothing monitored yet.</div>
+        </div>
+      </div>
+      <div class="col">
+        <div class="panel">
+          <div class="panel-head"><h2>Run history</h2>
+            <select id="adm-runs-asset"></select></div>
+          <table id="adm-runs" class="data">
+            <thead><tr><th>Started</th><th>Status</th><th>Rules fired</th>
+                       <th>Notes</th><th class="num">s</th></tr></thead>
+            <tbody></tbody>
+          </table>
+          <div class="panel-head"><h2>Run log</h2>
+            <select id="adm-log-level">
+              <option value="">all levels</option><option>INFO</option>
+              <option>WARN</option><option>ERROR</option></select></div>
+          <pre id="adm-runlog" class="log"></pre>
+        </div>
+      </div>
+    </div>
+
+    <div class="cols">
+      <div class="col grow2">
+        <div class="panel">
+          <div class="panel-head"><h2>Configuration</h2>
+            <span class="muted">human-ops only — ML parameters live in code and self-tune</span>
+            <input id="cfg-filter" placeholder="filter…"></div>
+          <table id="adm-config" class="data">
+            <thead><tr><th>Category</th><th>Param</th><th>Value</th><th>Type</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="col">
+        <div class="panel">
+          <div class="panel-head"><h2>Config audit trail</h2></div>
+          <table id="adm-audit" class="data">
+            <thead><tr><th>When</th><th>Who</th><th>Param</th><th>Old → New</th><th>Note</th></tr></thead>
+            <tbody></tbody>
+          </table>
+          <div id="adm-audit-empty" class="empty hidden">No config changes yet.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<!-- generic modal + toasts -->
+<div id="modal-backdrop" class="hidden">
+  <div id="modal" role="dialog" aria-modal="true">
+    <h3 id="modal-title"></h3>
+    <form id="modal-form"></form>
+  </div>
+</div>
+<div id="toasts"></div>
+
+<script src="/static/vendor/uplot.iife.min.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

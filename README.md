@@ -17,7 +17,52 @@ Installs Git/Python if missing, clones ACM, installs dependencies, and runs a
 quiet self-test. SQL Server is optional — SQLite is the default store and
 needs nothing installed.
 
-## Use
+## Run as a service (the intended way)
+
+ACM is an always-on condition monitor. One process is both the scheduler and
+the control panel:
+
+```powershell
+python scripts\acm_service.py                # SQLite store (default)
+python scripts\acm_service.py --backend mssql --conn "DRIVER={ODBC Driver 18 for SQL Server};SERVER=host;DATABASE=ACM"
+```
+
+Open **http://localhost:8765**. The single-page panel has three persona
+screens:
+
+- **Operator** — fleet health now: state badges, trend sparklines, KPI strip,
+  unacknowledged alarms with one-click acknowledge + note.
+- **Reliability Engineer** — per-asset deep dive: fused score timeline with
+  alarm shading and the self-tuned threshold, six-detector heat strip, culprit
+  channels, alarm-episode history, daily stats.
+- **Admin / ML Ops** — service health, run history and stage-by-stage logs,
+  asset onboarding/retirement (CSV, SQL table, or query — source validated at
+  onboarding), tick interval / pause / resume / run-now, and human-ops config
+  editing with a full audit trail. ML parameters are not editable anywhere —
+  they live in code and self-tune.
+
+Every tick (default each 15–30 min, settable live) the service pulls **only
+new rows** from each source into a local trailing-window cache (the historian
+is never bulk-queried twice), gates each asset — `MATURING` until it has 14
+days of history, `STALE` if the feed stops — then re-learns and scores every
+ready asset in parallel from scratch. Stateless per tick: no model files, no
+drift accumulation, nothing to corrupt; a crashed tick costs nothing. To run
+at boot, register it once with Windows Task Scheduler ("At startup") or wrap
+it with NSSM.
+
+```mermaid
+flowchart LR
+    HIST[("historian /<br/>CSV / SQL")] -->|"new rows only"| CACHE["raw cache<br/>(trailing window,<br/>parquet per asset)"]
+    CACHE --> GATE{"readiness"}
+    GATE -->|MATURING / STALE| BOARD
+    GATE -->|READY| SCORE["stateless re-learn + score<br/>(parallel workers)"]
+    SCORE --> STORE[("SQL store")]
+    STORE --> BOARD["control panel<br/>Operator · Engineer · Admin"]
+    BOARD -->|"run-now · pause · tick<br/>onboard · config · ack"| SVC["scheduler"]
+    SVC -->|"every tick"| CACHE
+```
+
+## One-shot use
 
 ```powershell
 # Score one asset: history before the cutoff is the baseline, after is scored
@@ -113,10 +158,12 @@ design.
 |---|---|
 | `assets` | one row per asset: verdict, self-tuned thresholds, rules fired |
 | `scores` | full timeline: fused + all six detector z-scores, status, alarm |
-| `alarms` | contiguous alarm episodes with duration and peak |
+| `alarms` | contiguous alarm episodes with duration, peak, acknowledgement |
 | `runs`, `run_log` | what ACM did, stage by stage — including culprit channels |
-| `config` | the human config, synced from file for visibility |
-| `v_asset_now` | live monitor: one row per asset, current state |
+| `config`, `config_audit` | the human config (synced from file) and who changed what, when, why |
+| `monitored_assets` | the service's asset registry: source, state, last run |
+| `service_state` | scheduler state: paused, tick interval, last tick |
+| `v_asset_now` | live monitor: one row per asset, current state, unacked alarms |
 | `v_daily_stats` | data science: daily rates, availability, aggregates |
 
 Identical schema on SQLite (default single file) and SQL Server
@@ -129,13 +176,16 @@ fused timeline, alarm shading, per-detector heat strip, and operations log.
 core/                 the ML: pipeline.py (entry), alarm_rules.py, detectors,
                       fast_features.py, fuse.py, ml_defaults.py
 scripts/
-  acm_run.py          score your assets (CSV or SQL, parallel) -> SQL store
+  acm_service.py      ALWAYS-ON service: scheduler + control panel (FastAPI)
+  acm_feed.py         incremental historian pull, raw cache, readiness gate
+  acm_run.py          one-shot scoring (CSV or SQL, parallel) -> SQL store
   acm_store.py        canonical store: SQLite / SQL Server, views, config sync
   acm_report.py       self-contained HTML reports, any asset selection
   robustness_matrix.py  asset-archetype x fault validation matrix
   care_benchmark.py   labelled wind-farm benchmark harness
   download_care_dataset.py / download_validation_datasets.py
+static/               the control panel UI (vanilla JS + vendored uPlot, no CDN)
 configs/config_table.csv   human settings only
-tests/                test_ml.py (injected-fault suite), test_store.py
+tests/                test_ml.py (ML suite), test_store.py, test_service.py
 setup_acm.ps1         one-command Windows setup
 ```

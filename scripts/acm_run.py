@@ -32,13 +32,13 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional
 
-import numpy as np
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from core.pipeline import Z_COLS, score_asset                       # noqa: E402
+from scripts.acm_feed import MIN_TRAIN_DAYS, frame_sensors          # noqa: E402
 from scripts.acm_store import Store, alarm_episodes, ingest_result  # noqa: E402
 
 
@@ -66,23 +66,18 @@ def run_one(args, source: str, asset_key: str) -> Dict:
     else:
         cut = ts.iloc[-1] - pd.Timedelta(days=args.score_days)
     train_df, score_df = df[ts < cut], df[ts >= cut]
-    if len(train_df) < 1000 or len(score_df) < 50:
+    # Time-aware maturity gate: a baseline needs ENOUGH TIME behind it, not a
+    # row count (1000 rows is a week at 10-min cadence but 17 minutes at 1Hz).
+    span_days = ((cut - ts.iloc[0]).total_seconds() / 86400.0) if len(train_df) else 0.0
+    if span_days < MIN_TRAIN_DAYS or not len(score_df):
         return {"asset_key": asset_key,
-                "error": f"insufficient data (train={len(train_df)}, score={len(score_df)})"}
+                "error": f"MATURING (history span {span_days:.1f} d, "
+                         f"need {MIN_TRAIN_DAYS:.0f} d)"}
 
-    status_col = args.status_col if args.status_col in df.columns else None
-    drop = [args.timestamp_col] + ([status_col] if status_col else [])
-
-    def sensors(d: pd.DataFrame) -> pd.DataFrame:
-        out = d.drop(columns=drop).apply(pd.to_numeric, errors="coerce")
-        out.index = pd.DatetimeIndex(d[args.timestamp_col], name="EntryDateTime")
-        return out.replace([np.inf, -np.inf], np.nan).dropna(axis=1, how="all")
-
-    res = score_asset(
-        train_raw=sensors(train_df), score_raw=sensors(score_df),
-        train_status=train_df[status_col].to_numpy() if status_col else None,
-        score_status=score_df[status_col].to_numpy() if status_col else None,
-    )
+    train_raw, train_status = frame_sensors(train_df, args.timestamp_col, args.status_col)
+    score_raw, score_status = frame_sensors(score_df, args.timestamp_col, args.status_col)
+    res = score_asset(train_raw=train_raw, score_raw=score_raw,
+                      train_status=train_status, score_status=score_status)
     return {"asset_key": asset_key, "result": res}
 
 
