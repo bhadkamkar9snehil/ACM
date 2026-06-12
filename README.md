@@ -129,31 +129,34 @@ flowchart LR
 
 ## 📁 Repository Map & File Descriptions
 
-| Directory / File | Description |
-| :--- | :--- |
-| **`core/`** | The ML engine root directory holding pipeline orchestrators and individual detectors. |
-| 📄 `core/pipeline.py` | Main entry point for scoring an asset. Handles features, operation splits, calibration, and fusion. |
-| 📄 `core/alarm_rules.py` | Implements cadence-aware rules that govern sustained alarms, daily rates, and availability outages. |
-| 📁 `core/detectors/` | Contains the 5 distinct detector models: Auto-regressive (AR1), PCA, Isolation Forest, GMM, and OMR. |
-| 📄 `core/fast_features.py` | High-speed rolling feature engineering using Polars (trends, deviations, and dynamic values). |
-| 📄 `core/fuse.py` | Fuses Z-scores from the detectors, dynamically discounting overlapping or correlated signals. |
-| 📄 `core/ml_defaults.py` | Stores default hyper-parameters, thresholds, and calibration bounds for the ML pipeline. |
-| **`scripts/`** | Command-line scripts for service operation, one-shot execution, and validation. |
-| 📄 `scripts/acm_service.py` | Runs the FastAPI scheduler service and serves the web control panel interface. |
-| 📄 `scripts/acm_feed.py` | Handles data caching and the readiness/maturity gate to protect the historian from bulk queries. |
-| 📄 `scripts/acm_run.py` | Runs batch parallel scoring CLI over raw CSV or SQL datasets into the SQL store. |
-| 📄 `scripts/acm_store.py` | Manages SQL schemas, syncs config parameters, and ingests offline benchmark runs. |
-| 📄 `scripts/acm_report.py` | Generates self-contained, interactive HTML diagnostic reports for any selected assets. |
-| 📄 `scripts/robustness_matrix.py` | Validates sensitivity and false-alarm rates across a synthetic matrix of asset and fault types. |
-| 📄 `scripts/care_benchmark.py` | Evaluates performance metrics against the public CARE-to-Compare wind farm dataset. |
-| 📄 `scripts/download_care_dataset.py` | Utility script to download and extract the CARE wind farm datasets from Zenodo. |
-| **`static/`** | Front-end asset directory containing the web dashboard layout and script assets. |
-| 📄 `static/index.html` | Entry point page structure for the Operator, Reliability Engineer, and Admin panels. |
-| 📄 `static/style.css` | Styling rules defining the layout, color palettes, and interactive responsiveness. |
-| 📄 `static/app.js` | Client-side logic for data polling, chart rendering, and sending API commands. |
-| **`configs/`** | Configuration files. Contains `config_table.csv` which houses all parameters editable from the UI. |
-| **`tests/`** | Unit and integration testing directory containing pytest suites for service and ML modules. |
-| 📄 `setup_acm.ps1` | Setup script that installs dependencies and prepares ACM for execution. |
+- 📁 **`core/`**: The ML engine root directory holding pipeline orchestrators and individual detectors.
+  - 📄 **`pipeline.py`**: Main entry point for scoring an asset. Handles features, operation splits, calibration, and fusion.
+  - 📄 **`alarm_rules.py`**: Implements cadence-aware rules that govern sustained alarms, daily rates, and availability outages.
+  - 📁 **`detectors/`**: Contains the 5 distinct detector models: Auto-regressive (AR1), PCA, Isolation Forest, GMM, and OMR.
+  - 📄 **`fast_features.py`**: High-speed rolling feature engineering using Polars (trends, deviations, and dynamic values).
+  - 📄 **`fuse.py`**: Fuses Z-scores from the detectors, dynamically discounting overlapping or correlated signals.
+  - 📄 **`ml_defaults.py`**: Stores default hyper-parameters, thresholds, and calibration bounds for the ML pipeline.
+
+- 📁 **`scripts/`**: Command-line scripts for service operation, one-shot execution, and validation.
+  - 📄 **`acm_service.py`**: Runs the FastAPI scheduler service and serves the web control panel interface.
+  - 📄 **`acm_feed.py`**: Handles data caching and the readiness/maturity gate to protect the historian from bulk queries.
+  - 📄 **`acm_run.py`**: Runs batch parallel scoring CLI over raw CSV or SQL datasets into the SQL store.
+  - 📄 **`acm_store.py`**: Manages SQL schemas, syncs config parameters, and ingests offline benchmark runs.
+  - 📄 **`acm_report.py`**: Generates self-contained, interactive HTML diagnostic reports for any selected assets.
+  - 📄 **`robustness_matrix.py`**: Validates sensitivity and false-alarm rates across a synthetic matrix of asset and fault types.
+  - 📄 **`care_benchmark.py`**: Evaluates performance metrics against the public CARE-to-Compare wind farm dataset.
+  - 📄 **`download_care_dataset.py`**: Utility script to download and extract the CARE wind farm datasets from Zenodo.
+
+- 📁 **`static/`**: Front-end asset directory containing the web dashboard layout and script assets.
+  - 📄 **`index.html`**: Entry point page structure for the Operator, Reliability Engineer, and Admin panels.
+  - 📄 **`style.css`**: Styling rules defining the layout, color palettes, and interactive responsiveness.
+  - 📄 **`app.js`**: Client-side logic for data polling, chart rendering, and sending API commands.
+
+- 📁 **`configs/`**: Configuration files. Contains `config_table.csv` which houses all parameters editable from the UI.
+
+- 📁 **`tests/`**: Unit and integration testing directory containing pytest suites for service and ML modules.
+
+- 📄 **`setup_acm.ps1`**: Setup script that installs dependencies and prepares ACM for execution.
 
 ---
 
