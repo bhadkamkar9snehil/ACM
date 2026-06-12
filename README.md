@@ -1,54 +1,89 @@
 # ACM — Asset Condition Monitor
 
-ACM watches industrial assets and tells you when something is wrong — **with
-no labels, no training-data preparation, and no human tuning**. Point it at
-any asset's raw sensor history (CSV or SQL): it learns what normal looks like
-from t=0 (faults in the history included), sets its own alarm thresholds at
-the cadence of your data, names the sensors driving every alarm, and retains
-everything in SQL — human verdicts and the full data-science substrate.
+ACM watches industrial assets and tells you when something is wrong — **with no labels, no training-data preparation, and no human tuning**. Point it at any asset's raw sensor history (CSV or SQL): it learns what normal looks like from t=0 (faults in the history included), sets its own alarm thresholds at the cadence of your data, names the sensors driving every alarm, and retains everything in SQL — human verdicts and the full data-science substrate.
 
-## Install
+---
 
+## 🚀 Quick Start Guide
+
+### 1. One-Command Setup (Windows)
+Open PowerShell and run:
 ```powershell
 irm https://raw.githubusercontent.com/bhadkamkar9snehil/ACM/main/setup_acm.ps1 | iex
 ```
+This installs Git and Python (3.11+) if missing, clones the ACM repository to `$HOME\ACM`, installs all dependencies, and runs an automated self-test.
 
-Installs Git/Python if missing, clones ACM, installs dependencies, and runs a
-quiet self-test. SQL Server is optional — SQLite is the default store and
-needs nothing installed.
+---
 
-## Run as a service (the intended way)
+## 🖥️ Running the Always-On Service (Web UI)
 
-ACM is an always-on condition monitor. One process is both the scheduler and
-the control panel:
+ACM runs as an always-on scheduler and control panel. To start the service:
 
+### 1. Start the Service
 ```powershell
-python scripts\acm_service.py                # SQLite store (default)
+# In the ACM directory, run the service with the default SQLite database
+python scripts\acm_service.py
+
+# Or run it with an MS SQL Server backend
 python scripts\acm_service.py --backend mssql --conn "DRIVER={ODBC Driver 18 for SQL Server};SERVER=host;DATABASE=ACM"
 ```
 
-Open **http://localhost:8765**. The single-page panel has three persona
-screens:
+### 2. Access the Control Panel
+Open your browser and navigate to:
+**[http://localhost:8765](http://localhost:8765)**
 
-- **Operator** — fleet health now: state badges, trend sparklines, KPI strip,
-  unacknowledged alarms with one-click acknowledge + note.
-- **Reliability Engineer** — per-asset deep dive: fused score timeline with
-  alarm shading and the self-tuned threshold, six-detector heat strip, culprit
-  channels, alarm-episode history, daily stats.
-- **Admin / ML Ops** — service health, run history and stage-by-stage logs,
-  asset onboarding/retirement (CSV, SQL table, or query — source validated at
-  onboarding), tick interval / pause / resume / run-now, and human-ops config
-  editing with a full audit trail. ML parameters are not editable anywhere —
-  they live in code and self-tune.
+The control panel features three screens:
+*   **Operator Panel**: Real-time fleet health dashboard with asset state badges, trend sparklines, and one-click alarm acknowledgments.
+*   **Reliability Engineer Panel**: Deep-dive diagnostics including fused score timelines, alarm-shading, six-detector heatmap strips, culprit sensors, and daily stats.
+*   **Admin / ML Ops Panel**: Service health metrics, task schedules, run logs, and live configuration edits with audit trails.
 
-Every tick (default each 15–30 min, settable live) the service pulls **only
-new rows** from each source into a local trailing-window cache (the historian
-is never bulk-queried twice), gates each asset — `MATURING` until it has 14
-days of history, `STALE` if the feed stops — then re-learns and scores every
-ready asset in parallel from scratch. Stateless per tick: no model files, no
-drift accumulation, nothing to corrupt; a crashed tick costs nothing. To run
-at boot, register it once with Windows Task Scheduler ("At startup") or wrap
-it with NSSM.
+---
+
+## 📊 Running the CARE Wind Farm Benchmark
+
+To validate ACM's unsupervised ML core against real-world anomalies, you can run the benchmark on the public CARE-to-Compare Wind Farm dataset.
+
+### 1. Run the Benchmark (CLI)
+Specify the path to your downloaded CARE dataset:
+```powershell
+# Run the full Wind Farm A benchmark (22 events, ~20 mins)
+python scripts/care_benchmark.py --data-dir "C:\path\to\care_data\CARE_To_Compare\Wind Farm A" --out results/A
+
+# Or run a quick targeted test on 3 specific events (~1 min)
+python scripts/care_benchmark.py --data-dir "C:\path\to\care_data\CARE_To_Compare\Wind Farm A" --out results/A --datasets 40 10 68
+```
+
+### 2. Ingest Benchmark Results into the Web UI
+To visualize the benchmark runs directly in the Web UI:
+```powershell
+# Load the results directory into the SQLite store
+python scripts/acm_store.py ingest --results-dir results/A --farm A --db acm_results.db
+```
+Once ingested, restart or refresh the service (`python scripts/acm_service.py`) and visit **[http://localhost:8765](http://localhost:8765)** to inspect the scored timelines, active alerts, and detected anomalies.
+
+---
+
+## ⚡ One-Shot CLI Scoring & Visualization
+
+If you want to score raw data and generate reports without launching the service:
+
+```powershell
+# Score one asset (CSV): history before the cutoff is baseline, trailing 30 days is scored
+python scripts\acm_run.py --csv pump7.csv --timestamp-col time --score-days 30 --report pump7.html
+
+# Score a fleet of CSVs in parallel into one SQLite store
+python scripts\acm_run.py --csv data\*.csv --score-days 30 --workers 3 --db acm_results.db --report fleet.html
+
+# Generate a standalone interactive HTML report for specific assets
+python scripts\acm_report.py --db acm_results.db --assets PUMP7 --out pump7.html
+
+# List all scored assets in a database
+python scripts\acm_report.py --db acm_results.db --list
+```
+
+---
+
+## 🛠️ Architecture & Core Pipeline
 
 ```mermaid
 flowchart LR
@@ -62,38 +97,8 @@ flowchart LR
     SVC -->|"every tick"| CACHE
 ```
 
-## One-shot use
-
-```powershell
-# Score one asset: history before the cutoff is the baseline, after is scored
-python scripts\acm_run.py --csv pump7.csv --timestamp-col time --score-days 30 --report pump7.html
-
-# Score a fleet in parallel into one SQL store
-python scripts\acm_run.py --csv data\*.csv --score-days 30 --workers 3 --db acm_results.db --report fleet.html
-
-# From / to SQL Server
-python scripts\acm_run.py --backend mssql --conn "DRIVER={ODBC Driver 18 for SQL Server};SERVER=host;DATABASE=ACM" `
-    --query "SELECT * FROM Historian WHERE EquipID=5010" --asset T10 --timestamp-col EntryDateTime --score-days 30
-
-# Visualise: whole fleet, one group, or specific assets — full timeline
-python scripts\acm_report.py --db acm_results.db --out report.html
-python scripts\acm_report.py --db acm_results.db --assets PUMP7 --out pump7.html
-python scripts\acm_report.py --db acm_results.db --list
-
-# Keep the running config visible next to results
-python scripts\acm_store.py sync-config --db acm_results.db
-
-# Run the validation suites yourself
-pytest tests\ -q                                  # injected-fault ML suite (~1 min)
-python scripts\robustness_matrix.py               # asset-archetype x fault matrix
-.\scripts\run_care_benchmark.ps1                  # public labelled wind-farm benchmark
-```
-
-If the asset has an operating-status column (0/2 = normal operation), pass
-`--status-col` — it enables the availability rule (extended unplanned outage
-detection).
-
-## How it works
+### Unsupervised ML Pipeline
+ACM scores assets statelessly on every tick using six independent detector heads:
 
 ```mermaid
 flowchart LR
@@ -120,72 +125,47 @@ flowchart LR
     SQL --> REP["HTML report<br/>+ culprit channels"]
 ```
 
-Six detector heads answer independent questions about every sample (sensor
-dynamics, correlation structure, operating point, rarity, mode membership,
-cross-prediction residuals). Calibrated scores are fused and passed to
-self-tuned rules whose horizons are defined in **time** (1 h persistence,
-24 h / 7 d rates, 48 h availability) and converted using the cadence inferred
-from your data's own timestamps. Every alarm names its culprit channels.
+---
 
-## Validation
+## 📁 Repository Map & File Descriptions
 
-ACM's bar for ML completeness: **confidence in pre-detecting developing
-abnormalities without false alarms, across varied kinds of assets, on raw
-sensor data.** Three instruments, all reproducible from this repository:
+| Directory / File | Description |
+| :--- | :--- |
+| **`core/`** | The ML engine root directory holding pipeline orchestrators and individual detectors. |
+| 📄 `core/pipeline.py` | Main entry point for scoring an asset. Handles features, operation splits, calibration, and fusion. |
+| 📄 `core/alarm_rules.py` | Implements cadence-aware rules that govern sustained alarms, daily rates, and availability outages. |
+| 📁 `core/detectors/` | Contains the 5 distinct detector models: Auto-regressive (AR1), PCA, Isolation Forest, GMM, and OMR. |
+| 📄 `core/fast_features.py` | High-speed rolling feature engineering using Polars (trends, deviations, and dynamic values). |
+| 📄 `core/fuse.py` | Fuses Z-scores from the detectors, dynamically discounting overlapping or correlated signals. |
+| 📄 `core/ml_defaults.py` | Stores default hyper-parameters, thresholds, and calibration bounds for the ML pipeline. |
+| **`scripts/`** | Command-line scripts for service operation, one-shot execution, and validation. |
+| 📄 `scripts/acm_service.py` | Runs the FastAPI scheduler service and serves the web control panel interface. |
+| 📄 `scripts/acm_feed.py` | Handles data caching and the readiness/maturity gate to protect the historian from bulk queries. |
+| 📄 `scripts/acm_run.py` | Runs batch parallel scoring CLI over raw CSV or SQL datasets into the SQL store. |
+| 📄 `scripts/acm_store.py` | Manages SQL schemas, syncs config parameters, and ingests offline benchmark runs. |
+| 📄 `scripts/acm_report.py` | Generates self-contained, interactive HTML diagnostic reports for any selected assets. |
+| 📄 `scripts/robustness_matrix.py` | Validates sensitivity and false-alarm rates across a synthetic matrix of asset and fault types. |
+| 📄 `scripts/care_benchmark.py` | Evaluates performance metrics against the public CARE-to-Compare wind farm dataset. |
+| 📄 `scripts/download_care_dataset.py` | Utility script to download and extract the CARE wind farm datasets from Zenodo. |
+| **`static/`** | Front-end asset directory containing the web dashboard layout and script assets. |
+| 📄 `static/index.html` | Entry point page structure for the Operator, Reliability Engineer, and Admin panels. |
+| 📄 `static/style.css` | Styling rules defining the layout, color palettes, and interactive responsiveness. |
+| 📄 `static/app.js` | Client-side logic for data polling, chart rendering, and sending API commands. |
+| **`configs/`** | Configuration files. Contains `config_table.csv` which houses all parameters editable from the UI. |
+| **`tests/`** | Unit and integration testing directory containing pytest suites for service and ML modules. |
+| 📄 `setup_acm.ps1` | Setup script that installs dependencies and prepares ACM for execution. |
 
-1. **Robustness matrix** (`scripts/robustness_matrix.py`) — four synthetic
-   asset archetypes with different physics (turbine, compressor, heat
-   exchanger, noisy two-regime process) × five fault archetypes (drift,
-   correlation break, intermittent, stuck sensor, step) × seeds, plus clean
-   runs. Verdict requires ≥90% detection and ≥90% of clean runs quiet.
-2. **Injected-fault test suite** (`tests/test_ml.py`, 22 tests) — guards every
-   known failure mode of the pipeline: sensitivity, false-alarm resistance,
-   detector health, degenerate channels, channel-role verification, rule
-   self-tuning. Runs in about a minute, no SQL, no network.
-3. **Public labelled data** — CARE-to-Compare Wind Farm A
-   ([zenodo.org/records/15846963](https://zenodo.org/records/15846963)):
-   **12/12 faults detected, 8/10 normal windows clean, F1 0.92**, cold-start,
-   zero labels shown to the model. MetroPT-3 (raw metro-compressor signals
-   with documented failures) via `scripts/download_validation_datasets.py`.
+---
 
-Detection floor, stated plainly: ACM targets **developing** faults — its
-persistence horizon is one hour. Sub-hour transients are out of scope by
-design.
+## 💾 Results SQL Schema Reference
 
-## Results live in SQL
-
-| Table/View | What it holds |
-|---|---|
-| `assets` | one row per asset: verdict, self-tuned thresholds, rules fired |
-| `scores` | full timeline: fused + all six detector z-scores, status, alarm |
-| `alarms` | contiguous alarm episodes with duration, peak, acknowledgement |
-| `runs`, `run_log` | what ACM did, stage by stage — including culprit channels |
-| `config`, `config_audit` | the human config (synced from file) and who changed what, when, why |
-| `monitored_assets` | the service's asset registry: source, state, last run |
-| `service_state` | scheduler state: paused, tick interval, last tick |
-| `v_asset_now` | live monitor: one row per asset, current state, unacked alarms |
-| `v_daily_stats` | data science: daily rates, availability, aggregates |
-
-Identical schema on SQLite (default single file) and SQL Server
-(`--backend mssql`). The HTML report renders any selection of assets with the
-fused timeline, alarm shading, per-detector heat strip, and operations log.
-
-## Repository map
-
-```
-core/                 the ML: pipeline.py (entry), alarm_rules.py, detectors,
-                      fast_features.py, fuse.py, ml_defaults.py
-scripts/
-  acm_service.py      ALWAYS-ON service: scheduler + control panel (FastAPI)
-  acm_feed.py         incremental historian pull, raw cache, readiness gate
-  acm_run.py          one-shot scoring (CSV or SQL, parallel) -> SQL store
-  acm_store.py        canonical store: SQLite / SQL Server, views, config sync
-  acm_report.py       self-contained HTML reports, any asset selection
-  robustness_matrix.py  asset-archetype x fault validation matrix
-  care_benchmark.py   labelled wind-farm benchmark harness
-  download_care_dataset.py / download_validation_datasets.py
-static/               the control panel UI (vanilla JS + vendored uPlot, no CDN)
-configs/config_table.csv   human settings only
-tests/                test_ml.py (ML suite), test_store.py, test_service.py
-setup_acm.ps1         one-command Windows setup
-```
+| Table / View | Purpose |
+| :--- | :--- |
+| `assets` | Summary for each asset including verdict, self-tuned thresholds, rules fired, and alert stats. |
+| `scores` | Full sensor timeline holding fused indicator, all six detector Z-scores, status, and alarms. |
+| `alarms` | Log of contiguous alarm episodes with duration, peak, and acknowledgment comments. |
+| `runs` / `run_log` | Detailed runtime log of scheduler actions, processing speeds, and pipeline outputs. |
+| `config` / `config_audit` | Current live service configurations and the historical log of config edits. |
+| `monitored_assets` | Service asset registry stating the source file/query, current state, and last runtime. |
+| `v_asset_now` | SQL view aggregating the current state and unacknowledged alarms for the Operator dashboard. |
+| `v_daily_stats` | SQL view calculating daily aggregates, availability rates, and trends for reporting. |
