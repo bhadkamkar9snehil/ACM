@@ -11,11 +11,12 @@
 </head>
 <body>
 
+<!-- ═══════════════ HEADER ════════════════════════════════ -->
 <header class="hdr">
   <div class="hdr-brand">
     <div class="logo-icon">A</div>
     <div class="hdr-titles">
-      <span class="eyebrow">Unsupervised ML • Pipeline Status</span>
+      <span class="eyebrow">Unsupervised ML · Pipeline Status</span>
       <h1>ACM <span>Condition Monitor</span></h1>
     </div>
   </div>
@@ -27,216 +28,262 @@
     </div>
     <div class="stat-cell">
       <span class="lbl">Last Tick</span>
-      <span class="val" id="svc-tick-info" style="font-size: 9px;">—</span>
+      <span class="val" id="svc-tick-info" style="font-size:9px;">—</span>
     </div>
     <div class="stat-cell">
       <span class="lbl">Interval</span>
-      <input id="inp-tick" type="number" min="1" value="5" style="width: 40px; height: 16px; font-size: 10px; padding: 0 4px;" title="Tick minutes">
+      <input id="inp-tick" class="val" type="number" min="1" value="5" title="Tick minutes">
     </div>
   </div>
 
   <div class="hdr-right">
     <button class="btn btn-hdr btn-warn hidden" id="btn-resume">▶ Resume</button>
-    <button class="btn btn-hdr btn-bad" id="btn-pause">⏸ Pause</button>
-    <button class="btn btn-hdr btn-ok" id="btn-runnow" style="color:#fff">⟳ Run now</button>
-    <button class="btn btn-hdr" onclick="document.body.dataset.theme = document.body.dataset.theme === 'light' ? 'dark' : 'light'">◐ Theme</button>
+    <button class="btn btn-hdr btn-bad"  id="btn-pause">⏸ Pause</button>
+    <button class="btn btn-hdr btn-ok"   id="btn-runnow">⟳ Run now</button>
+    <button class="btn btn-hdr" id="btn-theme">◐ Theme</button>
   </div>
 </header>
 
+<!-- ═══════════════ TAB RAIL ═════════════════════════════ -->
 <nav class="tab-rail" id="tabs">
   <button class="tab active" data-tab="operator"><span class="tab-num">01</span> Operator</button>
   <button class="tab" data-tab="engineer"><span class="tab-num">02</span> Reliability Engineer</button>
   <button class="tab" data-tab="admin"><span class="tab-num">03</span> Admin / ML Ops</button>
 </nav>
 
+<!-- ═══════════════ MAIN ══════════════════════════════════ -->
 <main class="main">
-  <!-- ============================================================ OPERATOR -->
-  <section id="tab-operator" class="tabpane">
-    <div id="kpis" class="kpis">
-      <div class="kpi" data-kpi="total"><div class="kpi-num">—</div><div class="kpi-cap">Assets</div></div>
-      <div class="kpi ok" data-kpi="ok"><div class="kpi-num">—</div><div class="kpi-cap">Healthy</div></div>
-      <div class="kpi alarm" data-kpi="alarm"><div class="kpi-num">—</div><div class="kpi-cap">In Alarm</div></div>
-      <div class="kpi warn" data-kpi="attention"><div class="kpi-num">—</div><div class="kpi-cap">Need Attention</div></div>
-      <div class="kpi accent" data-kpi="unacked"><div class="kpi-num">—</div><div class="kpi-cap">Unacked Alarms</div></div>
-    </div>
 
-    <div class="g24">
-      <div class="col">
-        <div class="card" style="flex:1">
-          <div class="card-title">Unacknowledged alarms</div>
-          <div class="tbl-wrap">
-            <table id="alarm-table">
-              <thead><tr><th>Asset</th><th>Start</th><th class="num">Hours</th>
-                         <th class="num">Peak</th><th></th></tr></thead>
-              <tbody></tbody>
-            </table>
-          </div>
-          <div id="alarm-empty" class="empty hidden">All clear — nothing waiting on a human. ✓</div>
-        </div>
+  <!-- ══════════════ 01 OPERATOR ═══════════════════════ -->
+  <section id="tab-operator" class="tabpane active">
+    <div class="panel-scroll">
+
+      <div id="kpis" class="kpis">
+        <div class="kpi"        data-kpi="total">    <div class="kpi-num">—</div><div class="kpi-cap">Assets</div></div>
+        <div class="kpi ok"     data-kpi="ok">       <div class="kpi-num">—</div><div class="kpi-cap">Healthy</div></div>
+        <div class="kpi alarm"  data-kpi="alarm">    <div class="kpi-num">—</div><div class="kpi-cap">In Alarm</div></div>
+        <div class="kpi warn"   data-kpi="attention"><div class="kpi-num">—</div><div class="kpi-cap">Need Attention</div></div>
+        <div class="kpi accent" data-kpi="unacked">  <div class="kpi-num">—</div><div class="kpi-cap">Unacked Alarms</div></div>
       </div>
-      <div class="col">
-        <div class="card" style="flex:1">
-          <div class="card-title">Fleet Matrix
-            <div class="ct-right"><span id="fleet-count" class="muted"></span></div>
-          </div>
-          <div class="tbl-wrap">
-            <table id="fleet-table">
-              <thead><tr><th>Asset</th><th>State</th><th>Trend (daily max z)</th>
-                         <th class="num">Fused</th><th>Last data</th>
-                         <th class="num">Unacked</th></tr></thead>
-              <tbody></tbody>
-            </table>
-          </div>
-          <div id="fleet-empty" class="empty hidden">
-            No assets yet — onboard your first asset from the <b>Admin</b> tab.
+
+      <div class="g24" style="flex:1;overflow:hidden;">
+        <div class="col" style="overflow:hidden;">
+          <div class="card" style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
+            <div class="card-title">Unacknowledged Alarms</div>
+            <div class="tbl-wrap" style="flex:1;">
+              <table id="alarm-table" class="data">
+                <thead><tr>
+                  <th>Asset</th><th>Start</th>
+                  <th class="num">Hours</th><th class="num">Peak</th><th></th>
+                </tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <div id="alarm-empty" class="empty hidden">All clear — nothing waiting on a human. ✓</div>
           </div>
         </div>
+
+        <div class="col" style="overflow:hidden;">
+          <div class="card" style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
+            <div class="card-title">Fleet Matrix
+              <div class="ct-right"><span id="fleet-count" class="muted"></span></div>
+            </div>
+            <div class="tbl-wrap" style="flex:1;">
+              <table id="fleet-table" class="data">
+                <thead><tr>
+                  <th>Asset</th><th>State</th><th>Trend (daily max z)</th>
+                  <th class="num">Fused</th><th>Last data</th><th class="num">Unacked</th>
+                </tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <div id="fleet-empty" class="empty hidden">
+              No assets yet — onboard your first asset from the <b>Admin</b> tab.
+            </div>
+          </div>
+        </div>
       </div>
+
     </div>
   </section>
 
-  <!-- ============================================================ ENGINEER -->
-  <section id="tab-engineer" class="tabpane hidden">
-    <div class="card" style="margin-bottom: 10px;">
-      <div class="row">
-        <label>Asset 
-          <select id="eng-asset" style="width: auto; display: inline-block;"></select>
-        </label>
-        <label style="margin-left: 15px;">Window 
-          <select id="eng-days" style="width: auto; display: inline-block;">
-            <option value="7">7 days</option>
-            <option value="30" selected>30 days</option>
-            <option value="90">90 days</option>
-            <option value="36500">everything</option>
-          </select>
-        </label>
-      </div>
-      <div id="eng-chips" class="chips" style="margin-top: 10px;"></div>
-    </div>
+  <!-- ══════════════ 02 ENGINEER ═══════════════════════ -->
+  <section id="tab-engineer" class="tabpane">
+    <div class="panel-scroll">
 
-    <div id="eng-culprits" class="msgbar error hidden" style="margin-bottom: 10px;"></div>
-
-    <div class="card" style="flex:1; display:flex; flex-direction:column; min-height: 400px; padding: 12px;">
-      <div class="card-title">Fused Anomaly Score
-        <div class="ct-right">
-          <span class="hint">fused z | self-tuned alert level | alarm</span>
+      <div class="card" style="margin-bottom:10px;">
+        <div class="row">
+          <label style="display:flex;align-items:center;gap:6px;">
+            <span style="font-family:'Barlow Condensed',sans-serif;font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);">Asset</span>
+            <select id="eng-asset" style="width:auto;"></select>
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;margin-left:10px;">
+            <span style="font-family:'Barlow Condensed',sans-serif;font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);">Window</span>
+            <select id="eng-days" style="width:auto;">
+              <option value="7">7 days</option>
+              <option value="30" selected>30 days</option>
+              <option value="90">90 days</option>
+              <option value="36500">Everything</option>
+            </select>
+          </label>
         </div>
-      </div>
-      <div id="eng-chart" style="flex:1"></div>
-      <div id="eng-heatwrap" style="display:flex; margin-top:10px;">
-        <div id="eng-heatlabels" style="display:flex; flex-direction:column; justify-content:space-between; font-family:'Share Tech Mono', monospace; font-size:9px; color:var(--muted); padding-right:6px; text-align:right; line-height:16px;"></div>
-        <canvas id="eng-heatmap" height="108" style="flex:1; background:var(--bg2); border:1px solid var(--line);"></canvas>
-      </div>
-    </div>
-
-    <div class="g2">
-      <div class="card">
-        <div class="card-title">Alarm Episodes</div>
-        <div class="tbl-wrap">
-          <table id="eng-episodes">
-            <thead><tr><th>Start</th><th>End</th><th class="num">Hours</th><th class="num">Peak</th><th>Ack</th></tr></thead>
-            <tbody></tbody>
-          </table>
-        </div>
-        <div id="eng-eps-empty" class="empty hidden">No alarm episodes in store.</div>
-      </div>
-      <div class="card">
-        <div class="card-title">Daily Stats</div>
-        <div class="tbl-wrap">
-          <table id="eng-daily">
-            <thead><tr><th>Day</th><th class="num">Fused max</th><th class="num">Rate z≥3</th><th class="num">Alarm</th><th class="num">Availability</th></tr></thead>
-            <tbody></tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- =============================================================== ADMIN -->
-  <section id="tab-admin" class="tabpane hidden">
-    <div class="g2">
-      <div class="col">
-        <div class="card">
-          <div class="card-title">Service Health</div>
-          <div id="adm-health"></div>
-        </div>
-        <div class="card">
-          <div class="card-title">Monitored Assets
-            <div class="ct-right"><button class="btn btn-sm btn-brand" id="btn-onboard">＋ Onboard asset</button></div>
-          </div>
-          <div class="tbl-wrap">
-            <table id="adm-assets">
-              <thead><tr><th>Asset</th><th>State</th><th>Source</th><th>Last run</th><th class="num">s</th><th></th></tr></thead>
-              <tbody></tbody>
-            </table>
-          </div>
-          <div id="adm-assets-empty" class="empty hidden">Nothing monitored yet.</div>
-        </div>
+        <div id="eng-chips" class="chips" style="margin-top:8px;"></div>
       </div>
 
-      <div class="col">
-        <div class="card">
-          <div class="card-title">Run History
-            <div class="ct-right">
-              <select id="adm-runs-asset" style="padding: 2px; height: 22px; font-size: 11px;"></select>
-            </div>
-          </div>
-          <div class="tbl-wrap">
-            <table id="adm-runs">
-              <thead><tr><th>Started</th><th>Status</th><th>Rules fired</th><th>Notes</th><th class="num">s</th></tr></thead>
-              <tbody></tbody>
-            </table>
-          </div>
-        </div>
-        <div class="card">
-          <div class="card-title">Run Log
-            <div class="ct-right">
-              <select id="adm-log-level" style="padding: 2px; height: 22px; font-size: 11px;">
-                <option value="">all levels</option><option>INFO</option><option>WARN</option><option>ERROR</option>
-              </select>
-            </div>
-          </div>
-          <pre id="adm-runlog" class="term" style="margin: 0; min-height: 150px;"></pre>
-        </div>
-      </div>
-    </div>
+      <div id="eng-culprits" class="msgbar hidden" style="margin-bottom:10px;"></div>
 
-    <div class="g2">
-      <div class="card">
-        <div class="card-title">Configuration
+      <div class="card" style="margin-bottom:10px;">
+        <div class="card-title">Fused Anomaly Score
           <div class="ct-right">
-            <input id="cfg-filter" placeholder="filter…" style="width: 100px; height: 22px; padding: 2px 5px;">
+            <span class="legend">
+              <span class="sw" style="background:#5ba8e8;"></span>fused z
+              <span class="sw dash"></span>alert level
+            </span>
           </div>
         </div>
-        <div class="hint">human-ops only — ML parameters live in code and self-tune</div>
-        <div class="tbl-wrap">
-          <table id="adm-config">
-            <thead><tr><th>Category</th><th>Param</th><th>Value</th><th>Type</th><th></th></tr></thead>
-            <tbody></tbody>
-          </table>
+        <div id="eng-chart"></div>
+        <div id="eng-heatwrap" style="margin-top:8px;">
+          <div id="eng-heatlabels"></div>
+          <canvas id="eng-heatmap" height="96" style="flex:1;background:var(--bg2);"></canvas>
         </div>
       </div>
-      <div class="card">
-        <div class="card-title">Config Audit Trail</div>
-        <div class="tbl-wrap">
-          <table id="adm-audit">
-            <thead><tr><th>When</th><th>Who</th><th>Param</th><th>Old → New</th><th>Note</th></tr></thead>
-            <tbody></tbody>
-          </table>
+
+      <div class="g2">
+        <div class="card">
+          <div class="card-title">Alarm Episodes</div>
+          <div class="tbl-wrap">
+            <table id="eng-episodes" class="data">
+              <thead><tr>
+                <th>Start</th><th>End</th><th class="num">Hours</th><th class="num">Peak</th><th>Ack</th>
+              </tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div id="eng-eps-empty" class="empty hidden">No alarm episodes in store.</div>
         </div>
-        <div id="adm-audit-empty" class="empty hidden">No config changes yet.</div>
+        <div class="card">
+          <div class="card-title">Daily Stats</div>
+          <div class="tbl-wrap">
+            <table id="eng-daily" class="data">
+              <thead><tr>
+                <th>Day</th><th class="num">Fused max</th><th class="num">Rate z≥3</th>
+                <th class="num">Alarm</th><th class="num">Availability</th>
+              </tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
       </div>
+
     </div>
   </section>
+
+  <!-- ══════════════ 03 ADMIN ══════════════════════════ -->
+  <section id="tab-admin" class="tabpane">
+    <div class="panel-scroll">
+
+      <div class="g2" style="margin-bottom:10px;">
+        <!-- Left column -->
+        <div class="col">
+          <div class="card">
+            <div class="card-title">Service Health</div>
+            <div id="adm-health"></div>
+          </div>
+          <div class="card">
+            <div class="card-title">Monitored Assets
+              <div class="ct-right">
+                <button class="btn btn-sm btn-brand" id="btn-onboard">＋ Onboard asset</button>
+              </div>
+            </div>
+            <div class="tbl-wrap">
+              <table id="adm-assets" class="data">
+                <thead><tr>
+                  <th>Asset</th><th>State</th><th>Source</th>
+                  <th>Last run</th><th class="num">s</th><th></th>
+                </tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <div id="adm-assets-empty" class="empty hidden">Nothing monitored yet.</div>
+          </div>
+        </div>
+
+        <!-- Right column -->
+        <div class="col">
+          <div class="card">
+            <div class="card-title">Run History
+              <div class="ct-right">
+                <select id="adm-runs-asset" style="padding:2px;height:22px;font-size:11px;"></select>
+              </div>
+            </div>
+            <div class="tbl-wrap">
+              <table id="adm-runs" class="data">
+                <thead><tr>
+                  <th>Started</th><th>Status</th><th>Rules fired</th><th>Notes</th><th class="num">s</th>
+                </tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-title">Run Log
+              <div class="ct-right">
+                <select id="adm-log-level" style="padding:2px;height:22px;font-size:11px;">
+                  <option value="">all levels</option>
+                  <option>INFO</option><option>WARN</option><option>ERROR</option>
+                </select>
+              </div>
+            </div>
+            <pre id="adm-runlog" class="term" style="margin:0;min-height:120px;"></pre>
+          </div>
+        </div>
+      </div>
+
+      <div class="g2">
+        <div class="card">
+          <div class="card-title">Configuration
+            <div class="ct-right">
+              <input id="cfg-filter" placeholder="filter…" style="width:110px;height:22px;padding:2px 6px;">
+            </div>
+          </div>
+          <div class="hint">human-ops only — ML parameters live in code and self-tune</div>
+          <div class="tbl-wrap">
+            <table id="adm-config" class="data">
+              <thead><tr>
+                <th>Category</th><th>Param</th><th>Value</th><th>Type</th><th></th>
+              </tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">Config Audit Trail</div>
+          <div class="tbl-wrap">
+            <table id="adm-audit" class="data">
+              <thead><tr>
+                <th>When</th><th>Who</th><th>Param</th><th>Old → New</th><th>Note</th>
+              </tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div id="adm-audit-empty" class="empty hidden">No config changes yet.</div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
 </main>
 
-<!-- generic modal + toasts -->
+<!-- ═════════════ MODAL ═══════════════════════════════════ -->
 <div id="modal-backdrop" class="hidden">
   <div id="modal" role="dialog" aria-modal="true">
     <h3 id="modal-title"></h3>
     <form id="modal-form"></form>
   </div>
 </div>
+
+<!-- ═════════════ TOASTS ══════════════════════════════════ -->
 <div id="toasts"></div>
 
 <script src="/static/vendor/uplot.iife.min.js"></script>

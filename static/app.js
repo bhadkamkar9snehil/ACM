@@ -67,10 +67,10 @@ function openModal(title, fields, submitLabel, onSubmit) {
   const row = document.createElement("div");
   row.className = "row";
   const cancel = document.createElement("button");
-  cancel.type = "button"; cancel.textContent = "Cancel"; cancel.className = "ghost";
+  cancel.type = "button"; cancel.textContent = "Cancel"; cancel.className = "btn btn-sm";
   cancel.addEventListener("click", closeModal);
   const ok = document.createElement("button");
-  ok.type = "submit"; ok.textContent = submitLabel; ok.className = "primary";
+  ok.type = "submit"; ok.textContent = submitLabel; ok.className = "btn btn-sm btn-brand";
   row.append(cancel, ok);
   form.append(err, row);
   form.onsubmit = async (e) => {
@@ -112,7 +112,7 @@ function sparkline(points, w = 150, h = 26) {
   const path = document.createElementNS(svg.namespaceURI, "path");
   path.setAttribute("d", d);
   path.setAttribute("fill", "none");
-  path.setAttribute("stroke", peak >= 3 ? "#ef5350" : "#4da3ff");
+  path.setAttribute("stroke", peak >= 3 ? "#e05050" : "#5ba8e8");
   path.setAttribute("stroke-width", "1.4");
   path.setAttribute("stroke-linejoin", "round");
   svg.append(path);
@@ -122,7 +122,7 @@ function sparkline(points, w = 150, h = 26) {
     const ln = document.createElementNS(svg.namespaceURI, "line");
     ln.setAttribute("x1", 0); ln.setAttribute("x2", w);
     ln.setAttribute("y1", y3); ln.setAttribute("y2", y3);
-    ln.setAttribute("stroke", "rgba(239,83,80,.35)");
+    ln.setAttribute("stroke", "rgba(224,80,80,.35)");
     ln.setAttribute("stroke-dasharray", "3 3");
     svg.prepend(ln);
   }
@@ -135,17 +135,24 @@ document.querySelectorAll(".tab").forEach((b) => b.addEventListener("click", () 
   activeTab = b.dataset.tab;
   document.querySelectorAll(".tab").forEach((x) => x.classList.toggle("active", x === b));
   document.querySelectorAll(".tabpane").forEach((p) =>
-    p.classList.toggle("hidden", p.id !== `tab-${activeTab}`));
+    p.classList.toggle("active", p.id === `tab-${activeTab}`));
   refresh();
 }));
+
+// Theme toggle
+document.getElementById("btn-theme").addEventListener("click", () => {
+  const body = document.body;
+  const next = body.dataset.theme === "light" ? "dark" : "light";
+  body.dataset.theme = next;
+  document.documentElement.dataset.theme = next;
+});
 
 // ------------------------------------------------------------- service ----
 async function refreshService() {
   const svc = await api("/api/service");
   const pill = $("#svc-pill");
-  pill.className = "pill " + (svc.tick_in_progress ? "ticking" : svc.paused ? "paused" : "running");
-  $("#svc-pill-text").textContent =
-    svc.tick_in_progress ? "ANALYZING" : svc.paused ? "PAUSED" : "WATCHING";
+  pill.className = "stat-cell " + (svc.tick_in_progress ? "warn" : svc.paused ? "bad" : "ok");
+  $("#svc-pill-text").textContent = svc.tick_in_progress ? "TICKING" : svc.paused ? "PAUSED" : "WATCHING";
   $("#svc-tick-info").textContent =
     `tick ${fmtTs(svc.last_tick_at)} · ${svc.last_tick_duration_s ?? "—"}s`;
   $("#btn-pause").classList.toggle("hidden", !!svc.paused);
@@ -224,7 +231,7 @@ async function refreshOperator() {
               tdNum(fmtNum(al.duration_h, 1)), tdNum(fmtNum(al.peak_fused)));
     const cell = td("");
     const btn = document.createElement("button");
-    btn.className = "mini";
+    btn.className = "btn btn-sm btn-warn";
     btn.textContent = "Ack";
     btn.addEventListener("click", () => ackAlarm(al.asset_key, al.start_ts));
     cell.append(btn); tr.append(cell);
@@ -324,20 +331,20 @@ async function refreshEngineer() {
     cursor: { y: false },
     series: [
       {},
-      { label: "fused z", stroke: "#4da3ff", width: 1.4,
-        fill: "rgba(77,163,255,.06)", value: (u, v) => fmtNum(v) },
-      { label: "alert_z", stroke: "#ef5350", dash: [5, 5], width: 1,
+      { label: "fused z", stroke: "#5ba8e8", width: 1.4,
+        fill: "rgba(91,168,232,.06)", value: (u, v) => fmtNum(v) },
+      { label: "alert_z", stroke: "#e05050", dash: [5, 5], width: 1,
         points: { show: false }, value: (u, v) => fmtNum(v) },
     ],
     axes: [
-      { stroke: "#74839a", grid: { stroke: "#1c2430" }, ticks: { stroke: "#1c2430" } },
-      { stroke: "#74839a", grid: { stroke: "#1c2430" }, ticks: { stroke: "#1c2430" } },
+      { stroke: "#7a6e58", grid: { stroke: "rgba(58,52,40,.8)" }, ticks: { stroke: "rgba(58,52,40,.8)" } },
+      { stroke: "#7a6e58", grid: { stroke: "rgba(58,52,40,.8)" }, ticks: { stroke: "rgba(58,52,40,.8)" } },
     ],
     hooks: {
       draw: [(u) => {   // alarm shading
         const ctx = u.ctx;
         ctx.save();
-        ctx.fillStyle = "rgba(239,83,80,0.16)";
+        ctx.fillStyle = "rgba(224,80,80,0.14)";
         let start = null;
         for (let i = 0; i <= alarm.length; i++) {
           const on = i < alarm.length && alarm[i];
@@ -369,7 +376,7 @@ async function refreshEngineer() {
   Z_COLS.forEach((z, zi) => {
     for (let i = 0; i < np; i++) {
       const v = s.rows[i][idx[z]];
-      ctx.fillStyle = v == null ? "#0d1117" : heatColor(v);
+      ctx.fillStyle = v == null ? "#1a1710" : heatColor(v);
       ctx.fillRect(i * colW, zi * rowH, colW + 0.6, rowH - 1.5);
     }
   });
@@ -387,7 +394,7 @@ async function refreshEngineer() {
       cell.title = `${fmtTs(e.ack_at)} — ${e.ack_note || ""}`;
     } else {
       const btn = document.createElement("button");
-      btn.className = "mini";
+      btn.className = "btn btn-sm btn-warn";
       btn.textContent = "Ack";
       btn.addEventListener("click", () => ackAlarm(key, e.start_ts));
       cell.append(btn);
@@ -445,7 +452,7 @@ async function refreshAdmin() {
     const actions = td("");
     const mk = (label, cls, fn) => {
       const b = document.createElement("button");
-      b.className = `mini ${cls}`;
+      b.className = `btn btn-sm ${cls}`;
       b.textContent = label;
       b.addEventListener("click", async () => {
         try { await fn(); refreshAdmin(); } catch (e) { toast(e.message, "err"); }
@@ -458,7 +465,7 @@ async function refreshAdmin() {
       await api("/api/service/run-now", { method: "POST", body: { assets: [m.asset_key] } });
       toast(`Analysis triggered for ${m.asset_key}`, "ok");
     });
-    mk("Retire", "danger", () =>
+    mk("Retire", "btn-bad", () =>
       openModal(`Retire ${m.asset_key}?`, [
         { name: "confirm", label: `Type the asset key to confirm — results are kept`, required: true },
       ], "Retire", async (body) => {
@@ -523,7 +530,7 @@ function renderConfig() {
     tr.append(td(c.category), td(c.param_path), td(c.param_value), td(c.value_type));
     const cell = td("");
     const b = document.createElement("button");
-    b.className = "mini";
+    b.className = "btn btn-sm";
     b.textContent = "Edit";
     b.addEventListener("click", () =>
       openModal(`Edit ${c.category}.${c.param_path}`, [
