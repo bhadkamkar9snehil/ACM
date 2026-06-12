@@ -111,13 +111,13 @@
   <section id="tab-engineer" class="tabpane">
     <div class="panel-scroll">
 
-      <div class="card" style="margin-bottom:10px;">
-        <div class="row">
+      <div class="card" style="margin-bottom:10px; display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; padding:8px 12px;">
+        <div style="display:flex; align-items:center; gap:16px;">
           <label style="display:flex;align-items:center;gap:6px;">
             <span style="font-family:'Barlow Condensed',sans-serif;font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);">Asset</span>
             <select id="eng-asset" style="width:auto;"></select>
           </label>
-          <label style="display:flex;align-items:center;gap:6px;margin-left:10px;">
+          <label style="display:flex;align-items:center;gap:6px;">
             <span style="font-family:'Barlow Condensed',sans-serif;font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);">Window</span>
             <select id="eng-days" style="width:auto;">
               <option value="7">7 days</option>
@@ -127,7 +127,7 @@
             </select>
           </label>
         </div>
-        <div id="eng-chips" class="chips" style="margin-top:8px;"></div>
+        <div id="eng-chips" class="chips" style="margin:0;"></div>
       </div>
 
       <div id="eng-culprits" class="msgbar hidden" style="margin-bottom:10px;"></div>
