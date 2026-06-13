@@ -56,6 +56,11 @@
 
   --hdr-bg: linear-gradient(160deg, #1a1510 0%, #221d14 55%, #2a2418 100%);
   --tab-rail-bg: #1a1710;
+  
+  --chart-score: var(--ok);
+  --chart-score-fill: var(--ok-lo);
+  --chart-alert: var(--bad);
+  --chart-alarm-fill: rgba(232,135,10,.25);
 }
 
 [data-theme="light"] {
@@ -107,6 +112,11 @@
 
   --hdr-bg: linear-gradient(160deg, #073642 0%, #004052 55%, #005060 100%);
   --tab-rail-bg: #e4ddc8;
+  
+  --chart-score: #073642;
+  --chart-score-fill: rgba(7,54,66,.12);
+  --chart-alert: var(--bad);
+  --chart-alarm-fill: rgba(203,75,22,.25);
 }
 
 /* ── Reset ──────────────────────────────────────────────── */

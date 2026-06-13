@@ -145,6 +145,8 @@ document.getElementById("btn-theme").addEventListener("click", () => {
   const next = body.dataset.theme === "light" ? "dark" : "light";
   body.dataset.theme = next;
   document.documentElement.dataset.theme = next;
+  if (activeTab === "operator") refreshOperator();
+  else if (activeTab === "engineer") refreshEngineer();
 });
 
 // ------------------------------------------------------------- service ----
@@ -423,15 +425,16 @@ async function refreshEngineer() {
     });
   };
 
+  const getCss = (v) => getComputedStyle(document.body).getPropertyValue(v).trim();
   if (plot) plot.destroy();
   plot = new uPlot({
     width, height: 200,
     cursor: { y: false },
     series: [
       {},
-      { label: "fused z", stroke: "#5ba8e8", width: 2,
-        fill: "rgba(91,168,232,.12)", value: (u, v) => fmtNum(v) },
-      { label: "alert_z", stroke: "#e05050", dash: [5, 5], width: 1.5,
+      { label: "fused z", stroke: getCss("--chart-score"), width: 2,
+        fill: getCss("--chart-score-fill"), value: (u, v) => fmtNum(v) },
+      { label: "alert_z", stroke: getCss("--chart-alert"), dash: [5, 5], width: 1.5,
         points: { show: false }, value: (u, v) => fmtNum(v) },
     ],
     axes: [
@@ -466,7 +469,7 @@ async function refreshEngineer() {
       draw: [(u) => {   // alarm shading
         const ctx = u.ctx;
         ctx.save();
-        ctx.fillStyle = "rgba(224,80,80,0.14)";
+        ctx.fillStyle = getCss("--chart-alarm-fill");
         let start = null;
         for (let i = 0; i <= alarm.length; i++) {
           const on = i < alarm.length && alarm[i];
