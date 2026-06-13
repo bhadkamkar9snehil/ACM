@@ -591,23 +591,33 @@ async function refreshEngineer() {
     
     const rateColor = d.rate_z3 > 0.05 ? "bad" : (d.rate_z3 > 0 ? "warn" : "ok");
     let rateDelta = "";
-    if (prev && prev.rate_z3 != null) {
+    if (prev && prev.rate_z3 != null && d.rate_z3 > 0) {
        const diff = d.rate_z3 - prev.rate_z3;
        if (diff > 0.01) rateDelta = `<span class="delta-up">↑ ${(diff*100).toFixed(1)}%</span>`;
        else if (diff < -0.01) rateDelta = `<span class="delta-down">↓ ${(Math.abs(diff)*100).toFixed(1)}%</span>`;
     }
-    const rateHtml = renderGaugeHtml((d.rate_z3 * 100).toFixed(1) + "%", d.rate_z3, rateColor, rateDelta);
+    
+    let rateHtml;
+    if (d.rate_z3 === 0) {
+      rateHtml = `<span class="muted">—</span>`;
+    } else {
+      rateHtml = `<span style="font-weight:bold; color:var(--${rateColor})">${(d.rate_z3 * 100).toFixed(1)}%</span>`;
+      if (rateDelta) rateHtml += ` <span style="margin-left: 8px">${rateDelta}</span>`;
+    }
     
     let alarmHtml = d.alarm_samples.toString();
     if (d.alarm_samples === 0) alarmHtml = `<span class="muted">0</span>`;
     else alarmHtml = `<span class="badge ALARM">${d.alarm_samples}</span>`;
     
     const availColor = d.availability >= 0.99 ? "ok" : (d.availability >= 0.90 ? "warn" : "bad");
-    const availVal = d.availability == null ? "—" : (d.availability * 100).toFixed(0) + "%";
-    const availHtml = d.availability == null ? availVal : renderGaugeHtml(availVal, d.availability, availColor);
+    let availHtml;
+    if (d.availability == null) availHtml = "—";
+    else if (d.availability === 0) availHtml = `<span class="badge ALARM">OFFLINE</span>`;
+    else availHtml = `<span style="color:var(--${availColor}); font-weight:bold">${(d.availability * 100).toFixed(0)}%</span>`;
 
     const tr = document.createElement("tr");
     if (d.alarm_samples > 0) tr.className = "row-alarm";
+    else if (d.availability < 1.0 && d.availability != null) tr.className = "row-warn";
     
     tr.append(
       tdHtml(formatDayStr(d.day)),
