@@ -580,3 +580,21 @@ table.data tr.is-alarm td { background: var(--bad-lo); }
   .hdr { grid-template-columns: auto auto; }
   .hdr-status { display: none; }
 }
+
+/* ── Heatmap Tooltip ──────────────────────────────────────── */
+.heat-tooltip {
+  position: fixed;
+  background: var(--bg2);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-hdr);
+  color: var(--ink);
+  padding: 6px 10px;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 12px;
+  pointer-events: none;
+  z-index: 1000;
+  transform: translate(-50%, -100%);
+  margin-top: -10px;
+  white-space: nowrap;
+}
+.heat-tooltip.hidden { display: none; }

@@ -444,6 +444,26 @@ async function refreshEngineer() {
     }
   });
 
+  const tooltip = $("#eng-heat-tooltip");
+  cv.onmousemove = (e) => {
+    const rect = cv.getBoundingClientRect();
+    const i = Math.floor((e.clientX - rect.left) / colW);
+    const zi = Math.floor((e.clientY - rect.top) / rowH);
+    if (i >= 0 && i < np && zi >= 0 && zi < Z_COLS.length) {
+      const zVal = s.rows[i][idx[Z_COLS[zi]]];
+      tooltip.innerHTML = `
+        <div style="color:var(--muted); margin-bottom:4px;">${fmtTs(ts[i] * 1000)}</div>
+        <div><strong style="color:var(--brand)">${Z_LABELS[zi]}</strong> : ${zVal != null ? zVal.toFixed(2) : "—"}</div>
+      `;
+      tooltip.style.left = e.clientX + "px";
+      tooltip.style.top = e.clientY + "px";
+      tooltip.classList.remove("hidden");
+    } else {
+      tooltip.classList.add("hidden");
+    }
+  };
+  cv.onmouseleave = () => tooltip.classList.add("hidden");
+
   // alarm episodes
   const eb = $("#eng-episodes tbody");
   eb.replaceChildren();
