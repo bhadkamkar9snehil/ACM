@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="light">
+<html lang="en" data-theme="light-solarised">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -8,7 +8,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;900&family=Barlow:wght@400;500;600&family=Share+Tech+Mono&display=swap">
 <link rel="stylesheet" href="/static/vendor/uplot.min.css">
 <link rel="stylesheet" href="/static/style.css">
-<link id="favicon" rel="icon" type="image/svg+xml" href="/static/favicon-light.svg">
+<link id="favicon" rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='16' fill='%23fdf6e3'/><path d='M20 65 L40 25 L60 75 L80 35' fill='none' stroke='%23cb4b16' stroke-width='12' stroke-linecap='round' stroke-linejoin='round'/></svg>">
 </head>
 <body>
 
@@ -39,7 +39,23 @@
     <button class="btn btn-hdr btn-warn hidden" id="btn-resume">▶ Resume</button>
     <button class="btn btn-hdr btn-bad"  id="btn-pause">⏸ Pause</button>
     <button class="btn btn-hdr btn-ok"   id="btn-runnow">⟳ Run now</button>
-    <button class="btn btn-hdr" id="btn-theme">◐ Theme</button>
+    <select class="btn btn-hdr" id="sel-theme" title="Switch theme" style="cursor:pointer; padding-right:6px;">
+      <optgroup label="─── Dark ───">
+        <option value="dark-forge">🔥 Forge Dark</option>
+        <option value="dark-petrol">🌊 Petrol Dark</option>
+      </optgroup>
+      <optgroup label="─── Light ───">
+        <option value="light-solarised" selected>☀ Solarised</option>
+        <option value="light-polar">❄ Polar White</option>
+        <option value="light-nordic">🌫 Nordic Fog</option>
+        <option value="light-cloud">⛅ Cloud Atlas</option>
+        <option value="light-concrete">🪨 Warm Concrete</option>
+        <option value="light-linen">📄 Linen &amp; Navy</option>
+        <option value="light-sage">🌿 Sage &amp; Stone</option>
+        <option value="light-cobalt">🔷 Chalk &amp; Cobalt</option>
+        <option value="light-ivory">🏺 Ivory &amp; Cinnabar</option>
+      </optgroup>
+    </select>
   </div>
 </header>
 
@@ -111,7 +127,7 @@
         <div class="card-title">Fused Anomaly Score
           <div class="ct-right">
             <span class="legend">
-              <span class="sw" style="background:#5ba8e8;"></span>fused z
+              <span class="sw" style="background:var(--chart-score);"></span>fused z
               <span class="sw dash"></span>alert level
             </span>
           </div>

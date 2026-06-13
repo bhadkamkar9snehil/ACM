@@ -126,7 +126,7 @@ function sparkline(points, w = 150, h = 26) {
   const path = document.createElementNS(svg.namespaceURI, "path");
   path.setAttribute("d", d);
   path.setAttribute("fill", "none");
-  path.setAttribute("stroke", peak >= 3 ? "#e05050" : "#5ba8e8");
+  path.setAttribute("stroke", peak >= 3 ? "var(--chart-alert)" : "var(--blue)");
   path.setAttribute("stroke-width", "1.4");
   path.setAttribute("stroke-linejoin", "round");
   svg.append(path);
@@ -136,7 +136,8 @@ function sparkline(points, w = 150, h = 26) {
     const ln = document.createElementNS(svg.namespaceURI, "line");
     ln.setAttribute("x1", 0); ln.setAttribute("x2", w);
     ln.setAttribute("y1", y3); ln.setAttribute("y2", y3);
-    ln.setAttribute("stroke", "rgba(224,80,80,.35)");
+    ln.setAttribute("stroke", "var(--chart-alert)");
+    ln.setAttribute("stroke-opacity", "0.5");
     ln.setAttribute("stroke-dasharray", "3 3");
     svg.prepend(ln);
   }
@@ -153,13 +154,21 @@ document.querySelectorAll(".tab").forEach((b) => b.addEventListener("click", () 
   refresh();
 }));
 
-// Theme toggle
-document.getElementById("btn-theme").addEventListener("click", () => {
-  const body = document.body;
-  const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
-  body.dataset.theme = next;
+// Theme picker
+const selTheme = document.getElementById("sel-theme");
+selTheme.value = document.documentElement.dataset.theme || "light-solarised";
+selTheme.addEventListener("change", (e) => {
+  const next = e.target.value;
+  document.body.dataset.theme = next;
   document.documentElement.dataset.theme = next;
-  document.getElementById("favicon").href = `/static/favicon-${next}.svg`;
+  
+  // Generate dynamic favicon from CSS vars
+  const style = getComputedStyle(document.body);
+  const bg = style.getPropertyValue('--favicon-bg').trim();
+  const stroke = style.getPropertyValue('--favicon-stroke').trim();
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='25' fill='${encodeURIComponent(bg)}' stroke='${encodeURIComponent(stroke)}' stroke-width='6'/><path d='M20 65 L40 25 L60 75 L80 35' fill='none' stroke='${encodeURIComponent(stroke)}' stroke-width='12' stroke-linecap='round' stroke-linejoin='round'/></svg>`;
+  document.getElementById("favicon").href = `data:image/svg+xml,${svg}`;
+
   if (activeTab === "operator") refreshOperator();
   else if (activeTab === "engineer") refreshEngineer();
 });
@@ -369,11 +378,64 @@ async function fillAssetSelectors() {
   if (!selectedAsset) selectedAsset = $("#eng-asset").value;
 }
 
-const INFERNO = ["#000004", "#160b39", "#420a68", "#6a176e", "#932667",
-                 "#bc3754", "#dd513a", "#f37819", "#fca50a", "#f6d746", "#fcffa4"];
+function hexToRgb(h) {
+  h = h.trim();
+  if (h.startsWith("rgba")) {
+    const parts = h.match(/[\d.]+/g);
+    return [parseInt(parts[0]), parseInt(parts[1]), parseInt(parts[2])];
+  }
+  if (h.startsWith("rgb")) {
+    const parts = h.match(/\d+/g);
+    return [parseInt(parts[0]), parseInt(parts[1]), parseInt(parts[2])];
+  }
+  if (h.startsWith("#")) {
+    let c = h.substring(1);
+    if (c.length === 3) c = c.split('').map(x => x + x).join('');
+    const num = parseInt(c, 16);
+    return [num >> 16, (num >> 8) & 255, num & 255];
+  }
+  return [0, 0, 0];
+}
+
+function interp(c1, c2, t) {
+  return [
+    Math.round(c1[0] + (c2[0] - c1[0]) * t),
+    Math.round(c1[1] + (c2[1] - c1[1]) * t),
+    Math.round(c1[2] + (c2[2] - c1[2]) * t)
+  ];
+}
+
+let currentTheme = null;
+let currentPalette = [];
+
+function updateHeatPalette() {
+  const getCss = (v) => getComputedStyle(document.body).getPropertyValue(v).trim();
+  const bg = hexToRgb(getCss('--bg2') || getCss('--bg'));
+  const ok = hexToRgb(getCss('--blue'));
+  const warn = hexToRgb(getCss('--warn'));
+  const bad = hexToRgb(getCss('--bad'));
+  
+  // Create a 20-step palette
+  currentPalette = [];
+  for (let i = 0; i <= 20; i++) {
+    const z = (i / 20) * 8; // map 0..20 to 0..8
+    let c;
+    if (z <= 2) {
+      c = interp(bg, ok, z / 2);
+    } else if (z <= 4) {
+      c = interp(ok, warn, (z - 2) / 2);
+    } else {
+      c = interp(warn, bad, Math.min(1, (z - 4) / 4));
+    }
+    currentPalette.push(`rgb(${c.join(',')})`);
+  }
+  currentTheme = document.documentElement.dataset.theme;
+}
+
 function heatColor(z) {
+  if (currentTheme !== document.documentElement.dataset.theme) updateHeatPalette();
   const t = Math.max(0, Math.min(1, z / 8));
-  return INFERNO[Math.round(t * (INFERNO.length - 1))];
+  return currentPalette[Math.round(t * (currentPalette.length - 1))];
 }
 
 async function refreshEngineer() {
@@ -437,7 +499,7 @@ async function refreshEngineer() {
     Z_COLS.forEach((z, zi) => {
       for (let j = 0; j < np; j++) {
         const v = s.rows[currentI0 + j][idx[z]];
-        ctx.fillStyle = v == null ? "#1a1710" : heatColor(v);
+        ctx.fillStyle = v == null ? getCss("--bg") : heatColor(v);
         ctx.fillRect(j * colW, zi * rowH, colW + 0.6, rowH - 1.5);
       }
     });
