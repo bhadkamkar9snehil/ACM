@@ -14,8 +14,8 @@
   --bg3:         #2a2620;
   --bg4:         #332e26;
   --ink:         #ede0c0;
-  --ink2:        #d0c0a0;
-  --muted:       #857870;
+  --ink2:        #e0d0b0;
+  --muted:       #a5968b;
   --card:        #221f16;
   --line:        #3a3428;
   --line2:       #504838;
@@ -70,8 +70,8 @@
   --bg3:         #18202c;
   --bg4:         #1e2834;
   --ink:         #d8e0f0;
-  --ink2:        #90a0c0;
-  --muted:       #4a5870;
+  --ink2:        #b0c0e0;
+  --muted:       #7a8ba8;
   --card:        #121822;
   --line:        #1e2a3a;
   --line2:       #2a3a50;
@@ -126,8 +126,8 @@
   --bg3:         #1f1f1f;
   --bg4:         #272727;
   --ink:         #e8e8e8;
-  --ink2:        #a0a0a0;
-  --muted:       #5a5a5a;
+  --ink2:        #c0c0c0;
+  --muted:       #888888;
   --card:        #171717;
   --line:        #2c2c2c;
   --line2:       #3e3e3e;
@@ -181,9 +181,9 @@
   --bg2:         #080e08;
   --bg3:         #0e160e;
   --bg4:         #141e14;
-  --ink:         #a8e0a0;
-  --ink2:        #6aaa60;
-  --muted:       #3a6038;
+  --ink:         #c0ffb8;
+  --ink2:        #8ada80;
+  --muted:       #6a9a68;
   --card:        #080e08;
   --line:        #1a2a1a;
   --line2:       #264026;
@@ -238,8 +238,8 @@
   --bg3:         #1a1a28;
   --bg4:         #202030;
   --ink:         #e4e4f0;
-  --ink2:        #9090b8;
-  --muted:       #505070;
+  --ink2:        #b0b0d8;
+  --muted:       #8080a0;
   --card:        #14141e;
   --line:        #24243a;
   --line2:       #30305a;
@@ -914,7 +914,7 @@ body {
   text-transform: uppercase;
 }
 .hdr-titles h1 {
-  font-family: 'Barlow Condensed', sans-serif;
+  font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif-condensed, sans-serif;
   font-size: 18px; font-weight: 900; letter-spacing: .06em;
   text-transform: uppercase; color: #fff; line-height: 1; margin: 0;
 }
@@ -954,7 +954,7 @@ body {
 
 /* ── 3-D Buttons ────────────────────────────────────────── */
 .btn {
-  font-family: 'Barlow Condensed', sans-serif;
+  font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif-condensed, sans-serif;
   font-size: 12px; font-weight: 700; letter-spacing: .07em;
   text-transform: uppercase;
   border: 1px solid var(--line2);
@@ -1022,7 +1022,7 @@ select.btn optgroup {
   border-bottom: 2px solid var(--line);
 }
 .tab {
-  font-family: 'Barlow Condensed', sans-serif;
+  font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif-condensed, sans-serif;
   font-size: 12px; font-weight: 700; letter-spacing: .07em;
   text-transform: uppercase;
   border: 1px solid var(--line); border-bottom: none;
@@ -1068,7 +1068,7 @@ select.btn optgroup {
 }
 .card:last-child { margin-bottom: 0; }
 .card-title {
-  font-family: 'Barlow Condensed', sans-serif;
+  font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif-condensed, sans-serif;
   font-size: 12px; font-weight: 800; letter-spacing: .10em;
   text-transform: uppercase; color: var(--brand);
   border-bottom: 1px solid var(--line);
@@ -1104,7 +1104,7 @@ input[type="checkbox"] { width: auto; accent-color: var(--brand); }
 .tbl-wrap { overflow-x: auto; overflow-y: auto; }
 table.data { border-collapse: collapse; width: 100%; }
 table.data th {
-  font-family: 'Barlow Condensed', sans-serif;
+  font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif-condensed, sans-serif;
   text-align: left; font-weight: 700; font-size: 10px;
   letter-spacing: .10em; text-transform: uppercase; color: var(--muted);
   border-bottom: 1px solid var(--line2);
@@ -1140,7 +1140,7 @@ table.data tr.is-alarm td { background: var(--bad-lo); }
   font-size: 14px; font-weight: bold; color: var(--ink);
 }
 .kpi-cap {
-  font-family: 'Barlow Condensed', sans-serif;
+  font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif-condensed, sans-serif;
   font-size: 10px; font-weight: 700; letter-spacing: .09em;
   text-transform: uppercase; color: var(--muted); margin-top: 2px;
 }
@@ -1152,7 +1152,7 @@ table.data tr.is-alarm td { background: var(--bad-lo); }
 .badge {
   display: inline-flex; align-items: center; gap: 5px;
   padding: 2px 8px;
-  font-family: 'Barlow Condensed', sans-serif;
+  font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif-condensed, sans-serif;
   font-size: 10px; font-weight: 700; letter-spacing: .09em;
   text-transform: uppercase;
   border: 1px solid var(--line2);
@@ -1218,7 +1218,7 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
   font-size: 14px; font-weight: bold; color: var(--ink);
 }
 .health-cell .k {
-  font-family: 'Barlow Condensed', sans-serif;
+  font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif-condensed, sans-serif;
   font-size: 10px; font-weight: 700; letter-spacing: .09em;
   text-transform: uppercase; color: var(--muted); margin-top: 2px;
 }
@@ -1270,7 +1270,7 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
   padding: 20px 24px; width: min(440px, 92vw);
 }
 #modal h3 {
-  font-family: 'Barlow Condensed', sans-serif;
+  font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif-condensed, sans-serif;
   font-size: 16px; font-weight: 800; letter-spacing: .08em;
   text-transform: uppercase; color: var(--brand);
   margin: 0 0 14px; border-bottom: 1px solid var(--line); padding-bottom: 8px;
@@ -1278,7 +1278,7 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
 #modal-form { display: flex; flex-direction: column; gap: 10px; }
 #modal-form label {
   display: flex; flex-direction: column; gap: 4px;
-  font-family: 'Barlow Condensed', sans-serif;
+  font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif-condensed, sans-serif;
   font-size: 10px; font-weight: 700; letter-spacing: .09em;
   text-transform: uppercase; color: var(--ink2);
 }
@@ -1325,7 +1325,7 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
   display: grid; 
   grid-template-columns: 220px 90px 150px 80px 200px 1fr 60px;
   gap: 10px; padding: 8px 12px;
-  font-family: 'Barlow Condensed', sans-serif; font-weight: 700;
+  font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif-condensed, sans-serif; font-weight: 700;
   color: var(--muted); text-transform: uppercase;
   border-bottom: 2px solid var(--line);
   position: sticky; top: 0; z-index: 20; background: var(--bg2);
