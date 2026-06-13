@@ -4,16 +4,47 @@ ACM watches industrial assets and tells you when something is wrong — **with n
 
 ## Interface Preview
 
-ACM features a fully responsive, dual-theme (Light & Dark) industrial control panel that visualizes the AI's internal state alongside fleet health.
+ACM features a fully responsive industrial control panel with **14 themes** — 5 dark, 9 light — across three persona screens.
 
-### Reliability Engineer Dashboard (Dark Mode)
-*Deep-dive diagnostics featuring fused score timelines, interactive detector heatmaps, and culprit sensors.*
+---
 
-### Fleet Operator Dashboard (Light Mode)
-*Real-time fleet health dashboard with asset state badges, unified hierarchical timelines, and one-click alarm acknowledgments.*
+### Fleet Operator View
 
-### Administration & ML Ops (Light Mode)
-*Live service configuration, backend process logs, and ML pipeline health metrics.*
+| Factory (dark) | Forge Dark | Solarised (light) |
+|---|---|---|
+| ![Factory — Operator](docs/screenshots/factory_operator.png) | ![Forge Dark — Operator](docs/screenshots/forge_operator.png) | ![Solarised — Operator](docs/screenshots/solarised_operator.png) |
+
+*Real-time fleet health KPIs, asset state badges, unified hierarchical alarm timelines, and one-click acknowledgments.*
+
+---
+
+### Reliability Engineer View
+
+| Factory (dark) | Forge Dark | Solarised (light) |
+|---|---|---|
+| ![Factory — Engineer](docs/screenshots/factory_engineer.png) | ![Forge Dark — Engineer](docs/screenshots/forge_engineer.png) | ![Solarised — Engineer](docs/screenshots/solarised_engineer.png) |
+
+*Fused anomaly score chart, six-detector heatmap strip, culprit sensor ranking, and daily diagnostic stats.*
+
+---
+
+### Admin / ML Ops View
+
+| Factory (dark) | Forge Dark | Solarised (light) |
+|---|---|---|
+| ![Factory — Admin](docs/screenshots/factory_admin.png) | ![Forge Dark — Admin](docs/screenshots/forge_admin.png) | ![Solarised — Admin](docs/screenshots/solarised_admin.png) |
+
+*Service health metrics, monitored asset registry, live configuration table with audit trail, and backend run logs.*
+
+---
+
+#### Available themes
+
+| Dark | Light |
+|---|---|
+| 🏭 Factory · 🔥 Forge Dark · 🌊 Petrol Dark | ☀ Solarised · ❄ Polar White · 🌫 Nordic Fog |
+| ⬛ Midnight Graphite · 🟩 Carbon & Phosphor · 🪻 Slate & Violet | ⛅ Cloud Atlas · 🪨 Warm Concrete · 📄 Linen & Navy |
+| | 🌿 Sage & Stone · 🔷 Chalk & Cobalt · 🏺 Ivory & Cinnabar |
 
 ---
 
