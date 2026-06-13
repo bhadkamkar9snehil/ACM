@@ -578,6 +578,7 @@ table.data tr.is-alarm td { background: var(--bad-lo); }
 
 /* ── Admin tab fixed layout ──────────────────────────────── */
 /* Removed: Admin tab is now a natural scroll layout */
+#tab-admin > .panel-scroll { overflow-y: auto; display: block; }
 #tab-admin .card { display: flex; flex-direction: column; }
 #tab-admin .tbl-wrap { max-height: 400px; overflow-y: auto; }
 /* ── Responsive ─────────────────────────────────────────── */
