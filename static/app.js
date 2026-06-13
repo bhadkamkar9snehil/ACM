@@ -185,6 +185,24 @@ $("#inp-tick").addEventListener("change", async (e) => {
 // ------------------------------------------------------------ operator ----
 const STATE_ORDER = { ALARM: 0, ERROR: 1, STALE: 2, OK: 3, MATURING: 4, NEW: 5, PAUSED: 6 };
 
+function formatRulesForOperator(raw) {
+  if (!raw || raw === "quiet") return '<span style="color:var(--ok)">Healthy Baseline</span>';
+  const causes = [];
+  if (raw.includes("sustained")) causes.push("Sustained Deviation");
+  if (raw.includes("rate")) causes.push("Frequent Spikes");
+  if (raw.includes("avail")) causes.push("Prolonged Offline");
+  if (raw.includes("heads:")) causes.push("Recurring Pattern");
+  if (causes.length === 0) return "Anomaly Detected";
+  
+  let txt = causes.join(", ");
+  if (raw.includes("distrusted")) {
+    txt = '<span style="color:var(--muted);font-style:italic;" title="Suppressed False Alarm">Suppressed Event</span>';
+  } else {
+    txt = `<span style="color:var(--bad)">${txt}</span>`;
+  }
+  return txt;
+}
+
 async function refreshOperator() {
   const [fleet, sparks, alarms] = await Promise.all([
     api("/api/fleet"), api("/api/fleet/sparklines"), api("/api/alarms?unacked=true"),
@@ -232,6 +250,7 @@ async function refreshOperator() {
       <div>Status / Start</div>
       <div>Trend / Hrs</div>
       <div>Fused / Peak</div>
+      <div>Diagnosis</div>
       <div style="display:flex; justify-content:space-between; align-items:center;">
         <span class="mt-empty">-24h</span><span class="mt-empty">Timeline Matrix</span><span class="mt-empty">Now</span>
       </div>
@@ -252,6 +271,7 @@ async function refreshOperator() {
       <div id="mr-state-${a.asset_key}"></div>
       <div id="mr-sp-${a.asset_key}"></div>
       <div class="num">${fmtNum(a.last_fused)}</div>
+      <div style="font-size:12px;font-family:'Share Tech Mono',monospace;">${formatRulesForOperator(a.rules_fired)}</div>
       <div>${renderTimeline(assetAlarms)}</div>
       <div class="num" style="color:var(--warn); font-weight:bold;">${a.unacked_alarms || 0}</div>
     `;
@@ -278,6 +298,7 @@ async function refreshOperator() {
           <div>${fmtTs(al.start_ts)}</div>
           <div class="num">${fmtNum(al.duration_h, 1)} hrs</div>
           <div class="num">Peak: ${fmtNum(al.peak_fused)}</div>
+          <div></div>
           <div>${renderTimeline([al])}</div>
           <div id="mr-ack-${a.asset_key}-${al.start_ts.replace(/[: ]/g, '')}"></div>
         `;
