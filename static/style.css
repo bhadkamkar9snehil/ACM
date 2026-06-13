@@ -1504,6 +1504,19 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
 [data-mode="advanced"] .adm-config  { grid-area: config; }
 [data-mode="advanced"] .adm-audit   { grid-area: audit; }
 
+/* ── Detector toggle buttons ────────────────────────────── */
+.det-toggle {
+  opacity: 0.6;
+  transition: opacity 150ms ease;
+}
+.det-toggle:hover {
+  opacity: 0.9;
+}
+.det-toggle.active {
+  opacity: 1;
+  box-shadow: 0 0 6px currentColor;
+}
+
 /* ── Responsive: collapse grids below 900px ─────────────── */
 @media (max-width: 900px) {
   [data-mode="advanced"] .op-layout,

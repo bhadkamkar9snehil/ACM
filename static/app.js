@@ -541,6 +541,16 @@ async function refreshEngineer(useCache = false) {
   };
 
   const getCss = (v) => getComputedStyle(document.body).getPropertyValue(v).trim();
+  // Build detector series for Advanced mode
+  const detectorSeries = [
+    { label: "AR1", stroke: getCss("--det-ar1"), width: 1, points: { show: false }, value: (u, v) => fmtNum(v) },
+    { label: "PCA-SPE", stroke: getCss("--det-pca-spe"), width: 1, points: { show: false }, value: (u, v) => fmtNum(v) },
+    { label: "PCA-T2", stroke: getCss("--det-pca-t2"), width: 1, points: { show: false }, value: (u, v) => fmtNum(v) },
+    { label: "IForest", stroke: getCss("--det-iforest"), width: 1, points: { show: false }, value: (u, v) => fmtNum(v) },
+    { label: "GMM", stroke: getCss("--det-gmm"), width: 1, points: { show: false }, value: (u, v) => fmtNum(v) },
+    { label: "OMR", stroke: getCss("--det-omr"), width: 1, points: { show: false }, value: (u, v) => fmtNum(v) },
+  ];
+
   if (plot) plot.destroy();
   plot = new uPlot({
     width, height: 200,
@@ -551,6 +561,7 @@ async function refreshEngineer(useCache = false) {
         fill: getCss("--chart-score-fill"), value: (u, v) => fmtNum(v) },
       { label: "alert_z", stroke: getCss("--chart-alert"), dash: [5, 5], width: 1.5,
         points: { show: false }, value: (u, v) => fmtNum(v) },
+      ...detectorSeries,
     ],
     axes: [
       { 
@@ -599,7 +610,28 @@ async function refreshEngineer(useCache = false) {
         ctx.restore();
       }],
     },
-  }, [ts, fused, fused.map(() => alertZ)], $("#eng-chart"));
+  }, [
+    ts,
+    fused,
+    fused.map(() => alertZ),
+    s.rows.map(r => r[idx["ar1_z"]]),
+    s.rows.map(r => r[idx["pca_spe_z"]]),
+    s.rows.map(r => r[idx["pca_t2_z"]]),
+    s.rows.map(r => r[idx["iforest_z"]]),
+    s.rows.map(r => r[idx["gmm_z"]]),
+    s.rows.map(r => r[idx["omr_z"]]),
+  ], $("#eng-chart"));
+
+  // Detector toggle buttons (Advanced mode only)
+  document.querySelectorAll(".det-toggle").forEach((btn, i) => {
+    const seriesIdx = 3 + i; // Series 0=x, 1=fused, 2=alertZ, 3-8=detectors
+    btn.addEventListener("click", () => {
+      btn.classList.toggle("active");
+      // Toggle series visibility
+      const show = btn.classList.contains("active");
+      plot.setSeries(seriesIdx, { show });
+    });
+  });
 
   // detector heat strip, aligned to the chart's plotted area
   const labels = $("#eng-heatlabels");
