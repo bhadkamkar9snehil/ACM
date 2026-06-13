@@ -229,8 +229,12 @@ async function refreshOperator() {
     alarmsByAsset[al.asset_key].push(al);
   }
 
-  // Anchor the timeline to the engine's last tick, fallback to real time if missing
-  const nowTs = window.lastTickAt ? new Date(window.lastTickAt + (window.lastTickAt.includes('Z') || window.lastTickAt.includes('+') ? '' : 'Z')).getTime() : Date.now();
+  // Anchor the timeline to the latest data timestamp in the fleet
+  let maxLastTs = "";
+  for (const a of fleet) {
+    if (a.last_ts && a.last_ts > maxLastTs) maxLastTs = a.last_ts;
+  }
+  const nowTs = maxLastTs ? new Date(maxLastTs + (maxLastTs.includes('Z') || maxLastTs.includes('+') ? '' : 'Z')).getTime() : Date.now();
   const hourMs = 3600000;
   const renderTimeline = (alarmList) => {
     let html = '<div class="mega-timeline">';
