@@ -309,6 +309,7 @@ body {
 
 /* ── Grid helpers ───────────────────────────────────────── */
 .g2  { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.g2 > .card { margin-bottom: 0; }
 .g24 { display: grid; grid-template-columns: 2fr 4fr; gap: 10px; }
 .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .col { display: flex; flex-direction: column; gap: 6px; }
