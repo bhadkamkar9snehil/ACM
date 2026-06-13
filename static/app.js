@@ -507,13 +507,37 @@ async function refreshEngineer(useCache = false) {
   chip("rules", meta.asset.rules_fired || "quiet");
   chip("points", `${s.rows.length}${s.stride > 1 ? ` (1/${s.stride})` : ""}`);
 
-  // culprit banner from the latest run's notes
+  // culprit banner from the latest run's notes (A4)
   const notes = runs[0]?.notes || "";
   const culprits = notes.startsWith("culprits: ") ? notes.slice(10) : null;
   $("#eng-culprits").classList.toggle("hidden", !culprits);
   if (culprits) {
-    $("#eng-culprits").innerHTML =
-      `⚠ Alarm driven by: <b>${culprits}</b> — OMR residual attribution, latest run`;
+    // Parse culprits string (e.g., "AR1, GMM, IForest") into detector names with colors
+    const detectorMap = {
+      "AR1": { color: getCss("--det-ar1"), name: "AR1" },
+      "SPE": { color: getCss("--det-pca-spe"), name: "PCA-SPE" },
+      "T2": { color: getCss("--det-pca-t2"), name: "PCA-T²" },
+      "IForest": { color: getCss("--det-iforest"), name: "IForest" },
+      "GMM": { color: getCss("--det-gmm"), name: "GMM" },
+      "OMR": { color: getCss("--det-omr"), name: "OMR" },
+    };
+
+    // Parse detectors from culprits string
+    const detList = culprits.split(/[,;]/g).map(s => s.trim()).filter(s => s);
+    let chipsHtml = `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">`;
+    chipsHtml += `<span style="font-size:11px;color:var(--muted);">⚠ Drivers:</span>`;
+
+    for (const det of detList) {
+      const key = Object.keys(detectorMap).find(k => det.includes(k) || k === det);
+      if (key) {
+        const info = detectorMap[key];
+        chipsHtml += `<span style="background:${info.color};color:#000;padding:2px 6px;border-radius:2px;font-size:10px;font-weight:600;">${info.name}</span>`;
+      }
+    }
+    chipsHtml += `<span style="font-size:9px;color:var(--muted);margin-left:4px;">OMR attribution</span>`;
+    chipsHtml += `</div>`;
+
+    $("#eng-culprits").innerHTML = chipsHtml;
   }
 
   // fused chart with alarm shading
