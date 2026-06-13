@@ -97,7 +97,7 @@
         <div class="op-health adv card">
           <div class="card-title">Fleet Health History <span class="muted" style="font-weight:400;font-size:10px;">30 days</span></div>
           <div id="op-health-chart" style="height:120px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:11px;">
-            chart coming in next slice
+            Loading…
           </div>
         </div>
 
@@ -184,7 +184,7 @@
         <div class="eng-pattern adv card">
           <div class="card-title">Alarm Pattern — Day × Hour</div>
           <div id="eng-pattern-body" style="height:150px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:11px;">
-            heatmap coming in next slice
+            Loading…
           </div>
         </div>
 
@@ -207,17 +207,25 @@
         <div class="eng-cofiring adv card" style="display:flex;flex-direction:column;overflow:hidden;">
           <div class="card-title">Co-firing Matrix</div>
           <div id="eng-cofiring-body" style="flex:1;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:11px;">
-            matrix coming in next slice
+            Loading…
           </div>
         </div>
 
         <div class="eng-daily card" style="display:flex;flex-direction:column;overflow:hidden;">
           <div class="card-title">Daily Stats</div>
+          <div class="adv" id="eng-avail-chart" style="padding:4px 8px 0;height:48px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:10px;">
+            Loading…
+          </div>
           <div class="tbl-wrap" style="flex:1;overflow-y:auto;">
             <table id="eng-daily" class="data">
               <thead><tr>
-                <th>Day</th><th class="num num-gauge">Fused max</th><th class="num">Rate z≥3</th>
-                <th class="num">Alarm</th><th class="num">Availability</th>
+                <th>Day</th>
+                <th class="num num-gauge">Fused max</th>
+                <th class="adv num" title="Fused mean z-score">Mean</th>
+                <th class="num">Rate z≥3</th>
+                <th class="num">Alarm</th>
+                <th class="num">Availability</th>
+                <th class="adv num" title="Sample count">N</th>
               </tr></thead>
               <tbody></tbody>
             </table>
@@ -227,14 +235,14 @@
         <div class="eng-histogram adv card" style="display:flex;flex-direction:column;">
           <div class="card-title">Alarm Duration Distribution</div>
           <div id="eng-histogram-body" style="flex:1;min-height:120px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:11px;">
-            histogram coming in next slice
+            Loading…
           </div>
         </div>
 
         <div class="eng-mttd card">
           <div class="card-title">Reliability Metrics</div>
           <div id="eng-mttd-body" style="padding:8px;color:var(--muted);font-size:11px;">
-            MTTD / MTTR coming in next slice
+            Loading…
           </div>
         </div>
 
@@ -273,7 +281,7 @@
         <div class="adm-runhist adv card">
           <div class="card-title">Run Duration History</div>
           <div id="adm-runhist-body" style="height:120px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:11px;">
-            sparkline chart coming in next slice
+            Loading…
           </div>
         </div>
 

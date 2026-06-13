@@ -1036,14 +1036,61 @@ async function refreshEngineer(useCache = false) {
     const tr = document.createElement("tr");
     if (d.alarm_samples > 0) tr.className = "row-alarm";
     
+    // C7 — fused_mean and sample count (Advanced mode, .adv td)
+    const meanColor = (d.fused_mean ?? 0) >= 2.5 ? "warn" : "muted";
+    const meanTd = tdHtml(d.fused_mean != null
+      ? `<span style="color:var(--${meanColor})">${fmtNum(d.fused_mean)}</span>` : "—", "adv num");
+    const nTd = tdHtml(d.n != null
+      ? `<span style="color:var(--muted);font-size:9px;">${d.n}</span>` : "—", "adv num");
+
     tr.append(
       tdHtml(formatDayStr(d.day)),
       tdHtml(fMaxHtml, "num"),
+      meanTd,
       tdHtml(rateHtml, "num"),
       tdHtml(alarmHtml, "num"),
-      tdHtml(availHtml, "num")
+      tdHtml(availHtml, "num"),
+      nTd
     );
     db.append(tr);
+  }
+
+  // C2 — Availability trend sparkline (Advanced mode, above daily table)
+  {
+    const availEl = $("#eng-avail-chart");
+    availEl.innerHTML = "";
+    const availDays = daily.filter(d => d.availability != null).slice(0, 30).reverse();
+    if (availDays.length < 2) {
+      availEl.style.cssText = "padding:4px 8px 0;height:48px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:10px;";
+      availEl.textContent = "No availability data yet.";
+    } else {
+      const W_a = availEl.parentElement?.clientWidth || 400;
+      const H_a = 40, GAP_a = 1;
+      const barW_a = Math.max(3, Math.floor((W_a - 16) / availDays.length) - GAP_a);
+      const W_cv = availDays.length * (barW_a + GAP_a) - GAP_a;
+      const dpr_a = window.devicePixelRatio || 1;
+      const cvs_a = document.createElement("canvas");
+      cvs_a.width = W_cv * dpr_a; cvs_a.height = H_a * dpr_a;
+      cvs_a.style.cssText = `width:${W_cv}px;height:${H_a}px;display:block;`;
+      const ctx_a = cvs_a.getContext("2d");
+      ctx_a.scale(dpr_a, dpr_a);
+      ctx_a.clearRect(0, 0, W_cv, H_a);
+      availDays.forEach((d, i) => {
+        const av = d.availability ?? 1;
+        const bH = Math.max(2, Math.round(av * H_a));
+        const x = i * (barW_a + GAP_a);
+        const y = H_a - bH;
+        ctx_a.fillStyle = av >= 0.99 ? getCss("--ok") : av >= 0.90 ? getCss("--warn") : getCss("--bad");
+        ctx_a.globalAlpha = 0.75;
+        ctx_a.fillRect(x, y, barW_a, bH);
+        ctx_a.globalAlpha = 1;
+      });
+      availEl.style.cssText = "padding:4px 8px 2px;display:flex;flex-direction:column;gap:2px;";
+      const label_a = document.createElement("div");
+      label_a.style.cssText = "font-size:8px;color:var(--muted);font-family:'Barlow Condensed',sans-serif;letter-spacing:.06em;text-transform:uppercase;";
+      label_a.textContent = "Availability Trend";
+      availEl.append(label_a, cvs_a);
+    }
   }
 
   // MTTD / MTTR tiles (B5)
