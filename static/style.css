@@ -579,7 +579,11 @@ table.data tr.is-alarm td { background: var(--bad-lo); }
 /* ── Admin tab fixed layout ──────────────────────────────── */
 /* Removed: Admin tab is now a natural scroll layout */
 #tab-admin > .panel-scroll { overflow-y: auto; display: block; }
-#tab-admin .card { display: flex; flex-direction: column; }
+#tab-admin .card { display: flex; flex-direction: column; padding-top: 0; }
+#tab-admin .card-title {
+  position: sticky; top: -1px; z-index: 10;
+  background: var(--card); padding-top: 12px;
+}
 #tab-admin .tbl-wrap { max-height: 400px; overflow-y: auto; }
 /* ── Responsive ─────────────────────────────────────────── */
 @media (max-width: 900px) {
