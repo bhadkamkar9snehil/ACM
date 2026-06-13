@@ -451,6 +451,54 @@ async function refreshOperator(useCache = false) {
 
   $("#fleet-count").textContent = n ? `${n} assets` : "";
   $("#fleet-empty").classList.toggle("hidden", n > 0);
+
+  // B2 — Top Alarm Causes fleet-wide (Advanced mode, op-causes card)
+  {
+    const causesBody = $("#op-causes-body");
+    const CAUSES = [
+      { key: "Sustained Deviation", test: r => r?.includes("sustained") },
+      { key: "Frequent Spikes",     test: r => r?.includes("rate") },
+      { key: "Prolonged Offline",   test: r => r?.includes("avail") },
+      { key: "Recurring Pattern",   test: r => r?.includes("heads:") },
+    ];
+    const counts = {};
+    CAUSES.forEach(c => { counts[c.key] = 0; });
+    counts["Other Anomaly"] = 0;
+
+    for (const a of fleet) {
+      const raw = a.rules_fired;
+      if (!raw || raw === "quiet") continue;
+      let matched = false;
+      for (const c of CAUSES) {
+        if (c.test(raw)) { counts[c.key]++; matched = true; }
+      }
+      if (!matched) counts["Other Anomaly"]++;
+    }
+
+    const sorted = Object.entries(counts)
+      .filter(([, cnt]) => cnt > 0)
+      .sort(([, a], [, b]) => b - a);
+
+    if (sorted.length === 0) {
+      causesBody.innerHTML = `<span style="color:var(--ok)">✓ No active alarm causes</span>`;
+    } else {
+      const maxCnt = sorted[0][1];
+      causesBody.style.padding = "8px";
+      causesBody.innerHTML = sorted.map(([cause, cnt]) => {
+        const pct = fleet.length > 0 ? Math.round(cnt / fleet.length * 100) : 0;
+        const barW = Math.round(cnt / maxCnt * 100);
+        return `<div style="margin-bottom:8px;">
+          <div style="display:flex;justify-content:space-between;margin-bottom:3px;">
+            <span style="font-size:11px;color:var(--ink);">${cause}</span>
+            <span style="font-size:9px;color:var(--muted);font-family:'Share Tech Mono',monospace;">${cnt}&nbsp;assets&nbsp;(${pct}%)</span>
+          </div>
+          <div style="background:var(--bg);height:5px;border-radius:2px;">
+            <div style="background:var(--bad);width:${barW}%;height:100%;border-radius:2px;opacity:.75;transition:width .3s;"></div>
+          </div>
+        </div>`;
+      }).join("");
+    }
+  }
 }
 
 function ackAlarm(assetKey, startTs) {
@@ -1101,6 +1149,80 @@ async function refreshEngineer(useCache = false) {
       coBody.append(note);
     }
   }
+
+  // B4 — Alarm Pattern Day × Hour Heatmap (Advanced mode, eng-pattern div)
+  {
+    const patBody = $("#eng-pattern-body");
+    patBody.innerHTML = "";
+
+    // Accumulate per (day_of_week, hour) totals and alarm counts
+    const totalCnt = Array.from({length: 7}, () => new Array(24).fill(0));
+    const alarmCnt = Array.from({length: 7}, () => new Array(24).fill(0));
+    for (let i = 0; i < ts.length; i++) {
+      const date = new Date(ts[i] * 1000);
+      const dow = (date.getDay() + 6) % 7; // 0=Mon … 6=Sun
+      const hr = date.getHours();
+      totalCnt[dow][hr]++;
+      if (alarm[i]) alarmCnt[dow][hr]++;
+    }
+
+    const DAY_LABELS = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+    const dpr = window.devicePixelRatio || 1;
+    const containerW = patBody.parentElement?.clientWidth || 320;
+    const LABEL_W = 30, LABEL_H = 16, GAP = 1;
+    const CELL_W = Math.max(8, Math.floor((containerW - LABEL_W - 12) / 24));
+    const CELL_H = 20;
+    const W = LABEL_W + 24 * (CELL_W + GAP) - GAP;
+    const H = LABEL_H + 7 * (CELL_H + GAP) - GAP;
+
+    const cvs = document.createElement("canvas");
+    cvs.width = W * dpr; cvs.height = H * dpr;
+    cvs.style.width = W + "px"; cvs.style.height = H + "px";
+    const ctx2 = cvs.getContext("2d");
+    ctx2.scale(dpr, dpr);
+    ctx2.clearRect(0, 0, W, H);
+
+    // Hour axis labels: 0 3 6 9 12 15 18 21
+    ctx2.fillStyle = getCss("--muted");
+    ctx2.font = `${8}px "Barlow Condensed", sans-serif`;
+    ctx2.textAlign = "center";
+    for (let h = 0; h < 24; h += 3) {
+      const x = LABEL_W + h * (CELL_W + GAP) + CELL_W / 2;
+      ctx2.fillText(h, x, LABEL_H - 2);
+    }
+
+    // Rows: days
+    DAY_LABELS.forEach((lbl, r) => {
+      const y = LABEL_H + r * (CELL_H + GAP);
+      ctx2.fillStyle = getCss("--muted");
+      ctx2.textAlign = "right";
+      ctx2.font = `${8}px "Barlow Condensed", sans-serif`;
+      ctx2.fillText(lbl, LABEL_W - 4, y + CELL_H / 2 + 3);
+
+      for (let h = 0; h < 24; h++) {
+        const tot = totalCnt[r][h];
+        const al = alarmCnt[r][h];
+        const frac = tot > 0 ? al / tot : 0;
+        const x = LABEL_W + h * (CELL_W + GAP);
+        ctx2.fillStyle = tot === 0 ? getCss("--bg3") : heatColor(frac * 8);
+        ctx2.fillRect(x, y, CELL_W, CELL_H);
+        if (al > 0 && CELL_W >= 12) {
+          ctx2.fillStyle = frac > 0.5 ? getCss("--bg") : getCss("--ink2");
+          ctx2.font = `${7}px "Share Tech Mono", monospace`;
+          ctx2.textAlign = "center";
+          ctx2.fillText(al, x + CELL_W / 2, y + CELL_H / 2 + 2.5);
+        }
+      }
+    });
+
+    patBody.style.cssText = "padding:8px;display:block;";
+    patBody.append(cvs);
+    const totalAlarmPts = alarm.reduce((acc, v) => acc + (v ? 1 : 0), 0);
+    const patNote = document.createElement("div");
+    patNote.style.cssText = "font-size:9px;color:var(--muted);margin-top:6px;font-family:'Share Tech Mono',monospace;";
+    patNote.textContent = `${totalAlarmPts} alarm pts · ${ts.length} total · color = alarm fraction`;
+    patBody.append(patNote);
+  }
 }
 $("#eng-asset").addEventListener("change", (e) => { selectedAsset = e.target.value; refreshEngineer(); });
 $("#eng-days").addEventListener("change", refreshEngineer);
@@ -1195,6 +1317,64 @@ async function refreshAdmin(useCache = false) {
     $("#adm-runlog").innerHTML = logs.slice(0, 200).map((l) =>
       `<span class="${l.level}">${fmtTs(l.ts)} [${l.level}] ${l.stage}: ` +
       `${String(l.message).replace(/</g, "&lt;")}</span>`).join("\n");
+  }
+
+  // C6 — Run duration history sparkline (Advanced mode only)
+  {
+    const runHistBody = $("#adm-runhist-body");
+    runHistBody.innerHTML = "";
+    if (!key || !cachedAdminData[key]?.runs) {
+      runHistBody.innerHTML = `<span style="color:var(--muted);font-size:11px;">Select an asset.</span>`;
+    } else {
+      const allRuns = cachedAdminData[key].runs.slice(0, 30).reverse();
+      if (allRuns.length === 0) {
+        runHistBody.innerHTML = `<span style="color:var(--muted);font-size:11px;">No runs yet.</span>`;
+      } else {
+        const durations = allRuns.map(r => r.duration_s ?? 0);
+        const statuses = allRuns.map(r => r.status);
+        const maxDur = Math.max(...durations, 1);
+        const getCssAdm = v => getComputedStyle(document.body).getPropertyValue(v).trim();
+
+        const W_total = runHistBody.clientWidth || 420;
+        const BAR_H = 68, LABEL_H = 14, GAP = 2;
+        const barW = Math.max(5, Math.floor((W_total - 16) / allRuns.length) - GAP);
+        const W = allRuns.length * (barW + GAP) - GAP;
+        const H = BAR_H + LABEL_H;
+        const dpr = window.devicePixelRatio || 1;
+
+        const cvs = document.createElement("canvas");
+        cvs.width = W * dpr; cvs.height = H * dpr;
+        cvs.style.width = W + "px"; cvs.style.height = H + "px";
+        const ctx = cvs.getContext("2d");
+        ctx.scale(dpr, dpr);
+        ctx.clearRect(0, 0, W, H);
+
+        allRuns.forEach((r, i) => {
+          const dur = durations[i];
+          const bH = Math.max(2, Math.round(dur / maxDur * BAR_H));
+          const x = i * (barW + GAP);
+          const y = BAR_H - bH;
+          ctx.fillStyle = statuses[i] === "OK" ? getCssAdm("--ok") : getCssAdm("--bad");
+          ctx.globalAlpha = 0.82;
+          ctx.fillRect(x, y, barW, bH);
+          ctx.globalAlpha = 1;
+        });
+
+        // Y-axis hint: max duration label
+        ctx.fillStyle = getCssAdm("--muted");
+        ctx.font = `8px "Share Tech Mono", monospace`;
+        ctx.textAlign = "left";
+        ctx.fillText(`${maxDur.toFixed(1)}s`, 2, 10);
+
+        runHistBody.style.cssText = "padding:8px;display:block;";
+        runHistBody.append(cvs);
+        const avgDur = durations.reduce((a, b) => a + b, 0) / durations.length;
+        const rhNote = document.createElement("div");
+        rhNote.style.cssText = "font-size:9px;color:var(--muted);margin-top:4px;font-family:'Share Tech Mono',monospace;";
+        rhNote.textContent = `${allRuns.length} runs · avg ${avgDur.toFixed(1)}s · green=OK red=ERROR`;
+        runHistBody.append(rhNote);
+      }
+    }
   }
 
   await refreshConfig(useCache);
