@@ -538,7 +538,7 @@ table.data tr.is-alarm td { background: var(--bad-lo); }
 .mega-list { display: flex; flex-direction: column; width: 100%; min-width: 900px; }
 .mega-hdr { 
   display: grid; 
-  grid-template-columns: 100px 90px 100px 80px 200px 1fr 60px;
+  grid-template-columns: 100px 90px 150px 80px 200px 1fr 60px;
   gap: 10px; padding: 8px 12px;
   font-family: 'Barlow Condensed', sans-serif; font-weight: 700;
   color: var(--muted); text-transform: uppercase;
@@ -547,7 +547,7 @@ table.data tr.is-alarm td { background: var(--bad-lo); }
 }
 .mega-asset-row {
   display: grid;
-  grid-template-columns: 100px 90px 100px 80px 200px 1fr 60px;
+  grid-template-columns: 100px 90px 150px 80px 200px 1fr 60px;
   gap: 10px; padding: 10px 12px; align-items: center;
   position: sticky; top: 33px; z-index: 10;
   background: var(--bg); border-bottom: 1px solid var(--line);
@@ -557,7 +557,7 @@ table.data tr.is-alarm td { background: var(--bad-lo); }
 .mega-alarms { display: flex; flex-direction: column; }
 .mega-alarm-row {
   display: grid;
-  grid-template-columns: 100px 90px 100px 80px 200px 1fr 60px;
+  grid-template-columns: 100px 90px 150px 80px 200px 1fr 60px;
   gap: 10px; padding: 8px 12px 8px 30px; align-items: center;
   border-bottom: 1px dashed rgba(255,255,255,0.05);
   font-family: 'Share Tech Mono', monospace; font-size: 13px;
