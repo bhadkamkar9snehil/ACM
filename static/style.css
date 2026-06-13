@@ -814,6 +814,31 @@ body {
 .btn-hdr.btn-bad { background: var(--bad); border-color: color-mix(in srgb,var(--bad) 60%,#000 40%); color:#fff; }
 .btn-hdr.btn-warn { background: var(--warn); border-color: color-mix(in srgb,var(--warn) 60%,#000 40%); color:#000; }
 
+/* Custom select styling for theme picker */
+select.btn {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url('data:image/svg+xml;utf8,<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5H7z" fill="white"/></svg>');
+  background-repeat: no-repeat;
+  background-position: right 4px center;
+  background-size: 16px;
+  padding-right: 22px !important;
+}
+select.btn option, select.btn optgroup {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: 'Barlow', sans-serif;
+  text-transform: none;
+  font-size: 13px;
+  letter-spacing: normal;
+  font-weight: 500;
+}
+select.btn optgroup {
+  font-weight: 700;
+  color: var(--muted);
+  background: var(--bg2);
+}
+
 /* ── Tab rail ───────────────────────────────────────────── */
 .tab-rail {
   flex-shrink: 0;
