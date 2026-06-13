@@ -452,6 +452,71 @@ async function refreshOperator(useCache = false) {
   $("#fleet-count").textContent = n ? `${n} assets` : "";
   $("#fleet-empty").classList.toggle("hidden", n > 0);
 
+  // B3 — Fleet Health History (30-day stacked bar, Advanced mode)
+  {
+    const healthEl = $("#op-health-chart");
+    healthEl.innerHTML = "";
+    const getCssOp = v => getComputedStyle(document.body).getPropertyValue(v).trim();
+
+    // Build per-day state counts from sparklines (fused_max thresholds)
+    const dayMap = {};
+    for (const [, points] of Object.entries(sparks)) {
+      for (const [dayStr, fusedMax] of points) {
+        if (!dayMap[dayStr]) dayMap[dayStr] = {ok: 0, warn: 0, alarm: 0};
+        if (fusedMax >= 3.5) dayMap[dayStr].alarm++;
+        else if (fusedMax >= 2.0) dayMap[dayStr].warn++;
+        else dayMap[dayStr].ok++;
+      }
+    }
+
+    const days = Object.keys(dayMap).sort().slice(-30);
+    if (days.length === 0) {
+      healthEl.style.cssText = "height:120px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:11px;";
+      healthEl.textContent = "No history yet.";
+    } else {
+      const W_total = healthEl.clientWidth || 500;
+      const H_bars = 90, GAP = 1;
+      const barW = Math.max(3, Math.floor((W_total - 8) / days.length) - GAP);
+      const W = days.length * (barW + GAP) - GAP;
+      const maxN = Math.max(...days.map(d => dayMap[d].ok + dayMap[d].warn + dayMap[d].alarm), 1);
+      const dpr = window.devicePixelRatio || 1;
+
+      const cvs = document.createElement("canvas");
+      cvs.width = W * dpr; cvs.height = H_bars * dpr;
+      cvs.style.cssText = `width:${W}px;height:${H_bars}px;display:block;`;
+      const ctx = cvs.getContext("2d");
+      ctx.scale(dpr, dpr);
+      ctx.clearRect(0, 0, W, H_bars);
+
+      days.forEach((d, i) => {
+        const {ok, warn, alarm} = dayMap[d];
+        const x = i * (barW + GAP);
+        let y = H_bars;
+        for (const [cnt, cv] of [[ok,"--ok"],[warn,"--warn"],[alarm,"--bad"]]) {
+          const bH = Math.round(cnt / maxN * H_bars);
+          y -= bH;
+          ctx.fillStyle = getCssOp(cv);
+          ctx.globalAlpha = 0.78;
+          ctx.fillRect(x, y, barW, bH);
+          ctx.globalAlpha = 1;
+        }
+      });
+
+      healthEl.style.cssText = "padding:6px 8px;display:block;";
+      healthEl.append(cvs);
+      const leg = document.createElement("div");
+      leg.style.cssText = "display:flex;justify-content:space-between;font-size:9px;color:var(--muted);font-family:'Share Tech Mono',monospace;margin-top:3px;";
+      leg.innerHTML = `<span>${days[0]}</span>
+        <span style="display:flex;gap:8px;">
+          <span style="color:var(--ok)">■ ok</span>
+          <span style="color:var(--warn)">■ warn</span>
+          <span style="color:var(--bad)">■ alarm</span>
+        </span>
+        <span>${days[days.length - 1]}</span>`;
+      healthEl.append(leg);
+    }
+  }
+
   // B2 — Top Alarm Causes fleet-wide (Advanced mode, op-causes card)
   {
     const causesBody = $("#op-causes-body");
@@ -812,6 +877,27 @@ async function refreshEngineer(useCache = false) {
     }
   };
   cv.onmouseleave = () => tooltip.classList.add("hidden");
+
+  // C9 — State-change lane (Advanced mode only)
+  {
+    const sl = $("#eng-statelane");
+    const slLabel = $("#eng-statelabels");
+    sl.width = Math.max(100, width - 72);
+    const slCtx = sl.getContext("2d");
+    slCtx.clearRect(0, 0, sl.width, sl.height);
+    const slColW = sl.width / (ts.length || 1);
+    for (let i = 0; i < ts.length; i++) {
+      const alm = alarm[i];
+      const z = fused[i];
+      if (alm) slCtx.fillStyle = getCss("--bad");
+      else if (z != null && z >= 2.0) slCtx.fillStyle = getCss("--warn");
+      else slCtx.fillStyle = getCss("--ok");
+      slCtx.globalAlpha = alm ? 0.85 : 0.45;
+      slCtx.fillRect(i * slColW, 0, slColW + 0.5, sl.height);
+    }
+    slCtx.globalAlpha = 1;
+    slLabel.innerHTML = `<div style="font-size:8px;color:var(--muted);font-family:'Barlow Condensed',sans-serif;line-height:14px;">state</div>`;
+  }
 
   // A3 — Build per-episode detector max z from series data (Advanced mode)
   const DET_VARS = ["ar1_z", "pca_spe_z", "pca_t2_z", "iforest_z", "gmm_z", "omr_z"];
