@@ -32,10 +32,26 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional
 
+import warnings
+warnings.filterwarnings("ignore", category=Warning, module="requests")
+warnings.filterwarnings("ignore", category=Warning, module="urllib3")
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+
+_SEP = "  " + "─" * 53
+_CYN = "\x1b[36m"
+_GRN = "\x1b[32m"
+_RED = "\x1b[31m"
+_YLW = "\x1b[33m"
+_DIM = "\x1b[2m"
+_BLD = "\x1b[1m"
+_RST = "\x1b[0m"
 
 from core.pipeline import Z_COLS, score_asset                       # noqa: E402
 from scripts.acm_feed import MIN_TRAIN_DAYS, frame_sensors          # noqa: E402
@@ -124,20 +140,48 @@ def main() -> int:
     else:
         outputs = [run_one(args, s, k) for s, k in sources]
 
+    # ── header ────────────────────────────────────────────────────────────────
+    print(flush=True)
+    print(f"{_CYN}  ACM  ·  one-shot run{_RST}", flush=True)
+    print(f"{_DIM}{_SEP}{_RST}", flush=True)
+    n = len(sources)
+    backend_label = "SQL Server" if args.backend == "mssql" else "SQLite"
+    print(f"{_DIM}  {n} asset{'s' if n != 1 else ''}  ·  {backend_label}  ·  {args.db}{_RST}", flush=True)
+    print(flush=True)
+
     store = Store(args.backend, db=args.db, conn_str=args.conn)
+    ok_count = skip_count = alarm_count = 0
     try:
         for o in outputs:
+            key = o["asset_key"]
             if "error" in o:
-                print(f"--- {o['asset_key']}: SKIPPED ({o['error']})", flush=True)
+                skip_count += 1
+                print(f"  {_YLW}⊘{_RST}  {_BLD}{key}{_RST}  {_DIM}skipped  ·  {o['error']}{_RST}", flush=True)
                 continue
             res = o["result"]
-            ingest_result(store, args.group, o["asset_key"], res)
+            ingest_result(store, args.group, key, res)
             d = res.decision
-            state = "ALARM" if d.alarm.any() else "ok"
-            print(f"--- {o['asset_key']}: {state} rule={d.rule_fired or '-'} "
-                  f"alert_z={d.alert_z:.2f} ({res.runtime_s}s)", flush=True)
+            is_alarm = bool(d.alarm.any())
+            if is_alarm:
+                alarm_count += 1
+                state_str = f"{_RED}ALARM{_RST}"
+            else:
+                ok_count += 1
+                state_str = f"{_GRN}ok{_RST}"
+            rule  = d.rule_fired or "─"
+            print(f"  {_GRN}✓{_RST}  {_BLD}{key}{_RST}  {state_str}"
+                  f"  {_DIM}z={d.alert_z:.2f}  rule={rule}  {res.runtime_s}s{_RST}", flush=True)
     finally:
         store.close()
+
+    # ── footer ────────────────────────────────────────────────────────────────
+    print(flush=True)
+    print(f"{_DIM}{_SEP}{_RST}", flush=True)
+    parts = []
+    if ok_count:    parts.append(f"{_GRN}{ok_count} ok{_RST}")
+    if alarm_count: parts.append(f"{_RED}{alarm_count} alarm{_RST}")
+    if skip_count:  parts.append(f"{_YLW}{skip_count} skipped{_RST}")
+    print(f"  {'  ·  '.join(parts)}", flush=True)
 
     if args.report:
         import subprocess
@@ -145,6 +189,10 @@ def main() -> int:
                         "--backend", args.backend, "--db", args.db,
                         *( ["--conn", args.conn] if args.conn else []),
                         "--out", args.report], check=False)
+        print(f"  {_DIM}Report  ·  {args.report}{_RST}", flush=True)
+
+    print(f"{_DIM}{_SEP}{_RST}", flush=True)
+    print(flush=True)
     return 0
 
 

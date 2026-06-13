@@ -535,7 +535,7 @@ def sync_config(store: "Store", csv_path: Path) -> None:
         f"INSERT INTO {store.t('config')} VALUES (?,?,?,?,?)",
         [(c, p, v, t, now) for (c, p), (v, t) in dedup.items()])
     store.commit()
-    print(f"Synced {len(rows)} config rows from {csv_path} ({store.backend})")
+    print(f"\x1b[2m  ✓  Config synced  ·  {len(rows)} params  ·  {store.backend}\x1b[0m", flush=True)
 
 
 def main() -> int:
