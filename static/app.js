@@ -229,15 +229,10 @@ async function refreshOperator() {
     alarmsByAsset[al.asset_key].push(al);
   }
 
-  // Anchor the timeline to the latest data timestamp in the fleet
-  let maxLastTs = "";
-  for (const a of fleet) {
-    if (a.last_ts && a.last_ts > maxLastTs) maxLastTs = a.last_ts;
-  }
-  const nowTs = maxLastTs ? new Date(maxLastTs + (maxLastTs.includes('Z') || maxLastTs.includes('+') ? '' : 'Z')).getTime() : Date.now();
   const hourMs = 3600000;
-  const renderTimeline = (alarmList) => {
+  const renderTimeline = (alarmList, anchorTsStr) => {
     let html = '<div class="mega-timeline">';
+    const nowTs = anchorTsStr ? new Date(anchorTsStr + (anchorTsStr.includes('Z') || anchorTsStr.includes('+') ? '' : 'Z')).getTime() : Date.now();
     for (let i = 23; i >= 0; i--) {
       const bStart = nowTs - (i + 1) * hourMs;
       const bEnd = nowTs - i * hourMs;
@@ -281,7 +276,7 @@ async function refreshOperator() {
       <div id="mr-sp-${a.asset_key}"></div>
       <div class="num">${fmtNum(a.last_fused)}</div>
       <div style="font-size:12px;font-family:'Share Tech Mono',monospace;">${formatRulesForOperator(a.rules_fired)}</div>
-      <div>${renderTimeline(assetAlarms)}</div>
+      <div>${renderTimeline(assetAlarms, a.last_ts)}</div>
       <div class="num" style="color:var(--warn); font-weight:bold;">${a.unacked_alarms || 0}</div>
     `;
     aRow.querySelector(`[id="mr-state-${a.asset_key}"]`).append(badge(a.state));
@@ -310,7 +305,7 @@ async function refreshOperator() {
           <div class="num">${fmtNum(al.duration_h, 1)} hrs</div>
           <div class="num">Peak: ${fmtNum(al.peak_fused)}</div>
           <div></div>
-          <div>${renderTimeline([al])}</div>
+          <div>${renderTimeline([al], a.last_ts)}</div>
           <div id="mr-ack-${a.asset_key}-${al.start_ts.replace(/[: ]/g, '')}"></div>
         `;
         const btn = document.createElement("button");
