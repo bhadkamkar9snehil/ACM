@@ -119,6 +119,174 @@
   --favicon-stroke: #f59e0b;
 }
 
+/* ── THEME: Midnight Graphite ─────────────────────────────── */
+[data-theme="dark-graphite"] {
+  --bg:          #0f0f0f;
+  --bg2:         #171717;
+  --bg3:         #1f1f1f;
+  --bg4:         #272727;
+  --ink:         #e8e8e8;
+  --ink2:        #a0a0a0;
+  --muted:       #5a5a5a;
+  --card:        #171717;
+  --line:        #2c2c2c;
+  --line2:       #3e3e3e;
+  --brand:       #00d4c8;
+  --brand-lo:    rgba(0,212,200,.13);
+  --brand-hi:    #4dfff7;
+  --ok:          #39d353;
+  --ok-lo:       rgba(57,211,83,.12);
+  --warn:        #ffd93d;
+  --warn-lo:     rgba(255,217,61,.12);
+  --bad:         #ff4757;
+  --bad-lo:      rgba(255,71,87,.14);
+  --blue:        #5352ed;
+  --blue-lo:     rgba(83,82,237,.12);
+  --term-bg:     #050505;
+  --term-ink:    #4a4a4a;
+  --term-hi:     #00d4c8;
+  --term-ok:     #39d353;
+  --term-warn:   #ffd93d;
+  --shadow-card: 0 3px 0 rgba(0,0,0,.5), 0 6px 24px rgba(0,0,0,.45);
+  --shadow-hdr:  0 4px 20px rgba(0,0,0,.55);
+  --btn-face:    #222222;
+  --btn-hi:      #303030;
+  --btn-mid:     #171717;
+  --btn-sh:      #0f0f0f;
+  --btn-deep:    #060606;
+  --btn-3d:
+    inset 0 1px 0 var(--btn-hi),
+    inset 0 -2px 0 var(--btn-deep),
+    inset  1px 0 0 var(--btn-hi),
+    inset -1px 0 0 var(--btn-sh),
+    0 4px 10px rgba(0,0,0,.60),
+    0 1px 2px rgba(0,0,0,.40);
+  --btn-3d-press:
+    inset 0 3px 7px rgba(0,0,0,.70),
+    inset 0 1px 3px rgba(0,0,0,.50),
+    0 1px 0 rgba(255,255,255,.04);
+  --hdr-bg: linear-gradient(160deg, #050505 0%, #0f0f0f 55%, #141414 100%);
+  --tab-rail-bg: #0f0f0f;
+  --chart-score: var(--ok);
+  --chart-score-fill: var(--ok-lo);
+  --chart-alert: var(--bad);
+  --chart-alarm-fill: rgba(0,212,200,.25);
+  --favicon-bg: #171717;
+  --favicon-stroke: #00d4c8;
+}
+
+/* ── THEME: Carbon & Phosphor ───────────────────────────── */
+[data-theme="dark-carbon"] {
+  --bg:          #030603;
+  --bg2:         #080e08;
+  --bg3:         #0e160e;
+  --bg4:         #141e14;
+  --ink:         #a8e0a0;
+  --ink2:        #6aaa60;
+  --muted:       #3a6038;
+  --card:        #080e08;
+  --line:        #1a2a1a;
+  --line2:       #264026;
+  --brand:       #c0ff80;
+  --brand-lo:    rgba(192,255,128,.12);
+  --brand-hi:    #e0ffb0;
+  --ok:          #40ff80;
+  --ok-lo:       rgba(64,255,128,.12);
+  --warn:        #ffee40;
+  --warn-lo:     rgba(255,238,64,.12);
+  --bad:         #ff4040;
+  --bad-lo:      rgba(255,64,64,.14);
+  --blue:        #40c0ff;
+  --blue-lo:     rgba(64,192,255,.12);
+  --term-bg:     #010301;
+  --term-ink:    #3a6038;
+  --term-hi:     #c0ff80;
+  --term-ok:     #40ff80;
+  --term-warn:   #ffee40;
+  --shadow-card: 0 3px 0 rgba(0,0,0,.5), 0 6px 24px rgba(0,0,0,.45);
+  --shadow-hdr:  0 4px 20px rgba(0,0,0,.55);
+  --btn-face:    #0e180e;
+  --btn-hi:      #182818;
+  --btn-mid:     #080e08;
+  --btn-sh:      #030603;
+  --btn-deep:    #010301;
+  --btn-3d:
+    inset 0 1px 0 var(--btn-hi),
+    inset 0 -2px 0 var(--btn-deep),
+    inset  1px 0 0 var(--btn-hi),
+    inset -1px 0 0 var(--btn-sh),
+    0 4px 10px rgba(0,0,0,.60),
+    0 1px 2px rgba(0,0,0,.40);
+  --btn-3d-press:
+    inset 0 3px 7px rgba(0,0,0,.70),
+    inset 0 1px 3px rgba(0,0,0,.50),
+    0 1px 0 rgba(255,255,255,.04);
+  --hdr-bg: linear-gradient(160deg, #010301 0%, #060c06 55%, #080e08 100%);
+  --tab-rail-bg: #030603;
+  --chart-score: var(--ok);
+  --chart-score-fill: var(--ok-lo);
+  --chart-alert: var(--bad);
+  --chart-alarm-fill: rgba(192,255,128,.25);
+  --favicon-bg: #080e08;
+  --favicon-stroke: #c0ff80;
+}
+
+/* ── THEME: Slate & Violet ──────────────────────────────── */
+[data-theme="dark-slate"] {
+  --bg:          #0e0e14;
+  --bg2:         #14141e;
+  --bg3:         #1a1a28;
+  --bg4:         #202030;
+  --ink:         #e4e4f0;
+  --ink2:        #9090b8;
+  --muted:       #505070;
+  --card:        #14141e;
+  --line:        #24243a;
+  --line2:       #30305a;
+  --brand:       #8b5cf6;
+  --brand-lo:    rgba(139,92,246,.14);
+  --brand-hi:    #a78bfa;
+  --ok:          #34d399;
+  --ok-lo:       rgba(52,211,153,.12);
+  --warn:        #fbbf24;
+  --warn-lo:     rgba(251,191,36,.12);
+  --bad:         #f87171;
+  --bad-lo:      rgba(248,113,113,.14);
+  --blue:        #60a5fa;
+  --blue-lo:     rgba(96,165,250,.12);
+  --term-bg:     #06060c;
+  --term-ink:    #404060;
+  --term-hi:     #c4b5fd;
+  --term-ok:     #34d399;
+  --term-warn:   #fbbf24;
+  --shadow-card: 0 3px 0 rgba(0,0,0,.5), 0 6px 24px rgba(0,0,0,.45);
+  --shadow-hdr:  0 4px 20px rgba(0,0,0,.55);
+  --btn-face:    #1c1c2c;
+  --btn-hi:      #28283e;
+  --btn-mid:     #14141e;
+  --btn-sh:      #0e0e14;
+  --btn-deep:    #060610;
+  --btn-3d:
+    inset 0 1px 0 var(--btn-hi),
+    inset 0 -2px 0 var(--btn-deep),
+    inset  1px 0 0 var(--btn-hi),
+    inset -1px 0 0 var(--btn-sh),
+    0 4px 10px rgba(0,0,0,.60),
+    0 1px 2px rgba(0,0,0,.40);
+  --btn-3d-press:
+    inset 0 3px 7px rgba(0,0,0,.70),
+    inset 0 1px 3px rgba(0,0,0,.50),
+    0 1px 0 rgba(255,255,255,.04);
+  --hdr-bg: linear-gradient(160deg, #06060e 0%, #0c0c1a 55%, #101020 100%);
+  --tab-rail-bg: #0e0e14;
+  --chart-score: var(--ok);
+  --chart-score-fill: var(--ok-lo);
+  --chart-alert: var(--bad);
+  --chart-alarm-fill: rgba(139,92,246,.25);
+  --favicon-bg: #14141e;
+  --favicon-stroke: #8b5cf6;
+}
+
 /* ── THEME: Solarised Light (original) ──────────────────── */
 [data-theme="light"],
 [data-theme="light-solarised"] {
@@ -693,6 +861,11 @@ html { height: 100%; color-scheme: dark; }
 [data-theme="light-sage"],
 [data-theme="light-cobalt"],
 [data-theme="light-ivory"] { color-scheme: light; }
+[data-theme="dark-forge"],
+[data-theme="dark-petrol"],
+[data-theme="dark-graphite"],
+[data-theme="dark-carbon"],
+[data-theme="dark-slate"] { color-scheme: dark; }
 body {
   height: 100%; display: flex; flex-direction: column;
   font-family: 'Barlow', sans-serif;
@@ -810,6 +983,7 @@ body {
 .btn-sm     { font-size: 10px; padding: 3px 8px; }
 .btn-hdr    { background: rgba(255,255,255,.08); border-color: rgba(255,255,255,.20); color:#fff; font-size:11px; padding:4px 9px; }
 .btn-hdr:hover { background: rgba(255,255,255,.16); }
+.btn-hdr.btn-brand { background: var(--brand); border-color: color-mix(in srgb,var(--brand) 60%,#000 40%); color:#fff; }
 .btn-hdr.btn-ok  { background: var(--ok);  border-color: color-mix(in srgb,var(--ok) 60%,#000 40%); color:#fff; }
 .btn-hdr.btn-bad { background: var(--bad); border-color: color-mix(in srgb,var(--bad) 60%,#000 40%); color:#fff; }
 .btn-hdr.btn-warn { background: var(--warn); border-color: color-mix(in srgb,var(--warn) 60%,#000 40%); color:#000; }
