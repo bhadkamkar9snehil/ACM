@@ -2,7 +2,7 @@
 
 ACM watches industrial assets and tells you when something is wrong — **with no labels, no training-data preparation, and no human tuning**. Point it at any asset's raw sensor history (CSV or SQL): it learns what normal looks like from t=0 (faults in the history included), sets its own alarm thresholds at the cadence of your data, names the sensors driving every alarm, and retains everything in SQL — human verdicts and the full data-science substrate.
 
-## 📸 Interface Preview
+## Interface Preview
 
 ACM features a fully responsive, dual-theme (Light & Dark) industrial control panel that visualizes the AI's internal state alongside fleet health.
 
@@ -20,7 +20,7 @@ ACM features a fully responsive, dual-theme (Light & Dark) industrial control pa
 
 ---
 
-## 🚀 Quick Start Guide
+## Quick Start Guide
 
 ### 1. One-Command Setup (Windows)
 Open PowerShell and run:
@@ -31,7 +31,7 @@ This installs Git and Python (3.11+) if missing, clones the ACM repository to `$
 
 ---
 
-## 🛡️ Self-Tuned Alarm Rules Explained
+## Self-Tuned Alarm Rules Explained
 
 ACM doesn't just alert on every minor spike. It routes the **Fused Anomaly Score** through a series of intelligent, cadence-aware rules to determine if a true `ALERT` should be triggered. These rules operate without human-defined thresholds:
 
@@ -43,7 +43,7 @@ ACM doesn't just alert on every minor spike. It routes the **Fused Anomaly Score
 
 ---
 
-## 🖥️ Running the Always-On Service (Web UI)
+## Running the Always-On Service (Web UI)
 
 ACM runs as an always-on scheduler and control panel. To start the service:
 
@@ -67,7 +67,7 @@ The control panel features three screens:
 
 ---
 
-## 📊 Running the CARE Wind Farm Benchmark
+## Running the CARE Wind Farm Benchmark
 
 To validate ACM's unsupervised ML core against real-world anomalies, you can run the benchmark on the public CARE-to-Compare Wind Farm dataset.
 
@@ -91,7 +91,7 @@ Once ingested, restart or refresh the service (`python scripts/acm_service.py`) 
 
 ---
 
-## ⚡ One-Shot CLI Scoring & Visualization
+## One-Shot CLI Scoring & Visualization
 
 If you want to score raw data and generate reports without launching the service:
 
@@ -111,7 +111,7 @@ python scripts\acm_report.py --db acm_results.db --list
 
 ---
 
-## 🛠️ Architecture & Core Pipeline
+## Architecture & Core Pipeline
 
 ```mermaid
 flowchart LR
@@ -155,40 +155,40 @@ flowchart LR
 
 ---
 
-## 📁 Repository Map & File Descriptions
+## Repository Map & File Descriptions
 
-- 📁 **`core/`**: The ML engine root directory holding pipeline orchestrators and individual detectors.
-  - 📄 **`pipeline.py`**: Main entry point for scoring an asset. Handles features, operation splits, calibration, and fusion.
-  - 📄 **`alarm_rules.py`**: Implements cadence-aware rules that govern sustained alarms, daily rates, and availability outages.
-  - 📁 **`detectors/`**: Contains the 5 distinct detector models: Auto-regressive (AR1), PCA, Isolation Forest, GMM, and OMR.
-  - 📄 **`fast_features.py`**: High-speed rolling feature engineering using Polars (trends, deviations, and dynamic values).
-  - 📄 **`fuse.py`**: Fuses Z-scores from the detectors, dynamically discounting overlapping or correlated signals.
-  - 📄 **`ml_defaults.py`**: Stores default hyper-parameters, thresholds, and calibration bounds for the ML pipeline.
+-  **`core/`**: The ML engine root directory holding pipeline orchestrators and individual detectors.
+  -  **`pipeline.py`**: Main entry point for scoring an asset. Handles features, operation splits, calibration, and fusion.
+  -  **`alarm_rules.py`**: Implements cadence-aware rules that govern sustained alarms, daily rates, and availability outages.
+  -  **`detectors/`**: Contains the 5 distinct detector models: Auto-regressive (AR1), PCA, Isolation Forest, GMM, and OMR.
+  -  **`fast_features.py`**: High-speed rolling feature engineering using Polars (trends, deviations, and dynamic values).
+  -  **`fuse.py`**: Fuses Z-scores from the detectors, dynamically discounting overlapping or correlated signals.
+  -  **`ml_defaults.py`**: Stores default hyper-parameters, thresholds, and calibration bounds for the ML pipeline.
 
-- 📁 **`scripts/`**: Command-line scripts for service operation, one-shot execution, and validation.
-  - 📄 **`acm_service.py`**: Runs the FastAPI scheduler service and serves the web control panel interface.
-  - 📄 **`acm_feed.py`**: Handles data caching and the readiness/maturity gate to protect the historian from bulk queries.
-  - 📄 **`acm_run.py`**: Runs batch parallel scoring CLI over raw CSV or SQL datasets into the SQL store.
-  - 📄 **`acm_store.py`**: Manages SQL schemas, syncs config parameters, and ingests offline benchmark runs.
-  - 📄 **`acm_report.py`**: Generates self-contained, interactive HTML diagnostic reports for any selected assets.
-  - 📄 **`robustness_matrix.py`**: Validates sensitivity and false-alarm rates across a synthetic matrix of asset and fault types.
-  - 📄 **`care_benchmark.py`**: Evaluates performance metrics against the public CARE-to-Compare wind farm dataset.
-  - 📄 **`download_care_dataset.py`**: Utility script to download and extract the CARE wind farm datasets from Zenodo.
+-  **`scripts/`**: Command-line scripts for service operation, one-shot execution, and validation.
+  -  **`acm_service.py`**: Runs the FastAPI scheduler service and serves the web control panel interface.
+  -  **`acm_feed.py`**: Handles data caching and the readiness/maturity gate to protect the historian from bulk queries.
+  -  **`acm_run.py`**: Runs batch parallel scoring CLI over raw CSV or SQL datasets into the SQL store.
+  -  **`acm_store.py`**: Manages SQL schemas, syncs config parameters, and ingests offline benchmark runs.
+  -  **`acm_report.py`**: Generates self-contained, interactive HTML diagnostic reports for any selected assets.
+  -  **`robustness_matrix.py`**: Validates sensitivity and false-alarm rates across a synthetic matrix of asset and fault types.
+  -  **`care_benchmark.py`**: Evaluates performance metrics against the public CARE-to-Compare wind farm dataset.
+  -  **`download_care_dataset.py`**: Utility script to download and extract the CARE wind farm datasets from Zenodo.
 
-- 📁 **`static/`**: Front-end asset directory containing the web dashboard layout and script assets.
-  - 📄 **`index.html`**: Entry point page structure for the Operator, Reliability Engineer, and Admin panels.
-  - 📄 **`style.css`**: Styling rules defining the layout, color palettes, and interactive responsiveness.
-  - 📄 **`app.js`**: Client-side logic for data polling, chart rendering, and sending API commands.
+-  **`static/`**: Front-end asset directory containing the web dashboard layout and script assets.
+  -  **`index.html`**: Entry point page structure for the Operator, Reliability Engineer, and Admin panels.
+  -  **`style.css`**: Styling rules defining the layout, color palettes, and interactive responsiveness.
+  -  **`app.js`**: Client-side logic for data polling, chart rendering, and sending API commands.
 
-- 📁 **`configs/`**: Configuration files. Contains `config_table.csv` which houses all parameters editable from the UI.
+-  **`configs/`**: Configuration files. Contains `config_table.csv` which houses all parameters editable from the UI.
 
-- 📁 **`tests/`**: Unit and integration testing directory containing pytest suites for service and ML modules.
+-  **`tests/`**: Unit and integration testing directory containing pytest suites for service and ML modules.
 
-- 📄 **`setup_acm.ps1`**: Setup script that installs dependencies and prepares ACM for execution.
+-  **`setup_acm.ps1`**: Setup script that installs dependencies and prepares ACM for execution.
 
 ---
 
-## 💾 Results SQL Schema Reference
+##  Results SQL Schema Reference
 
 | Table / View | Purpose |
 | :--- | :--- |
