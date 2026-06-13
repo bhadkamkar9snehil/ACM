@@ -112,9 +112,8 @@
 
   --hdr-bg: linear-gradient(160deg, #073642 0%, #004052 55%, #005060 100%);
   --tab-rail-bg: #e4ddc8;
-  
-  --chart-score: #073642;
-  --chart-score-fill: rgba(7,54,66,.12);
+  --chart-score: var(--ok);
+  --chart-score-fill: var(--ok-lo);
   --chart-alert: var(--bad);
   --chart-alarm-fill: rgba(203,75,22,.25);
 }
