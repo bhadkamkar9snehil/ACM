@@ -32,10 +32,40 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, List, Optional
 
+import warnings
+warnings.filterwarnings("ignore", category=Warning, module="requests")
+warnings.filterwarnings("ignore", category=Warning, module="urllib3")
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+
+
+_SEP  = "  " + "─" * 53   # ─────...
+_CHK  = "✓"                # ✓
+_TRI  = "▸"                # ▸
+_DOT  = "·"                # ·
+_CYN  = "\x1b[36m"
+_GRN  = "\x1b[32m"
+_DIM  = "\x1b[2m"
+_RST  = "\x1b[0m"
+
+
+def _startup_banner(host: str, port: int, backend: str, db: Optional[str]) -> None:
+    db_label = db or "default"
+    store_label = f"SQL Server  {_DOT}  {db_label}" if backend == "mssql" else f"SQLite  {_DOT}  {db_label}"
+    print(flush=True)
+    print(f"{_CYN}  ACM  {_DOT}  Asset Condition Monitor{_RST}", flush=True)
+    print(f"{_DIM}{_SEP}{_RST}", flush=True)
+    print(f"  {_TRI}  {_CYN}http://{host}:{port}{_RST}", flush=True)
+    print(f"{_DIM}  {_TRI}  Store  {_DOT}  {store_label}{_RST}", flush=True)
+    print(f"{_DIM}{_SEP}{_RST}", flush=True)
+    print(f"{_DIM}  Scheduler active  {_DOT}  Ctrl-C to stop{_RST}", flush=True)
+    print(flush=True)
 
 from fastapi import FastAPI, HTTPException                    # noqa: E402
 from fastapi.responses import FileResponse                    # noqa: E402
@@ -101,6 +131,8 @@ class Service:
         self.backend, self.db, self.conn_str = backend, db, conn_str
         self.store = st.Store(backend, db=db, conn_str=conn_str)
         cfg = _cfg()
+        self._host = str(cfg_get(cfg, "runtime.service.host", "127.0.0.1"))
+        self._port = int(cfg_get(cfg, "runtime.service.port", 8765))
         self.cache_dir = ROOT / str(cfg_get(cfg, "runtime.cache_dir", "data_cache"))
         self.workers = int(cfg_get(cfg, "runtime.workers", 2))
         self.train_window_days = float(cfg_get(cfg, "runtime.train_window_days", 180.0))
@@ -582,13 +614,12 @@ def main() -> int:
     ap.add_argument("--port", type=int, default=None)
     args = ap.parse_args()
 
-    cfg = _cfg()
-    host = args.host or str(cfg_get(cfg, "runtime.service.host", "127.0.0.1"))
-    port = args.port or int(cfg_get(cfg, "runtime.service.port", 8765))
-
     import uvicorn
     app = create_app(args.backend, db=args.db, conn_str=args.conn)
-    print(f"ACM service: http://{host}:{port}  (store: {args.backend})", flush=True)
+    svc = app.state.service
+    host = args.host or svc._host
+    port = args.port or svc._port
+    _startup_banner(host, port, args.backend, args.db)
     uvicorn.run(app, host=host, port=port, log_level="warning")
     return 0
 

@@ -439,18 +439,8 @@
     var(--btn-3d);
 }
 
-/* Tabs: flat dark-concrete style with orange bottom underline
-   on the active tab — matches the Factorio wiki tab bar */
-[data-theme="dark-factory"] .tab-btn {
-  border-radius: 0;
-  border-bottom: 2px solid transparent;
-}
-[data-theme="dark-factory"] .tab-btn.active {
-  background: var(--bg2);
-  border-bottom: 2px solid var(--brand);
-  color: var(--brand);
-  box-shadow: none;
-}
+/* (Tab styling lives in the structural block below — the markup uses
+   `.tab`, not `.tab-btn`; Factorio grey/orange/cream tabs win there.) */
 
 /* Farm section headers in operator matrix */
 [data-theme="dark-factory"] .mega-farm-hdr {
@@ -970,61 +960,70 @@
   --favicon-stroke: #c0392b;
 }
 
+/* ── THEME: Factory token palette lives earlier in this file (the
+   neutral #1a1a1a charcoal block). The structural overrides below are
+   retained from main and blend with that palette via the cascade. ── */
 
-  --bg:          #1a1710;
-  --bg2:         #221f16;
-  --bg3:         #2a2620;
-  --bg4:         #332e26;
-  --ink:         #ede0c0;
-  --ink2:        #c4b090;
-  --muted:       #7a6e58;
-  --card:        #221f16;
-  --line:        #3a3428;
-  --line2:       #504838;
-  --brand:       #e8870a;
-  --brand-lo:    rgba(232,135,10,.14);
-  --brand-hi:    #ffaa33;
-  --ok:          #44c49a;
-  --ok-lo:       rgba(68,196,154,.12);
-  --warn:        #f0c040;
-  --warn-lo:     rgba(240,192,64,.12);
-  --bad:         #e05050;
-  --bad-lo:      rgba(224,80,80,.14);
-  --blue:        #5ba8e8;
-  --blue-lo:     rgba(91,168,232,.12);
-  --term-bg:     #0e0c08;
-  --term-ink:    #7a6e58;
-  --term-hi:     #ffe8a0;
-  --term-ok:     #44c49a;
-  --term-warn:   #f0c040;
-  --shadow-card: 0 3px 0 var(--line), 0 6px 24px rgba(0,0,0,.45);
-  --shadow-hdr:  0 4px 20px rgba(0,0,0,.55);
+/* ── Factory structural overrides (scoped to dark-factory) ── */
 
-  --btn-face:    #342f24;
-  --btn-hi:      #4a4436;
-  --btn-mid:     #28231a;
-  --btn-sh:      #1a1510;
-  --btn-deep:    #0c0a06;
-  --btn-3d:
-    inset 0 1px 0 var(--btn-hi),
-    inset 0 -2px 0 var(--btn-deep),
-    inset  1px 0 0 var(--btn-hi),
-    inset -1px 0 0 var(--btn-sh),
-    0 4px 10px rgba(0,0,0,.60),
-    0 1px 2px rgba(0,0,0,.40);
-  --btn-3d-press:
-    inset 0 3px 7px rgba(0,0,0,.70),
-    inset 0 1px 3px rgba(0,0,0,.50),
-    0 1px 0 rgba(255,255,255,.04);
+/* Buttons: grey face with dark text, matching Factorio's factory default */
+[data-theme="dark-factory"] .btn { color: #1d1c1d; }
+[data-theme="dark-factory"] .btn-brand,
+[data-theme="dark-factory"] .btn-ok,
+[data-theme="dark-factory"] .btn-bad  { color: #fff; }
+[data-theme="dark-factory"] .btn-hdr  { color: #fff; }
 
-  --hdr-bg: linear-gradient(160deg, #1a1510 0%, #221d14 55%, #2a2418 100%);
-  --tab-rail-bg: #1a1710;
-  
-  --chart-score: var(--ok);
-  --chart-score-fill: var(--ok-lo);
-  --chart-alert: var(--bad);
-  --chart-alarm-fill: rgba(232,135,10,.25);
+/* Cards: 4px panel borders — the non-negotiable Factory structural rule */
+[data-theme="dark-factory"] .card { border-width: 4px; }
+[data-theme="dark-factory"] .card-title { border-bottom-width: 2px; }
+
+/* Status dots: 10×10 SQUARES (border-radius: 2px), not circles */
+[data-theme="dark-factory"] .badge::before { border-radius: 2px; }
+
+/* Tab rail: 4px border bottom to match factory panel spec */
+[data-theme="dark-factory"] .tab-rail { border-bottom-width: 4px; }
+
+/* Tabs: grey inactive (Factorio default), orange hover, cream active */
+[data-theme="dark-factory"] .tab {
+  background: #8e8e8e;
+  color: #1d1c1d;
+  border-color: #5c5040;
 }
+[data-theme="dark-factory"] .tab:hover  { background: #e39827; color: #1d1c1d; }
+[data-theme="dark-factory"] .tab.active { background: #414040; color: #ffe6c0; border-color: #5c5040; }
+
+/* Tables: factory grid — separate cells with visible gaps showing --bg-deep */
+[data-theme="dark-factory"] table.data {
+  border-collapse: separate;
+  border-spacing: 2px;
+  background: #1d1c1d;
+}
+[data-theme="dark-factory"] table.data th {
+  background: #242324;
+  border-bottom: none;
+  box-shadow:
+    inset 0  3px 6px rgba(0,0,0,.75),
+    inset 0  1px 2px rgba(0,0,0,.55),
+    inset 3px 0 4px rgba(0,0,0,.20),
+    inset -3px 0 4px rgba(0,0,0,.20),
+    0 -1px 0 rgba(255,255,255,.06),
+    0  1px 0 rgba(0,0,0,.50);
+}
+[data-theme="dark-factory"] table.data td {
+  background: #414040;
+  border-bottom: none;
+  box-shadow:
+    inset 0  1px 0 rgba(255,255,255,.10),
+    inset 1px 0 0 rgba(255,255,255,.06),
+    inset 0 -2px 0 rgba(0,0,0,.50),
+    inset -1px 0 0 rgba(0,0,0,.30),
+    0 2px 4px rgba(0,0,0,.40);
+}
+[data-theme="dark-factory"] table.data tr:last-child td { border-bottom: none; }
+[data-theme="dark-factory"] table.data tr.click:hover td { background: #4c4b4b; }
+[data-theme="dark-factory"] table.data tr.is-alarm td,
+[data-theme="dark-factory"] table.data tr.row-alarm td  { background: rgba(235,92,95,.30) !important; }
+[data-theme="dark-factory"] table.data tr.row-warn td   { background: rgba(255,162,0,.22) !important; }
 
 /* ── Reset ──────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
