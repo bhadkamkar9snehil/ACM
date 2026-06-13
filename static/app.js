@@ -942,6 +942,74 @@ async function refreshEngineer(useCache = false) {
     `;
   }
 
+  // C4 — Alarm duration histogram (Advanced mode only)
+  {
+    const histBody = $("#eng-histogram-body");
+    histBody.innerHTML = "";
+    histBody.style.padding = "8px";
+    histBody.style.display = "block";
+
+    const durations = eps.map(e => e.duration_h).filter(d => d != null && d > 0);
+    if (durations.length === 0) {
+      histBody.innerHTML = `<span style="color:var(--muted);font-size:11px;">No alarm episodes.</span>`;
+    } else {
+      // Bin into buckets: 0-2h, 2-4h, 4-8h, 8-16h, 16-32h, 32h+
+      const BINS = [0, 2, 4, 8, 16, 32, Infinity];
+      const BIN_LABELS = ["0-2h", "2-4h", "4-8h", "8-16h", "16-32h", "32h+"];
+      const binCounts = new Array(BIN_LABELS.length).fill(0);
+      for (const d of durations) {
+        for (let b = 0; b < BINS.length - 1; b++) {
+          if (d >= BINS[b] && d < BINS[b + 1]) { binCounts[b]++; break; }
+        }
+      }
+
+      const maxCount = Math.max(...binCounts, 1);
+      const BAR_H = 80, BAR_W = 32, GAP = 6, LABEL_H = 18;
+      const W = BIN_LABELS.length * (BAR_W + GAP) - GAP;
+      const H = BAR_H + LABEL_H + 4;
+      const dpr = window.devicePixelRatio || 1;
+
+      const cvs = document.createElement("canvas");
+      cvs.width = W * dpr; cvs.height = H * dpr;
+      cvs.style.width = W + "px"; cvs.style.height = H + "px";
+      const ctx = cvs.getContext("2d");
+      ctx.scale(dpr, dpr);
+      ctx.clearRect(0, 0, W, H);
+
+      binCounts.forEach((cnt, b) => {
+        const barH = Math.round((cnt / maxCount) * BAR_H);
+        const x = b * (BAR_W + GAP);
+        const y = BAR_H - barH;
+        // Color by severity: short=ok, medium=warn, long=bad
+        const color = b <= 1 ? getCss("--ok") : b <= 3 ? getCss("--warn") : getCss("--bad");
+        ctx.fillStyle = color;
+        ctx.globalAlpha = 0.85;
+        ctx.fillRect(x, y, BAR_W, barH);
+        ctx.globalAlpha = 1;
+
+        // Count label
+        if (cnt > 0) {
+          ctx.fillStyle = getCss("--ink");
+          ctx.font = `bold ${Math.round(9 * dpr) / dpr}px "Share Tech Mono", monospace`;
+          ctx.textAlign = "center";
+          ctx.fillText(cnt, x + BAR_W / 2, y - 3);
+        }
+
+        // Bin label
+        ctx.fillStyle = getCss("--muted");
+        ctx.font = `${Math.round(8 * dpr) / dpr}px "Barlow Condensed", sans-serif`;
+        ctx.textAlign = "center";
+        ctx.fillText(BIN_LABELS[b], x + BAR_W / 2, BAR_H + LABEL_H - 2);
+      });
+
+      histBody.append(cvs);
+      const note = document.createElement("div");
+      note.style.cssText = "font-size:9px;color:var(--muted);margin-top:6px;font-family:'Share Tech Mono',monospace;";
+      note.textContent = `${durations.length} episodes · median ${fmtNum(durations.sort((a,b)=>a-b)[Math.floor(durations.length/2)], 1)}h`;
+      histBody.append(note);
+    }
+  }
+
   // B6 — Co-firing matrix (Advanced mode only)
   {
     const coBody = $("#eng-cofiring-body");
