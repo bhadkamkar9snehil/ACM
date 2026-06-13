@@ -30,8 +30,9 @@ tmp/
 ## Data files (large, local-only)
 data/
 
-## Output visualization files
+## Output visualization files (local-only — except tracked docs)
 **/*.png
+!docs/screenshots/*.png
 
 ## Local configs with credentials
 configs/sql_connection.ini
