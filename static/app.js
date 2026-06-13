@@ -209,8 +209,42 @@ async function refreshService(useCache = false) {
   $("#btn-resume").classList.toggle("hidden", !svc.paused);
   if (document.activeElement !== $("#inp-tick")) $("#inp-tick").value = svc.tick_minutes;
   window.lastTickAt = svc.last_tick_at;
+  window.tickMinutes = svc.tick_minutes;
+  updateCountdown();
   return svc;
 }
+
+// C1 — Next-tick countdown timer
+function updateCountdown() {
+  const nextEl = $("#svc-next-tick");
+  if (!window.lastTickAt || !window.tickMinutes) {
+    nextEl.textContent = "—";
+    return;
+  }
+  const lastMs = typeof window.lastTickAt === "string"
+    ? new Date(window.lastTickAt.replace(" ", "T")).getTime()
+    : window.lastTickAt * 1000;
+  const nextMs = lastMs + (window.tickMinutes * 60000);
+  const nowMs = Date.now();
+  const deltaMs = nextMs - nowMs;
+
+  if (deltaMs <= 0) {
+    nextEl.textContent = "now";
+    nextEl.style.color = "var(--brand)";
+  } else if (deltaMs < 60000) {
+    const secs = Math.ceil(deltaMs / 1000);
+    nextEl.textContent = `${secs}s`;
+    nextEl.style.color = "var(--warn)";
+  } else {
+    const mins = Math.ceil(deltaMs / 60000);
+    nextEl.textContent = `${mins}m`;
+    nextEl.style.color = "var(--ok)";
+  }
+}
+
+// Update countdown every second
+setInterval(updateCountdown, 1000);
+
 $("#btn-pause").addEventListener("click", async () => {
   await api("/api/service/pause", { method: "POST" });
   toast("Scheduler paused — no ticks until resumed", "info");
