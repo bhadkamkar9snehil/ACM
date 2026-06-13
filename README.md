@@ -7,15 +7,12 @@ ACM watches industrial assets and tells you when something is wrong — **with n
 ACM features a fully responsive, dual-theme (Light & Dark) industrial control panel that visualizes the AI's internal state alongside fleet health.
 
 ### Reliability Engineer Dashboard (Dark Mode)
-![Engineer Dashboard Dark](c_eng_dark.png)
 *Deep-dive diagnostics featuring fused score timelines, interactive detector heatmaps, and culprit sensors.*
 
 ### Fleet Operator Dashboard (Light Mode)
-![Operator Dashboard Light](c_op_light.png)
 *Real-time fleet health dashboard with asset state badges, unified hierarchical timelines, and one-click alarm acknowledgments.*
 
 ### Administration & ML Ops (Light Mode)
-![Admin Dashboard Light](c_adm_light.png)
 *Live service configuration, backend process logs, and ML pipeline health metrics.*
 
 ---
