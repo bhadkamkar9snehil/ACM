@@ -478,7 +478,7 @@ async function refreshEngineer() {
     db.append(tr);
   }
 }
-$("#eng-asset").addEventListener("change", refreshEngineer);
+$("#eng-asset").addEventListener("change", (e) => { selectedAsset = e.target.value; refreshEngineer(); });
 $("#eng-days").addEventListener("change", refreshEngineer);
 
 // --------------------------------------------------------------- admin ----
