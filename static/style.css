@@ -972,6 +972,17 @@ body {
 }
 .btn:hover  { background: var(--btn-hi); }
 .btn:active { box-shadow: var(--btn-3d-press); top: 2px; }
+
+/* --- ACCESSIBILITY FOCUS RING (START) --- */
+/* You can safely remove this block if you don't want keyboard focus rings */
+.btn:focus-visible, .tab:focus-visible {
+  outline: none;
+  box-shadow: var(--btn-3d), 0 0 0 2px var(--brand);
+}
+.btn:active:focus-visible {
+  box-shadow: var(--btn-3d-press), 0 0 0 2px var(--brand);
+}
+/* --- ACCESSIBILITY FOCUS RING (END) --- */
 .btn-brand  { background: var(--brand);  border-color: color-mix(in srgb,var(--brand) 60%,#000 40%); color:#fff; }
 .btn-brand:hover  { background: color-mix(in srgb,var(--brand) 85%,#fff 15%); color:#fff; }
 .btn-ok     { background: var(--ok);    border-color: color-mix(in srgb,var(--ok) 60%,#000 40%);    color:#fff; }

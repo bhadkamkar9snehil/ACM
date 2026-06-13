@@ -162,20 +162,25 @@ selTheme.addEventListener("change", (e) => {
   document.body.dataset.theme = next;
   document.documentElement.dataset.theme = next;
   
-  // Generate dynamic favicon from CSS vars
-  const style = getComputedStyle(document.body);
-  const bg = style.getPropertyValue('--favicon-bg').trim();
-  const stroke = style.getPropertyValue('--favicon-stroke').trim();
-  const svg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='25' fill='${encodeURIComponent(bg)}' stroke='${encodeURIComponent(stroke)}' stroke-width='6'/><path d='M20 65 L40 25 L60 75 L80 35' fill='none' stroke='${encodeURIComponent(stroke)}' stroke-width='12' stroke-linecap='round' stroke-linejoin='round'/></svg>`;
-  document.getElementById("favicon").href = `data:image/svg+xml,${svg}`;
+  // Generate dynamic favicon from CSS vars (deferred to avoid layout thrashing)
+  requestAnimationFrame(() => {
+    const style = getComputedStyle(document.body);
+    const bg = style.getPropertyValue('--favicon-bg').trim();
+    const stroke = style.getPropertyValue('--favicon-stroke').trim();
+    const svg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='25' fill='${encodeURIComponent(bg)}' stroke='${encodeURIComponent(stroke)}' stroke-width='6'/><path d='M20 65 L40 25 L60 75 L80 35' fill='none' stroke='${encodeURIComponent(stroke)}' stroke-width='12' stroke-linecap='round' stroke-linejoin='round'/></svg>`;
+    document.getElementById("favicon").href = `data:image/svg+xml,${svg}`;
+  });
 
-  if (activeTab === "operator") refreshOperator();
-  else if (activeTab === "engineer") refreshEngineer();
+  if (activeTab === "operator") refreshOperator(true);
+  else if (activeTab === "engineer") refreshEngineer(true);
+  else if (activeTab === "admin") refreshAdmin(true);
 });
 
 // ------------------------------------------------------------- service ----
-async function refreshService() {
-  const svc = await api("/api/service");
+let cachedServiceData = null;
+async function refreshService(useCache = false) {
+  if (!useCache || !cachedServiceData) cachedServiceData = await api("/api/service");
+  const svc = cachedServiceData;
   const pill = $("#svc-pill");
   pill.className = "stat-cell " + (svc.tick_in_progress ? "warn" : svc.paused ? "bad" : "ok");
   $("#svc-pill-text").textContent = svc.tick_in_progress ? "TICKING" : svc.paused ? "PAUSED" : "WATCHING";
@@ -230,10 +235,15 @@ function formatRulesForOperator(raw) {
   return txt;
 }
 
-async function refreshOperator() {
-  const [fleet, sparks, alarms] = await Promise.all([
-    api("/api/fleet"), api("/api/fleet/sparklines"), api("/api/alarms?unacked=true"),
-  ]);
+let cachedOperatorData = null;
+async function refreshOperator(useCache = false) {
+  if (!useCache || !cachedOperatorData) {
+    const [fleet, sparks, alarms] = await Promise.all([
+      api("/api/fleet"), api("/api/fleet/sparklines"), api("/api/alarms?unacked=true"),
+    ]);
+    cachedOperatorData = { fleet, sparks, alarms };
+  }
+  const { fleet, sparks, alarms } = cachedOperatorData;
 
   // KPI strip
   const n = fleet.length;
@@ -438,19 +448,25 @@ function heatColor(z) {
   return currentPalette[Math.round(t * (currentPalette.length - 1))];
 }
 
-async function refreshEngineer() {
+let cachedEngineerData = null;
+async function refreshEngineer(useCache = false) {
   await fillAssetSelectors();
   const key = $("#eng-asset").value;
   if (!key) return;
   selectedAsset = key;
   const days = +$("#eng-days").value;
-  const [s, meta, eps, daily, runs] = await Promise.all([
-    api(`/api/assets/${key}/series?days=${days}`),
-    api(`/api/assets/${key}`),
-    api(`/api/assets/${key}/alarms`),
-    api(`/api/assets/${key}/daily`),
-    api(`/api/assets/${key}/runs?limit=1`),
-  ]);
+  
+  if (!useCache || !cachedEngineerData || cachedEngineerData.key !== key || cachedEngineerData.days !== days) {
+    const [s, meta, eps, daily, runs] = await Promise.all([
+      api(`/api/assets/${key}/series?days=${days}`),
+      api(`/api/assets/${key}`),
+      api(`/api/assets/${key}/alarms`),
+      api(`/api/assets/${key}/daily`),
+      api(`/api/assets/${key}/runs?limit=1`),
+    ]);
+    cachedEngineerData = { key, days, s, meta, eps, daily, runs };
+  }
+  const { s, meta, eps, daily, runs } = cachedEngineerData;
   const idx = Object.fromEntries(s.columns.map((c, i) => [c, i]));
   const ts = s.rows.map((r) => new Date(String(r[idx.ts]).replace(" ", "T")).getTime() / 1000);
   const fused = s.rows.map((r) => r[idx.fused]);
@@ -694,8 +710,9 @@ $("#eng-asset").addEventListener("change", (e) => { selectedAsset = e.target.val
 $("#eng-days").addEventListener("change", refreshEngineer);
 
 // --------------------------------------------------------------- admin ----
-async function refreshAdmin() {
-  const svc = await refreshService();
+let cachedAdminData = null;
+async function refreshAdmin(useCache = false) {
+  const svc = await refreshService(useCache);
 
   const cell = (k, v) =>
     `<div class="health-cell"><div class="v">${v}</div><div class="k">${k}</div></div>`;
@@ -713,7 +730,10 @@ async function refreshAdmin() {
       || `<div style="color:var(--ok)">✓ no assets need attention</div>`) +
     `</div>`;
 
-  const assets = await api("/api/monitored-assets");
+  if (!useCache || !cachedAdminData) {
+    cachedAdminData = { assets: await api("/api/monitored-assets") };
+  }
+  const assets = cachedAdminData.assets;
   const tb = $("#adm-assets tbody");
   tb.replaceChildren();
   for (const m of assets) {
@@ -758,7 +778,10 @@ async function refreshAdmin() {
   await fillAssetSelectors();
   const key = $("#adm-runs-asset").value;
   if (key) {
-    const runs = await api(`/api/assets/${key}/runs`);
+    if (!useCache || !cachedAdminData[key]) {
+      cachedAdminData[key] = { runs: await api(`/api/assets/${key}/runs`) };
+    }
+    const runs = cachedAdminData[key].runs;
     const rb = $("#adm-runs tbody");
     rb.replaceChildren();
     for (const r of runs.slice(0, 15)) {
@@ -769,20 +792,27 @@ async function refreshAdmin() {
       rb.append(tr);
     }
     const lvl = $("#adm-log-level").value;
-    const logs = await api(`/api/assets/${key}/runlog${lvl ? `?level=${lvl}` : ""}`);
+    if (!useCache || !cachedAdminData[key][lvl]) {
+      cachedAdminData[key][lvl] = { logs: await api(`/api/assets/${key}/runlog${lvl ? `?level=${lvl}` : ""}`) };
+    }
+    const logs = cachedAdminData[key][lvl].logs;
     $("#adm-runlog").innerHTML = logs.slice(0, 200).map((l) =>
       `<span class="${l.level}">${fmtTs(l.ts)} [${l.level}] ${l.stage}: ` +
       `${String(l.message).replace(/</g, "&lt;")}</span>`).join("\n");
   }
 
-  await refreshConfig();
+  await refreshConfig(useCache);
 }
 
 let configRows = [];
-async function refreshConfig() {
-  configRows = await api("/api/config");
+let cachedConfigData = null;
+async function refreshConfig(useCache = false) {
+  if (!useCache || !cachedConfigData) {
+    cachedConfigData = { configRows: await api("/api/config"), audit: await api("/api/config/audit") };
+  }
+  configRows = cachedConfigData.configRows;
   renderConfig();
-  const audit = await api("/api/config/audit");
+  const audit = cachedConfigData.audit;
   const ab = $("#adm-audit tbody");
   ab.replaceChildren();
   for (const a of audit.slice(0, 30)) {

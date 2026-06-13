@@ -32,15 +32,15 @@
     </div>
     <div class="stat-cell">
       <span class="lbl">Interval</span>
-      <input id="inp-tick" class="val" type="number" min="1" value="5" title="Tick minutes">
+      <input id="inp-tick" class="val" type="number" min="1" value="5" title="Tick minutes" aria-label="Interval in minutes">
     </div>
   </div>
 
   <div class="hdr-right">
-    <button class="btn btn-hdr btn-ok hidden" id="btn-resume">▶ Resume</button>
-    <button class="btn btn-hdr btn-bad"  id="btn-pause">⏸ Pause</button>
-    <button class="btn btn-hdr btn-ok"   id="btn-runnow">⟳ Run now</button>
-    <select class="btn btn-hdr" id="sel-theme" title="Switch theme" style="cursor:pointer; padding-right:6px;">
+    <button type="button" class="btn btn-hdr btn-ok hidden" id="btn-resume">▶ Resume</button>
+    <button type="button" class="btn btn-hdr btn-bad"  id="btn-pause">⏸ Pause</button>
+    <button type="button" class="btn btn-hdr btn-ok"   id="btn-runnow">⟳ Run now</button>
+    <select class="btn btn-hdr" id="sel-theme" aria-label="Switch theme" title="Switch theme" style="cursor:pointer; padding-right:6px;">
       <optgroup label="─── Dark ───">
         <option value="dark-forge">🔥 Forge Dark</option>
         <option value="dark-petrol">🌊 Petrol Dark</option>
@@ -65,9 +65,9 @@
 
 <!-- ═══════════════ TAB RAIL ═════════════════════════════ -->
 <nav class="tab-rail" id="tabs">
-  <button class="tab active" data-tab="operator"><span class="tab-num">01</span> Operator</button>
-  <button class="tab" data-tab="engineer"><span class="tab-num">02</span> Reliability Engineer</button>
-  <button class="tab" data-tab="admin"><span class="tab-num">03</span> Admin / ML Ops</button>
+  <button type="button" class="tab active" data-tab="operator"><span class="tab-num">01</span> Operator</button>
+  <button type="button" class="tab" data-tab="engineer"><span class="tab-num">02</span> Reliability Engineer</button>
+  <button type="button" class="tab" data-tab="admin"><span class="tab-num">03</span> Admin / ML Ops</button>
 </nav>
 
 <!-- ═══════════════ MAIN ══════════════════════════════════ -->
@@ -110,11 +110,11 @@
         <div style="display:flex; align-items:center; gap:16px;">
           <label style="display:flex;align-items:center;gap:6px;">
             <span style="font-family:'Barlow Condensed',sans-serif;font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);">Asset</span>
-            <select id="eng-asset" style="width:auto;"></select>
+            <select id="eng-asset" aria-label="Select Asset" style="width:auto; cursor:pointer;"></select>
           </label>
           <label style="display:flex;align-items:center;gap:6px;">
             <span style="font-family:'Barlow Condensed',sans-serif;font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);">Window</span>
-            <select id="eng-days" style="width:auto;">
+            <select id="eng-days" aria-label="Select Window" style="width:auto; cursor:pointer;">
               <option value="7">7 days</option>
               <option value="30" selected>30 days</option>
               <option value="90">90 days</option>
@@ -185,7 +185,7 @@
       <div class="card" style="margin-bottom: 10px;">
         <div class="card-title">Monitored Assets
           <div class="ct-right">
-            <button class="btn btn-sm btn-brand" id="btn-onboard">＋ Onboard asset</button>
+            <button type="button" class="btn btn-sm btn-brand" id="btn-onboard">＋ Onboard asset</button>
           </div>
         </div>
         <div class="tbl-wrap">
@@ -203,7 +203,7 @@
       <div class="card" style="margin-bottom: 10px;">
         <div class="card-title">Configuration
           <div class="ct-right">
-            <input id="cfg-filter" placeholder="filter…" style="width:110px;height:22px;padding:2px 6px;">
+            <input id="cfg-filter" aria-label="Filter Configuration" placeholder="filter…" style="width:110px;height:22px;padding:2px 6px;">
           </div>
         </div>
         <div class="hint">human-ops only — ML parameters live in code and self-tune</div>
