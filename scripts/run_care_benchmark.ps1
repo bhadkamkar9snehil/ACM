@@ -23,7 +23,7 @@ param(
     [string]$Branch    = "claude/charming-cerf-3mt13j",
     [string]$WorkDir   = "$PWD\acm_care_bench",
     [string[]]$Farms   = @("A"),
-    [string]$Datasets  = "",     # space-separated event IDs; empty = all
+    [string]$Datasets  = ""      # space-separated event IDs; empty = all
 )
 
 $ErrorActionPreference = "Stop"
@@ -48,7 +48,7 @@ python -m pip install --quiet pandas numpy polars pyarrow scikit-learn scipy str
 
 # 3. Dataset
 Write-Host "== Downloading CARE_To_Compare farm(s): $($Farms -join ', ') =="
-python scripts/download_care_dataset.py --dest "$WorkDir\care_data" --farms @Farms
+python scripts/download_care_dataset.py --dest "$WorkDir\care_data" --farms $Farms
 
 # 4. Benchmark
 foreach ($farm in $Farms) {
