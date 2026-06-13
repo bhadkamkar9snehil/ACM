@@ -577,13 +577,9 @@ table.data tr.is-alarm td { background: var(--bad-lo); }
 #tab-engineer > .panel-scroll > .g2 > .card .tbl-wrap { flex: 1; overflow-y: auto; max-height: none; }
 
 /* ── Admin tab fixed layout ──────────────────────────────── */
-#tab-admin .g2 { flex: 1; min-height: 0; }
-#tab-admin .col { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
-#tab-admin .card { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
-#tab-admin .col > .card { flex: 1; }
-#tab-admin > .panel-scroll > .g2 > .card { flex: 1; }
-#tab-admin .col:first-child > .card:first-child { flex: 0 0 auto; margin-bottom: 10px; }
-#tab-admin .tbl-wrap, #tab-admin .term { flex: 1; overflow-y: auto; }
+/* Removed: Admin tab is now a natural scroll layout */
+#tab-admin .card { display: flex; flex-direction: column; }
+#tab-admin .tbl-wrap { max-height: 400px; overflow-y: auto; }
 /* ── Responsive ─────────────────────────────────────────── */
 @media (max-width: 900px) {
   .g2, .g24 { grid-template-columns: 1fr; }
