@@ -64,41 +64,17 @@
         <div class="kpi accent" data-kpi="unacked">  <div class="kpi-num">—</div><div class="kpi-cap">Unacked Alarms</div></div>
       </div>
 
-      <div class="g24" style="flex:1;overflow:hidden;">
-        <div class="col" style="overflow:hidden;">
-          <div class="card" style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
-            <div class="card-title">Unacknowledged Alarms</div>
-            <div class="tbl-wrap" style="flex:1;">
-              <table id="alarm-table" class="data">
-                <thead><tr>
-                  <th>Asset</th><th>Start</th>
-                  <th class="num">Hours</th><th class="num">Peak</th><th></th>
-                </tr></thead>
-                <tbody></tbody>
-              </table>
-            </div>
-            <div id="alarm-empty" class="empty hidden">All clear — nothing waiting on a human. ✓</div>
+      <div class="card" style="flex:1;display:flex;flex-direction:column;overflow:hidden;margin-top:0;">
+        <div class="card-title">Fleet Operations Matrix
+          <div class="ct-right"><span id="fleet-count" class="muted"></span></div>
+        </div>
+        <div class="tbl-wrap" style="flex:1; padding:0;">
+          <div id="mega-matrix" class="mega-list">
+            <!-- Headers and sticky rows injected by JS -->
           </div>
         </div>
-
-        <div class="col" style="overflow:hidden;">
-          <div class="card" style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
-            <div class="card-title">Fleet Matrix
-              <div class="ct-right"><span id="fleet-count" class="muted"></span></div>
-            </div>
-            <div class="tbl-wrap" style="flex:1;">
-              <table id="fleet-table" class="data">
-                <thead><tr>
-                  <th>Asset</th><th>State</th><th>Trend (daily max z)</th>
-                  <th class="num">Fused</th><th>Last data</th><th class="num">Unacked</th>
-                </tr></thead>
-                <tbody></tbody>
-              </table>
-            </div>
-            <div id="fleet-empty" class="empty hidden">
-              No assets yet — onboard your first asset from the <b>Admin</b> tab.
-            </div>
-          </div>
+        <div id="fleet-empty" class="empty hidden">
+          No assets yet — onboard your first asset from the <b>Admin</b> tab.
         </div>
       </div>
 

@@ -200,44 +200,99 @@ async function refreshOperator() {
   setK("attention", nAttn); setK("unacked", alarms.length);
   $('[data-kpi="alarm"]').classList.toggle("lit", nAlarm > 0);
 
-  // fleet table
-  const tb = $("#fleet-table tbody");
-  tb.replaceChildren();
-  fleet.sort((a, b) =>
-    (STATE_ORDER[a.state] ?? 9) - (STATE_ORDER[b.state] ?? 9)
-    || String(a.asset_key).localeCompare(String(b.asset_key)));
-  for (const a of fleet) {
-    const tr = document.createElement("tr");
-    tr.className = "click" + (a.state === "ALARM" ? " is-alarm" : "");
-    tr.append(td(a.asset_key));
-    const st = td(""); st.append(badge(a.state)); tr.append(st);
-    const sp = td(""); sp.append(sparkline(sparks[a.asset_key] || [])); tr.append(sp);
-    tr.append(tdNum(fmtNum(a.last_fused)));
-    tr.append(td(fmtTs(a.last_ts)));
-    tr.append(tdNum(a.unacked_alarms ?? 0));
-    tr.title = a.state_detail || a.rules_fired || "";
-    tr.addEventListener("click", () => openEngineer(a.asset_key));
-    tb.append(tr);
+  // Group alarms
+  const alarmsByAsset = {};
+  for (const al of alarms) {
+    if (!alarmsByAsset[al.asset_key]) alarmsByAsset[al.asset_key] = [];
+    alarmsByAsset[al.asset_key].push(al);
   }
+
+  const nowTs = Date.now();
+  const hourMs = 3600000;
+  const renderTimeline = (alarmList) => {
+    let html = '<div class="mega-timeline">';
+    for (let i = 23; i >= 0; i--) {
+      const bStart = nowTs - (i + 1) * hourMs;
+      const bEnd = nowTs - i * hourMs;
+      let active = false, maxPeak = 0;
+      for (const al of alarmList) {
+        const alStart = new Date(al.start_ts).getTime();
+        const alEnd = al.end_ts ? new Date(al.end_ts).getTime() : nowTs;
+        if (alStart < bEnd && alEnd > bStart) { active = true; maxPeak = Math.max(maxPeak, al.peak_fused || 0); }
+      }
+      html += `<div class="mt-block ${active ? (maxPeak > 5.0 ? 'danger' : 'warn') : ''}"></div>`;
+    }
+    return html + '</div>';
+  };
+
+  const mx = $("#mega-matrix");
+  mx.innerHTML = `
+    <div class="mega-hdr">
+      <div>Asset / Episode</div>
+      <div>Status / Start</div>
+      <div>Trend / Hrs</div>
+      <div>Fused / Peak</div>
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <span class="mt-empty">-24h</span><span class="mt-empty">Timeline Matrix</span><span class="mt-empty">Now</span>
+      </div>
+      <div>Unack</div>
+    </div>
+  `;
+
+  fleet.sort((a, b) => (STATE_ORDER[a.state] ?? 9) - (STATE_ORDER[b.state] ?? 9) || String(a.asset_key).localeCompare(String(b.asset_key)));
+
+  for (const a of fleet) {
+    const assetAlarms = alarmsByAsset[a.asset_key] || [];
+    
+    // Asset Row
+    const aRow = document.createElement("div");
+    aRow.className = "mega-asset-row";
+    aRow.innerHTML = `
+      <div style="font-weight:bold; color:var(--text);"><span style="display:inline-block;width:14px;color:var(--muted);">${assetAlarms.length ? '▼' : '►'}</span> ${a.asset_key}</div>
+      <div id="mr-state-${a.asset_key}"></div>
+      <div id="mr-sp-${a.asset_key}"></div>
+      <div class="num">${fmtNum(a.last_fused)}</div>
+      <div>${renderTimeline(assetAlarms)}</div>
+      <div class="num" style="color:var(--warn); font-weight:bold;">${a.unacked_alarms || 0}</div>
+    `;
+    aRow.querySelector(`[id="mr-state-${a.asset_key}"]`).append(badge(a.state));
+    aRow.querySelector(`[id="mr-sp-${a.asset_key}"]`).append(sparkline(sparks[a.asset_key] || []));
+    aRow.addEventListener("click", (e) => {
+      if (e.target.tagName !== 'BUTTON') {
+        aRow.classList.toggle('collapsed');
+      }
+    });
+    // Add double click handler to open engineer view
+    aRow.addEventListener("dblclick", () => openEngineer(a.asset_key));
+    mx.append(aRow);
+
+    // Alarm Rows
+    if (assetAlarms.length > 0) {
+      const alContainer = document.createElement("div");
+      alContainer.className = "mega-alarms";
+      for (const al of assetAlarms) {
+        const alRow = document.createElement("div");
+        alRow.className = "mega-alarm-row";
+        alRow.innerHTML = `
+          <div style="color:var(--muted);">└── Episode</div>
+          <div>${fmtTs(al.start_ts)}</div>
+          <div class="num">${fmtNum(al.duration_h, 1)} hrs</div>
+          <div class="num">Peak: ${fmtNum(al.peak_fused)}</div>
+          <div>${renderTimeline([al])}</div>
+          <div id="mr-ack-${a.asset_key}-${al.start_ts.replace(/[: ]/g, '')}"></div>
+        `;
+        const btn = document.createElement("button");
+        btn.className = "btn btn-sm btn-warn"; btn.textContent = "Ack";
+        btn.addEventListener("click", () => ackAlarm(a.asset_key, al.start_ts));
+        alRow.querySelector(`[id="mr-ack-${a.asset_key}-${al.start_ts.replace(/[: ]/g, '')}"]`).append(btn);
+        alContainer.append(alRow);
+      }
+      mx.append(alContainer);
+    }
+  }
+
   $("#fleet-count").textContent = n ? `${n} assets` : "";
   $("#fleet-empty").classList.toggle("hidden", n > 0);
-
-  // unacked alarms
-  const ab = $("#alarm-table tbody");
-  ab.replaceChildren();
-  for (const al of alarms) {
-    const tr = document.createElement("tr");
-    tr.append(td(al.asset_key), td(fmtTs(al.start_ts)),
-              tdNum(fmtNum(al.duration_h, 1)), tdNum(fmtNum(al.peak_fused)));
-    const cell = td("");
-    const btn = document.createElement("button");
-    btn.className = "btn btn-sm btn-warn";
-    btn.textContent = "Ack";
-    btn.addEventListener("click", () => ackAlarm(al.asset_key, al.start_ts));
-    cell.append(btn); tr.append(cell);
-    ab.append(tr);
-  }
-  $("#alarm-empty").classList.toggle("hidden", alarms.length > 0);
 }
 
 function ackAlarm(assetKey, startTs) {
