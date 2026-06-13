@@ -346,33 +346,24 @@ table.data tr.is-alarm td { background: var(--bad-lo); }
 .kpis { display: flex; gap: 8px; margin-bottom: 10px; flex-shrink: 0; }
 .kpi {
   flex: 1; min-width: 100px;
-  background: var(--card); border: 1px solid var(--line);
+  background: var(--ink2); border: 1px solid var(--ink2);
   box-shadow: var(--shadow-card); padding: 12px 10px;
   display: flex; flex-direction: column; align-items: center;
-  border-top: 3px solid var(--ink2);
 }
 .kpi.ok    { background: var(--ok); border-color: var(--ok); }
 .kpi.alarm { background: var(--bad); border-color: var(--bad); }
 .kpi.warn  { background: var(--warn); border-color: var(--warn); }
 .kpi.accent{ background: var(--brand); border-color: var(--brand); }
 
-/* Apply contrasting text color to all lit KPIs */
-.kpi.ok .kpi-num, .kpi.ok .kpi-cap,
-.kpi.alarm .kpi-num, .kpi.alarm .kpi-cap,
-.kpi.warn .kpi-num, .kpi.warn .kpi-cap,
-.kpi.accent .kpi-num, .kpi.accent .kpi-cap {
-  color: var(--bg);
-}
-
 .kpi-num {
   font-family: 'Share Tech Mono', monospace;
-  font-size: 26px; font-weight: bold; color: var(--ink);
+  font-size: 26px; font-weight: bold; color: var(--bg);
   line-height: 1; margin-bottom: 4px;
 }
 .kpi-cap {
   font-family: 'Barlow Condensed', sans-serif;
   font-size: 11px; font-weight: 700; text-transform: uppercase;
-  letter-spacing: .10em; color: var(--muted);
+  letter-spacing: .10em; color: var(--bg); opacity: 0.85;
 }
 .kpi.alarm.lit { border-color: var(--bad); box-shadow: 0 0 18px var(--bad-lo), var(--shadow-card); }
 
