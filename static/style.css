@@ -554,7 +554,7 @@ table.data tr.is-alarm td { background: var(--bad-lo); }
 }
 .mega-asset-row.collapsed + .mega-alarms { display: none; }
 .mega-timeline { display: flex; align-items: center; gap: 2px; width: 100%; }
-.mt-block { flex: 1; height: 16px; background: rgba(255,255,255,0.03); border-radius: 1px; }
+.mt-block { flex: 1; height: 16px; background: var(--bg3); border-radius: 1px; }
 .mt-block.warn { background: var(--warn); }
 .mt-block.danger { background: #e05050; }
 .mt-empty { color: var(--muted); font-size: 11px; font-family: sans-serif; font-style: italic; }
