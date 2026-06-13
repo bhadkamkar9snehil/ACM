@@ -941,6 +941,98 @@ async function refreshEngineer(useCache = false) {
       </div>
     `;
   }
+
+  // B6 — Co-firing matrix (Advanced mode only)
+  {
+    const coBody = $("#eng-cofiring-body");
+    coBody.innerHTML = "";
+
+    // Count co-fires across all alarm samples in series
+    const N6 = 6;
+    const THRESH = 2.0; // z ≥ 2 = "active"
+    const counts = Array.from({length: N6}, () => new Array(N6).fill(0));
+    const selfCounts = new Array(N6).fill(0);
+
+    for (let i = 0; i < s.rows.length; i++) {
+      if (!s.rows[i][idx.alarm]) continue; // only alarm samples
+      const active = DET_VARS.map(col => (s.rows[i][idx[col]] ?? 0) >= THRESH);
+      for (let r = 0; r < N6; r++) {
+        if (!active[r]) continue;
+        selfCounts[r]++;
+        for (let c = 0; c < N6; c++) {
+          if (active[c]) counts[r][c]++;
+        }
+      }
+    }
+
+    const totalAlarmSamples = s.rows.filter(r => r[idx.alarm]).length;
+    if (totalAlarmSamples === 0) {
+      coBody.innerHTML = `<span style="color:var(--muted);font-size:11px;">No alarm data.</span>`;
+    } else {
+      // Normalize: freq[r][c] = pct of r's active samples when c also active
+      const freq = counts.map((row, r) =>
+        row.map(v => selfCounts[r] > 0 ? v / selfCounts[r] : 0)
+      );
+
+      const CELL = 28, GAP = 2;
+      const LABEL = 32; // left label width
+      const W = LABEL + N6 * (CELL + GAP) - GAP;
+      const H = LABEL + N6 * (CELL + GAP) - GAP;
+      const dpr = window.devicePixelRatio || 1;
+
+      const cvs = document.createElement("canvas");
+      cvs.width = W * dpr; cvs.height = H * dpr;
+      cvs.style.width = W + "px"; cvs.style.height = H + "px";
+      cvs.style.imageRendering = "pixelated";
+      const ctx = cvs.getContext("2d");
+      ctx.scale(dpr, dpr);
+      ctx.clearRect(0, 0, W, H);
+
+      // Column labels (top)
+      ctx.font = `bold ${Math.round(7 * dpr) / dpr}px "Barlow Condensed", sans-serif`;
+      ctx.textAlign = "center";
+      DET_NAMES.forEach((name, c) => {
+        ctx.fillStyle = getCss(DET_VARS_CSS[c]);
+        ctx.fillText(name, LABEL + c * (CELL + GAP) + CELL / 2, LABEL - 4);
+      });
+
+      // Row labels (left) + cells
+      DET_NAMES.forEach((name, r) => {
+        // Row label
+        ctx.fillStyle = getCss(DET_VARS_CSS[r]);
+        ctx.textAlign = "right";
+        ctx.fillText(name, LABEL - 4, LABEL + r * (CELL + GAP) + CELL / 2 + 3);
+
+        DET_NAMES.forEach((_, c) => {
+          const v = freq[r][c];
+          const x = LABEL + c * (CELL + GAP);
+          const y = LABEL + r * (CELL + GAP);
+
+          // Cell background via heatColor
+          ctx.fillStyle = r === c
+            ? getCss("--blue-lo")
+            : heatColor(v * 10);
+          ctx.fillRect(x, y, CELL, CELL);
+
+          // Percent text
+          const pct = Math.round(v * 100);
+          ctx.fillStyle = v > 0.5 ? getCss("--bg") : getCss("--ink2");
+          ctx.textAlign = "center";
+          ctx.fillText(pct > 0 ? `${pct}%` : "—", x + CELL / 2, y + CELL / 2 + 3);
+        });
+      });
+
+      coBody.style.padding = "8px";
+      coBody.style.display = "flex";
+      coBody.style.flexDirection = "column";
+      coBody.style.gap = "6px";
+      coBody.append(cvs);
+      const note = document.createElement("div");
+      note.style.cssText = "font-size:9px;color:var(--muted);font-family:'Share Tech Mono',monospace;";
+      note.textContent = `Based on ${totalAlarmSamples} alarm samples · threshold z≥${THRESH}`;
+      coBody.append(note);
+    }
+  }
 }
 $("#eng-asset").addEventListener("change", (e) => { selectedAsset = e.target.value; refreshEngineer(); });
 $("#eng-days").addEventListener("change", refreshEngineer);
