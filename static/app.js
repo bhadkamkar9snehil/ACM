@@ -176,6 +176,25 @@ selTheme.addEventListener("change", (e) => {
   else if (activeTab === "admin") refreshAdmin(true);
 });
 
+// --------------------------------------------------------- mode toggle ----
+const btnMode = document.getElementById("btn-mode");
+function applyMode(mode) {
+  document.documentElement.dataset.mode = mode;
+  localStorage.setItem("acm-mode", mode);
+  btnMode.textContent = mode === "basic" ? "⊕ Advanced" : "⊖ Basic";
+  btnMode.classList.toggle("active", mode === "advanced");
+  // Charts must re-render into new grid-area widths
+  if (activeTab === "engineer") refreshEngineer(true);
+  else if (activeTab === "operator") refreshOperator(true);
+}
+(function () {
+  const saved = localStorage.getItem("acm-mode") || "basic";
+  applyMode(saved);
+})();
+btnMode.addEventListener("click", () =>
+  applyMode(document.documentElement.dataset.mode === "basic" ? "advanced" : "basic")
+);
+
 // ------------------------------------------------------------- service ----
 let cachedServiceData = null;
 async function refreshService(useCache = false) {

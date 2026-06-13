@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="light-solarised">
+<html lang="en" data-theme="light-solarised" data-mode="basic">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -37,6 +37,7 @@
   </div>
 
   <div class="hdr-right">
+    <button type="button" class="btn btn-hdr" id="btn-mode">⊕ Advanced</button>
     <button type="button" class="btn btn-hdr btn-ok hidden" id="btn-resume">▶ Resume</button>
     <button type="button" class="btn btn-hdr btn-bad"  id="btn-pause">⏸ Pause</button>
     <button type="button" class="btn btn-hdr btn-ok"   id="btn-runnow">⟳ Run now</button>
@@ -76,77 +77,102 @@
   <!-- ══════════════ 01 OPERATOR ═══════════════════════ -->
   <section id="tab-operator" class="tabpane active">
     <div class="panel-scroll">
+      <div class="op-layout">
 
-      <div id="kpis" class="kpis">
-        <div class="kpi"        data-kpi="total">    <div class="kpi-num">—</div><div class="kpi-cap">Assets</div></div>
-        <div class="kpi ok"     data-kpi="ok">       <div class="kpi-num">—</div><div class="kpi-cap">Healthy</div></div>
-        <div class="kpi alarm"  data-kpi="alarm">    <div class="kpi-num">—</div><div class="kpi-cap">In Alarm</div></div>
-        <div class="kpi warn"   data-kpi="attention"><div class="kpi-num">—</div><div class="kpi-cap">Need Attention</div></div>
-        <div class="kpi accent" data-kpi="unacked">  <div class="kpi-num">—</div><div class="kpi-cap">Unacked Alarms</div></div>
-      </div>
-
-      <div class="card" style="flex:1;display:flex;flex-direction:column;overflow:hidden;margin-top:0;">
-        <div class="card-title">Fleet Operations Matrix
-          <div class="ct-right"><span id="fleet-count" class="muted"></span></div>
-        </div>
-        <div class="tbl-wrap" style="flex:1; padding:0;">
-          <div id="mega-matrix" class="mega-list">
-            <!-- Headers and sticky rows injected by JS -->
+        <div class="op-kpis">
+          <div id="kpis" class="kpis">
+            <div class="kpi"        data-kpi="total">    <div class="kpi-num">—</div><div class="kpi-cap">Assets</div></div>
+            <div class="kpi ok"     data-kpi="ok">       <div class="kpi-num">—</div><div class="kpi-cap">Healthy</div></div>
+            <div class="kpi alarm"  data-kpi="alarm">    <div class="kpi-num">—</div><div class="kpi-cap">In Alarm</div></div>
+            <div class="kpi warn"   data-kpi="attention"><div class="kpi-num">—</div><div class="kpi-cap">Need Attention</div></div>
+            <div class="kpi accent" data-kpi="unacked">  <div class="kpi-num">—</div><div class="kpi-cap">Unacked Alarms</div></div>
           </div>
         </div>
-        <div id="fleet-empty" class="empty hidden">
-          No assets yet — onboard your first asset from the <b>Admin</b> tab.
-        </div>
-      </div>
 
+        <div class="op-health adv card">
+          <div class="card-title">Fleet Health History <span class="muted" style="font-weight:400;font-size:10px;">30 days</span></div>
+          <div id="op-health-chart" style="height:120px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:11px;">
+            chart coming in next slice
+          </div>
+        </div>
+
+        <div class="op-matrix card" style="flex:1;display:flex;flex-direction:column;overflow:hidden;margin-top:0;">
+          <div class="card-title">Fleet Operations Matrix
+            <div class="ct-right"><span id="fleet-count" class="muted"></span></div>
+          </div>
+          <div class="tbl-wrap" style="flex:1; padding:0;">
+            <div id="mega-matrix" class="mega-list">
+              <!-- Headers and sticky rows injected by JS -->
+            </div>
+          </div>
+          <div id="fleet-empty" class="empty hidden">
+            No assets yet — onboard your first asset from the <b>Admin</b> tab.
+          </div>
+        </div>
+
+        <div class="op-causes adv card">
+          <div class="card-title">Top Alarm Causes — Fleet-Wide</div>
+          <div id="op-causes-body" style="padding:8px;color:var(--muted);font-size:11px;">
+            loading…
+          </div>
+        </div>
+
+      </div>
     </div>
   </section>
 
   <!-- ══════════════ 02 ENGINEER ═══════════════════════ -->
   <section id="tab-engineer" class="tabpane">
     <div class="panel-scroll">
+      <div class="eng-layout">
 
-      <div class="card" style="margin-bottom:10px; display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; padding:8px 12px;">
-        <div style="display:flex; align-items:center; gap:16px;">
-          <label style="display:flex;align-items:center;gap:6px;">
-            <span style="font-family:'Barlow Condensed',sans-serif;font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);">Asset</span>
-            <select id="eng-asset" aria-label="Select Asset" style="width:auto; cursor:pointer;"></select>
-          </label>
-          <label style="display:flex;align-items:center;gap:6px;">
-            <span style="font-family:'Barlow Condensed',sans-serif;font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);">Window</span>
-            <select id="eng-days" aria-label="Select Window" style="width:auto; cursor:pointer;">
-              <option value="7">7 days</option>
-              <option value="30" selected>30 days</option>
-              <option value="90">90 days</option>
-              <option value="36500">Everything</option>
-            </select>
-          </label>
+        <div class="eng-topbar card" style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; padding:8px 12px;">
+          <div style="display:flex; align-items:center; gap:16px;">
+            <label style="display:flex;align-items:center;gap:6px;">
+              <span style="font-family:'Barlow Condensed',sans-serif;font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);">Asset</span>
+              <select id="eng-asset" aria-label="Select Asset" style="width:auto; cursor:pointer;"></select>
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;">
+              <span style="font-family:'Barlow Condensed',sans-serif;font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);">Window</span>
+              <select id="eng-days" aria-label="Select Window" style="width:auto; cursor:pointer;">
+                <option value="7">7 days</option>
+                <option value="30" selected>30 days</option>
+                <option value="90">90 days</option>
+                <option value="36500">Everything</option>
+              </select>
+            </label>
+          </div>
+          <div id="eng-chips" class="chips" style="margin:0;"></div>
         </div>
-        <div id="eng-chips" class="chips" style="margin:0;"></div>
-      </div>
 
-      <div id="eng-culprits" class="msgbar hidden" style="margin-bottom:10px;"></div>
+        <div id="eng-culprits" class="eng-culprits msgbar hidden"></div>
 
-      <div class="card" style="margin-bottom:10px;">
-        <div class="card-title">Fused Anomaly Score
-          <div class="ct-right">
-            <span class="legend">
-              <span class="sw" style="background:var(--chart-score);"></span>fused z
-              <span class="sw dash"></span>alert level
-            </span>
+        <div class="eng-chart card">
+          <div class="card-title">Fused Anomaly Score
+            <div class="ct-right">
+              <span class="legend">
+                <span class="sw" style="background:var(--chart-score);"></span>fused z
+                <span class="sw dash"></span>alert level
+              </span>
+            </div>
+          </div>
+          <div id="eng-chart"></div>
+          <div id="eng-heatwrap" style="margin-top:8px;">
+            <div id="eng-heatlabels"></div>
+            <canvas id="eng-heatmap" height="64" style="flex:1;background:var(--bg2);"></canvas>
           </div>
         </div>
-        <div id="eng-chart"></div>
-        <div id="eng-heatwrap" style="margin-top:8px;">
-          <div id="eng-heatlabels"></div>
-          <canvas id="eng-heatmap" height="64" style="flex:1;background:var(--bg2);"></canvas>
-        </div>
-      </div>
 
-      <div class="g2">
-        <div class="card">
+        <div class="eng-pattern adv card">
+          <div class="card-title">Alarm Pattern — Day × Hour</div>
+          <div id="eng-pattern-body" style="height:150px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:11px;">
+            heatmap coming in next slice
+          </div>
+        </div>
+
+        <div class="eng-episodes card" style="display:flex;flex-direction:column;overflow:hidden;">
           <div class="card-title">Alarm Episodes</div>
-          <div class="tbl-wrap">
+          <div class="tbl-wrap" style="flex:1;overflow-y:auto;">
             <table id="eng-episodes" class="data">
               <thead><tr>
                 <th>Start</th><th>End</th><th class="num">Hours</th><th class="num">Peak</th><th>Ack</th>
@@ -156,9 +182,17 @@
           </div>
           <div id="eng-eps-empty" class="empty hidden">No alarm episodes in store.</div>
         </div>
-        <div class="card">
+
+        <div class="eng-cofiring adv card" style="display:flex;flex-direction:column;overflow:hidden;">
+          <div class="card-title">Co-firing Matrix</div>
+          <div id="eng-cofiring-body" style="flex:1;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:11px;">
+            matrix coming in next slice
+          </div>
+        </div>
+
+        <div class="eng-daily card" style="display:flex;flex-direction:column;overflow:hidden;">
           <div class="card-title">Daily Stats</div>
-          <div class="tbl-wrap">
+          <div class="tbl-wrap" style="flex:1;overflow-y:auto;">
             <table id="eng-daily" class="data">
               <thead><tr>
                 <th>Day</th><th class="num num-gauge">Fused max</th><th class="num">Rate z≥3</th>
@@ -168,96 +202,119 @@
             </table>
           </div>
         </div>
-      </div>
 
+        <div class="eng-histogram adv card" style="display:flex;flex-direction:column;">
+          <div class="card-title">Alarm Duration Distribution</div>
+          <div id="eng-histogram-body" style="flex:1;min-height:120px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:11px;">
+            histogram coming in next slice
+          </div>
+        </div>
+
+        <div class="eng-mttd card">
+          <div class="card-title">Reliability Metrics</div>
+          <div id="eng-mttd-body" style="padding:8px;color:var(--muted);font-size:11px;">
+            MTTD / MTTR coming in next slice
+          </div>
+        </div>
+
+      </div>
     </div>
   </section>
 
   <!-- ══════════════ 03 ADMIN ══════════════════════════ -->
   <section id="tab-admin" class="tabpane">
     <div class="panel-scroll">
+      <div class="adm-layout">
 
-      <div class="card" style="margin-bottom: 10px;">
-        <div class="card-title">Service Health</div>
-        <div id="adm-health"></div>
-      </div>
+        <div class="adm-health card">
+          <div class="card-title">Service Health</div>
+          <div id="adm-health"></div>
+        </div>
 
-      <div class="card" style="margin-bottom: 10px;">
-        <div class="card-title">Monitored Assets
-          <div class="ct-right">
-            <button type="button" class="btn btn-sm btn-brand" id="btn-onboard">＋ Onboard asset</button>
+        <div class="adm-assets card">
+          <div class="card-title">Monitored Assets
+            <div class="ct-right">
+              <button type="button" class="btn btn-sm btn-brand" id="btn-onboard">＋ Onboard asset</button>
+            </div>
+          </div>
+          <div class="tbl-wrap">
+            <table id="adm-assets" class="data">
+              <thead><tr>
+                <th>Asset</th><th>State</th><th>Source</th>
+                <th>Last run</th><th class="num">s</th><th></th>
+              </tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div id="adm-assets-empty" class="empty hidden">Nothing monitored yet.</div>
+        </div>
+
+        <div class="adm-runhist adv card">
+          <div class="card-title">Run Duration History</div>
+          <div id="adm-runhist-body" style="height:120px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:11px;">
+            sparkline chart coming in next slice
           </div>
         </div>
-        <div class="tbl-wrap">
-          <table id="adm-assets" class="data">
-            <thead><tr>
-              <th>Asset</th><th>State</th><th>Source</th>
-              <th>Last run</th><th class="num">s</th><th></th>
-            </tr></thead>
-            <tbody></tbody>
-          </table>
-        </div>
-        <div id="adm-assets-empty" class="empty hidden">Nothing monitored yet.</div>
-      </div>
 
-      <div class="card" style="margin-bottom: 10px;">
-        <div class="card-title">Configuration
-          <div class="ct-right">
-            <input id="cfg-filter" aria-label="Filter Configuration" placeholder="filter…" style="width:110px;height:22px;padding:2px 6px;">
+        <div class="adm-runs card">
+          <div class="card-title">Run History
+            <div class="ct-right">
+              <select id="adm-runs-asset" style="padding:2px;height:22px;font-size:11px;"></select>
+            </div>
+          </div>
+          <div class="tbl-wrap">
+            <table id="adm-runs" class="data">
+              <thead><tr>
+                <th>Started</th><th>Status</th><th>Rules fired</th><th>Notes</th><th class="num">s</th>
+              </tr></thead>
+              <tbody></tbody>
+            </table>
           </div>
         </div>
-        <div class="hint">human-ops only — ML parameters live in code and self-tune</div>
-        <div class="tbl-wrap">
-          <table id="adm-config" class="data">
-            <thead><tr>
-              <th>Category</th><th>Param</th><th>Value</th><th>Type</th><th></th>
-            </tr></thead>
-            <tbody></tbody>
-          </table>
-        </div>
-      </div>
 
-      <div class="card" style="margin-bottom: 10px;">
-        <div class="card-title">Config Audit Trail</div>
-        <div class="tbl-wrap">
-          <table id="adm-audit" class="data">
-            <thead><tr>
-              <th>When</th><th>Who</th><th>Param</th><th>Old → New</th><th>Note</th>
-            </tr></thead>
-            <tbody></tbody>
-          </table>
-        </div>
-        <div id="adm-audit-empty" class="empty hidden">No config changes yet.</div>
-      </div>
-
-      <div class="card" style="margin-bottom: 10px;">
-        <div class="card-title">Run History
-          <div class="ct-right">
-            <select id="adm-runs-asset" style="padding:2px;height:22px;font-size:11px;"></select>
+        <div class="adm-config card">
+          <div class="card-title">Configuration
+            <div class="ct-right">
+              <input id="cfg-filter" aria-label="Filter Configuration" placeholder="filter…" style="width:110px;height:22px;padding:2px 6px;">
+            </div>
+          </div>
+          <div class="hint">human-ops only — ML parameters live in code and self-tune</div>
+          <div class="tbl-wrap">
+            <table id="adm-config" class="data">
+              <thead><tr>
+                <th>Category</th><th>Param</th><th>Value</th><th>Type</th><th></th>
+              </tr></thead>
+              <tbody></tbody>
+            </table>
           </div>
         </div>
-        <div class="tbl-wrap">
-          <table id="adm-runs" class="data">
-            <thead><tr>
-              <th>Started</th><th>Status</th><th>Rules fired</th><th>Notes</th><th class="num">s</th>
-            </tr></thead>
-            <tbody></tbody>
-          </table>
-        </div>
-      </div>
 
-      <div class="card">
-        <div class="card-title">Run Log
-          <div class="ct-right">
-            <select id="adm-log-level" style="padding:2px;height:22px;font-size:11px;">
-              <option value="">all levels</option>
-              <option>INFO</option><option>WARN</option><option>ERROR</option>
-            </select>
+        <div class="adm-audit card">
+          <div class="card-title">Config Audit Trail</div>
+          <div class="tbl-wrap">
+            <table id="adm-audit" class="data">
+              <thead><tr>
+                <th>When</th><th>Who</th><th>Param</th><th>Old → New</th><th>Note</th>
+              </tr></thead>
+              <tbody></tbody>
+            </table>
           </div>
+          <div id="adm-audit-empty" class="empty hidden">No config changes yet.</div>
         </div>
-        <pre id="adm-runlog" class="term" style="margin:0;min-height:300px; max-height: 400px; overflow-y: auto;"></pre>
-      </div>
 
+        <div class="adm-log card" style="grid-column: 1 / -1;">
+          <div class="card-title">Run Log
+            <div class="ct-right">
+              <select id="adm-log-level" style="padding:2px;height:22px;font-size:11px;">
+                <option value="">all levels</option>
+                <option>INFO</option><option>WARN</option><option>ERROR</option>
+              </select>
+            </div>
+          </div>
+          <pre id="adm-runlog" class="term" style="margin:0;min-height:300px; max-height: 400px; overflow-y: auto;"></pre>
+        </div>
+
+      </div>
     </div>
   </section>
 

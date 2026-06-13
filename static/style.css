@@ -61,6 +61,13 @@
   --chart-alarm-fill: rgba(232,135,10,.25);
   --favicon-bg: #221f16;
   --favicon-stroke: #e8870a;
+  /* Detector palette — shared across all themes */
+  --det-ar1:     #f4a261;
+  --det-pca-spe: #4cc9f0;
+  --det-pca-t2:  #9b5de5;
+  --det-iforest: #06d6a0;
+  --det-gmm:     #ef476f;
+  --det-omr:     #ffd166;
 }
 
 /* ── THEME: Petrol Dark ─────────────────────────────────── */
@@ -1365,15 +1372,12 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
 .mt-block.danger { background: #e05050; }
 .mt-empty { color: var(--muted); font-size: 11px; font-family: sans-serif; font-style: italic; }
 
-/* ── Engineer tab — fixed layout ────────────────────────── */
-#tab-engineer > .panel-scroll > .card { flex: 0 0 auto; }
-#tab-engineer > .panel-scroll > #eng-culprits { flex: 0 0 auto; }
-#tab-engineer > .panel-scroll > .g2 { flex: 1; min-height: 0; }
-#tab-engineer > .panel-scroll > .g2 > .card { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
-#tab-engineer > .panel-scroll > .g2 > .card .tbl-wrap { flex: 1; overflow-y: auto; max-height: none; }
+/* ── Engineer tab — eng-layout fills panel-scroll ───────── */
+#tab-engineer > .panel-scroll { overflow-y: auto; }
+.eng-layout > .eng-episodes,
+.eng-layout > .eng-daily { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 
-/* ── Admin tab fixed layout ──────────────────────────────── */
-/* Removed: Admin tab is now a natural scroll layout */
+/* ── Admin tab — adm-layout fills panel-scroll ──────────── */
 #tab-admin > .panel-scroll { overflow-y: auto; display: block; }
 #tab-admin .card { display: flex; flex-direction: column; padding-top: 0; }
 #tab-admin .card-title {
@@ -1405,3 +1409,107 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
   white-space: nowrap;
 }
 .heat-tooltip.hidden { display: none; }
+
+/* ══════════════════════════════════════════════════════════
+   BASIC / ADVANCED MODE
+══════════════════════════════════════════════════════════ */
+
+/* Hide Advanced-only elements in Basic mode */
+[data-mode="basic"] .adv { display: none !important; }
+
+/* Mode toggle button active state */
+#btn-mode.active {
+  background: var(--brand);
+  color: var(--bg);
+  border-color: var(--brand);
+}
+
+/* ── Card density in Advanced mode ──────────────────────── */
+[data-mode="advanced"] .card { padding: 8px 10px; }
+[data-mode="advanced"] table.data td { padding: 4px 7px; font-size: 11px; }
+[data-mode="advanced"] .card-title { font-size: 11px; padding-bottom: 4px; margin-bottom: 6px; }
+[data-mode="advanced"] table.data th { font-size: 9px; }
+
+/* ── Operator tab — op-layout ────────────────────────────── */
+.op-layout { display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 0; }
+
+[data-mode="advanced"] .op-layout {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  grid-template-rows: auto 1fr auto;
+  grid-template-areas:
+    "kpis   health"
+    "matrix matrix"
+    "causes causes";
+  gap: 8px;
+}
+[data-mode="advanced"] .op-kpis   { grid-area: kpis; }
+[data-mode="advanced"] .op-health { grid-area: health; }
+[data-mode="advanced"] .op-matrix { grid-area: matrix; }
+[data-mode="advanced"] .op-causes { grid-area: causes; }
+
+/* KPI tiles: horizontal row in basic → compact vertical sidebar in advanced */
+[data-mode="advanced"] .op-kpis .kpis { flex-direction: column; gap: 4px; }
+[data-mode="advanced"] .op-kpis .kpi  { padding: 6px 10px; }
+[data-mode="advanced"] .op-kpis .kpi-num { font-size: 18px; }
+
+/* ── Engineer tab — eng-layout ───────────────────────────── */
+.eng-layout { display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 0; }
+
+[data-mode="advanced"] .eng-layout {
+  display: grid;
+  grid-template-columns: 3fr 2fr;
+  grid-template-rows: auto auto auto auto auto auto;
+  grid-template-areas:
+    "topbar    topbar"
+    "culprits  culprits"
+    "chart     pattern"
+    "episodes  cofiring"
+    "daily     histogram"
+    "mttd      mttd";
+  gap: 8px;
+}
+[data-mode="advanced"] .eng-topbar    { grid-area: topbar; }
+[data-mode="advanced"] .eng-culprits  { grid-area: culprits; }
+[data-mode="advanced"] .eng-chart     { grid-area: chart; }
+[data-mode="advanced"] .eng-pattern   { grid-area: pattern; }
+[data-mode="advanced"] .eng-episodes  { grid-area: episodes; }
+[data-mode="advanced"] .eng-cofiring  { grid-area: cofiring; }
+[data-mode="advanced"] .eng-daily     { grid-area: daily; }
+[data-mode="advanced"] .eng-histogram { grid-area: histogram; }
+[data-mode="advanced"] .eng-mttd      { grid-area: mttd; }
+
+/* Score chart: taller in basic, shorter in advanced (shares row with pattern heatmap) */
+[data-mode="basic"]    #eng-chart uplot { height: 220px; }
+[data-mode="advanced"] #eng-chart uplot { height: 180px; }
+
+/* ── Admin tab — adm-layout ──────────────────────────────── */
+.adm-layout { display: flex; flex-direction: column; gap: 10px; }
+
+[data-mode="advanced"] .adm-layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-areas:
+    "health  health"
+    "assets  runhist"
+    "runs    runs"
+    "config  config"
+    "audit   audit";
+  gap: 8px;
+}
+[data-mode="advanced"] .adm-health  { grid-area: health; }
+[data-mode="advanced"] .adm-assets  { grid-area: assets; }
+[data-mode="advanced"] .adm-runhist { grid-area: runhist; }
+[data-mode="advanced"] .adm-runs    { grid-area: runs; }
+[data-mode="advanced"] .adm-config  { grid-area: config; }
+[data-mode="advanced"] .adm-audit   { grid-area: audit; }
+
+/* ── Responsive: collapse grids below 900px ─────────────── */
+@media (max-width: 900px) {
+  [data-mode="advanced"] .op-layout,
+  [data-mode="advanced"] .eng-layout,
+  [data-mode="advanced"] .adm-layout {
+    display: flex;
+    flex-direction: column;
+  }
+}
