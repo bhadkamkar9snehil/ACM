@@ -271,7 +271,7 @@ async function refreshOperator() {
     const aRow = document.createElement("div");
     aRow.className = "mega-asset-row collapsed";
     aRow.innerHTML = `
-      <div style="font-weight:bold; color:var(--text);"><span class="chevron" style="display:inline-block;width:14px;color:var(--muted);">${assetAlarms.length ? '►' : ' '}</span> ${a.asset_key}</div>
+      <div style="font-weight:bold; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${a.asset_key}"><span class="chevron" style="display:inline-block;width:14px;color:var(--muted);">${assetAlarms.length ? '►' : ' '}</span> ${a.asset_key}</div>
       <div id="mr-state-${a.asset_key}"></div>
       <div id="mr-sp-${a.asset_key}"></div>
       <div class="num">${fmtNum(a.last_fused)}</div>
