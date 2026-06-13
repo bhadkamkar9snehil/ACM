@@ -296,58 +296,63 @@
 
 /* ── THEME: Factory (Factorio-inspired) ─────────────────── */
 [data-theme="dark-factory"] {
-  --bg:          #0c0c0a;
-  --bg2:         #141310;
-  --bg3:         #1c1b18;
-  --bg4:         #262420;
-  --ink:         #cdc0a0;
-  --ink2:        #a89878;
-  --muted:       #6a5e48;
-  --card:        #141310;
-  --line:        #242218;
-  --line2:       #383428;
-  --brand:       #e88018;
-  --brand-lo:    rgba(232,128,24,.15);
-  --brand-hi:    #f4a030;
-  --ok:          #4ea030;
-  --ok-lo:       rgba(78,160,48,.12);
-  --warn:        #c8a010;
-  --warn-lo:     rgba(200,160,16,.12);
-  --bad:         #c03020;
-  --bad-lo:      rgba(192,48,32,.14);
-  --blue:        #3878b8;
-  --blue-lo:     rgba(56,120,184,.12);
-  --term-bg:     #070706;
-  --term-ink:    #4a4030;
-  --term-hi:     #f4a030;
-  --term-ok:     #4ea030;
-  --term-warn:   #c8a010;
-  --shadow-card: 0 3px 0 rgba(0,0,0,.70), 0 6px 28px rgba(0,0,0,.60);
+  --bg:          #201810;
+  --bg2:         #313031;
+  --bg3:         #414040;
+  --bg4:         #242324;
+  --ink:         #ffffff;
+  --ink2:        #ffe6c0;
+  --muted:       #a6a6a6;
+  --card:        #313031;
+  --line:        #2e2623;
+  --line2:       #5c5040;
+  --brand:       #ffa200;
+  --brand-lo:    rgba(255,162,0,.18);
+  --brand-hi:    #f9b44b;
+  --ok:          #5eb663;
+  --ok-lo:       rgba(94,182,99,.18);
+  --warn:        #ffa200;
+  --warn-lo:     rgba(255,162,0,.18);
+  --bad:         #eb5c5f;
+  --bad-lo:      rgba(235,92,95,.18);
+  --blue:        #7dcaed;
+  --blue-lo:     rgba(125,202,237,.14);
+  --term-bg:     #1d1c1d;
+  --term-ink:    #5a5040;
+  --term-hi:     #f9b44b;
+  --term-ok:     #5eb663;
+  --term-warn:   #ffa200;
+  --shadow-card:
+    inset 0 1px 0 rgba(255,255,255,.08),
+    inset 1px 0 0 rgba(255,255,255,.04),
+    inset 0 -2px 0 rgba(0,0,0,.45),
+    0 6px 20px rgba(0,0,0,.70),
+    0 2px 6px rgba(0,0,0,.50);
   --shadow-hdr:  0 4px 20px rgba(0,0,0,.70);
-  --btn-face:    #222018;
-  --btn-hi:      #302e24;
-  --btn-mid:     #181610;
-  --btn-sh:      #100e0a;
-  --btn-deep:    #060504;
+  --btn-face:    #8e8e8e;
+  --btn-hi:      #a8a8a8;
+  --btn-mid:     #6e6e6e;
+  --btn-sh:      #3d3d3d;
+  --btn-deep:    #1d1c1d;
   --btn-3d:
-    inset 0 1px 0 var(--btn-hi),
-    inset 0 -2px 0 var(--btn-deep),
-    inset  1px 0 0 var(--btn-hi),
-    inset -1px 0 0 var(--btn-sh),
-    0 4px 10px rgba(0,0,0,.75),
-    0 1px 2px rgba(0,0,0,.50);
+    inset 8px 0 4px -8px #000,
+    inset -8px 0 4px -8px #000,
+    inset 0 10px 2px -8px #e3e3e3,
+    inset 0 -9px 2px -8px #000,
+    0 0 4px 0 #000;
   --btn-3d-press:
-    inset 0 3px 7px rgba(0,0,0,.80),
-    inset 0 1px 3px rgba(0,0,0,.55),
-    0 1px 0 rgba(255,255,255,.02);
-  --hdr-bg: linear-gradient(160deg, #060604 0%, #0c0b08 55%, #121008 100%);
-  --tab-rail-bg: #0c0c0a;
+    inset 0 10px 2px -8px #000,
+    inset 8px 0 4px -8px #563a10,
+    inset -8px 0 4px -8px #563a10,
+    0 0 4px 0 #000;
+  --hdr-bg: linear-gradient(160deg, #1d1c1d 0%, #242324 55%, #2e2623 100%);
+  --tab-rail-bg: #1d1c1d;
   --chart-score: var(--ok);
   --chart-score-fill: var(--ok-lo);
   --chart-alert: var(--bad);
-  --chart-alarm-fill: rgba(232,128,24,.28);
-  --favicon-bg: #141310;
-  --favicon-stroke: #e88018;
+  --chart-alarm-fill: rgba(255,162,0,.28);
+  --favicon-bg: #313031;
+  --favicon-stroke: #ffa200;
   /* Detector palette — shared across all themes */
   --det-ar1:     #f4a261;
   --det-pca-spe: #4cc9f0;
