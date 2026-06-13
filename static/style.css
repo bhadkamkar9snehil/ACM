@@ -296,19 +296,25 @@
 
 /* ── THEME: Factory (Factorio-inspired) ─────────────────── */
 [data-theme="dark-factory"] {
-  --bg:          #201810;
-  --bg2:         #313031;
-  --bg3:         #414040;
-  --bg4:         #242324;
-  --ink:         #ffffff;
-  --ink2:        #ffe6c0;
-  --muted:       #a6a6a6;
-  --card:        #313031;
-  --line:        #2e2623;
-  --line2:       #5c5040;
+  /* Background: neutral dark charcoal — matches factorio.com / wiki page bg */
+  --bg:          #1a1a1a;
+  --bg2:         #282828;
+  --bg3:         #333333;
+  --bg4:         #3d3d3d;
+  /* Cards sit slightly lighter on the bg — the "concrete panel on ground" */
+  --card:        #252525;
+  /* Text */
+  --ink:         #f0f0f0;
+  --ink2:        #d8cdb4;
+  --muted:       #7a7a7a;
+  /* Borders — neutral, with slight warmth on accent borders */
+  --line:        #363636;
+  --line2:       #504530;
+  /* Brand — Factorio orange, exact */
   --brand:       #ffa200;
   --brand-lo:    rgba(255,162,0,.18);
   --brand-hi:    #f9b44b;
+  /* States */
   --ok:          #5eb663;
   --ok-lo:       rgba(94,182,99,.18);
   --warn:        #ffa200;
@@ -317,23 +323,26 @@
   --bad-lo:      rgba(235,92,95,.18);
   --blue:        #7dcaed;
   --blue-lo:     rgba(125,202,237,.14);
-  --term-bg:     #1d1c1d;
-  --term-ink:    #5a5040;
+  /* Terminal */
+  --term-bg:     #111111;
+  --term-ink:    #585040;
   --term-hi:     #f9b44b;
   --term-ok:     #5eb663;
   --term-warn:   #ffa200;
+  /* Shadows — inset bevel for the raised concrete-panel look */
   --shadow-card:
-    inset 0 1px 0 rgba(255,255,255,.08),
-    inset 1px 0 0 rgba(255,255,255,.04),
-    inset 0 -2px 0 rgba(0,0,0,.45),
-    0 6px 20px rgba(0,0,0,.70),
-    0 2px 6px rgba(0,0,0,.50);
+    inset 0 1px 0 rgba(255,255,255,.07),
+    inset 1px 0 0 rgba(255,255,255,.03),
+    inset 0 -1px 0 rgba(0,0,0,.40),
+    0 4px 16px rgba(0,0,0,.55),
+    0 1px 4px rgba(0,0,0,.40);
   --shadow-hdr:  0 4px 20px rgba(0,0,0,.70);
+  /* Buttons — concrete-grey factory buttons from Factorio game UI */
   --btn-face:    #8e8e8e;
   --btn-hi:      #a8a8a8;
   --btn-mid:     #6e6e6e;
   --btn-sh:      #3d3d3d;
-  --btn-deep:    #1d1c1d;
+  --btn-deep:    #1a1a1a;
   --btn-3d:
     inset 8px 0 4px -8px #000,
     inset -8px 0 4px -8px #000,
@@ -342,16 +351,17 @@
     0 0 4px 0 #000;
   --btn-3d-press:
     inset 0 10px 2px -8px #000,
-    inset 8px 0 4px -8px #563a10,
-    inset -8px 0 4px -8px #563a10,
+    inset 8px 0 4px -8px #6a4a10,
+    inset -8px 0 4px -8px #6a4a10,
     0 0 4px 0 #000;
-  --hdr-bg: linear-gradient(160deg, #1d1c1d 0%, #242324 55%, #2e2623 100%);
-  --tab-rail-bg: #1d1c1d;
+  /* Header — very dark, slight warm tint at edges like the FFF page header */
+  --hdr-bg: linear-gradient(160deg, #111111 0%, #1c1c1a 55%, #201e18 100%);
+  --tab-rail-bg: #111111;
   --chart-score: var(--ok);
   --chart-score-fill: var(--ok-lo);
   --chart-alert: var(--bad);
   --chart-alarm-fill: rgba(255,162,0,.28);
-  --favicon-bg: #313031;
+  --favicon-bg: #252525;
   --favicon-stroke: #ffa200;
   /* Detector palette — shared across all themes */
   --det-ar1:     #f4a261;
@@ -360,6 +370,99 @@
   --det-iforest: #06d6a0;
   --det-gmm:     #ef476f;
   --det-omr:     #ffd166;
+}
+
+/* ── Factory theme — component polish ─────────────────────
+   Cards have a concrete-panel look: darker header strip that
+   blends into the orange top-border accent; table headers are
+   sunken (bg < card); highlighted buttons glow amber.
+   ───────────────────────────────────────────────────────── */
+
+/* Cards: orange top-accent, clip children for full-bleed title strip */
+[data-theme="dark-factory"] .card {
+  border: 1px solid #363636;
+  border-top: 2px solid rgba(255,162,0,.40);
+  overflow: hidden;
+  box-shadow:
+    var(--shadow-card),
+    inset 0 1px 0 rgba(255,162,0,.08);
+}
+
+/* Card title: orange text + darker strip bg in all factory cards */
+[data-theme="dark-factory"] .card-title {
+  color: var(--brand);
+  background: var(--bg2);
+  border-bottom: 1px solid rgba(255,162,0,.22);
+  letter-spacing: .06em;
+}
+/* Full-bleed strip (negative margins) for operator + engineer cards.
+   Admin is excluded — those titles are position:sticky with manual top padding. */
+[data-theme="dark-factory"] #tab-operator .card-title,
+[data-theme="dark-factory"] #tab-engineer .card-title {
+  margin: -12px -12px 10px;
+  padding: 8px 12px;
+  font-size: 11px;
+}
+
+/* Card sub-header — a second stripe below the title for
+   secondary info (e.g. asset name, date range).
+   Usage: <div class="card-sub">Asset › 2024-Q2</div> */
+[data-theme="dark-factory"] .card-sub {
+  color: var(--ink2);
+  background: var(--bg2);
+  margin: -10px -12px 10px;
+  padding: 4px 12px 6px;
+  font-size: 10px;
+  border-bottom: 1px solid rgba(255,162,0,.12);
+  opacity: .85;
+}
+
+/* Table headers: darker than card body, orange text — like
+   Factorio wiki table headings that are visually "sunken" */
+[data-theme="dark-factory"] table.data th {
+  background: var(--bg);
+  color: var(--brand);
+  border-bottom: 1px solid rgba(255,162,0,.28);
+  font-size: 10px;
+  letter-spacing: .05em;
+}
+
+/* Active Advanced mode button: orange glow — the Factorio
+   "highlighted / selected" button style */
+[data-theme="dark-factory"] #btn-mode.active {
+  background: linear-gradient(180deg, #ffb82a 0%, #e58f00 100%);
+  color: #111;
+  text-shadow: none;
+  box-shadow:
+    0 0 0 1px rgba(255,162,0,.80),
+    0 0 14px rgba(255,162,0,.50),
+    var(--btn-3d);
+}
+
+/* Tabs: flat dark-concrete style with orange bottom underline
+   on the active tab — matches the Factorio wiki tab bar */
+[data-theme="dark-factory"] .tab-btn {
+  border-radius: 0;
+  border-bottom: 2px solid transparent;
+}
+[data-theme="dark-factory"] .tab-btn.active {
+  background: var(--bg2);
+  border-bottom: 2px solid var(--brand);
+  color: var(--brand);
+  box-shadow: none;
+}
+
+/* Farm section headers in operator matrix */
+[data-theme="dark-factory"] .mega-farm-hdr {
+  border-left: 3px solid var(--brand);
+  background: var(--bg2);
+  color: var(--brand);
+}
+
+/* Hdr status strip: "Next Tick" countdown glows when imminent */
+[data-theme="dark-factory"] #svc-next-tick.imminent {
+  color: var(--warn);
+  text-shadow: 0 0 8px rgba(255,162,0,.55);
 }
 
 /* ── THEME: Solarised Light (original) ──────────────────── */
