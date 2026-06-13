@@ -399,13 +399,14 @@ table.data tr.is-alarm td { background: var(--bad-lo); }
 @keyframes alarmpulse { 50% { box-shadow: 0 0 10px var(--bad-lo); } }
 
 /* ── Inline Gauges & Deltas ─────────────────────────────── */
-.h-gauge-wrap { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.h-gauge-wrap { display: grid; grid-template-columns: 1fr 48px 40px; align-items: center; gap: 8px; text-align: right; }
 .h-gauge-val { font-weight: bold; color: var(--ink); font-variant-numeric: tabular-nums; }
-.h-gauge { width: 50px; height: 6px; background: var(--bg4); border-radius: 3px; overflow: hidden; display: flex; }
+.h-gauge-delta { display: flex; align-items: center; justify-content: flex-end; }
+.h-gauge { width: 40px; height: 6px; background: var(--bg4); border-radius: 3px; overflow: hidden; display: flex; }
 .h-gauge-fill { height: 100%; transition: width 0.3s ease; }
 
-.delta-up { color: var(--bad); font-size: 10px; margin-left: 6px; }
-.delta-down { color: var(--ok); font-size: 10px; margin-left: 6px; }
+.delta-up { color: var(--bad); font-size: 11px; font-variant-numeric: tabular-nums; }
+.delta-down { color: var(--ok); font-size: 11px; font-variant-numeric: tabular-nums; }
 
 table.data tr.row-alarm td { background: var(--bad-lo) !important; }
 table.data tr.row-alarm:hover td { background: var(--bad-lo) !important; filter: brightness(1.1); }

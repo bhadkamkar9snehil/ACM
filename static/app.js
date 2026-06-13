@@ -28,7 +28,8 @@ function renderGaugeHtml(valText, ratio, colorVar, deltaHtml = "") {
   const wPct = Math.min(100, Math.max(0, ratio * 100));
   return `
     <div class="h-gauge-wrap">
-      <span class="h-gauge-val">${valText}${deltaHtml}</span>
+      <span class="h-gauge-val">${valText}</span>
+      <span class="h-gauge-delta">${deltaHtml}</span>
       <div class="h-gauge">
         <div class="h-gauge-fill" style="width: ${wPct}%; background: var(--${colorVar})"></div>
       </div>
@@ -583,8 +584,8 @@ async function refreshEngineer() {
     let fMaxDelta = "";
     if (prev && prev.fused_max != null) {
        const diff = d.fused_max - prev.fused_max;
-       if (diff > 0.1) fMaxDelta = `<span class="delta-up">↑ +${diff.toFixed(2)}</span>`;
-       else if (diff < -0.1) fMaxDelta = `<span class="delta-down">↓ ${diff.toFixed(2)}</span>`;
+       if (diff > 0.1) fMaxDelta = `<span class="delta-up">↑ ${diff.toFixed(2)}</span>`;
+       else if (diff < -0.1) fMaxDelta = `<span class="delta-down">↓ ${Math.abs(diff).toFixed(2)}</span>`;
     }
     const fMaxHtml = renderGaugeHtml(fmtNum(d.fused_max), d.fused_max / 5.0, fMaxColor, fMaxDelta);
     
@@ -592,15 +593,14 @@ async function refreshEngineer() {
     let rateDelta = "";
     if (prev && prev.rate_z3 != null) {
        const diff = d.rate_z3 - prev.rate_z3;
-       if (diff > 0.01) rateDelta = `<span class="delta-up">↑ +${(diff*100).toFixed(1)}</span>`;
-       else if (diff < -0.01) rateDelta = `<span class="delta-down">↓ ${(Math.abs(diff)*100).toFixed(1)}</span>`;
+       if (diff > 0.01) rateDelta = `<span class="delta-up">↑ ${(diff*100).toFixed(1)}%</span>`;
+       else if (diff < -0.01) rateDelta = `<span class="delta-down">↓ ${(Math.abs(diff)*100).toFixed(1)}%</span>`;
     }
     const rateHtml = renderGaugeHtml((d.rate_z3 * 100).toFixed(1) + "%", d.rate_z3, rateColor, rateDelta);
     
     let alarmHtml = d.alarm_samples.toString();
-    if (d.alarm_samples > 0) {
-      alarmHtml = `<span class="badge ALARM">${d.alarm_samples}</span>`;
-    }
+    if (d.alarm_samples === 0) alarmHtml = `<span class="muted">0</span>`;
+    else alarmHtml = `<span class="badge ALARM">${d.alarm_samples}</span>`;
     
     const availColor = d.availability >= 0.99 ? "ok" : (d.availability >= 0.90 ? "warn" : "bad");
     const availVal = d.availability == null ? "—" : (d.availability * 100).toFixed(0) + "%";
