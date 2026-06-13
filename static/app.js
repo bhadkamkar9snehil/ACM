@@ -765,13 +765,65 @@ async function refreshEngineer(useCache = false) {
   };
   cv.onmouseleave = () => tooltip.classList.add("hidden");
 
+  // A3 — Build per-episode detector max z from series data (Advanced mode)
+  const DET_VARS = ["ar1_z", "pca_spe_z", "pca_t2_z", "iforest_z", "gmm_z", "omr_z"];
+  const DET_NAMES = ["AR1", "SPE", "T2", "IF", "GMM", "OMR"];
+  const DET_VARS_CSS = ["--det-ar1", "--det-pca-spe", "--det-pca-t2", "--det-iforest", "--det-gmm", "--det-omr"];
+
+  const episodeDetContrib = (ep) => {
+    const epStart = new Date(ep.start_ts.replace(" ", "T")).getTime() / 1000;
+    const epEnd = ep.end_ts ? new Date(ep.end_ts.replace(" ", "T")).getTime() / 1000 : ts[ts.length - 1];
+    const maxZ = DET_VARS.map(col => {
+      let mx = 0;
+      for (let i = 0; i < ts.length; i++) {
+        if (ts[i] >= epStart && ts[i] <= epEnd) {
+          const v = s.rows[i][idx[col]];
+          if (v != null && v > mx) mx = v;
+        }
+      }
+      return mx;
+    });
+    return maxZ;
+  };
+
   // alarm episodes
   const eb = $("#eng-episodes tbody");
   eb.replaceChildren();
   for (const e of eps.slice(0, 30)) {
+    const detMaxZ = episodeDetContrib(e);
+    const overallMax = Math.max(...detMaxZ, 1);
+    const topIdx = detMaxZ.indexOf(Math.max(...detMaxZ));
+
+    // Build detector strip (A3)
+    const stripTd = document.createElement("td");
+    stripTd.className = "adv";
+    const strip = document.createElement("div");
+    strip.className = "cause-strip";
+    DET_VARS_CSS.forEach((cssVar, i) => {
+      const cell = document.createElement("div");
+      const intensity = Math.min(1, detMaxZ[i] / overallMax);
+      const alpha = 0.15 + intensity * 0.85;
+      cell.className = "cause-cell";
+      cell.style.background = getCss(cssVar);
+      cell.style.opacity = alpha.toFixed(2);
+      cell.title = `${DET_NAMES[i]}: ${fmtNum(detMaxZ[i])}`;
+      strip.append(cell);
+    });
+    stripTd.append(strip);
+
+    // Top detector (A3 dominant)
+    const topTd = document.createElement("td");
+    topTd.className = "adv";
+    if (detMaxZ[topIdx] > 1) {
+      topTd.innerHTML = `<span style="color:${getCss(DET_VARS_CSS[topIdx])};font-size:10px;font-weight:600;">${DET_NAMES[topIdx]}</span>`;
+    } else {
+      topTd.innerHTML = `<span style="color:var(--muted);font-size:10px;">—</span>`;
+    }
+
     const tr = document.createElement("tr");
     tr.append(td(fmtTs(e.start_ts)), td(fmtTs(e.end_ts)),
-              tdNum(fmtNum(e.duration_h, 1)), tdNum(fmtNum(e.peak_fused)));
+              tdNum(fmtNum(e.duration_h, 1)), tdNum(fmtNum(e.peak_fused)),
+              stripTd, topTd);
     const cell = td("");
     if (e.ack_at) {
       cell.textContent = `✓ ${e.ack_by}`;

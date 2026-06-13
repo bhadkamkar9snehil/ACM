@@ -1568,6 +1568,22 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
 [data-mode="advanced"] .adm-config  { grid-area: config; }
 [data-mode="advanced"] .adm-audit   { grid-area: audit; }
 
+/* ── A3 Episode detector contribution strip ──────────────── */
+.cause-strip {
+  display: inline-flex;
+  gap: 2px;
+  align-items: center;
+}
+.cause-cell {
+  width: 14px;
+  height: 14px;
+  border-radius: 1px;
+  cursor: default;
+  flex-shrink: 0;
+  transition: opacity 120ms;
+}
+.cause-cell:hover { opacity: 1 !important; }
+
 /* ── Fleet farm group header (C5) ───────────────────────── */
 .mega-farm-hdr {
   padding: 6px 12px 4px;
