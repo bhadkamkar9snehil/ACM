@@ -161,6 +161,7 @@ async function refreshService() {
   $("#btn-pause").classList.toggle("hidden", !!svc.paused);
   $("#btn-resume").classList.toggle("hidden", !svc.paused);
   if (document.activeElement !== $("#inp-tick")) $("#inp-tick").value = svc.tick_minutes;
+  window.lastTickAt = svc.last_tick_at;
   return svc;
 }
 $("#btn-pause").addEventListener("click", async () => {
@@ -228,7 +229,8 @@ async function refreshOperator() {
     alarmsByAsset[al.asset_key].push(al);
   }
 
-  const nowTs = Date.now();
+  // Anchor the timeline to the engine's last tick, fallback to real time if missing
+  const nowTs = window.lastTickAt ? new Date(window.lastTickAt + (window.lastTickAt.includes('Z') || window.lastTickAt.includes('+') ? '' : 'Z')).getTime() : Date.now();
   const hourMs = 3600000;
   const renderTimeline = (alarmList) => {
     let html = '<div class="mega-timeline">';
@@ -237,8 +239,8 @@ async function refreshOperator() {
       const bEnd = nowTs - i * hourMs;
       let active = false, maxPeak = 0;
       for (const al of alarmList) {
-        const alStart = new Date(al.start_ts).getTime();
-        const alEnd = al.end_ts ? new Date(al.end_ts).getTime() : nowTs;
+        const alStart = new Date(al.start_ts + (al.start_ts.includes('Z') || al.start_ts.includes('+') ? '' : 'Z')).getTime();
+        const alEnd = al.end_ts ? new Date(al.end_ts + (al.end_ts.includes('Z') || al.end_ts.includes('+') ? '' : 'Z')).getTime() : nowTs;
         if (alStart < bEnd && alEnd > bStart) { active = true; maxPeak = Math.max(maxPeak, al.peak_fused || 0); }
       }
       html += `<div class="mt-block ${active ? (maxPeak > 5.0 ? 'danger' : 'warn') : ''}"></div>`;
