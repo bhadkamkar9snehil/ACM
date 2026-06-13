@@ -142,9 +142,10 @@ document.querySelectorAll(".tab").forEach((b) => b.addEventListener("click", () 
 // Theme toggle
 document.getElementById("btn-theme").addEventListener("click", () => {
   const body = document.body;
-  const next = body.dataset.theme === "light" ? "dark" : "light";
+  const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
   body.dataset.theme = next;
   document.documentElement.dataset.theme = next;
+  document.getElementById("favicon").href = `/static/favicon-${next}.svg`;
   if (activeTab === "operator") refreshOperator();
   else if (activeTab === "engineer") refreshEngineer();
 });
@@ -267,9 +268,9 @@ async function refreshOperator() {
     
     // Asset Row
     const aRow = document.createElement("div");
-    aRow.className = "mega-asset-row";
+    aRow.className = "mega-asset-row collapsed";
     aRow.innerHTML = `
-      <div style="font-weight:bold; color:var(--text);"><span style="display:inline-block;width:14px;color:var(--muted);">${assetAlarms.length ? '▼' : '►'}</span> ${a.asset_key}</div>
+      <div style="font-weight:bold; color:var(--text);"><span class="chevron" style="display:inline-block;width:14px;color:var(--muted);">${assetAlarms.length ? '►' : ' '}</span> ${a.asset_key}</div>
       <div id="mr-state-${a.asset_key}"></div>
       <div id="mr-sp-${a.asset_key}"></div>
       <div class="num">${fmtNum(a.last_fused)}</div>
@@ -281,7 +282,9 @@ async function refreshOperator() {
     aRow.querySelector(`[id="mr-sp-${a.asset_key}"]`).append(sparkline(sparks[a.asset_key] || []));
     aRow.addEventListener("click", (e) => {
       if (e.target.tagName !== 'BUTTON') {
-        aRow.classList.toggle('collapsed');
+        const isColl = aRow.classList.toggle('collapsed');
+        const chev = aRow.querySelector('.chevron');
+        if (chev && assetAlarms.length) chev.textContent = isColl ? '►' : '▼';
       }
     });
     // Add double click handler to open engineer view
