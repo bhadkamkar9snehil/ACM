@@ -26,6 +26,13 @@ irm https://raw.githubusercontent.com/bhadkamkar9snehil/ACM/main/setup_acm.ps1 |
 ```
 This installs Git and Python (3.11+) if missing, clones the ACM repository to `$HOME\ACM`, installs all dependencies, and runs an automated self-test.
 
+### 2. Updating an Existing Installation
+The setup script acts as both an installer and an updater! To update your installation to the latest version:
+1. Close the ACM service if it is running.
+2. Open PowerShell and run the **exact same setup command** as above.
+
+The script will automatically detect your existing installation, pull the latest changes from GitHub, and upgrade any new Python dependencies.
+Your local data (`acm.db`, `acm_results.db`) and local configurations are safely ignored by Git and **will be preserved**.
 ---
 
 ## Self-Tuned Alarm Rules Explained
