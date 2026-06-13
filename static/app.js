@@ -23,6 +23,19 @@ async function api(path, opts = {}) {
 // ------------------------------------------------------------ utilities --
 function td(text) { const el = document.createElement("td"); el.textContent = text ?? "—"; return el; }
 function tdNum(text) { const el = td(text); el.className = "num"; return el; }
+function tdHtml(html, cls) { const el = document.createElement("td"); if(cls) el.className = cls; el.innerHTML = html ?? "—"; return el; }
+function renderGaugeHtml(valText, ratio, colorVar, deltaHtml = "") {
+  const wPct = Math.min(100, Math.max(0, ratio * 100));
+  return `
+    <div class="h-gauge-wrap">
+      <span class="h-gauge-val">${valText}${deltaHtml}</span>
+      <div class="h-gauge">
+        <div class="h-gauge-fill" style="width: ${wPct}%; background: var(--${colorVar})"></div>
+      </div>
+    </div>
+  `;
+}
+
 function badge(state) {
   const el = document.createElement("span");
   el.className = `badge ${state || "NEW"}`;
@@ -545,11 +558,64 @@ async function refreshEngineer() {
   // daily stats
   const db = $("#eng-daily tbody");
   db.replaceChildren();
-  for (const d of daily.slice(0, 21)) {
+  
+  const todayStr = new Date().toISOString().split('T')[0];
+  const yesterday = new Date(Date.now() - 86400000);
+  const yesterdayStr = yesterday.toISOString().split('T')[0];
+  
+  function formatDayStr(ds) {
+    if (ds === todayStr) return "<b>Today</b>";
+    if (ds === yesterdayStr) return "<b>Yesterday</b>";
+    const dt = new Date(ds);
+    const utcDate = new Date(dt.getTime() + dt.getTimezoneOffset() * 60000);
+    return utcDate.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+  }
+
+  const sliced = daily.slice(0, 21);
+  for (let i = 0; i < sliced.length; i++) {
+    const d = sliced[i];
+    const prev = daily[i + 1];
+    
+    let fMaxColor = "ok";
+    if (d.fused_max >= 2.5) fMaxColor = "warn";
+    if (d.fused_max >= 3.0) fMaxColor = "bad";
+    
+    let fMaxDelta = "";
+    if (prev && prev.fused_max != null) {
+       const diff = d.fused_max - prev.fused_max;
+       if (diff > 0.1) fMaxDelta = `<span class="delta-up">↑ +${diff.toFixed(2)}</span>`;
+       else if (diff < -0.1) fMaxDelta = `<span class="delta-down">↓ ${diff.toFixed(2)}</span>`;
+    }
+    const fMaxHtml = renderGaugeHtml(fmtNum(d.fused_max), d.fused_max / 5.0, fMaxColor, fMaxDelta);
+    
+    const rateColor = d.rate_z3 > 0.05 ? "bad" : (d.rate_z3 > 0 ? "warn" : "ok");
+    let rateDelta = "";
+    if (prev && prev.rate_z3 != null) {
+       const diff = d.rate_z3 - prev.rate_z3;
+       if (diff > 0.01) rateDelta = `<span class="delta-up">↑ +${(diff*100).toFixed(1)}</span>`;
+       else if (diff < -0.01) rateDelta = `<span class="delta-down">↓ ${(Math.abs(diff)*100).toFixed(1)}</span>`;
+    }
+    const rateHtml = renderGaugeHtml((d.rate_z3 * 100).toFixed(1) + "%", d.rate_z3, rateColor, rateDelta);
+    
+    let alarmHtml = d.alarm_samples.toString();
+    if (d.alarm_samples > 0) {
+      alarmHtml = `<span class="badge ALARM">${d.alarm_samples}</span>`;
+    }
+    
+    const availColor = d.availability >= 0.99 ? "ok" : (d.availability >= 0.90 ? "warn" : "bad");
+    const availVal = d.availability == null ? "—" : (d.availability * 100).toFixed(0) + "%";
+    const availHtml = d.availability == null ? availVal : renderGaugeHtml(availVal, d.availability, availColor);
+
     const tr = document.createElement("tr");
-    tr.append(td(d.day), tdNum(fmtNum(d.fused_max)),
-              tdNum((d.rate_z3 * 100).toFixed(1) + "%"), tdNum(d.alarm_samples),
-              tdNum(d.availability == null ? "—" : (d.availability * 100).toFixed(0) + "%"));
+    if (d.alarm_samples > 0) tr.className = "row-alarm";
+    
+    tr.append(
+      tdHtml(formatDayStr(d.day)),
+      tdHtml(fMaxHtml, "num"),
+      tdHtml(rateHtml, "num"),
+      tdHtml(alarmHtml, "num"),
+      tdHtml(availHtml, "num")
+    );
     db.append(tr);
   }
 }
