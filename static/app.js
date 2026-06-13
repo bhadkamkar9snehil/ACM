@@ -333,6 +333,20 @@ async function refreshOperator(useCache = false) {
     return html + '</div>';
   };
 
+  // C5 — Extract farm prefix from asset key (e.g. FD_FAN_01 → "FD")
+  const farmPrefix = (key) => {
+    const parts = String(key).split("_");
+    return parts.length >= 2 ? parts[0] : "–";
+  };
+
+  // C8 — Last-alarm badge from unacked alarms (most recent start)
+  const lastAlarmBadge = (assetAlarms) => {
+    if (!assetAlarms.length) return "";
+    const latest = assetAlarms.reduce((a, b) =>
+      new Date(b.start_ts) > new Date(a.start_ts) ? b : a);
+    return `<span class="last-alarm-badge">⏱ ${fmtRelTime(latest.start_ts)}</span>`;
+  };
+
   const mx = $("#mega-matrix");
   mx.innerHTML = `
     <div class="mega-hdr">
@@ -348,16 +362,47 @@ async function refreshOperator(useCache = false) {
     </div>
   `;
 
-  fleet.sort((a, b) => (STATE_ORDER[a.state] ?? 9) - (STATE_ORDER[b.state] ?? 9) || String(a.asset_key).localeCompare(String(b.asset_key)));
+  // C5 — Sort by (farm, state priority, asset_key) then group by farm
+  fleet.sort((a, b) => {
+    const fa = farmPrefix(a.asset_key), fb = farmPrefix(b.asset_key);
+    if (fa !== fb) return fa.localeCompare(fb);
+    const sd = (STATE_ORDER[a.state] ?? 9) - (STATE_ORDER[b.state] ?? 9);
+    return sd || String(a.asset_key).localeCompare(String(b.asset_key));
+  });
+
+  let currentFarm = null;
 
   for (const a of fleet) {
+    const farm = farmPrefix(a.asset_key);
     const assetAlarms = alarmsByAsset[a.asset_key] || [];
     
+    // C5 — Farm group header when farm changes
+    if (farm !== currentFarm) {
+      currentFarm = farm;
+      const farmAssets = fleet.filter(x => farmPrefix(x.asset_key) === farm);
+      const farmAlarm = farmAssets.filter(x => x.state === "ALARM").length;
+      const farmWarn = farmAssets.filter(x => x.state === "WARN").length;
+      const farmHdr = document.createElement("div");
+      farmHdr.className = "mega-farm-hdr";
+      const dot = farmAlarm ? "var(--bad)" : farmWarn ? "var(--warn)" : "var(--ok)";
+      farmHdr.innerHTML = `
+        <span style="color:var(--brand);font-weight:700;letter-spacing:.06em;">${farm}</span>
+        <span style="color:var(--muted);font-size:10px;margin-left:6px;">${farmAssets.length} assets</span>
+        ${farmAlarm ? `<span style="color:var(--bad);font-size:10px;margin-left:8px;">● ${farmAlarm} alarm</span>` : ""}
+        ${farmWarn ? `<span style="color:var(--warn);font-size:10px;margin-left:6px;">● ${farmWarn} warn</span>` : ""}
+      `;
+      mx.append(farmHdr);
+    }
+
     // Asset Row
     const aRow = document.createElement("div");
     aRow.className = "mega-asset-row collapsed";
     aRow.innerHTML = `
-      <div style="font-weight:bold; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${a.asset_key}"><span class="chevron" style="display:inline-block;width:14px;color:var(--muted);">${assetAlarms.length ? '►' : ' '}</span> ${a.asset_key}</div>
+      <div style="font-weight:bold; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${a.asset_key}">
+        <span class="chevron" style="display:inline-block;width:14px;color:var(--muted);">${assetAlarms.length ? '►' : ' '}</span>
+        ${a.asset_key}
+        ${lastAlarmBadge(assetAlarms)}
+      </div>
       <div id="mr-state-${a.asset_key}"></div>
       <div id="mr-sp-${a.asset_key}"></div>
       <div class="num">${fmtNum(a.last_fused)}</div>

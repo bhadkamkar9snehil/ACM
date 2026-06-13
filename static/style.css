@@ -294,6 +294,69 @@
   --favicon-stroke: #8b5cf6;
 }
 
+/* ── THEME: Factory (Factorio-inspired) ─────────────────── */
+[data-theme="dark-factory"] {
+  --bg:          #0c0c0a;
+  --bg2:         #141310;
+  --bg3:         #1c1b18;
+  --bg4:         #262420;
+  --ink:         #cdc0a0;
+  --ink2:        #a89878;
+  --muted:       #6a5e48;
+  --card:        #141310;
+  --line:        #242218;
+  --line2:       #383428;
+  --brand:       #e88018;
+  --brand-lo:    rgba(232,128,24,.15);
+  --brand-hi:    #f4a030;
+  --ok:          #4ea030;
+  --ok-lo:       rgba(78,160,48,.12);
+  --warn:        #c8a010;
+  --warn-lo:     rgba(200,160,16,.12);
+  --bad:         #c03020;
+  --bad-lo:      rgba(192,48,32,.14);
+  --blue:        #3878b8;
+  --blue-lo:     rgba(56,120,184,.12);
+  --term-bg:     #070706;
+  --term-ink:    #4a4030;
+  --term-hi:     #f4a030;
+  --term-ok:     #4ea030;
+  --term-warn:   #c8a010;
+  --shadow-card: 0 3px 0 rgba(0,0,0,.70), 0 6px 28px rgba(0,0,0,.60);
+  --shadow-hdr:  0 4px 20px rgba(0,0,0,.70);
+  --btn-face:    #222018;
+  --btn-hi:      #302e24;
+  --btn-mid:     #181610;
+  --btn-sh:      #100e0a;
+  --btn-deep:    #060504;
+  --btn-3d:
+    inset 0 1px 0 var(--btn-hi),
+    inset 0 -2px 0 var(--btn-deep),
+    inset  1px 0 0 var(--btn-hi),
+    inset -1px 0 0 var(--btn-sh),
+    0 4px 10px rgba(0,0,0,.75),
+    0 1px 2px rgba(0,0,0,.50);
+  --btn-3d-press:
+    inset 0 3px 7px rgba(0,0,0,.80),
+    inset 0 1px 3px rgba(0,0,0,.55),
+    0 1px 0 rgba(255,255,255,.02);
+  --hdr-bg: linear-gradient(160deg, #060604 0%, #0c0b08 55%, #121008 100%);
+  --tab-rail-bg: #0c0c0a;
+  --chart-score: var(--ok);
+  --chart-score-fill: var(--ok-lo);
+  --chart-alert: var(--bad);
+  --chart-alarm-fill: rgba(232,128,24,.28);
+  --favicon-bg: #141310;
+  --favicon-stroke: #e88018;
+  /* Detector palette — shared across all themes */
+  --det-ar1:     #f4a261;
+  --det-pca-spe: #4cc9f0;
+  --det-pca-t2:  #9b5de5;
+  --det-iforest: #06d6a0;
+  --det-gmm:     #ef476f;
+  --det-omr:     #ffd166;
+}
+
 /* ── THEME: Solarised Light (original) ──────────────────── */
 [data-theme="light"],
 [data-theme="light-solarised"] {
@@ -872,7 +935,8 @@ html { height: 100%; color-scheme: dark; }
 [data-theme="dark-petrol"],
 [data-theme="dark-graphite"],
 [data-theme="dark-carbon"],
-[data-theme="dark-slate"] { color-scheme: dark; }
+[data-theme="dark-slate"],
+[data-theme="dark-factory"] { color-scheme: dark; }
 body {
   height: 100%; display: flex; flex-direction: column;
   font-family: 'Barlow', sans-serif;
@@ -1503,6 +1567,39 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
 [data-mode="advanced"] .adm-runs    { grid-area: runs; }
 [data-mode="advanced"] .adm-config  { grid-area: config; }
 [data-mode="advanced"] .adm-audit   { grid-area: audit; }
+
+/* ── Fleet farm group header (C5) ───────────────────────── */
+.mega-farm-hdr {
+  padding: 6px 12px 4px;
+  background: var(--bg3);
+  border-top: 1px solid var(--line2);
+  border-bottom: 1px solid var(--line);
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+
+/* ── Last-alarm badge (C8) ───────────────────────────────── */
+.last-alarm-badge {
+  font-size: 9px;
+  background: var(--bad-lo);
+  color: var(--bad);
+  padding: 1px 5px;
+  border-radius: 2px;
+  white-space: nowrap;
+  margin-left: 6px;
+  font-family: 'Share Tech Mono', monospace;
+  font-weight: 400;
+  vertical-align: middle;
+}
 
 /* ── Detector toggle buttons ────────────────────────────── */
 .det-toggle {
