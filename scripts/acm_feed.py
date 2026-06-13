@@ -22,6 +22,7 @@ from typing import Dict, Optional
 
 import numpy as np
 import pandas as pd
+import pyarrow.parquet as _pq
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -100,6 +101,24 @@ def cache_path(cache_dir: Path | str, asset_key: str) -> Path:
     return Path(cache_dir) / f"{safe}.parquet"
 
 
+def _read_ts_column(path: Path, ts_col: str) -> Optional[pd.Series]:
+    """Read only the timestamp column from a parquet file via column pruning.
+
+    Parquet's columnar storage means we load a single column's byte range
+    rather than all N sensor channels — O(rows) instead of O(rows × cols).
+    Returns None when the file is missing or empty.
+    """
+    if not path.exists():
+        return None
+    try:
+        tbl = _pq.read_table(str(path), columns=[ts_col])
+        if len(tbl) == 0:
+            return None
+        return pd.to_datetime(tbl.column(ts_col).to_pandas())
+    except Exception:
+        return None
+
+
 def update_cache(spec: SourceSpec, cache_dir: Path | str,
                  train_window_days: float = 180.0) -> CacheInfo:
     """Incremental pull into the asset's parquet cache.
@@ -108,13 +127,35 @@ def update_cache(spec: SourceSpec, cache_dir: Path | str,
     last timestamp. The cache keeps a trailing `train_window_days` window —
     older rows fall off, so the file is bounded regardless of asset age.
     Atomic write (tmp + os.replace): a crash mid-write never corrupts.
+
+    Performance: the timestamp column is read with column-pruning (PyArrow)
+    to find `since` without loading all sensor channels.  When no new data
+    arrives (most ticks for mature assets), the full parquet read and write
+    are skipped entirely.
     """
     path = cache_path(cache_dir, spec.asset_key)
     path.parent.mkdir(parents=True, exist_ok=True)
-    cached = pd.read_parquet(path) if path.exists() else None
-    since = cached[spec.timestamp_col].max() if cached is not None and len(cached) else None
+
+    # Fast path: read only the timestamp column — avoids loading 600+ sensor
+    # columns just to find the maximum timestamp.
+    ts_series = _read_ts_column(path, spec.timestamp_col)
+    since = ts_series.max() if ts_series is not None else None
 
     inc = load_increment(spec, since)
+
+    if not len(inc):
+        # No new data — skip the expensive full read and atomic write.
+        if ts_series is not None and len(ts_series):
+            last_ts = since
+            window_start = last_ts - pd.Timedelta(days=train_window_days)
+            n_rows = int((ts_series >= window_start).sum())
+            span_days = float((last_ts - ts_series.min()).total_seconds() / 86400.0)
+            return CacheInfo(last_ts=last_ts, n_rows=n_rows,
+                             span_days=span_days, pulled_rows=0)
+        return CacheInfo(last_ts=None, n_rows=0, span_days=0.0, pulled_rows=0)
+
+    # New data available — full read, merge, trim, write.
+    cached = pd.read_parquet(path) if path.exists() else None
     df = pd.concat([cached, inc], ignore_index=True) if cached is not None else inc
     if not len(df):
         return CacheInfo(last_ts=None, n_rows=0, span_days=0.0, pulled_rows=0)

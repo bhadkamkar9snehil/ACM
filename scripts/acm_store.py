@@ -68,7 +68,9 @@ CREATE TABLE IF NOT EXISTS runs (
     status TEXT, alert_z REAL, persist INTEGER, rules_fired TEXT, notes TEXT);
 CREATE TABLE IF NOT EXISTS run_log (
     asset_key TEXT, ts TEXT, level TEXT, stage TEXT, message TEXT);
-CREATE INDEX IF NOT EXISTS ix_runlog_asset ON run_log(asset_key, ts);
+CREATE INDEX IF NOT EXISTS ix_runlog_asset     ON run_log(asset_key, ts);
+CREATE INDEX IF NOT EXISTS ix_alarms_asset     ON alarms(asset_key);
+CREATE INDEX IF NOT EXISTS ix_alarms_asset_ack ON alarms(asset_key, ack_at);
 
 CREATE TABLE IF NOT EXISTS config (
     category TEXT, param_path TEXT, param_value TEXT, value_type TEXT,
@@ -89,20 +91,34 @@ CREATE TABLE IF NOT EXISTS config_audit (
     changed_at TEXT, changed_by TEXT, category TEXT, param_path TEXT,
     old_value TEXT, new_value TEXT, note TEXT);
 
--- LIVE MONITORING (human view): one row per asset, current state
+-- LIVE MONITORING: one row per asset.
+--
+-- Design: keep ix_scores_asset_ts-indexed correlated subqueries for scores
+-- (each seek is O(log N) and hits RAM in any warm DB) and replace the three
+-- alarm subqueries — which had NO index and did full-table scans — with a
+-- single GROUP BY pass over alarms using ix_alarms_asset_ack.
+--
+-- Net change: 3·N alarm full-scans → 1 alarm scan with index grouping.
 DROP VIEW IF EXISTS v_asset_now;
 CREATE VIEW v_asset_now AS
+WITH alarm_agg AS (
+    SELECT asset_key,
+           COUNT(*)                                         AS alarm_episodes,
+           SUM(CASE WHEN ack_at IS NULL THEN 1 ELSE 0 END) AS unacked_alarms,
+           MAX(end_ts)                                      AS last_alarm_end
+    FROM alarms GROUP BY asset_key
+)
 SELECT a.asset_key, a.farm, a.asset_id, a.verdict, a.rules_fired,
        m.state, m.enabled, m.last_run_at,
-       (SELECT MAX(ts) FROM scores s WHERE s.asset_key = a.asset_key)   AS last_ts,
+       (SELECT MAX(ts) FROM scores s WHERE s.asset_key = a.asset_key)  AS last_ts,
        (SELECT fused FROM scores s WHERE s.asset_key = a.asset_key
-        ORDER BY ts DESC LIMIT 1)                                        AS last_fused,
-       (SELECT COUNT(*) FROM alarms al WHERE al.asset_key = a.asset_key) AS alarm_episodes,
-       (SELECT COUNT(*) FROM alarms al WHERE al.asset_key = a.asset_key
-        AND al.ack_at IS NULL)                                           AS unacked_alarms,
-       (SELECT MAX(end_ts) FROM alarms al WHERE al.asset_key = a.asset_key) AS last_alarm_end
+        ORDER BY ts DESC LIMIT 1)                                       AS last_fused,
+       COALESCE(aa.alarm_episodes, 0)  AS alarm_episodes,
+       COALESCE(aa.unacked_alarms, 0)  AS unacked_alarms,
+       aa.last_alarm_end
 FROM assets a
-LEFT JOIN monitored_assets m ON a.asset_key = m.grp || '/' || m.asset_key;
+LEFT JOIN monitored_assets m ON a.asset_key = m.grp || '/' || m.asset_key
+LEFT JOIN alarm_agg aa       ON a.asset_key = aa.asset_key;
 
 -- DATA SCIENCE (daily aggregates): trend material per asset per day
 CREATE VIEW IF NOT EXISTS v_daily_stats AS
@@ -132,7 +148,9 @@ IF OBJECT_ID('dbo.acm_scores') IS NULL CREATE TABLE dbo.acm_scores (
 IF OBJECT_ID('dbo.acm_alarms') IS NULL CREATE TABLE dbo.acm_alarms (
     asset_key NVARCHAR(64), start_ts DATETIME2, end_ts DATETIME2,
     duration_h FLOAT, peak_fused FLOAT,
-    ack_by NVARCHAR(64), ack_at DATETIME2, ack_note NVARCHAR(MAX));
+    ack_by NVARCHAR(64), ack_at DATETIME2, ack_note NVARCHAR(MAX),
+    INDEX ix_acm_alarms_asset     (asset_key),
+    INDEX ix_acm_alarms_asset_ack (asset_key, ack_at));
 IF OBJECT_ID('dbo.acm_summary') IS NULL CREATE TABLE dbo.acm_summary (
     farm NVARCHAR(16), ingested_at DATETIME2, metrics_json NVARCHAR(MAX));
 IF OBJECT_ID('dbo.acm_runs') IS NULL CREATE TABLE dbo.acm_runs (
@@ -168,21 +186,38 @@ IF OBJECT_ID('dbo.acm_config_audit') IS NULL CREATE TABLE dbo.acm_config_audit (
 DDL_MSSQL_MIGRATIONS = [
     "IF COL_LENGTH('dbo.acm_alarms', 'ack_by') IS NULL "
     "ALTER TABLE dbo.acm_alarms ADD ack_by NVARCHAR(64), ack_at DATETIME2, ack_note NVARCHAR(MAX)",
+    # Alarm indexes added in perf/performance-gains; idempotent on existing stores.
+    "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='ix_acm_alarms_asset' "
+    "AND object_id=OBJECT_ID('dbo.acm_alarms')) "
+    "CREATE INDEX ix_acm_alarms_asset ON dbo.acm_alarms(asset_key)",
+    "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='ix_acm_alarms_asset_ack' "
+    "AND object_id=OBJECT_ID('dbo.acm_alarms')) "
+    "CREATE INDEX ix_acm_alarms_asset_ack ON dbo.acm_alarms(asset_key, ack_at)",
 ]
 
 # Views created separately on mssql (CREATE VIEW must be first in batch);
 # CREATE OR ALTER so view upgrades reach existing stores.
 DDL_MSSQL_VIEWS = [
+    # Hybrid: keep ix_acm_scores_asset_ts-backed correlated subqueries for scores;
+    # replace 3×N alarm full-scans with one GROUP BY via ix_acm_alarms_asset_ack.
     """EXEC('CREATE OR ALTER VIEW dbo.acm_v_asset_now AS
+WITH alarm_agg AS (
+    SELECT asset_key,
+           COUNT(*)                                         AS alarm_episodes,
+           SUM(CASE WHEN ack_at IS NULL THEN 1 ELSE 0 END) AS unacked_alarms,
+           MAX(end_ts)                                      AS last_alarm_end
+    FROM dbo.acm_alarms GROUP BY asset_key
+)
 SELECT a.asset_key, a.farm, a.asset_id, a.verdict, a.rules_fired,
        m.state, m.enabled, m.last_run_at,
        (SELECT MAX(ts) FROM dbo.acm_scores s WHERE s.asset_key = a.asset_key) AS last_ts,
        (SELECT TOP 1 fused FROM dbo.acm_scores s WHERE s.asset_key = a.asset_key ORDER BY ts DESC) AS last_fused,
-       (SELECT COUNT(*) FROM dbo.acm_alarms al WHERE al.asset_key = a.asset_key) AS alarm_episodes,
-       (SELECT COUNT(*) FROM dbo.acm_alarms al WHERE al.asset_key = a.asset_key AND al.ack_at IS NULL) AS unacked_alarms,
-       (SELECT MAX(end_ts) FROM dbo.acm_alarms al WHERE al.asset_key = a.asset_key) AS last_alarm_end
+       COALESCE(aa.alarm_episodes, 0) AS alarm_episodes,
+       COALESCE(aa.unacked_alarms, 0) AS unacked_alarms,
+       aa.last_alarm_end
 FROM dbo.acm_assets a
-LEFT JOIN dbo.acm_monitored_assets m ON a.asset_key = m.grp + ''/'' + m.asset_key')""",
+LEFT JOIN dbo.acm_monitored_assets m ON a.asset_key = m.grp + ''/'' + m.asset_key
+LEFT JOIN alarm_agg aa              ON a.asset_key = aa.asset_key')""",
     """EXEC('CREATE OR ALTER VIEW dbo.acm_v_daily_stats AS
 SELECT asset_key, CAST(ts AS DATE) AS day, COUNT(*) AS n,
        AVG(fused) AS fused_mean, MAX(fused) AS fused_max,
