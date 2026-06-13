@@ -617,7 +617,6 @@ async function refreshEngineer() {
 
     const tr = document.createElement("tr");
     if (d.alarm_samples > 0) tr.className = "row-alarm";
-    else if (d.availability < 1.0 && d.availability != null) tr.className = "row-warn";
     
     tr.append(
       tdHtml(formatDayStr(d.day)),
