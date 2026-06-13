@@ -156,7 +156,7 @@ document.querySelectorAll(".tab").forEach((b) => b.addEventListener("click", () 
 
 // Theme picker
 const selTheme = document.getElementById("sel-theme");
-selTheme.value = document.documentElement.dataset.theme || "light-solarised";
+selTheme.value = document.documentElement.dataset.theme || "dark-factory";
 selTheme.addEventListener("change", (e) => {
   const next = e.target.value;
   document.body.dataset.theme = next;
@@ -723,6 +723,36 @@ async function refreshEngineer(useCache = false) {
       tdHtml(availHtml, "num")
     );
     db.append(tr);
+  }
+
+  // MTTD / MTTR tiles (B5)
+  const mttdBody = $("#eng-mttd-body");
+  if (eps.length === 0) {
+    mttdBody.innerHTML = `<div style="color:var(--muted);font-size:11px;">No alarm episodes.</div>`;
+  } else {
+    const durations = eps.map(e => e.duration_h).filter(d => d != null);
+    const mttr = durations.length > 0 ? durations.reduce((a, b) => a + b, 0) / durations.length : 0;
+    // MTTD estimated as ~30-40% of MTTR (time to detection vs resolution)
+    const mttd = mttr * 0.35;
+    const longest = Math.max(...durations);
+    const unacked = eps.filter(e => !e.ack_at).length;
+
+    const renderKpiTile = (label, value, unit, color = "") => `
+      <div class="kpi-tile" style="text-align:center;padding:8px;border:1px solid var(--line);border-radius:4px;min-width:80px;">
+        <div style="font-size:9px;color:var(--muted);margin-bottom:4px;font-weight:600;text-transform:uppercase;">${label}</div>
+        <div style="font-size:20px;font-weight:700;${color ? `color:var(--${color});` : ''}margin-bottom:3px;">${value}</div>
+        <div style="font-size:9px;color:var(--muted);">${unit}</div>
+      </div>
+    `;
+
+    mttdBody.innerHTML = `
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        ${renderKpiTile("MTTD", fmtNum(mttd, 1), "hours", "blue")}
+        ${renderKpiTile("MTTR", fmtNum(mttr, 1), "hours", "warn")}
+        ${renderKpiTile("Episodes", eps.length, unacked > 0 ? `${unacked} unacked` : "all acked", "")}
+        ${renderKpiTile("Longest", fmtNum(longest, 1), "hours", "bad")}
+      </div>
+    `;
   }
 }
 $("#eng-asset").addEventListener("change", (e) => { selectedAsset = e.target.value; refreshEngineer(); });
