@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  ACM one-command setup for ANY Windows machine. No Docker. Ever.
+  ACM one-command setup for ANY Windows machine.
 
   Installs prerequisites (Git + Python 3.11, via winget when present, direct
   official installers when not), clones or updates ACM from GitHub, installs
