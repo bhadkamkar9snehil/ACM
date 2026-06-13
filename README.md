@@ -2,6 +2,22 @@
 
 ACM watches industrial assets and tells you when something is wrong — **with no labels, no training-data preparation, and no human tuning**. Point it at any asset's raw sensor history (CSV or SQL): it learns what normal looks like from t=0 (faults in the history included), sets its own alarm thresholds at the cadence of your data, names the sensors driving every alarm, and retains everything in SQL — human verdicts and the full data-science substrate.
 
+## 📸 Interface Preview
+
+ACM features a fully responsive, dual-theme (Light & Dark) industrial control panel that visualizes the AI's internal state alongside fleet health.
+
+### Reliability Engineer Dashboard (Dark Mode)
+![Engineer Dashboard Dark](c_eng_dark.png)
+*Deep-dive diagnostics featuring fused score timelines, interactive detector heatmaps, and culprit sensors.*
+
+### Fleet Operator Dashboard (Light Mode)
+![Operator Dashboard Light](c_op_light.png)
+*Real-time fleet health dashboard with asset state badges, unified hierarchical timelines, and one-click alarm acknowledgments.*
+
+### Administration & ML Ops (Light Mode)
+![Admin Dashboard Light](c_adm_light.png)
+*Live service configuration, backend process logs, and ML pipeline health metrics.*
+
 ---
 
 ## 🚀 Quick Start Guide
@@ -12,6 +28,18 @@ Open PowerShell and run:
 irm https://raw.githubusercontent.com/bhadkamkar9snehil/ACM/main/setup_acm.ps1 | iex
 ```
 This installs Git and Python (3.11+) if missing, clones the ACM repository to `$HOME\ACM`, installs all dependencies, and runs an automated self-test.
+
+---
+
+## 🛡️ Self-Tuned Alarm Rules Explained
+
+ACM doesn't just alert on every minor spike. It routes the **Fused Anomaly Score** through a series of intelligent, cadence-aware rules to determine if a true `ALERT` should be triggered. These rules operate without human-defined thresholds:
+
+1. **Sustained Anomaly (R1):** Triggers when the fused anomaly score remains persistently high for a continuous duration. This filters out transient noise and sensor glitches, ensuring only sustained physical deviations raise an alarm.
+2. **24-Hour Rate (R2):** Triggers if an asset experiences an abnormally dense cluster of short-lived anomalies within a rolling 24-hour window, capturing intermittent faults that might reset before hitting the R1 duration limit.
+3. **Per-Head 7-Day Rate (R3):** Triggers if a specific *type* of fault (detected by a single independent model, like GMM or Isolation Forest) becomes highly recurrent over a 7-day period, indicating a chronic, degrading condition.
+4. **Availability Drop (R4):** Triggers if the asset stops communicating or goes offline for more than 48 consecutive hours, alerting operators to data-pipeline or catastrophic failures.
+5. **Self-Distrust Gate (DG):** A final sanity-check gate. If ACM detects simultaneous anomalies across the *entire* fleet, it categorizes it as a network/sensor-grid issue rather than a mass physical failure, suppressing false alarms.
 
 ---
 

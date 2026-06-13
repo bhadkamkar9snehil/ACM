@@ -380,15 +380,37 @@ async function refreshEngineer() {
 
   // fused chart with alarm shading
   const width = $("#eng-chart").clientWidth || 980;
+  const cv = $("#eng-heatmap");
+  cv.width = Math.max(100, width - 72);
+  const rowH = cv.height / Z_COLS.length;
+  const ctx = cv.getContext("2d");
+
+  let currentI0 = 0;
+  let currentI1 = s.rows.length - 1;
+
+  const renderHeatmap = () => {
+    ctx.clearRect(0, 0, cv.width, cv.height);
+    const np = currentI1 - currentI0 + 1;
+    if (np <= 0) return;
+    const colW = cv.width / np;
+    Z_COLS.forEach((z, zi) => {
+      for (let j = 0; j < np; j++) {
+        const v = s.rows[currentI0 + j][idx[z]];
+        ctx.fillStyle = v == null ? "#1a1710" : heatColor(v);
+        ctx.fillRect(j * colW, zi * rowH, colW + 0.6, rowH - 1.5);
+      }
+    });
+  };
+
   if (plot) plot.destroy();
   plot = new uPlot({
     width, height: 200,
     cursor: { y: false },
     series: [
       {},
-      { label: "fused z", stroke: "#5ba8e8", width: 1.4,
-        fill: "rgba(91,168,232,.06)", value: (u, v) => fmtNum(v) },
-      { label: "alert_z", stroke: "#e05050", dash: [5, 5], width: 1,
+      { label: "fused z", stroke: "#5ba8e8", width: 2,
+        fill: "rgba(91,168,232,.12)", value: (u, v) => fmtNum(v) },
+      { label: "alert_z", stroke: "#e05050", dash: [5, 5], width: 1.5,
         points: { show: false }, value: (u, v) => fmtNum(v) },
     ],
     axes: [
@@ -404,6 +426,22 @@ async function refreshEngineer() {
       },
     ],
     hooks: {
+      setScale: [(u, key) => {
+        if (key === "x") {
+          const minT = u.scales.x.min;
+          const maxT = u.scales.x.max;
+          let i0 = ts.findIndex(t => t >= minT);
+          if (i0 === -1) i0 = 0;
+          let i1 = ts.length - 1;
+          for (let k = ts.length - 1; k >= 0; k--) {
+            if (ts[k] <= maxT) { i1 = k; break; }
+          }
+          if (i1 < i0) i1 = i0;
+          currentI0 = i0;
+          currentI1 = i1;
+          renderHeatmap();
+        }
+      }],
       draw: [(u) => {   // alarm shading
         const ctx = u.ctx;
         ctx.save();
@@ -429,27 +467,16 @@ async function refreshEngineer() {
   labels.replaceChildren(...Z_LABELS.map((l) => {
     const d = document.createElement("div"); d.textContent = l; return d;
   }));
-  const cv = $("#eng-heatmap");
-  cv.width = Math.max(100, width - 72);
-  const rowH = cv.height / Z_COLS.length;
-  const ctx = cv.getContext("2d");
-  ctx.clearRect(0, 0, cv.width, cv.height);
-  const np = s.rows.length;
-  const colW = cv.width / np;
-  Z_COLS.forEach((z, zi) => {
-    for (let i = 0; i < np; i++) {
-      const v = s.rows[i][idx[z]];
-      ctx.fillStyle = v == null ? "#1a1710" : heatColor(v);
-      ctx.fillRect(i * colW, zi * rowH, colW + 0.6, rowH - 1.5);
-    }
-  });
 
   const tooltip = $("#eng-heat-tooltip");
   cv.onmousemove = (e) => {
     const rect = cv.getBoundingClientRect();
-    const i = Math.floor((e.clientX - rect.left) / colW);
+    const np = currentI1 - currentI0 + 1;
+    const colW = cv.width / np;
+    const j = Math.floor((e.clientX - rect.left) / colW);
     const zi = Math.floor((e.clientY - rect.top) / rowH);
-    if (i >= 0 && i < np && zi >= 0 && zi < Z_COLS.length) {
+    if (j >= 0 && j < np && zi >= 0 && zi < Z_COLS.length) {
+      const i = currentI0 + j;
       const zVal = s.rows[i][idx[Z_COLS[zi]]];
       tooltip.innerHTML = `
         <div style="color:var(--muted); margin-bottom:4px;">${fmtTs(ts[i] * 1000)}</div>
