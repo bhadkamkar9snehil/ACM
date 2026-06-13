@@ -30,7 +30,7 @@ from concurrent.futures import ProcessPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, List, Optional
 
 import pandas as pd
 
@@ -53,6 +53,37 @@ STATIC_DIR = ROOT / "static"
 # thresholds, fusion, features, ...) live in code and are rejected.
 EDITABLE_CATEGORIES = {"data", "sql", "runtime", "report", "maintenance"}
 
+_MISS = object()  # sentinel: cache miss
+
+
+class _TTLCache:
+    """Thread-safe-for-asyncio in-memory TTL cache.
+
+    All FastAPI handlers and the scheduler tick run on the same event-loop
+    thread, so plain dict access is safe without locks.
+    """
+    __slots__ = ("_ttl", "_store")
+
+    def __init__(self, ttl: float) -> None:
+        self._ttl = ttl
+        self._store: dict[str, tuple[float, Any]] = {}
+
+    def get(self, key: str) -> Any:
+        entry = self._store.get(key)
+        if entry is not None and time.monotonic() - entry[0] < self._ttl:
+            return entry[1]
+        return _MISS
+
+    def put(self, key: str, val: Any) -> None:
+        self._store[key] = (time.monotonic(), val)
+
+    def drop(self, *keys: str) -> None:
+        for k in keys:
+            self._store.pop(k, None)
+
+    def clear(self) -> None:
+        self._store.clear()
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(sep=" ", timespec="seconds")
@@ -65,7 +96,8 @@ def _cfg() -> ConfigDict:
 class Service:
     """Scheduler + store access for the API routes."""
 
-    def __init__(self, backend: str, db: Optional[str], conn_str: Optional[str]):
+    def __init__(self, backend: str, db: Optional[str], conn_str: Optional[str],
+                 api_cache_ttl: float = 30.0):
         self.backend, self.db, self.conn_str = backend, db, conn_str
         self.store = st.Store(backend, db=db, conn_str=conn_str)
         cfg = _cfg()
@@ -84,6 +116,8 @@ class Service:
         self.run_now_assets: Optional[List[str]] = None
         self.tick_lock = asyncio.Lock()
         self.tick_in_progress = False
+        # API response cache: avoids hitting v_asset_now on every 5-second browser poll.
+        self.api_cache = _TTLCache(ttl=api_cache_ttl)
 
     # ----------------------------------------------------------- registry --
     def monitored(self, include_retired: bool = False) -> List[dict]:
@@ -191,6 +225,8 @@ class Service:
         st.set_service_state(self.store, last_tick_at=_now(),
                              last_tick_duration_s=round(time.time() - t0, 1))
         st.prune_history(self.store, self.retention_days)
+        # Asset states changed — flush all cached API responses.
+        self.api_cache.clear()
         return counts
 
     async def loop(self) -> None:
@@ -215,8 +251,9 @@ class Service:
 
 # ------------------------------------------------------------------- app --
 def create_app(backend: str = "sqlite", db: Optional[str] = "acm_results.db",
-               conn_str: Optional[str] = None, run_scheduler: bool = True) -> FastAPI:
-    svc = Service(backend, db, conn_str)
+               conn_str: Optional[str] = None, run_scheduler: bool = True,
+               api_cache_ttl: float = 30.0) -> FastAPI:
+    svc = Service(backend, db, conn_str, api_cache_ttl=api_cache_ttl)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -240,16 +277,25 @@ def create_app(backend: str = "sqlite", db: Optional[str] = "acm_results.db",
     @app.get("/api/fleet/sparklines")
     async def sparklines(days: int = 30):
         """Per-asset daily fused_max — compact sparkline material."""
+        cache_key = f"sparklines:{days}"
+        hit = svc.api_cache.get(cache_key)
+        if hit is not _MISS:
+            return hit
         rows = s.fetch(f"SELECT asset_key, day, fused_max FROM {s.t('v_daily_stats')} "
                        f"ORDER BY asset_key, day")
         out: dict = {}
         for r in rows:
             out.setdefault(r["asset_key"], []).append(
                 [str(r["day"]), float(r["fused_max"]) if r["fused_max"] is not None else None])
-        return {k: v[-days:] for k, v in out.items()}
+        result = {k: v[-days:] for k, v in out.items()}
+        svc.api_cache.put(cache_key, result)
+        return result
 
     @app.get("/api/fleet")
     async def fleet():
+        hit = svc.api_cache.get("fleet")
+        if hit is not _MISS:
+            return hit
         scored = s.fetch(f"SELECT * FROM {s.t('v_asset_now')}")
         have = {r["asset_key"] for r in scored}
         # Monitored assets with no results yet (NEW/MATURING/ERROR) still
@@ -264,6 +310,7 @@ def create_app(backend: str = "sqlite", db: Optional[str] = "acm_results.db",
                                "last_fused": None, "alarm_episodes": 0,
                                "unacked_alarms": 0, "last_alarm_end": None,
                                "state_detail": m["state_detail"]})
+        svc.api_cache.put("fleet", scored)
         return scored
 
     # ------------------------------------------------------------- asset --
@@ -337,6 +384,7 @@ def create_app(backend: str = "sqlite", db: Optional[str] = "acm_results.db",
                          body["ack_by"], body.get("note", ""))
         if n == 0:
             raise HTTPException(404, "no matching alarm episode")
+        svc.api_cache.drop("fleet")  # unacked count changed
         return {"acked": n}
 
     # ----------------------------------------------------------- registry --
@@ -375,6 +423,7 @@ def create_app(backend: str = "sqlite", db: Optional[str] = "acm_results.db",
              spec.source_ref, spec.conn_ref, spec.timestamp_col, spec.status_col,
              _now(), "NEW"))
         s.commit()
+        svc.api_cache.drop("fleet")
         return {"asset_key": spec.asset_key, "state": "NEW", "probe_rows": len(probe)}
 
     @app.patch("/api/monitored-assets/{key:path}")
@@ -395,6 +444,7 @@ def create_app(backend: str = "sqlite", db: Optional[str] = "acm_results.db",
         if fields.get("enabled") == 0:
             svc.set_asset_state(key, "PAUSED", "monitoring disabled")
         s.commit()
+        svc.api_cache.drop("fleet")
         return {"updated": sorted(fields)}
 
     @app.delete("/api/monitored-assets/{key:path}")
@@ -405,6 +455,7 @@ def create_app(backend: str = "sqlite", db: Optional[str] = "acm_results.db",
         if cur.rowcount == 0:
             raise HTTPException(404, f"unknown asset '{key}'")
         s.commit()
+        svc.api_cache.drop("fleet")
         return {"retired": key}
 
     # ------------------------------------------------------------- config --
@@ -457,6 +508,11 @@ def create_app(backend: str = "sqlite", db: Optional[str] = "acm_results.db",
     # ------------------------------------------------------------ service --
     @app.get("/api/service")
     async def service_status():
+        # Service status is polled frequently; cache it but with a short TTL
+        # because tick_in_progress changes within a tick cycle.
+        hit = svc.api_cache.get("service")
+        if hit is not _MISS and not svc.tick_in_progress:
+            return hit
         state = st.get_service_state(s)
         errors = s.fetch(f"SELECT asset_key, state, state_detail FROM "
                          f"{s.t('monitored_assets')} WHERE state IN ('ERROR','STALE') "
@@ -468,19 +524,24 @@ def create_app(backend: str = "sqlite", db: Optional[str] = "acm_results.db",
         if state["last_tick_at"] and not state["paused"]:
             next_eta = str(pd.Timestamp(state["last_tick_at"])
                            + pd.Timedelta(minutes=state["tick_minutes"]))
-        return {**state, "tick_in_progress": svc.tick_in_progress,
-                "next_tick_eta": next_eta, "attention": errors,
-                "runtimes": runtimes, "workers": svc.workers,
-                "cache_dir": str(svc.cache_dir), "backend": svc.backend}
+        result = {**state, "tick_in_progress": svc.tick_in_progress,
+                  "next_tick_eta": next_eta, "attention": errors,
+                  "runtimes": runtimes, "workers": svc.workers,
+                  "cache_dir": str(svc.cache_dir), "backend": svc.backend}
+        if not svc.tick_in_progress:
+            svc.api_cache.put("service", result)
+        return result
 
     @app.post("/api/service/pause")
     async def pause():
         st.set_service_state(s, paused=1)
+        svc.api_cache.drop("service")
         return {"paused": True}
 
     @app.post("/api/service/resume")
     async def resume():
         st.set_service_state(s, paused=0)
+        svc.api_cache.drop("service")
         svc.run_now_event.set()
         return {"paused": False}
 
@@ -493,6 +554,7 @@ def create_app(backend: str = "sqlite", db: Optional[str] = "acm_results.db",
         if minutes < 1:
             raise HTTPException(422, "tick_minutes must be >= 1")
         st.set_service_state(s, tick_minutes=minutes)
+        svc.api_cache.drop("service")
         return {"tick_minutes": minutes}
 
     @app.post("/api/service/run-now")
