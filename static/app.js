@@ -392,8 +392,16 @@ async function refreshEngineer() {
         points: { show: false }, value: (u, v) => fmtNum(v) },
     ],
     axes: [
-      { stroke: "#7a6e58", grid: { stroke: "rgba(58,52,40,.8)" }, ticks: { stroke: "rgba(58,52,40,.8)" } },
-      { stroke: "#7a6e58", grid: { stroke: "rgba(58,52,40,.8)" }, ticks: { stroke: "rgba(58,52,40,.8)" } },
+      { 
+        stroke: getComputedStyle(document.body).getPropertyValue('--muted').trim(), 
+        grid: { show: false }, 
+        ticks: { stroke: getComputedStyle(document.body).getPropertyValue('--line').trim() } 
+      },
+      { 
+        stroke: getComputedStyle(document.body).getPropertyValue('--muted').trim(), 
+        grid: { stroke: getComputedStyle(document.body).getPropertyValue('--line').trim(), width: 1 }, 
+        ticks: { show: false } 
+      },
     ],
     hooks: {
       draw: [(u) => {   // alarm shading
