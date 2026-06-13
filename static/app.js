@@ -46,6 +46,27 @@ function badge(state) {
 function fmtTs(ts) { return ts ? String(ts).slice(0, 16) : "—"; }
 function fmtNum(v, d = 2) { return v == null || Number.isNaN(+v) ? "—" : (+v).toFixed(d); }
 
+function fmtRelTime(ts) {
+  if (!ts) return "—";
+  const d = new Date(ts);
+  if (isNaN(d)) return "—";
+  const diffMs = Date.now() - d.getTime();
+  const diffSec = Math.round(diffMs / 1000);
+  const diffMin = Math.round(diffMs / 60000);
+  if (diffSec < 90)  return "just now";
+  if (diffMin < 60)  return `${diffMin} min ago`;
+  const h = Math.floor(diffMin / 60), m = diffMin % 60;
+  if (h < 6) return m ? `${h}h ${m}m ago` : `${h}h ago`;
+  const now = new Date();
+  const hhmm = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  if (d.toDateString() === now.toDateString()) return hhmm;
+  const yest = new Date(now); yest.setDate(now.getDate() - 1);
+  const prefix = d.toDateString() === yest.toDateString()
+    ? "Yesterday"
+    : d.toLocaleDateString([], { month: "short", day: "numeric" });
+  return `${prefix} ${hhmm}`;
+}
+
 function toast(msg, kind = "info", ms = 3500) {
   const el = document.createElement("div");
   el.className = `toast ${kind}`;
@@ -184,8 +205,10 @@ async function refreshService(useCache = false) {
   const pill = $("#svc-pill");
   pill.className = "stat-cell " + (svc.tick_in_progress ? "warn" : svc.paused ? "bad" : "ok");
   $("#svc-pill-text").textContent = svc.tick_in_progress ? "TICKING" : svc.paused ? "PAUSED" : "WATCHING";
-  $("#svc-tick-info").textContent =
-    `tick ${fmtTs(svc.last_tick_at)} · ${svc.last_tick_duration_s ?? "—"}s`;
+  const dur = svc.last_tick_duration_s != null ? ` · ${svc.last_tick_duration_s}s` : "";
+  const tickEl = $("#svc-tick-info");
+  tickEl.textContent = fmtRelTime(svc.last_tick_at) + dur;
+  tickEl.title = svc.last_tick_at ? fmtTs(svc.last_tick_at) : "";
   $("#btn-pause").classList.toggle("hidden", !!svc.paused);
   $("#btn-resume").classList.toggle("hidden", !svc.paused);
   if (document.activeElement !== $("#inp-tick")) $("#inp-tick").value = svc.tick_minutes;
