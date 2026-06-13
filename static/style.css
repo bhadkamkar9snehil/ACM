@@ -351,10 +351,19 @@ table.data tr.is-alarm td { background: var(--bad-lo); }
   display: flex; flex-direction: column; align-items: center;
   border-top: 3px solid var(--ink2);
 }
-.kpi.ok    { border-top-color: var(--ok); }
-.kpi.alarm { border-top-color: var(--bad); }
-.kpi.warn  { border-top-color: var(--warn); }
-.kpi.accent{ border-top-color: var(--brand); }
+.kpi.ok    { background: var(--ok); border-color: var(--ok); }
+.kpi.alarm { background: var(--bad); border-color: var(--bad); }
+.kpi.warn  { background: var(--warn); border-color: var(--warn); }
+.kpi.accent{ background: var(--brand); border-color: var(--brand); }
+
+/* Apply contrasting text color to all lit KPIs */
+.kpi.ok .kpi-num, .kpi.ok .kpi-cap,
+.kpi.alarm .kpi-num, .kpi.alarm .kpi-cap,
+.kpi.warn .kpi-num, .kpi.warn .kpi-cap,
+.kpi.accent .kpi-num, .kpi.accent .kpi-cap {
+  color: var(--bg);
+}
+
 .kpi-num {
   font-family: 'Share Tech Mono', monospace;
   font-size: 26px; font-weight: bold; color: var(--ink);
