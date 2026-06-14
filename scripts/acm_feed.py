@@ -27,7 +27,7 @@ import pyarrow.parquet as _pq
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-SOURCE_KINDS = ("csv", "table", "query")
+SOURCE_KINDS = ("csv", "table", "query", "mqtt")
 
 # Readiness gate horizons — TIME-defined, like the alarm-rule horizons. A
 # baseline needs enough elapsed time behind it for the interleaved
@@ -66,6 +66,8 @@ class CacheInfo:
 
 def load_increment(spec: SourceSpec, since: Optional[pd.Timestamp]) -> pd.DataFrame:
     """Pull rows newer than `since` from the source (everything when None)."""
+    if spec.source_kind == "mqtt":
+        return _load_mqtt_increment(spec, since)
     if spec.source_kind == "csv":
         df = pd.read_csv(spec.source_ref, sep=None, engine='python')
         if spec.timestamp_col not in df.columns:
@@ -94,6 +96,56 @@ def load_increment(spec: SourceSpec, since: Optional[pd.Timestamp]) -> pd.DataFr
                              f"(columns: {list(df.columns)[:8]}...)")
         df[spec.timestamp_col] = pd.to_datetime(df[spec.timestamp_col])
     return df.sort_values(spec.timestamp_col).reset_index(drop=True)
+
+
+def _load_mqtt_increment(spec: SourceSpec, since: Optional[pd.Timestamp]) -> pd.DataFrame:
+    """Read buffered flat MQTT payloads from the SQLite bridge DB.
+
+    spec.conn_ref  — path to mqtt_buffer.db (falls back to data_cache/mqtt_buffer.db)
+    spec.timestamp_col — column to parse as timestamp (default "published_at")
+    """
+    import json as _json
+    import sqlite3 as _sqlite3
+
+    db_path = spec.conn_ref or str(ROOT / "data_cache" / "mqtt_buffer.db")
+    if not Path(db_path).exists():
+        return pd.DataFrame()
+
+    since_str = since.isoformat() if since is not None else None
+    with _sqlite3.connect(db_path) as con:
+        if since_str is not None:
+            rows = con.execute(
+                "SELECT payload_json FROM mqtt_buffer WHERE ts > ? ORDER BY ts",
+                (since_str,),
+            ).fetchall()
+        else:
+            rows = con.execute(
+                "SELECT payload_json FROM mqtt_buffer ORDER BY ts"
+            ).fetchall()
+
+    records = []
+    for (json_str,) in rows:
+        try:
+            records.append(_json.loads(json_str))
+        except Exception:
+            pass
+
+    if not records:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(records)
+    ts_col = spec.timestamp_col or "published_at"
+    if ts_col not in df.columns:
+        for alias in ("published_at", "timestamp", "ts"):
+            if alias in df.columns:
+                df = df.rename(columns={alias: ts_col})
+                break
+    if ts_col not in df.columns:
+        return pd.DataFrame()
+
+    df[ts_col] = pd.to_datetime(df[ts_col], utc=True, errors="coerce")
+    df = df.dropna(subset=[ts_col])
+    return df.sort_values(ts_col).reset_index(drop=True)
 
 
 def cache_path(cache_dir: Path | str, asset_key: str) -> Path:
