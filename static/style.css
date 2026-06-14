@@ -1148,9 +1148,12 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
 .mt-empty { color: var(--muted); font-size: 11px; font-family: sans-serif; font-style: italic; }
 
 /* ── Engineer tab — eng-layout fills panel-scroll ───────── */
-#tab-engineer > .panel-scroll { overflow-y: auto; }
-.eng-layout > .eng-episodes,
-.eng-layout > .eng-daily { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+/* display:block (like admin) lets eng-layout grow to natural height so panel-scroll can scroll it.
+   flex+overflow-y:auto traps content inside fixed viewport height, collapsing episodes/daily tables. */
+#tab-engineer > .panel-scroll { overflow-y: auto; display: block; }
+/* min-height: 0 only needed in advanced grid rows to allow shrinking below natural size */
+[data-mode="advanced"] .eng-layout > .eng-episodes,
+[data-mode="advanced"] .eng-layout > .eng-daily { min-height: 0; overflow: hidden; }
 
 /* ── Admin tab — adm-layout fills panel-scroll ──────────── */
 #tab-admin > .panel-scroll { overflow-y: auto; display: block; }
@@ -1210,7 +1213,7 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
 
 [data-mode="advanced"] .op-layout {
   display: grid;
-  grid-template-columns: 160px 1fr;
+  grid-template-columns: 200px 1fr;
   grid-template-rows: auto 1fr auto;
   grid-template-areas:
     "kpis   health"
@@ -1224,7 +1227,7 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
 [data-mode="advanced"] .op-causes { grid-area: causes; }
 
 /* KPI tiles: horizontal row in basic → compact vertical sidebar in advanced */
-[data-mode="advanced"] .op-kpis .kpis { flex-direction: column; gap: 4px; }
+[data-mode="advanced"] .op-kpis .kpis { grid-template-columns: 1fr; gap: 4px; }
 [data-mode="advanced"] .op-kpis .kpi  { padding: 6px 10px; }
 [data-mode="advanced"] .op-kpis .kpi-num { font-size: 18px; }
 
@@ -1248,10 +1251,10 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
 [data-mode="advanced"] .eng-culprits  { grid-area: culprits; }
 [data-mode="advanced"] .eng-chart     { grid-area: chart; }
 [data-mode="advanced"] .eng-pattern   { grid-area: pattern; }
-[data-mode="advanced"] .eng-episodes  { grid-area: episodes; }
-[data-mode="advanced"] .eng-cofiring  { grid-area: cofiring; }
-[data-mode="advanced"] .eng-daily     { grid-area: daily; }
-[data-mode="advanced"] .eng-histogram { grid-area: histogram; }
+[data-mode="advanced"] .eng-episodes  { grid-area: episodes; min-height: 200px; }
+[data-mode="advanced"] .eng-cofiring  { grid-area: cofiring; min-height: 160px; }
+[data-mode="advanced"] .eng-daily     { grid-area: daily;    min-height: 200px; }
+[data-mode="advanced"] .eng-histogram { grid-area: histogram; min-height: 160px; }
 [data-mode="advanced"] .eng-mttd      { grid-area: mttd; }
 
 /* Score chart: taller in basic, shorter in advanced (shares row with pattern heatmap) */
@@ -1269,7 +1272,8 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
     "assets  runhist"
     "runs    runs"
     "config  config"
-    "audit   audit";
+    "audit   audit"
+    "log     log";
   gap: 8px;
 }
 [data-mode="advanced"] .adm-health  { grid-area: health; }
@@ -1278,6 +1282,7 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
 [data-mode="advanced"] .adm-runs    { grid-area: runs; }
 [data-mode="advanced"] .adm-config  { grid-area: config; }
 [data-mode="advanced"] .adm-audit   { grid-area: audit; }
+[data-mode="advanced"] .adm-log     { grid-area: log; }
 
 /* ── A3 Episode detector contribution strip ──────────────── */
 .cause-strip {
