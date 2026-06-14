@@ -1623,3 +1623,538 @@ async function refresh() {
 }
 refresh();
 setInterval(refresh, POLL_MS);
+
+/* ═══════════════════════════════════════════════════════════
+   SIMULATE TAB — Generator, Files, Replay, Output Panel
+════════════════════════════════════════════════════════════ */
+
+const SIM = (() => {
+  let generators = [];
+  let currentSpec = null;
+  let currentGenResp = null;
+  let currentTagMappings = [];
+  let replayRunning = false;
+  let liveValPrev = {};
+  let outputLines = [];
+  let outputFilter = 'all';
+  let outputLevel = 'all';
+  let outputCollapsed = false;
+  let autoScroll = true;
+
+  function initSimTabs() {
+    document.querySelectorAll('.sub-tab').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const pane = btn.dataset.simTab;
+        document.querySelectorAll('.sub-tab').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        document.querySelectorAll('.sim-pane').forEach(p => p.classList.add('hidden'));
+        const el = document.getElementById('sim-pane-' + pane);
+        if (el) el.classList.remove('hidden');
+        if (pane === 'files') refreshFiles();
+        if (pane === 'replay') populateReplayFileList();
+      });
+    });
+  }
+
+  function log(text, src = 'sim', level = 'info') {
+    const ts = new Date().toLocaleTimeString();
+    outputLines.push({ ts, text, src, level });
+    if (outputLines.length > 2000) outputLines.shift();
+    renderOutputLog();
+    const el = document.getElementById('output-line-count');
+    if (el) el.textContent = outputLines.length + ' lines';
+  }
+
+  function renderOutputLog() {
+    const el = document.getElementById('output-log');
+    if (!el) return;
+    const visible = outputLines.filter(e => {
+      if (outputFilter !== 'all' && e.src !== outputFilter) return false;
+      if (outputLevel === 'warn' && !['warn','error'].includes(e.level)) return false;
+      if (outputLevel === 'error' && e.level !== 'error') return false;
+      return true;
+    });
+    el.innerHTML = visible.map(e => {
+      const cls = `log-${e.level === 'info' ? (e.src === 'sim' ? 'sim' : 'acm') : e.level}`;
+      const pfx = e.src === 'sim' ? '[SIM]' : '[ACM]';
+      return `<span class="${cls}">${e.ts} ${pfx} ${String(e.text).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</span>`;
+    }).join('\n');
+    if (autoScroll) el.scrollTop = el.scrollHeight;
+  }
+
+  function initOutputPanel() {
+    const toggleBtn = document.getElementById('btn-output-toggle');
+    const panel = document.getElementById('output-panel');
+    const clearBtn = document.getElementById('btn-output-clear');
+    const levelSel = document.getElementById('sel-output-level');
+    const autoScrollChk = document.getElementById('chk-autoscroll');
+
+    toggleBtn?.addEventListener('click', () => {
+      outputCollapsed = !outputCollapsed;
+      panel.classList.toggle('collapsed', outputCollapsed);
+      toggleBtn.textContent = outputCollapsed ? '∨' : '∧';
+      document.querySelector('.main').style.paddingBottom = outputCollapsed ? '40px' : '210px';
+    });
+    clearBtn?.addEventListener('click', () => { outputLines = []; renderOutputLog(); });
+    levelSel?.addEventListener('change', () => { outputLevel = levelSel.value; renderOutputLog(); });
+    autoScrollChk?.addEventListener('change', () => { autoScroll = autoScrollChk.checked; });
+    document.querySelectorAll('.output-src-tab').forEach(btn => {
+      btn.addEventListener('click', () => {
+        outputFilter = btn.dataset.src;
+        document.querySelectorAll('.output-src-tab').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        renderOutputLog();
+      });
+    });
+  }
+
+  async function simGet(path) {
+    const r = await fetch('/api/sim' + path);
+    if (!r.ok) throw new Error(await r.text());
+    return r.json();
+  }
+
+  async function simPost(path, body = {}) {
+    const r = await fetch('/api/sim' + path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) throw new Error(await r.text());
+    return r.json();
+  }
+
+  async function simDelete(path) {
+    const r = await fetch('/api/sim' + path, { method: 'DELETE' });
+    if (!r.ok) throw new Error(await r.text());
+    return r.json();
+  }
+
+  async function loadGenerators() {
+    try {
+      generators = await simGet('/generators');
+      const sel = document.getElementById('sim-domain-sel');
+      if (!sel) return;
+      sel.innerHTML = generators.map(g =>
+        `<option value="${g.domain_id}">${g.display_name}</option>`).join('');
+      if (generators.length) await onDomainChange();
+    } catch (e) { log('Failed to load generators: ' + e.message, 'sim', 'error'); }
+  }
+
+  async function onDomainChange() {
+    const sel = document.getElementById('sim-domain-sel');
+    if (!sel) return;
+    const id = sel.value;
+    const g = generators.find(x => x.domain_id === id);
+    if (g) document.getElementById('sim-domain-desc').textContent = g.description || '';
+    try {
+      currentSpec = await simGet('/generators/' + id + '/spec');
+      populateScenarios();
+      populateParams();
+      setDefaultFilename();
+    } catch (e) { log('Failed to load spec: ' + e.message, 'sim', 'error'); }
+  }
+
+  function populateScenarios() {
+    const sel = document.getElementById('sim-scenario-sel');
+    if (!sel || !currentSpec) return;
+    sel.innerHTML = (currentSpec.scenarios || []).map(sc =>
+      `<option value="${sc.id}">${sc.label}${sc.description ? ' — ' + sc.description : ''}</option>`
+    ).join('');
+  }
+
+  function populateParams() {
+    const grid = document.getElementById('sim-params-grid');
+    if (!grid || !currentSpec) return;
+    grid.innerHTML = '';
+    (currentSpec.parameters || []).forEach(p => {
+      const wrap = document.createElement('div');
+      const lbl = document.createElement('label');
+      lbl.className = 'lbl-sm';
+      lbl.textContent = p.label + (p.unit ? ' (' + p.unit + ')' : '');
+      wrap.appendChild(lbl);
+      const inpStyle = 'width:100%;box-sizing:border-box;font-family:"Share Tech Mono",monospace;font-size:12px;background:var(--bg2);border:1px solid var(--line);color:var(--ink);padding:5px 8px;';
+      let input;
+      if (p.type === 'select' && p.options) {
+        input = document.createElement('select');
+        input.style.cssText = inpStyle;
+        p.options.forEach(opt => {
+          const o = document.createElement('option');
+          o.value = opt; o.textContent = opt;
+          if (opt === p.default) o.selected = true;
+          input.appendChild(o);
+        });
+      } else {
+        input = document.createElement('input');
+        input.style.cssText = inpStyle;
+        input.type = p.type === 'number' ? 'number' : (p.type === 'datetime' ? 'datetime-local' : 'text');
+        if (p.default !== null && p.default !== undefined) input.value = p.default;
+        if (p.min !== null && p.min !== undefined) input.min = p.min;
+        if (p.max !== null && p.max !== undefined) input.max = p.max;
+        if (p.step !== null && p.step !== undefined) input.step = p.step;
+      }
+      input.dataset.param = p.name;
+      wrap.appendChild(input);
+      grid.appendChild(wrap);
+    });
+  }
+
+  function setDefaultFilename() {
+    const inp = document.getElementById('sim-output-filename');
+    if (inp && currentSpec?.default_output_filename) inp.value = currentSpec.default_output_filename;
+  }
+
+  function collectParams() {
+    const params = {};
+    document.querySelectorAll('#sim-params-grid [data-param]').forEach(el => {
+      const name = el.dataset.param;
+      const p = (currentSpec?.parameters || []).find(x => x.name === name);
+      params[name] = (p && p.type === 'number') ? (parseFloat(el.value) || 0) : el.value;
+    });
+    return params;
+  }
+
+  async function doGenerate() {
+    const domain = document.getElementById('sim-domain-sel')?.value;
+    const scenario = document.getElementById('sim-scenario-sel')?.value;
+    const filename = document.getElementById('sim-output-filename')?.value.trim();
+    const statusEl = document.getElementById('sim-gen-status');
+    const backdate = document.getElementById('sim-backdate')?.checked;
+    const backdateDays = parseInt(document.getElementById('sim-backdate-days')?.value) || 45;
+    if (!filename) { if(statusEl) statusEl.textContent = 'Filename required'; return; }
+    if(statusEl) statusEl.textContent = 'Generating…';
+    log(`Generating ${domain}/${scenario} → ${filename}`, 'sim', 'info');
+    try {
+      currentGenResp = await simPost('/generators/' + domain + '/generate', {
+        scenario, output_filename: filename,
+        parameters: collectParams(),
+        load_into_replay: false, backdate, backdate_days: backdateDays,
+      });
+      if(statusEl) statusEl.textContent = `✓ ${currentGenResp.row_count} rows, ${currentGenResp.column_count} columns`;
+      log(`Generated: ${currentGenResp.filename} (${currentGenResp.row_count} rows)`, 'sim', 'info');
+      currentTagMappings = currentGenResp.default_tag_mappings || [];
+      renderPreview(currentGenResp);
+    } catch (e) {
+      if(statusEl) statusEl.textContent = 'Error: ' + e.message;
+      log('Generate failed: ' + e.message, 'sim', 'error');
+    }
+  }
+
+  function renderPreview(resp) {
+    const card = document.getElementById('sim-preview-card');
+    if (!card) return;
+    card.classList.remove('hidden');
+    const meta = document.getElementById('sim-preview-meta');
+    if(meta) meta.textContent = `${resp.row_count} rows · ${resp.column_count} columns · ${resp.filename}`;
+    const tbl = document.getElementById('sim-preview-table');
+    if (!tbl || !resp.preview?.length) return;
+    const cols = Object.keys(resp.preview[0]);
+    const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    tbl.innerHTML = '<thead><tr>' + cols.map(c=>'<th>'+esc(c)+'</th>').join('') + '</tr></thead><tbody>'
+      + resp.preview.map(row=>'<tr>'+cols.map(c=>'<td>'+esc(row[c]??'')+'</td>').join('')+'</tr>').join('') + '</tbody>';
+    const keyInp = document.getElementById('sim-onboard-key');
+    if (keyInp && !keyInp.value) {
+      keyInp.value = resp.filename.replace(/\.(csv|xlsx)$/i,'').replace(/[^a-zA-Z0-9_]/g,'_').toUpperCase();
+    }
+  }
+
+  async function doOnboard() {
+    const assetKey = document.getElementById('sim-onboard-key')?.value.trim();
+    const statusEl = document.getElementById('sim-onboard-status');
+    if (!currentGenResp) { if(statusEl) statusEl.textContent = 'Generate a CSV first'; return; }
+    if (!assetKey) { if(statusEl) statusEl.textContent = 'Asset key required'; return; }
+    if(statusEl) statusEl.textContent = 'Onboarding…';
+    log(`Onboarding ${assetKey} from ${currentGenResp.filename}`, 'sim', 'info');
+    try {
+      const simResp = await simPost('/onboard', {
+        domain_id: document.getElementById('sim-domain-sel')?.value,
+        request: { scenario: document.getElementById('sim-scenario-sel')?.value,
+          output_filename: currentGenResp.filename, parameters: collectParams() },
+        asset_key: assetKey,
+        grp: document.getElementById('sim-onboard-grp')?.value || 'sim',
+        fast_track: document.getElementById('sim-fast-track')?.checked || false,
+        backdate: document.getElementById('sim-backdate')?.checked,
+        backdate_days: parseInt(document.getElementById('sim-backdate-days')?.value) || 45,
+      });
+      const acmResp = await fetch('/api/monitored-assets', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(simResp.suggested_onboard),
+      });
+      if (!acmResp.ok) throw new Error(await acmResp.text());
+      const acmData = await acmResp.json();
+      if(statusEl) statusEl.textContent = `✓ Onboarded (${acmData.state})`;
+      log(`Asset ${assetKey} onboarded (state: ${acmData.state})`, 'sim', 'info');
+    } catch (e) {
+      if(statusEl) statusEl.textContent = 'Error: ' + e.message;
+      log('Onboard failed: ' + e.message, 'sim', 'error');
+    }
+  }
+
+  async function refreshFiles() {
+    const tbody = document.getElementById('sim-files-body');
+    if (!tbody) return;
+    try {
+      const files = await simGet('/files');
+      const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      tbody.innerHTML = files.map(f => `<tr>
+        <td>${esc(f.filename)}</td><td>${esc(f.source)}</td>
+        <td class="num">${f.row_count}</td><td class="num">${f.column_count}</td>
+        <td>${esc(f.modified_at?.slice(0,16)||'—')}</td>
+        <td style="white-space:nowrap;">
+          <button class="btn btn-sm" onclick="SIM.previewFile('${esc(f.filename)}','${esc(f.source)}')">Preview</button>
+          <button class="btn btn-sm btn-bad" onclick="SIM.deleteFile('${esc(f.filename)}','${esc(f.source)}')">Delete</button>
+        </td></tr>`).join('');
+    } catch (e) {
+      tbody.innerHTML = '<tr><td colspan="6" style="color:var(--muted);">— error loading files —</td></tr>';
+      log('Files load failed: ' + e.message, 'sim', 'error');
+    }
+  }
+
+  async function previewFile(filename, source) {
+    const card = document.getElementById('sim-file-preview-card');
+    const tbl = document.getElementById('sim-file-preview-table');
+    if (!card || !tbl) return;
+    try {
+      const meta = await simGet(`/files/${encodeURIComponent(filename)}/metadata?source=${source}`);
+      card.classList.remove('hidden');
+      document.getElementById('sim-file-preview-title').textContent = `Preview: ${filename}`;
+      if (!meta.preview?.length) { tbl.innerHTML = '<tr><td>No preview</td></tr>'; return; }
+      const cols = Object.keys(meta.preview[0]);
+      const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      tbl.innerHTML = '<thead><tr>'+cols.map(c=>'<th>'+esc(c)+'</th>').join('')+'</tr></thead><tbody>'
+        + meta.preview.map(row=>'<tr>'+cols.map(c=>'<td>'+esc(row[c]??'')+'</td>').join('')+'</tr>').join('')+'</tbody>';
+    } catch (e) { log('Preview failed: ' + e.message, 'sim', 'error'); }
+  }
+
+  async function deleteFile(filename, source) {
+    if (!confirm(`Delete ${filename}?`)) return;
+    try {
+      await simDelete(`/files/${encodeURIComponent(filename)}?source=${source}`);
+      log(`Deleted: ${filename}`, 'sim', 'info');
+      refreshFiles();
+    } catch (e) { log('Delete failed: ' + e.message, 'sim', 'error'); }
+  }
+
+  async function handleUpload(file) {
+    if (!file) return;
+    log(`Uploading ${file.name}…`, 'sim', 'info');
+    const fd = new FormData();
+    fd.append('file', file);
+    try {
+      const r = await fetch('/api/sim/files/upload', { method: 'POST', body: fd });
+      if (!r.ok) throw new Error(await r.text());
+      const meta = await r.json();
+      log(`Uploaded: ${meta.filename} (${meta.row_count} rows)`, 'sim', 'info');
+      refreshFiles();
+    } catch (e) { log('Upload failed: ' + e.message, 'sim', 'error'); }
+  }
+
+  async function populateReplayFileList() {
+    const sel = document.getElementById('sim-replay-file');
+    if (!sel) return;
+    try {
+      const files = await simGet('/files');
+      sel.innerHTML = files.map(f =>
+        `<option value="${f.filename}" data-source="${f.source}">${f.filename} (${f.source})</option>`
+      ).join('');
+      if (files.length) {
+        const src = document.getElementById('sim-replay-source');
+        if (src) src.value = files[0].source;
+        await loadTagPlan(files[0].filename, files[0].source);
+      }
+    } catch (e) { log('File list failed: ' + e.message, 'sim', 'error'); }
+  }
+
+  async function loadTagPlan(filename, source) {
+    const tbody = document.getElementById('sim-tags-body');
+    const countEl = document.getElementById('sim-tag-count');
+    if (!tbody) return;
+    try {
+      const meta = await simGet(`/files/${encodeURIComponent(filename)}/metadata?source=${source}`);
+      currentTagMappings = meta.default_tag_mappings || [];
+      renderTagPlan();
+      if (countEl) countEl.textContent = `(${currentTagMappings.filter(t=>t.enabled).length} / ${currentTagMappings.length} enabled)`;
+    } catch (e) { log('Tag plan load failed: ' + e.message, 'sim', 'error'); }
+  }
+
+  function renderTagPlan() {
+    const tbody = document.getElementById('sim-tags-body');
+    if (!tbody) return;
+    const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    tbody.innerHTML = currentTagMappings.map((t,i) => `<tr>
+      <td><input type="checkbox" data-tag-idx="${i}" ${t.enabled?'checked':''}></td>
+      <td>${esc(t.csv_column)}</td>
+      <td><code style="font-size:11px;">${esc(t.tag_name)}</code></td>
+      <td><span class="badge">${esc(t.data_type)}</span></td>
+    </tr>`).join('');
+    tbody.querySelectorAll('input[type=checkbox]').forEach(cb => {
+      cb.addEventListener('change', () => {
+        currentTagMappings[parseInt(cb.dataset.tagIdx)].enabled = cb.checked;
+        const c = document.getElementById('sim-tag-count');
+        if(c) c.textContent = `(${currentTagMappings.filter(t=>t.enabled).length} / ${currentTagMappings.length} enabled)`;
+      });
+    });
+  }
+
+  async function doConfigure() {
+    const fileSel = document.getElementById('sim-replay-file');
+    const srcSel = document.getElementById('sim-replay-source');
+    const statusEl = document.getElementById('sim-replay-status-text');
+    if (!fileSel?.value) { if(statusEl) statusEl.textContent = 'Select a file first'; return; }
+    const publisherMode = document.getElementById('sim-replay-publisher')?.value || 'buffer';
+    const body = {
+      csv_file: fileSel.value,
+      csv_source: srcSel?.value || 'generated',
+      frequency_hz: parseFloat(document.getElementById('sim-replay-hz')?.value) || 1.0,
+      loop_mode: document.getElementById('sim-replay-loop')?.value || 'loop_forever',
+      timestamp_mode: document.getElementById('sim-replay-tsmode')?.value || 'wall_clock',
+      protocol: publisherMode === 'buffer' ? 'mqtt' : publisherMode,
+      publisher_mode: publisherMode,
+      tags: currentTagMappings,
+      start_row: 0,
+    };
+    if (['mqtt','both'].includes(publisherMode)) {
+      body.mqtt_host = document.getElementById('sim-mqtt-host')?.value || 'localhost';
+      body.mqtt_port = parseInt(document.getElementById('sim-mqtt-port')?.value) || 1883;
+      body.mqtt_topic_prefix = document.getElementById('sim-mqtt-prefix')?.value || 'industrial-tag-simulator';
+      body.mqtt_device_id = document.getElementById('sim-mqtt-device')?.value || 'FlowMeter01';
+    }
+    if(statusEl) statusEl.textContent = 'Configuring…';
+    log(`Configuring replay: ${fileSel.value} @ ${body.frequency_hz}Hz via ${publisherMode}`, 'sim', 'info');
+    try {
+      await simPost('/replay/configure', body);
+      if(statusEl) statusEl.textContent = '✓ Configured';
+      log('Replay configured', 'sim', 'info');
+      document.getElementById('btn-replay-start')?.classList.remove('hidden');
+      document.getElementById('btn-replay-stop')?.classList.add('hidden');
+      document.getElementById('btn-replay-restart')?.classList.add('hidden');
+    } catch (e) {
+      if(statusEl) statusEl.textContent = 'Error: ' + e.message;
+      log('Configure failed: ' + e.message, 'sim', 'error');
+    }
+  }
+
+  async function doStartReplay() {
+    const statusEl = document.getElementById('sim-replay-status-text');
+    try {
+      await simPost('/replay/start');
+      replayRunning = true;
+      if(statusEl) statusEl.textContent = '▶ Running';
+      log('Replay started', 'sim', 'info');
+      document.getElementById('btn-replay-start')?.classList.add('hidden');
+      document.getElementById('btn-replay-stop')?.classList.remove('hidden');
+      document.getElementById('btn-replay-restart')?.classList.remove('hidden');
+      document.getElementById('btn-sim-start')?.classList.add('hidden');
+      document.getElementById('btn-sim-stop')?.classList.remove('hidden');
+    } catch (e) {
+      if(statusEl) statusEl.textContent = 'Error: ' + e.message;
+      log('Start failed: ' + e.message, 'sim', 'error');
+    }
+  }
+
+  async function doStopReplay() {
+    const statusEl = document.getElementById('sim-replay-status-text');
+    try {
+      await simPost('/replay/stop');
+      replayRunning = false;
+      if(statusEl) statusEl.textContent = '■ Stopped';
+      log('Replay stopped', 'sim', 'info');
+      document.getElementById('btn-replay-start')?.classList.remove('hidden');
+      document.getElementById('btn-replay-stop')?.classList.add('hidden');
+      document.getElementById('btn-replay-restart')?.classList.add('hidden');
+      document.getElementById('btn-sim-start')?.classList.remove('hidden');
+      document.getElementById('btn-sim-stop')?.classList.add('hidden');
+    } catch (e) { log('Stop failed: ' + e.message, 'sim', 'error'); }
+  }
+
+  async function refreshLiveValues() {
+    if (!replayRunning) return;
+    try {
+      const resp = await simGet('/replay/current-values');
+      const tbody = document.getElementById('sim-live-body');
+      const updEl = document.getElementById('sim-live-updated');
+      if (!tbody) return;
+      if (updEl && resp.updated_at) updEl.textContent = resp.updated_at.slice(11,19) + ' UTC';
+      const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      tbody.innerHTML = (resp.values||[]).map(v => {
+        const changed = liveValPrev[v.node_id] !== String(v.value);
+        liveValPrev[v.node_id] = String(v.value);
+        return `<tr class="${changed?'val-changed':''}">
+          <td><code style="font-size:11px;">${esc(v.tag_name)}</code></td>
+          <td class="num" style="font-family:'Share Tech Mono',monospace;">${esc(String(v.value??'—'))}</td>
+          <td>${esc(v.data_type)}</td>
+          <td style="font-size:10px;color:var(--muted);">${esc(v.last_updated?.slice(11,19)||'—')}</td>
+        </tr>`;
+      }).join('');
+    } catch (_) {}
+  }
+
+  async function refreshSimStatus() {
+    try {
+      const status = await simGet('/status');
+      const pillText = document.getElementById('sim-pill-text');
+      const fileText = document.getElementById('sim-file-text');
+      if (pillText) pillText.textContent = (status.state||'IDLE').toUpperCase();
+      if (fileText) {
+        const f = status.csv_file || '—';
+        fileText.textContent = f.length > 20 ? '…' + f.slice(-18) : f;
+      }
+      replayRunning = status.state === 'running';
+      document.getElementById('btn-sim-start')?.classList.toggle('hidden', replayRunning);
+      document.getElementById('btn-sim-stop')?.classList.toggle('hidden', !replayRunning);
+    } catch (_) {}
+  }
+
+  function init() {
+    initSimTabs();
+    initOutputPanel();
+    document.getElementById('sim-domain-sel')?.addEventListener('change', onDomainChange);
+    document.getElementById('btn-generate')?.addEventListener('click', doGenerate);
+    document.getElementById('btn-sim-onboard')?.addEventListener('click', doOnboard);
+    document.getElementById('btn-sim-upload-open')?.addEventListener('click', () =>
+      document.getElementById('sim-upload-input')?.click());
+    document.getElementById('sim-upload-input')?.addEventListener('change', e => {
+      const f = e.target.files?.[0]; if (f) handleUpload(f);
+    });
+    document.getElementById('btn-sim-files-refresh')?.addEventListener('click', refreshFiles);
+    document.getElementById('sim-replay-file')?.addEventListener('change', async e => {
+      const opt = e.target.selectedOptions?.[0];
+      if (opt) {
+        const src = document.getElementById('sim-replay-source');
+        if (src && opt.dataset.source) src.value = opt.dataset.source;
+        await loadTagPlan(opt.value, opt.dataset.source || 'generated');
+      }
+    });
+    document.getElementById('sim-replay-publisher')?.addEventListener('change', e => {
+      const pub = e.target.value;
+      document.getElementById('sim-mqtt-card')?.classList.toggle('hidden', pub === 'buffer' || pub === 'opcua');
+    });
+    document.getElementById('btn-tags-all')?.addEventListener('click', () => {
+      currentTagMappings.forEach(t => t.enabled = true); renderTagPlan();
+    });
+    document.getElementById('btn-tags-none')?.addEventListener('click', () => {
+      currentTagMappings.forEach(t => t.enabled = false); renderTagPlan();
+    });
+    document.getElementById('btn-replay-configure')?.addEventListener('click', doConfigure);
+    document.getElementById('btn-replay-start')?.addEventListener('click', doStartReplay);
+    document.getElementById('btn-replay-stop')?.addEventListener('click', doStopReplay);
+    document.getElementById('btn-replay-restart')?.addEventListener('click', async () => {
+      try { await simPost('/replay/restart'); log('Replay restarted', 'sim', 'info'); }
+      catch (e) { log('Restart failed: ' + e.message, 'sim', 'error'); }
+    });
+    document.getElementById('btn-sim-start')?.addEventListener('click', doStartReplay);
+    document.getElementById('btn-sim-stop')?.addEventListener('click', doStopReplay);
+    loadGenerators();
+    setInterval(refreshSimStatus, 3000);
+    setInterval(refreshLiveValues, 1000);
+    log('Simulator module initialized', 'sim', 'info');
+  }
+
+  return { init, previewFile, deleteFile, log };
+})();
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', SIM.init);
+} else {
+  SIM.init();
+}
