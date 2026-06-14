@@ -42,6 +42,7 @@ if hasattr(sys.stdout, "reconfigure"):
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
+SIM_DATA_DIR = ROOT / "sim_data"
 sys.path.insert(0, str(ROOT))
 
 
@@ -150,6 +151,24 @@ class Service:
         self.tick_in_progress = False
         # API response cache: avoids hitting v_asset_now on every 5-second browser poll.
         self.api_cache = _TTLCache(ttl=api_cache_ttl)
+        # Simulator integration — lazy import so ACM starts even if sim deps are missing
+        try:
+            from sim.sim_adapter import SimAdapter
+            from scripts.acm_sim_routes import set_adapter
+            self.sim = SimAdapter()
+            set_adapter(self.sim)
+        except Exception as _sim_err:
+            print(f"[sim] Simulator module unavailable: {_sim_err}", flush=True)
+            self.sim = None
+        # Migrate: add fast_track column if not present
+        try:
+            self.store.execute(
+                f"ALTER TABLE {self.store.t('monitored_assets')} "
+                f"ADD COLUMN fast_track INTEGER DEFAULT 0"
+            )
+            self.store.commit()
+        except Exception:
+            pass  # Column already exists
 
     # ----------------------------------------------------------- registry --
     def monitored(self, include_retired: bool = False) -> List[dict]:
@@ -187,6 +206,7 @@ class Service:
                 status_col=r["status_col"]) for r in rows
         }
         groups = {r["asset_key"]: r["grp"] or "fleet" for r in rows}
+        fast_track_map = {r["asset_key"]: bool(r.get("fast_track", 0)) for r in rows}
         counts = {"ingested": 0, "scored": 0, "skipped": 0, "errors": 0}
 
         # Ensure OPC UA bridge is running when any asset uses it
@@ -235,7 +255,8 @@ class Service:
                 continue
             counts["ingested"] += 1
             state = readiness(info.span_days, info.last_ts, now,
-                              self.min_train_days, self.stale_after_hours)
+                              self.min_train_days, self.stale_after_hours,
+                              fast_track=fast_track_map.get(key, False))
             if state == "READY":
                 ready.append(key)
             else:
@@ -318,10 +339,14 @@ def create_app(backend: str = "sqlite", db: Optional[str] = "acm_results.db",
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        if svc.sim:
+            await svc.sim.start()
         task = asyncio.create_task(svc.loop()) if run_scheduler else None
         yield
         if task:
             task.cancel()
+        if svc.sim:
+            await svc.sim.stop()
         svc.store.close()
 
     app = FastAPI(title="ACM — Asset Condition Monitor", lifespan=lifespan)
@@ -333,6 +358,11 @@ def create_app(backend: str = "sqlite", db: Optional[str] = "acm_results.db",
         return FileResponse(STATIC_DIR / "index.html")
 
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+    try:
+        from scripts.acm_sim_routes import router as sim_router
+        app.include_router(sim_router)
+    except Exception as _sim_err:
+        print(f"[sim] Simulator routes unavailable: {_sim_err}", flush=True)
 
     # ------------------------------------------------------------- fleet --
     @app.get("/api/fleet/sparklines")
@@ -478,11 +508,11 @@ def create_app(backend: str = "sqlite", db: Optional[str] = "acm_results.db",
         s.execute(
             f"INSERT INTO {s.t('monitored_assets')} "
             f"(asset_key, grp, enabled, source_kind, source_ref, conn_ref, "
-            f" timestamp_col, status_col, added_at, state) "
-            f"VALUES (?,?,?,?,?,?,?,?,?,?)",
+            f" timestamp_col, status_col, added_at, state, fast_track) "
+            f"VALUES (?,?,?,?,?,?,?,?,?,?,?)",
             (spec.asset_key, body.get("grp", "fleet"), 1, spec.source_kind,
              spec.source_ref, spec.conn_ref, spec.timestamp_col, spec.status_col,
-             _now(), "NEW"))
+             _now(), "NEW", 1 if body.get("fast_track") else 0))
         s.commit()
         svc.api_cache.drop("fleet")
         return {"asset_key": spec.asset_key, "state": "NEW", "probe_rows": len(probe)}
