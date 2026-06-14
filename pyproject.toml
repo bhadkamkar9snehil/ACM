@@ -78,6 +78,9 @@ ignore_missing_imports = true
 pythonpath = ["."]
 testpaths = ["tests"]
 addopts = "-v --basetemp=.pytest_basetemp"
+markers = [
+    "slow: marks tests as slow (excluded from setup self-test; run with -m slow or omit -m to run all)",
+]
 
 [tool.acm]
 entry = "core/acm.py"

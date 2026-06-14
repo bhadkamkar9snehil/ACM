@@ -408,6 +408,7 @@ class TestTTLCache:
         c.put("key", [1, 2, 3])
         assert c.get("key") == [1, 2, 3]
 
+    @pytest.mark.slow
     def test_miss_after_ttl_expires(self):
         c = _TTLCache(ttl=0.05)  # 50 ms TTL
         c.put("k", "value")
@@ -431,6 +432,7 @@ class TestTTLCache:
         for i in range(5):
             assert c.get(f"k{i}") is _MISS
 
+    @pytest.mark.slow
     def test_overwrite_resets_ttl(self):
         c = _TTLCache(ttl=0.1)
         c.put("k", "first")
@@ -481,6 +483,7 @@ class TestFleetCacheIntegration:
         assert r2.status_code == 200
         assert r2.json() == data1
 
+    @pytest.mark.slow
     def test_fleet_cache_expires(self, app_client):
         client, svc = app_client
         r1 = client.get("/api/fleet")

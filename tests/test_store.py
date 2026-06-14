@@ -98,6 +98,7 @@ class TestConfigSync:
 
 
 class TestRunnerCSV:
+    @pytest.mark.slow
     def test_acm_run_csv_end_to_end(self, tmp_path):
         import subprocess
         df = make_plant(5000).reset_index().rename(columns={"EntryDateTime": "time_stamp"})

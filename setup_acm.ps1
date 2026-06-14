@@ -126,7 +126,7 @@ Step "Verify imports" {
     python -c "import pandas, numpy, polars, sklearn, matplotlib, fastapi, uvicorn; import core.pipeline, scripts.acm_store, scripts.acm_service"
 }
 Step "Self-test" {
-    python -m pytest tests/ -q --no-header -p no:warnings --basetemp="$InstallDir\.pytest_basetemp" 2>&1 | Select-Object -Last 1
+    python -m pytest tests/ -q --no-header -p no:warnings -m "not slow" --basetemp="$InstallDir\.pytest_basetemp" 2>&1 | Select-Object -Last 1
 }
 
 # --- Backend detection --------------------------------------------------------
