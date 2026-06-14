@@ -189,6 +189,20 @@ class Service:
         groups = {r["asset_key"]: r["grp"] or "fleet" for r in rows}
         counts = {"ingested": 0, "scored": 0, "skipped": 0, "errors": 0}
 
+        # Ensure OPC UA bridge is running when any asset uses it
+        opcua_specs = [s for s in specs.values() if s.source_kind == "opcua"]
+        if opcua_specs:
+            try:
+                from scripts.acm_opcua_bridge import get_or_start as _opcua_start
+                s = opcua_specs[0]
+                endpoint = s.source_ref or "opc.tcp://localhost:4840/simulator"
+                await _opcua_start(
+                    endpoint=endpoint,
+                    db_path=Path(s.conn_ref) if s.conn_ref else None,
+                )
+            except Exception:
+                pass  # bridge startup failure is non-fatal; feed returns empty until connected
+
         # Ensure MQTT bridge is running when any asset uses it
         mqtt_specs = [s for s in specs.values() if s.source_kind == "mqtt"]
         if mqtt_specs:
@@ -201,7 +215,7 @@ class Service:
                     port=int(port_str or 1883),
                     db_path=Path(s.conn_ref) if s.conn_ref else None,
                 )
-            except Exception as _e:
+            except Exception:
                 pass  # bridge startup failure is non-fatal; feed will return empty
 
         # Phase A+B: incremental pull (thread-parallel I/O) + readiness gate
