@@ -2046,6 +2046,7 @@ const SIM = (() => {
       document.getElementById('btn-replay-restart')?.classList.remove('hidden');
       document.getElementById('btn-sim-start')?.classList.add('hidden');
       document.getElementById('btn-sim-stop')?.classList.remove('hidden');
+      refreshSimStatus();
     } catch (e) {
       if(statusEl) statusEl.textContent = 'Error: ' + e.message;
       log('Start failed: ' + e.message, 'sim', 'error');
@@ -2064,6 +2065,7 @@ const SIM = (() => {
       document.getElementById('btn-replay-restart')?.classList.add('hidden');
       document.getElementById('btn-sim-start')?.classList.remove('hidden');
       document.getElementById('btn-sim-stop')?.classList.add('hidden');
+      refreshSimStatus();
     } catch (e) { log('Stop failed: ' + e.message, 'sim', 'error'); }
   }
 
