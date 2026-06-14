@@ -1,7 +1,7 @@
 # ACM — Codebase Knowledge Base
 
 > Maintained for future agents. Update this file whenever you learn something new about the codebase.
-> Last updated: session 53c30020 (2026-06-14)
+> Last updated: session 013M57Jr3CpacwDMxVebD5r6 (2026-06-14)
 
 ---
 
@@ -387,6 +387,9 @@ Generator produces data with timestamps shifted so the last row ≈ now.
 7. **`Select-Object -Last 1` inside a scriptblock already redirected to log** — redundant, and the pipe can confuse PowerShell's `$LASTEXITCODE` tracking.
 8. **Launching agents with `isolation: "worktree"`** — fails because `/home/user` is not a git repo. Always omit isolation parameter; work directly in `/home/user/ACM/` or `/home/user/Simulator/`.
 9. **Agents launching research sub-agents instead of doing the work** — wastes context. If the task is clear, do the implementation directly; only spawn agents for genuinely parallel independent work.
+10. **`pd.to_datetime` without `format='ISO8601'`** — generators write timestamps with fractional seconds (`2026-01-01T00:00:00.100000Z`). Without `format="ISO8601", utc=True`, pandas raises a parse error. Always use `pd.to_datetime(df[col], format="ISO8601", utc=True)` in `acm_feed.py` for CSV timestamps.
+11. **Replay pill not updating immediately** — `refreshSimStatus()` polls every 3 seconds. After `doStartReplay()` / `doStopReplay()` succeeds, call `refreshSimStatus()` immediately so the header stat-cell reflects the new state without a 3-second lag. Fixed in `app.js`.
+12. **Playwright `wait_for_function` picks up stale DOM** — after a sub-tab switch, `wait_for_function("length > 0")` may fire on cached content before the async API fetch completes. Use `wait_for_function(f"length > {previous_count}")` when you expect the count to change, or `wait_for_selector` for a specific element.
 
 ---
 
@@ -491,10 +494,95 @@ if ($code -eq 0) {
 
 ---
 
+## Service Start Command
+
+```bash
+cd ~/ACM
+python scripts/acm_service.py
+# Opens http://localhost:8765
+```
+
+**What this starts:**
+- FastAPI service on port 8765
+- Async tick scheduler (default 60-second interval)
+- SimAdapter (in-process: Generate + Replay + BufferPublisher)
+- OPC UA bridge (lazy — only when an `opcua` asset is registered)
+- MQTT bridge (lazy — only when an `mqtt` asset is registered)
+
+**What this does NOT start:**
+- The separate Simulator (`~/Simulator`) — that is a fully independent app with its own `RUN_SIMULATOR.bat` / `python suite_runtime.py`. ACM's embedded `sim/` package handles generation and replay without it.
+
+Optional flags: `--port 8766`, `--backend mssql --conn "..."`, `--db custom.db`
+
+---
+
+## UI Testing
+
+Playwright end-to-end tests live in `tests/ui/test_ui.py`. Run with:
+
+```bash
+cd ~/ACM
+python tests/ui/test_ui.py
+# Screenshots → /tmp/acm_screenshots_v2/
+```
+
+Requires: `pip install playwright && playwright install chromium`
+
+**What the test covers (26 checks):**
+1. Page loads, header stat-cells present (REPLAY pill, RUN NOW button)
+2. All 4 tabs switch correctly
+3. Simulate → Generate: 11-domain dropdown populated, CSV generation produces preview
+4. Files tab: 12 pre-seeded files listed (10 fault CSVs + any generated), count increases after generate
+5. Replay tab: file dropdown populated, configure → start → live tag values (9 tags) → stop
+6. Onboard: asset appears in Admin with correct key
+7. RUN NOW: tick executes, Operator tab updates
+8. Output panel: log content visible, [SIM] prefix present
+9. Theme switcher: 11 themes, switching works
+
+**Key element IDs to remember:**
+- Preview card: `#sim-preview-card` (not `#sim-gen-preview-card`)
+- Preview metadata: `#sim-preview-meta` (text: "36000 rows · 13 columns · filename.csv")
+- Onboard key input: `#sim-onboard-key` (not `#sim-asset-key`)
+- Files table body: `#sim-files-body`
+- Replay file select: `#sim-replay-file`
+- Domain select: `#sim-domain-sel`
+- Scenario select: `#sim-scenario-sel`
+- Output log: `#output-log`
+
+---
+
+## Fault Datasets (`sim_data/sample/`)
+
+10 pre-generated CSV files with known fault signatures, committed to git:
+
+| File | Domain | Scenario | Rows | Cols |
+|---|---|---|---|---|
+| `fault_rotary_bearing.csv` | rotary_equipment | bearing_fault | 72,000 | 13 |
+| `fault_rotary_imbalance.csv` | rotary_equipment | rotor_imbalance | 72,000 | 13 |
+| `fault_pipeline_small_leak.csv` | petroleum_pipeline | small_leak | 10,800 | 31 |
+| `fault_pipeline_large_leak.csv` | petroleum_pipeline | large_leak | 7,200 | 31 |
+| `fault_pipeline_pump_trip.csv` | petroleum_pipeline | pump_trip | 7,200 | 31 |
+| `fault_pipeline_sensor_drift.csv` | petroleum_pipeline | sensor_drift | 10,800 | 31 |
+| `fault_power_tube_leak.csv` | power_plant | tube_leak | 7,200 | 13 |
+| `fault_power_condenser_fouling.csv` | power_plant | condenser_fouling | 10,800 | 13 |
+| `fault_gas_compressor_trip.csv` | gas_pipeline | compressor_trip | 7,200 | 16 |
+| `fault_gas_leak.csv` | gas_pipeline | leak | 10,800 | 16 |
+
+**Fault injection structure:** First 40% of rows are `state=NORMAL` (ACM trains on this). Remaining 60% are the labeled fault state. The `state` column contains the scenario name string.
+
+**Regenerate:** `python scripts/generate_fault_dataset.py` — overwrites `sim_data/sample/fault_*.csv`.
+
+**Wrong scenario names discovered (use these):**
+- power_plant: `tube_leak`, `condenser_fouling` (NOT `load_rejection`)
+- gas_pipeline: `compressor_trip`, `leak` (NOT `compressor_surge`)
+- Use `g.get_spec().scenarios` to list valid scenarios for any generator
+
+---
+
 ## Git Workflow
 
-- Active development branch: `claude/epic-archimedes-7dkrwf` (both repos, current session)
-- Previous sessions used `claude/upbeat-hopper-m39epw` (merged to main)
+- Development branch for session 013M57Jr3CpacwDMxVebD5r6: pushed directly to `main`
+- Previous sessions used `claude/upbeat-hopper-m39epw`, `claude/epic-archimedes-7dkrwf` (both merged to main)
 - Pattern: commit to dev branch → push dev → `git checkout main` → `git merge dev --no-edit` → `git push origin main`
 - If push fails due to diverged remote: `git pull origin main --rebase` then push again
 - Never force-push, never `--no-verify`
