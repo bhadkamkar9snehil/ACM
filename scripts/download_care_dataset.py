@@ -28,6 +28,8 @@ def main() -> int:
                     help="Wind farms to download (default: A)")
     ap.add_argument("--count", type=int, default=None,
                     help="Maximum number of event CSVs to download per farm (default: all)")
+    ap.add_argument("--sim-dir", default=None,
+                    help="Also copy downloaded CSVs to this directory (e.g. sim_data/sample)")
     args = ap.parse_args()
 
     try:
@@ -64,6 +66,27 @@ def main() -> int:
         farm_dir = dest / "CARE_To_Compare" / f"Wind Farm {f}"
         n_csv = len(list((farm_dir / "datasets").glob("*.csv"))) if (farm_dir / "datasets").exists() else 0
         print(f"Wind Farm {f}: {n_csv} event datasets at '{farm_dir}'")
+
+    if args.sim_dir:
+        import shutil
+        sim_dir = Path(args.sim_dir)
+        sim_dir.mkdir(parents=True, exist_ok=True)
+        copied = 0
+        for farm_letter in args.farms:
+            farm_datasets = dest / "CARE_To_Compare" / f"Wind Farm {farm_letter}" / "datasets"
+            if not farm_datasets.exists():
+                continue
+            csvs = sorted(farm_datasets.glob("*.csv"))
+            if args.count:
+                csvs = csvs[:args.count]
+            for i, csv_path in enumerate(csvs, 1):
+                target = sim_dir / f"wind_turbine_farm{farm_letter}_{i:02d}.csv"
+                if not target.exists():
+                    shutil.copy2(csv_path, target)
+                    print(f"  → {target.name}")
+                copied += 1
+        print(f"Copied {copied} file(s) to {sim_dir}")
+
     return 0
 
 

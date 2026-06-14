@@ -204,10 +204,13 @@ if ($ans -match '^[yY]') {
 }
 
 Write-Host ""
-$ans = Read-Host "  [2/2]  CARE-to-Compare demo data — real wind-turbine SCADA data, score immediately`n         Download 3 events from Farm A (~30 MB)? [y/N]"
+$ans = Read-Host "  [2/2]  CARE-to-Compare demo data — real wind-turbine SCADA data, score immediately`n         Download 10 events from Farm A (~360 MB)? [y/N]"
 if ($ans -match '^[yY]') {
+    Step "Create sim_data directories" {
+        python -c "from pathlib import Path; [Path(d).mkdir(parents=True,exist_ok=True) for d in ('sim_data/sample','sim_data/generated','sim_data/uploads')]"
+    }
     Step "Download CARE events" {
-        python scripts\download_care_dataset.py --dest care_data --farms A --count 3
+        python scripts\download_care_dataset.py --dest care_data --farms A --count 10 --sim-dir sim_data\sample
     }
     Step "Register CARE assets" {
         python scripts\acm_seed_demo.py --care-dir care_data --db acm_results.db
@@ -238,7 +241,7 @@ Write-Host "  $([char]0x2192)  Admin  $([char]0x2192)  Onboard assets" -Foregrou
 Write-Host ""
 if ($setupCare) {
     Write-Host "  2  Score CARE assets now" -ForegroundColor DarkGray
-    Write-Host "       3 care_demo assets are registered — click " -NoNewline -ForegroundColor DarkGray
+    Write-Host "       10 care_demo assets registered + Farm A CSVs in Simulate tab — click " -NoNewline -ForegroundColor DarkGray
     Write-Host "Run Now" -ForegroundColor Cyan -NoNewline
     Write-Host " in the Admin panel." -ForegroundColor DarkGray
     Write-Host ""

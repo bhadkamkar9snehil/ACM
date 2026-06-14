@@ -1,7 +1,7 @@
 # ACM — Codebase Knowledge Base
 
 > Maintained for future agents. Update this file whenever you learn something new about the codebase.
-> Last updated: session 868c2988 (2026-06-14)
+> Last updated: session 53c30020 (2026-06-14)
 
 ---
 
@@ -41,9 +41,12 @@ Data sources  →  SQLite buffer / parquet cache  →  Pipeline workers  →  SQ
 | `scripts/care_benchmark.py` | CARE wind-farm benchmark against ground-truth labels |
 | `configs/config_table.csv` | Human-editable runtime config (151 rows, equipment IDs: 0/global, 1, 2621, 5000-5092, 8634). Categories: data, sql, runtime ONLY. |
 | `setup_acm.ps1` | One-command Windows installer + updater |
-| `static/index.html` | Single-page UI entry point (Operator / Engineer / Admin panels) |
-| `static/app.js` | Client-side polling, chart rendering, API commands |
-| `static/style.css` | 14 themes (5 dark, 9 light) |
+| `setup.sh` | One-command Linux/macOS installer (mirrors setup_acm.ps1) |
+| `static/index.html` | Single-page UI entry point (Operator / Engineer / Admin / Simulate tabs) |
+| `static/app.js` | Client-side polling, chart rendering, API commands; SIM IIFE module appended |
+| `static/style.css` | 14 themes (5 dark, 9 light); sim/output panel rules appended |
+| `sim/` | Vendored simulator package — generators, replay engine, BufferPublisher, SimAdapter |
+| `scripts/acm_sim_routes.py` | FastAPI router `prefix="/api/sim"` — 14 routes for generators, files, replay, onboard |
 
 ---
 
@@ -181,8 +184,9 @@ last_run_at TEXT, last_score_ts TEXT, last_runtime_s REAL
 
 ---
 
-## Setup Script (`setup_acm.ps1`)
+## Setup Scripts
 
+### `setup_acm.ps1` (Windows)
 Single command: `irm https://raw.githubusercontent.com/bhadkamkar9snehil/ACM/main/setup_acm.ps1 | iex`
 
 Flow:
@@ -190,12 +194,29 @@ Flow:
 2. Install: clone/update ACM, pip packages (includes `asyncua`, `paho-mqtt` — see constraint below), verify imports, self-test (non-fatal)
 3. Backend detection: tries SQL Server via pyodbc, falls back to SQLite
 4. **[1/2] Optional: Simulator** — clone to `$HOME\Simulator`, validate bundled runtime at `runtime\python\python.exe`, run `ensure-env`, seed `simulator/opc_ua` asset
-5. **[2/2] Optional: CARE demo** — download 3 events (~30 MB Farm A), seed as `care_demo` assets
+5. **[2/2] Optional: CARE demo** — download 10 Farm A events (~360 MB), copy to `sim_data\sample\` as `wind_turbine_farmA_01.csv` ... `_10.csv`, seed as `care_demo` assets
 6. Summary + context-aware next steps (adapts text based on what was seeded)
 
 **Critical constraint: `asyncua` and `paho-mqtt` MUST stay in the pip install step.** The bridges catch `ImportError` silently, so if these packages are removed the bridges will fail at runtime with no visible error. Discovered when OPC UA seeding worked but the bridge never actually connected.
 
 **PowerShell pattern used:** `Step "name" { scriptblock }` — throws on non-zero exit. For non-fatal steps, use a custom block that captures exit code and outputs warning instead.
+
+### `setup.sh` (Linux / macOS)
+Single command: `bash <(curl -fsSL https://raw.githubusercontent.com/bhadkamkar9snehil/ACM/main/setup.sh)`
+
+Mirror of the PowerShell script for Linux/macOS:
+1. Python 3.11+ check (exits if not found — does not auto-install)
+2. Clone / `git pull --ff-only` ACM
+3. pip install: `pandas numpy polars pyarrow scikit-learn scipy fastapi uvicorn python-multipart asyncua paho-mqtt openpyxl remotezip`
+4. Create directories: `sim_data/sample`, `sim_data/generated`, `sim_data/uploads`, `data_cache`, `configs`
+5. Import check: `list_generators()`, `BufferPublisher`, `SimAdapter`, `acm_sim_routes.router`
+6. Self-test (non-fatal): `pytest tests/ -m "not slow" -q --tb=no`
+7. **[1/2] Optional: Simulator** — if `~/Simulator` exists, offer to seed OPC UA asset
+8. **[2/2] Optional: CARE demo** — download 10 Farm A events, `--sim-dir sim_data/sample`
+9. Summary: start command + URLs
+
+**`step` helper** — prints `·  name`, runs command, overwrites with `✓` (green) or `✗` (red) + exits.
+**`warn_step` helper** — same but prints `!` (yellow) + continues on failure.
 
 ---
 
@@ -205,11 +226,126 @@ Flow:
 - Farm A: 22 events × ~36 MB (~800 MB total), 86 sensor features per event, CSV per event
 - Farm B: 37 events, 257 features; Farm C: 36 events, 957 features
 - CSV columns: `time_stamp`, `status_type_id`, sensor columns, `train_test`
-- Download: `python scripts/download_care_dataset.py --dest care_data --farms A --count 3`
-  - `--count N` applies to CSV files only (keeps README); N=3 ≈ 30 MB
+- Download: `python scripts/download_care_dataset.py --dest care_data --farms A --count 10 --sim-dir sim_data/sample`
+  - `--count N` applies to CSV files only (keeps README); N=10 ≈ 360 MB
+  - `--sim-dir` copies downloaded CSVs to that directory as `wind_turbine_farm{X}_{i:02d}.csv`
 - Seed: `python scripts/acm_seed_demo.py --care-dir care_data --db acm_results.db`
 - Asset key pattern: `care/{farm_letter}/{csv_stem}` e.g. `care/A/40`
 - Group: `care_demo`
+- CARE CSVs in `sim_data/sample/` appear in ACM's Simulate → Files tab for replay
+
+---
+
+## Simulator Integration — `sim/` Package
+
+The `sim/` package is a vendored copy of the Simulator's generator + replay engine, adapted to live inside ACM. It enables in-process CSV generation and data replay without any external services.
+
+### Package layout
+```
+sim/
+├── __init__.py
+├── models.py             — GenerateRequest, GenerateResponse, ReplayConfig, ReplayStatus, CurrentValue, etc.
+├── type_inference.py     — infer data types from CSV columns
+├── csv_manager.py        — file I/O for sim_data/ dirs (generated/, sample/, uploads/)
+├── generator_registry.py — registry of all 11 domain generators
+├── generator_engine.py   — generate_csv(domain_id, request) → GenerateResponse
+├── generators/           — 11 domain generators + base.py
+│   └── (eaf_melting, gas_pipeline, petroleum_pipeline, power_plant, rotary_equipment,
+│       steel_blast_furnace, steel_ccm, steel_coke_oven, steel_dri_plant, steel_lrf, steel_rolling_mill)
+├── simulator.py          — SimulatorEngine (configure/start/stop/restart/get_status/get_current_values)
+├── multi_simulator.py    — MultiSimulatorEngine (multi-file replay)
+├── opcua_server.py       — OpcUaTagServer (external OPC UA publish for sim data)
+├── mqtt_publisher.py     — MqttTagPublisher (external MQTT publish)
+├── protocol_adapter.py   — DualProtocolAdapter / ProtocolChannelAdapter
+├── config_store.py       — persistent replay config
+├── buffer_publisher.py   — BufferPublisher: in-process bridge → mqtt_buffer.db
+└── sim_adapter.py        — SimAdapter: facade holding engine + publisher, used by API routes
+```
+
+### Adaptation from Simulator source
+All files copied from `Simulator/industrial_simulator/app/` with:
+- All `from app.*` → `from sim.*` import rewrites
+- `csv_manager.py`: `ROOT = Path(__file__).resolve().parents[1]` so `sim_data/` resolves inside ACM root
+
+### BufferPublisher (key integration bridge)
+Implements the ProtocolPublisher duck-type interface but writes directly to `data_cache/mqtt_buffer.db`:
+```python
+async def update_values(self, values, timestamp=None, current_values=None, mqtt_metadata=None):
+    ts = timestamp or _utcnow()
+    payload = {"published_at": ts}
+    for node_id, (value, _dtype) in values.items():
+        col_name = self._tag_names.get(node_id) or node_id.split(".")[-1]
+        payload[col_name] = value
+    with sqlite3.connect(self.db_path) as con:
+        con.execute("INSERT INTO mqtt_buffer VALUES (?, ?)", (ts, json.dumps(payload, default=str)))
+```
+No broker needed. ACM's existing `_load_mqtt_increment()` reads these rows on the next tick.
+
+### SimAdapter
+Singleton held by `acm_service.Service`, exposes clean async API to routes:
+- `generate(domain_id, request)` → calls generator_engine, returns GenerateResponse
+- `configure_replay(config)` → passes to engine
+- `start_replay() / stop_replay() / restart_replay()` → async engine control
+- `get_status()` → `ReplayStatus.model_dump()` + `publisher_mode`
+- `get_current_values()` → `CurrentValuesResponse.model_dump()`
+- `list_files()` → CSV files from all `sim_data/` subdirs
+
+Publisher modes: `buffer` (default, writes to mqtt_buffer.db), `mqtt`, `opcua`, `both`
+
+### `/api/sim/*` Routes (`scripts/acm_sim_routes.py`)
+14 routes under `APIRouter(prefix="/api/sim")`:
+- `GET /generators` — list all 11 domains (id, label, description)
+- `GET /generators/{id}/spec` — scenarios, parameters, default_output_filename
+- `POST /generators/{id}/generate` — generate CSV; body: GenerateRequest
+- `GET /files` — list files in sim_data/ (name, size, rows, columns, source)
+- `GET /files/{filename}/metadata?source=generated` — column info, type inference, preview
+- `DELETE /files/{filename}?source=generated`
+- `POST /files/upload` — multipart upload
+- `GET /status` — SimAdapter.get_status()
+- `POST /replay/configure` — body: ReplayConfig
+- `POST /replay/start`
+- `POST /replay/stop`
+- `POST /replay/restart`
+- `GET /replay/current-values` — live tag values (poll at 1s in UI)
+- `POST /onboard` — generate CSV + register as ACM monitored asset (fast_track supported)
+
+### fast_track maturation bypass
+`monitored_assets` gains a `fast_track INTEGER DEFAULT 0` column (migrated on service start):
+```python
+# In acm_service Service.__init__:
+try:
+    self.store.execute("ALTER TABLE monitored_assets ADD COLUMN fast_track INTEGER DEFAULT 0")
+    self.store.commit()
+except Exception:
+    pass  # already exists
+```
+`readiness()` in `acm_feed.py` accepts `fast_track: bool = False`:
+```python
+effective_min = 0.0 if fast_track else min_train_days
+if last_ts is None or span_days < effective_min:
+    return "MATURING"
+```
+When True, assets score on the very first tick even with minutes of live data.
+
+### Backdating (alternative to fast_track)
+Generator produces data with timestamps shifted so the last row ≈ now.
+`/api/sim/onboard` accepts `backdate_days` (default 45) — enough data for READY status on first tick.
+
+### Simulate UI (4th tab — Frankenstein first pass)
+- **Tab 04 Simulate** added to ACM's existing tab rail (additive HTML only)
+- Inner sub-tabs: Generate | Files | Replay
+- All sim UI uses ACM's existing CSS classes (`.card`, `.btn`, `.data`, `.term`, `.kpi`, `.badge`)
+- SIM JavaScript IIFE appended to `app.js` — handles all `/api/sim/*` calls, sub-tab switching, output panel, live values polling at 1s
+- 2 new header stat-cells: `#sim-pill` (Replay state), `#sim-file-pill` (Active File)
+- 2 new header buttons: `▶ Replay` / `■ Stop` (toggle based on replay state)
+- Output panel: fixed bottom strip (180px, collapsible) with All/Sim/ACM filter tabs and `<pre class="term">` log stream
+
+### UI implementation rules (do not break)
+- All existing `index.html` section HTML must remain untouched — only additive changes
+- All existing `app.js` functions remain untouched — SIM code in its own IIFE appended at bottom
+- All existing `style.css` rules remain untouched — only new rules appended
+- API Studio UI from Simulator was NOT ported (deferred per user instruction)
+- OPC UA settings panel: minimal (publisher mode selector in Replay sub-tab), not a full port
 
 ---
 
@@ -249,6 +385,8 @@ Flow:
 5. **`asyncio.get_event_loop().run_until_complete()` in tests** — fails on Windows. Always `asyncio.run()`.
 6. **Omitting `asyncua`/`paho-mqtt` from pip install** — bridges silently fail with ImportError. Always include them.
 7. **`Select-Object -Last 1` inside a scriptblock already redirected to log** — redundant, and the pipe can confuse PowerShell's `$LASTEXITCODE` tracking.
+8. **Launching agents with `isolation: "worktree"`** — fails because `/home/user` is not a git repo. Always omit isolation parameter; work directly in `/home/user/ACM/` or `/home/user/Simulator/`.
+9. **Agents launching research sub-agents instead of doing the work** — wastes context. If the task is clear, do the implementation directly; only spawn agents for genuinely parallel independent work.
 
 ---
 
@@ -321,6 +459,13 @@ load_increment → update_cache (concat + trim to 180d, atomic parquet write)
 4. If it needs a bridge, follow the OPC UA (asyncio) or MQTT (daemon thread) pattern
 5. Return empty DataFrame on missing data — never raise
 
+### If modifying the `sim/` package:
+- Keep the ProtocolPublisher duck-type interface: `configure_tags(config)`, `start()`, `stop()`, `update_values(values, timestamp, current_values, mqtt_metadata)`, `get_endpoint()`, `get_status()`
+- `BufferPublisher` writes to `data_cache/mqtt_buffer.db` — the same file ACM's `_load_mqtt_increment()` reads
+- All 11 generators follow the same contract: `generator.generate(GenerateRequest) -> list[dict]`
+- `csv_manager.py` paths: `UPLOAD_DIR = ROOT/"sim_data"/"uploads"`, `GENERATED_DIR = ROOT/"sim_data"/"generated"`, `SAMPLE_DIR = ROOT/"sim_data"/"sample"` where `ROOT = Path(__file__).resolve().parents[1]` (ACM root)
+- `sim_adapter.py` is the only file `acm_service.py` and `acm_sim_routes.py` import from `sim/`
+
 ### If modifying the setup script:
 - Use `Step "Name" { scriptblock }` for fatal steps; use a custom warn block for non-fatal steps
 - Log all output to `$Log` via `*>> $Log`; never pipe to `Select-Object` inside a scriptblock that is already redirected
@@ -348,9 +493,10 @@ if ($code -eq 0) {
 
 ## Git Workflow
 
-- Development branch: `claude/upbeat-hopper-m39epw` (both repos)
+- Active development branch: `claude/epic-archimedes-7dkrwf` (both repos, current session)
+- Previous sessions used `claude/upbeat-hopper-m39epw` (merged to main)
 - Pattern: commit to dev branch → push dev → `git checkout main` → `git merge dev --no-edit` → `git push origin main`
-- If push fails due to diverged remote: `git pull origin main --no-rebase --no-edit` then push again
+- If push fails due to diverged remote: `git pull origin main --rebase` then push again
 - Never force-push, never `--no-verify`
 
 ---
