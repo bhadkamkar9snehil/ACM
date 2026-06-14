@@ -26,6 +26,8 @@ def main() -> int:
     ap.add_argument("--dest", default="./care_data", help="Destination directory")
     ap.add_argument("--farms", nargs="+", default=["A"], choices=["A", "B", "C"],
                     help="Wind farms to download (default: A)")
+    ap.add_argument("--count", type=int, default=None,
+                    help="Maximum number of event CSVs to download per farm (default: all)")
     args = ap.parse_args()
 
     try:
@@ -44,6 +46,10 @@ def main() -> int:
         names = [n for n in z.namelist()
                  if (any(n.startswith(p) for p in prefixes) or n.endswith("README.md"))
                  and not n.endswith("/")]
+        if args.count:
+            csv_names = [n for n in names if n.endswith(".csv")]
+            other_names = [n for n in names if not n.endswith(".csv")]
+            names = other_names + sorted(csv_names)[:args.count]
         total = len(names)
         print(f"Downloading {total} files for farm(s) {', '.join(args.farms)} -> {dest}")
         for i, n in enumerate(sorted(names), 1):
