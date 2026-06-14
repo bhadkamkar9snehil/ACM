@@ -916,7 +916,7 @@ table.data tr.click:hover td { background: var(--brand-lo); }
 table.data tr.is-alarm td { background: var(--bad-lo); }
 
 /* ── KPI strip ──────────────────────────────────────────── */
-.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin-bottom: 10px; flex-shrink: 0; }
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin-bottom: 10px; flex-shrink: 0; max-width: 1400px; margin-inline: auto; }
 .kpi {
   background: var(--bg3); border: 1px solid var(--line);
   padding: 8px 10px;
@@ -1228,7 +1228,7 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
 [data-mode="advanced"] .op-causes { grid-area: causes; }
 
 /* KPI tiles: horizontal row in basic → compact vertical sidebar in advanced */
-[data-mode="advanced"] .op-kpis .kpis { grid-template-columns: 1fr; gap: 4px; }
+[data-mode="advanced"] .op-kpis .kpis { grid-template-columns: 1fr; gap: 4px; margin-bottom: 0; }
 [data-mode="advanced"] .op-kpis .kpi  { padding: 6px 10px; }
 [data-mode="advanced"] .op-kpis .kpi-num { font-size: 18px; }
 
@@ -1258,9 +1258,9 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
 [data-mode="advanced"] .eng-histogram { grid-area: histogram; min-height: 160px; }
 [data-mode="advanced"] .eng-mttd      { grid-area: mttd; }
 
-/* Score chart: taller in basic, shorter in advanced (shares row with pattern heatmap) */
-[data-mode="basic"]    #eng-chart uplot { height: 220px; }
-[data-mode="advanced"] #eng-chart uplot { height: 180px; }
+/* Score chart: scales with viewport height so it isn't tiny on tall/4K monitors */
+[data-mode="basic"]    #eng-chart uplot { height: max(220px, 20vh); }
+[data-mode="advanced"] #eng-chart uplot { height: max(180px, 18vh); }
 
 /* ── Admin tab — adm-layout ──────────────────────────────── */
 .adm-layout { display: flex; flex-direction: column; gap: 10px; }
@@ -1355,4 +1355,12 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
     display: flex;
     flex-direction: column;
   }
+}
+
+/* ── Short screens: compact advanced KPI sidebar ─────────── */
+/* On monitors ≤700px tall the 5-tile sidebar eats too much of the matrix height */
+@media (max-height: 700px) {
+  [data-mode="advanced"] .op-kpis .kpi     { padding: 3px 8px; }
+  [data-mode="advanced"] .op-kpis .kpi-num { font-size: 14px; }
+  [data-mode="advanced"] .op-kpis .kpis    { gap: 2px; }
 }
