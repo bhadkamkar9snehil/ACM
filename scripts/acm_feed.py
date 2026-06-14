@@ -281,7 +281,8 @@ def update_cache(spec: SourceSpec, cache_dir: Path | str,
 
 def readiness(span_days: float, last_ts: Optional[pd.Timestamp], now: pd.Timestamp,
               min_train_days: float = MIN_TRAIN_DAYS,
-              stale_after_hours: float = STALE_AFTER_HOURS) -> str:
+              stale_after_hours: float = STALE_AFTER_HOURS,
+              fast_track: bool = False) -> str:
     """Time-aware gate: is this asset's history fit to score?
 
     MATURING  less than min_train_days of history — the baseline is not
@@ -290,7 +291,8 @@ def readiness(span_days: float, last_ts: Optional[pd.Timestamp], now: pd.Timesta
               stale_after_hours; scoring a dead feed is meaningless.
     READY     score it.
     """
-    if last_ts is None or span_days < min_train_days:
+    effective_min = 0.0 if fast_track else min_train_days
+    if last_ts is None or span_days < effective_min:
         return "MATURING"
     if (now - last_ts).total_seconds() > stale_after_hours * 3600.0:
         return "STALE"
