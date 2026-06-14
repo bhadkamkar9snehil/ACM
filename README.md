@@ -38,16 +38,6 @@ ACM features a fully responsive industrial control panel with **14 themes** — 
 
 ---
 
-#### Available themes
-
-| Dark | Light |
-|---|---|
-| 🏭 Factory · 🔥 Forge Dark · 🌊 Petrol Dark | ☀ Solarised · ❄ Polar White · 🌫 Nordic Fog |
-| ⬛ Midnight Graphite · 🟩 Carbon & Phosphor · 🪻 Slate & Violet | ⛅ Cloud Atlas · 🪨 Warm Concrete · 📄 Linen & Navy |
-| | 🌿 Sage & Stone · 🔷 Chalk & Cobalt · 🏺 Ivory & Cinnabar |
-
----
-
 ## Quick Start Guide
 
 ### 1. One-Command Setup (Windows)
