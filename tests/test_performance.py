@@ -562,7 +562,7 @@ class TestFleetCacheIntegration:
         assert svc.api_cache.get("fleet") is not _MISS
 
         # Drive a tick directly (no assets → counts all zero, but cache is cleared)
-        asyncio.get_event_loop().run_until_complete(svc.tick_once())
+        asyncio.run(svc.tick_once())
         assert svc.api_cache.get("fleet") is _MISS, \
             "api_cache must be cleared by tick_once"
 

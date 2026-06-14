@@ -179,6 +179,14 @@ Flow:
 
 ---
 
+## Windows Compatibility Notes
+
+- **Asyncio:** Always use `asyncio.run(coro)` to drive coroutines in tests — never `asyncio.get_event_loop().run_until_complete()`. On Windows (Python 3.8+), the default `ProactorEventLoop` has stricter lifecycle management; `get_event_loop()` can return a closed or missing loop after `TestClient` has consumed it. `asyncio.run()` always creates a fresh loop. Correct pattern already used in `test_service.py` lines 171, 188, 222.
+- **Paths:** Always use `pathlib.Path` or `os.path.join` — never hardcode `/` separators.
+- **Subprocess:** Pass arguments as a list with `sys.executable` as the first element — never rely on `.py` files being executable directly.
+
+---
+
 ## Key Patterns to Preserve
 
 - **Atomic parquet write:** always `df.to_parquet(tmp)` then `os.replace(tmp, path)` — crash-safe
