@@ -63,3 +63,8 @@ plans/DASHBOARD_ISSUES_AND_FIX_PLAN.md
 ## Service raw-data cache and local results store
 data_cache/
 *.db
+
+## Simulator generated / uploaded files (runtime artifacts)
+sim_data/generated/
+sim_data/uploads/
+## sim_data/sample/ is intentionally tracked (seeded CSVs)
