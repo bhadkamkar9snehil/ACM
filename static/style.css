@@ -1151,9 +1151,10 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
 /* display:block (like admin) lets eng-layout grow to natural height so panel-scroll can scroll it.
    flex+overflow-y:auto traps content inside fixed viewport height, collapsing episodes/daily tables. */
 #tab-engineer > .panel-scroll { overflow-y: auto; display: block; }
-/* min-height: 0 only needed in advanced grid rows to allow shrinking below natural size */
-[data-mode="advanced"] .eng-layout > .eng-episodes,
-[data-mode="advanced"] .eng-layout > .eng-daily { min-height: 0; overflow: hidden; }
+/* Base min-height so tbl-wrap (flex:1 inside an auto-height flex card) is never 0px.
+   flex:1 on tbl-wrap only grows into space when the card has an explicit height — without this
+   the card intrinsic height = card-title only (~36px) and the table is invisible. */
+.eng-episodes, .eng-daily { min-height: 220px; }
 
 /* ── Admin tab — adm-layout fills panel-scroll ──────────── */
 #tab-admin > .panel-scroll { overflow-y: auto; display: block; }
