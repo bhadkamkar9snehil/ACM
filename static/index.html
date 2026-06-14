@@ -38,6 +38,14 @@
       <span class="lbl">Every&thinsp;·&thinsp;min</span>
       <input id="inp-tick" class="val" type="number" min="1" value="5" title="Tick interval in minutes" aria-label="Tick interval in minutes">
     </div>
+    <div class="stat-cell" id="sim-pill">
+      <span class="lbl">Replay</span>
+      <span class="val" id="sim-pill-text">STOPPED</span>
+    </div>
+    <div class="stat-cell" id="sim-file-pill">
+      <span class="lbl">Active File</span>
+      <span class="val" id="sim-file-text">—</span>
+    </div>
   </div>
 
   <div class="hdr-right">
@@ -45,6 +53,8 @@
     <button type="button" class="btn btn-hdr btn-ok hidden" id="btn-resume">▶ Resume</button>
     <button type="button" class="btn btn-hdr btn-bad"  id="btn-pause">⏸ Pause</button>
     <button type="button" class="btn btn-hdr btn-ok"   id="btn-runnow">⟳ Run now</button>
+    <button type="button" class="btn btn-hdr btn-ok hidden" id="btn-sim-start">▶ Replay</button>
+    <button type="button" class="btn btn-hdr btn-bad hidden" id="btn-sim-stop">■ Stop</button>
     <select class="btn btn-hdr" id="sel-theme" aria-label="Switch theme" title="Switch theme" style="cursor:pointer; padding-right:6px;">
       <optgroup label="─── Dark ───">
         <option value="dark-forge" selected>Forge Dark</option>
@@ -70,6 +80,7 @@
   <button type="button" class="tab active" data-tab="operator"><span class="tab-num">01</span> Operator</button>
   <button type="button" class="tab" data-tab="engineer"><span class="tab-num">02</span> Reliability Engineer</button>
   <button type="button" class="tab" data-tab="admin"><span class="tab-num">03</span> Admin / ML Ops</button>
+  <button type="button" class="tab" data-tab="simulate"><span class="tab-num">04</span> Simulate</button>
 </nav>
 
 <!-- ═══════════════ MAIN ══════════════════════════════════ -->
@@ -343,7 +354,196 @@
     </div>
   </section>
 
+  <!-- ══════════════ 04 SIMULATE ═══════════════════════════════ -->
+  <section id="tab-simulate" class="tabpane">
+    <div class="panel-scroll">
+
+      <!-- Inner sub-tab rail -->
+      <div class="sub-tab-rail" id="sim-tabs">
+        <button type="button" class="sub-tab active" data-sim-tab="generate">⚡ Generate</button>
+        <button type="button" class="sub-tab" data-sim-tab="files">📁 Files</button>
+        <button type="button" class="sub-tab" data-sim-tab="replay">▶ Replay</button>
+      </div>
+
+      <!-- ── Generate ────────────────────────────────────── -->
+      <div id="sim-pane-generate" class="sim-pane">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+          <div class="card">
+            <div class="card-title">Domain &amp; Scenario</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px;">
+              <div>
+                <label class="lbl-sm">Domain</label>
+                <select id="sim-domain-sel" style="width:100%;box-sizing:border-box;font-family:'Share Tech Mono',monospace;font-size:12px;background:var(--bg2);border:1px solid var(--line);color:var(--ink);padding:5px 8px;"></select>
+              </div>
+              <div>
+                <label class="lbl-sm">Scenario</label>
+                <select id="sim-scenario-sel" style="width:100%;box-sizing:border-box;font-family:'Share Tech Mono',monospace;font-size:12px;background:var(--bg2);border:1px solid var(--line);color:var(--ink);padding:5px 8px;"></select>
+              </div>
+            </div>
+            <div id="sim-domain-desc" style="margin-top:6px;font-size:12px;color:var(--muted);"></div>
+          </div>
+          <div class="card">
+            <div class="card-title">Output File</div>
+            <div style="margin-top:6px;">
+              <label class="lbl-sm">Filename</label>
+              <input id="sim-output-filename" style="width:100%;box-sizing:border-box;font-family:'Share Tech Mono',monospace;font-size:12px;background:var(--bg2);border:1px solid var(--line);color:var(--ink);padding:5px 8px;" type="text" placeholder="output.csv">
+            </div>
+            <div style="margin-top:8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+              <input type="checkbox" id="sim-backdate" checked>
+              <label for="sim-backdate" style="font-size:12px;">Backdate timestamps</label>
+              <input id="sim-backdate-days" type="number" value="45" min="1" max="365" style="width:55px;font-family:'Share Tech Mono',monospace;font-size:12px;background:var(--bg2);border:1px solid var(--line);color:var(--ink);padding:3px 5px;" title="Days to backdate">
+              <span style="font-size:11px;color:var(--muted);">days</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="card" id="sim-params-card">
+          <div class="card-title">Parameters</div>
+          <div id="sim-params-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px;margin-top:6px;"></div>
+        </div>
+
+        <div style="display:flex;gap:8px;margin:10px 0;align-items:center;">
+          <button class="btn btn-brand" id="btn-generate">⚡ Generate CSV</button>
+          <span id="sim-gen-status" style="font-size:12px;color:var(--muted);"></span>
+        </div>
+
+        <div class="card hidden" id="sim-preview-card">
+          <div class="card-title">Preview</div>
+          <div id="sim-preview-meta" style="font-size:12px;color:var(--muted);margin:4px 0;"></div>
+          <div style="overflow-x:auto;">
+            <table class="data" id="sim-preview-table"></table>
+          </div>
+          <div style="margin-top:12px;border-top:1px solid var(--line);padding-top:10px;">
+            <div class="card-title">Onboard as ACM Asset</div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;margin-top:6px;">
+              <div>
+                <label class="lbl-sm">Asset Key</label>
+                <input id="sim-onboard-key" style="width:100%;box-sizing:border-box;font-family:'Share Tech Mono',monospace;font-size:12px;background:var(--bg2);border:1px solid var(--line);color:var(--ink);padding:5px 8px;" type="text" placeholder="SIM_ASSET_01">
+              </div>
+              <div>
+                <label class="lbl-sm">Group</label>
+                <input id="sim-onboard-grp" style="width:100%;box-sizing:border-box;font-family:'Share Tech Mono',monospace;font-size:12px;background:var(--bg2);border:1px solid var(--line);color:var(--ink);padding:5px 8px;" type="text" value="sim">
+              </div>
+              <div style="display:flex;align-items:center;gap:6px;padding-top:18px;">
+                <input type="checkbox" id="sim-fast-track">
+                <label for="sim-fast-track" style="font-size:12px;">Fast-track (skip 14-day gate)</label>
+              </div>
+            </div>
+            <div style="margin-top:8px;display:flex;gap:8px;align-items:center;">
+              <button class="btn btn-ok" id="btn-sim-onboard">⊕ Onboard Asset</button>
+              <span id="sim-onboard-status" style="font-size:12px;color:var(--muted);"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Files ───────────────────────────────────────── -->
+      <div id="sim-pane-files" class="sim-pane hidden">
+        <div style="display:flex;gap:8px;margin-bottom:10px;align-items:center;">
+          <button class="btn btn-brand" id="btn-sim-upload-open">⬆ Upload CSV / XLSX</button>
+          <button class="btn" id="btn-sim-files-refresh">⟳ Refresh</button>
+        </div>
+        <input id="sim-upload-input" type="file" accept=".csv,.xlsx" style="display:none">
+        <div class="card">
+          <div class="card-title">Available Files</div>
+          <div style="overflow-x:auto;">
+            <table class="data" id="sim-files-table">
+              <thead><tr><th>Filename</th><th>Source</th><th class="num">Rows</th><th class="num">Cols</th><th>Modified</th><th>Actions</th></tr></thead>
+              <tbody id="sim-files-body"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="card hidden" id="sim-file-preview-card">
+          <div class="card-title" id="sim-file-preview-title">File Preview</div>
+          <div style="overflow-x:auto;"><table class="data" id="sim-file-preview-table"></table></div>
+        </div>
+      </div>
+
+      <!-- ── Replay ──────────────────────────────────────── -->
+      <div id="sim-pane-replay" class="sim-pane hidden">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+          <div class="card">
+            <div class="card-title">Replay Settings</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px;">
+              <div><label class="lbl-sm">File</label><select id="sim-replay-file" style="width:100%;box-sizing:border-box;font-family:'Share Tech Mono',monospace;font-size:12px;background:var(--bg2);border:1px solid var(--line);color:var(--ink);padding:5px 8px;"></select></div>
+              <div><label class="lbl-sm">Source</label><select id="sim-replay-source" style="width:100%;box-sizing:border-box;font-family:'Share Tech Mono',monospace;font-size:12px;background:var(--bg2);border:1px solid var(--line);color:var(--ink);padding:5px 8px;"><option value="generated">Generated</option><option value="uploaded">Uploaded</option><option value="sample">Sample</option></select></div>
+              <div><label class="lbl-sm">Frequency (Hz)</label><input id="sim-replay-hz" type="number" value="1" min="0.01" max="100" step="0.01" style="width:100%;box-sizing:border-box;font-family:'Share Tech Mono',monospace;font-size:12px;background:var(--bg2);border:1px solid var(--line);color:var(--ink);padding:5px 8px;"></div>
+              <div><label class="lbl-sm">Loop Mode</label><select id="sim-replay-loop" style="width:100%;box-sizing:border-box;font-family:'Share Tech Mono',monospace;font-size:12px;background:var(--bg2);border:1px solid var(--line);color:var(--ink);padding:5px 8px;"><option value="loop_forever">Loop forever</option><option value="once">Once</option><option value="hold_last">Hold last</option><option value="ping_pong">Ping-pong</option></select></div>
+              <div><label class="lbl-sm">Timestamp Mode</label><select id="sim-replay-tsmode" style="width:100%;box-sizing:border-box;font-family:'Share Tech Mono',monospace;font-size:12px;background:var(--bg2);border:1px solid var(--line);color:var(--ink);padding:5px 8px;"><option value="wall_clock">Wall clock</option><option value="csv_timestamp_ignore_rate">CSV timestamp</option><option value="relative_from_csv">Relative from CSV</option></select></div>
+              <div><label class="lbl-sm">Publisher</label><select id="sim-replay-publisher" style="width:100%;box-sizing:border-box;font-family:'Share Tech Mono',monospace;font-size:12px;background:var(--bg2);border:1px solid var(--line);color:var(--ink);padding:5px 8px;"><option value="buffer">ACM Buffer (internal)</option><option value="mqtt">MQTT</option><option value="opcua">OPC-UA</option><option value="both">Both external</option></select></div>
+            </div>
+          </div>
+          <div class="card hidden" id="sim-mqtt-card">
+            <div class="card-title">MQTT Settings</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px;">
+              <div><label class="lbl-sm">Host</label><input id="sim-mqtt-host" style="width:100%;box-sizing:border-box;font-family:'Share Tech Mono',monospace;font-size:12px;background:var(--bg2);border:1px solid var(--line);color:var(--ink);padding:5px 8px;" value="localhost"></div>
+              <div><label class="lbl-sm">Port</label><input id="sim-mqtt-port" type="number" style="width:100%;box-sizing:border-box;font-family:'Share Tech Mono',monospace;font-size:12px;background:var(--bg2);border:1px solid var(--line);color:var(--ink);padding:5px 8px;" value="1883"></div>
+              <div><label class="lbl-sm">Topic Prefix</label><input id="sim-mqtt-prefix" style="width:100%;box-sizing:border-box;font-family:'Share Tech Mono',monospace;font-size:12px;background:var(--bg2);border:1px solid var(--line);color:var(--ink);padding:5px 8px;" value="industrial-tag-simulator"></div>
+              <div><label class="lbl-sm">Device ID</label><input id="sim-mqtt-device" style="width:100%;box-sizing:border-box;font-family:'Share Tech Mono',monospace;font-size:12px;background:var(--bg2);border:1px solid var(--line);color:var(--ink);padding:5px 8px;" value="FlowMeter01"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card" id="sim-tags-card">
+          <div class="card-title">Tag Plan <span id="sim-tag-count" style="font-weight:400;color:var(--muted);"></span></div>
+          <div style="margin:4px 0 8px;display:flex;gap:6px;">
+            <button class="btn btn-sm" id="btn-tags-all">All</button>
+            <button class="btn btn-sm" id="btn-tags-none">None</button>
+          </div>
+          <div style="overflow-x:auto;">
+            <table class="data" id="sim-tags-table">
+              <thead><tr><th>En</th><th>Column</th><th>Tag Name</th><th>Type</th></tr></thead>
+              <tbody id="sim-tags-body"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div style="display:flex;gap:8px;margin:10px 0;align-items:center;flex-wrap:wrap;">
+          <button class="btn btn-brand" id="btn-replay-configure">⚙ Configure</button>
+          <button class="btn btn-ok hidden" id="btn-replay-start">▶ Start</button>
+          <button class="btn btn-bad hidden" id="btn-replay-stop">■ Stop</button>
+          <button class="btn hidden" id="btn-replay-restart">⟳ Restart</button>
+          <span id="sim-replay-status-text" style="font-size:12px;color:var(--muted);"></span>
+        </div>
+
+        <div class="card" id="sim-live-card">
+          <div class="card-title">Live Tag Values <span id="sim-live-updated" style="font-weight:400;color:var(--muted);font-size:11px;"></span></div>
+          <div style="overflow-x:auto;">
+            <table class="data" id="sim-live-table">
+              <thead><tr><th>Tag</th><th class="num">Value</th><th>Type</th><th>Updated</th></tr></thead>
+              <tbody id="sim-live-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
 </main>
+
+<!-- ═══════════════ OUTPUT PANEL ════════════════════════ -->
+<div id="output-panel" class="output-panel">
+  <div class="output-toolbar">
+    <button class="btn btn-sm" id="btn-output-toggle" title="Collapse/expand">∧</button>
+    <div style="display:flex;gap:2px;">
+      <button class="output-src-tab active" data-src="all">All</button>
+      <button class="output-src-tab" data-src="sim">Simulator</button>
+      <button class="output-src-tab" data-src="acm">ACM</button>
+    </div>
+    <select id="sel-output-level" class="btn btn-sm" style="padding:2px 6px;">
+      <option value="all">All levels</option>
+      <option value="warn">Warn+</option>
+      <option value="error">Error only</option>
+    </select>
+    <button class="btn btn-sm" id="btn-output-clear">Clear</button>
+    <label style="font-size:11px;display:flex;align-items:center;gap:4px;cursor:pointer;">
+      <input type="checkbox" id="chk-autoscroll" checked> Auto-scroll
+    </label>
+    <span id="output-line-count" style="font-size:10px;color:var(--muted);margin-left:auto;">0 lines</span>
+  </div>
+  <pre class="term" id="output-log" style="margin:0;flex:1;overflow-y:auto;padding:4px 8px;font-size:11px;line-height:1.5;border-radius:0;"></pre>
+</div>
 
 <!-- ═════════════ MODAL ═══════════════════════════════════ -->
 <div id="modal-backdrop" class="hidden">
