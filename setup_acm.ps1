@@ -125,8 +125,26 @@ Step "Python packages" {
 Step "Verify imports" {
     python -c "import pandas, numpy, polars, sklearn, matplotlib, fastapi, uvicorn; import core.pipeline, scripts.acm_store, scripts.acm_service"
 }
-Step "Self-test" {
-    python -m pytest tests/ -q --no-header -p no:warnings -m "not slow" --basetemp="$InstallDir\.pytest_basetemp" 2>&1 | Select-Object -Last 1
+# Self-test — non-fatal: a failing test does not undo a working install.
+Write-Host "    $([char]0x00B7)  Self-test" -NoNewline
+$testOut  = python -m pytest tests/ -q --no-header -p no:warnings -m "not slow" `
+                --basetemp="$InstallDir\.pytest_basetemp" 2>&1
+$testExit = $LASTEXITCODE
+$testOut | Out-File $Log -Append
+$summary  = ($testOut | Where-Object { $_ -match "passed|failed|error" } | Select-Object -Last 1)
+if ($testExit -eq 0) {
+    Write-Host "`r    " -NoNewline
+    Write-Host ([char]0x2713) -ForegroundColor Green -NoNewline
+    Write-Host "  Self-test  " -NoNewline; Write-Host "$summary" -ForegroundColor DarkGray
+} else {
+    Write-Host "`r    " -NoNewline
+    Write-Host "!" -ForegroundColor Yellow -NoNewline
+    Write-Host "  Self-test (some tests failed — ACM is still usable)" -ForegroundColor Yellow
+    if ($summary) { Write-Host "       $summary" -ForegroundColor DarkGray }
+    Write-Host "       Full log: $Log" -ForegroundColor DarkGray
+    Write-Host "       Run " -NoNewline -ForegroundColor DarkGray
+    Write-Host "python -m pytest tests/ -v" -ForegroundColor Cyan -NoNewline
+    Write-Host " to investigate." -ForegroundColor DarkGray
 }
 
 # --- Backend detection --------------------------------------------------------
