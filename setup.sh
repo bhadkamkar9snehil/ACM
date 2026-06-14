@@ -112,6 +112,8 @@ print(f'  {len(list_generators())} generators, {len(router.routes)} sim routes �
 
 warn_step "Self-test (fast)" "$PYTHON" -m pytest tests/ -m "not slow" -q --tb=no 2>&1 | tail -3
 
+step "Fault datasets" "$PYTHON" scripts/generate_fault_dataset.py
+
 # ── Optional: Simulator ───────────────────────────────────────────────────────
 echo ""
 SIM_DIR="${SIMULATOR_DIR:-$HOME/Simulator}"
@@ -131,9 +133,9 @@ echo ""
 read -rp "  [2/2]  CARE-to-Compare data — 10 Farm A turbines (~360 MB)? [y/N] " ans
 if [[ "$ans" =~ ^[yY] ]]; then
     step "Download CARE events" "$PYTHON" scripts/download_care_dataset.py \
-        --dest care_data --farms A --count 10 --sim-dir sim_data/sample
+        --farms A --count 10
     step "Register CARE assets" "$PYTHON" scripts/acm_seed_demo.py \
-        --care-dir care_data --db acm_results.db
+        --care-dir sim_data/sample --db acm_results.db
 fi
 
 # ── Summary ───────────────────────────────────────────────────────────────────

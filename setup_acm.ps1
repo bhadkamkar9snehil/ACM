@@ -147,6 +147,8 @@ if ($testExit -eq 0) {
     Write-Host " to investigate." -ForegroundColor DarkGray
 }
 
+Step "Fault datasets" { python scripts\generate_fault_dataset.py }
+
 # --- Backend detection --------------------------------------------------------
 $backendLabel = "SQLite  $([char]0x00B7)  zero-config default"
 $hasSql = $false
@@ -206,14 +208,11 @@ if ($ans -match '^[yY]') {
 Write-Host ""
 $ans = Read-Host "  [2/2]  CARE-to-Compare demo data — real wind-turbine SCADA data, score immediately`n         Download 10 events from Farm A (~360 MB)? [y/N]"
 if ($ans -match '^[yY]') {
-    Step "Create sim_data directories" {
-        python -c "from pathlib import Path; [Path(d).mkdir(parents=True,exist_ok=True) for d in ('sim_data/sample','sim_data/generated','sim_data/uploads')]"
-    }
     Step "Download CARE events" {
-        python scripts\download_care_dataset.py --dest care_data --farms A --count 10 --sim-dir sim_data\sample
+        python scripts\download_care_dataset.py --farms A --count 10
     }
     Step "Register CARE assets" {
-        python scripts\acm_seed_demo.py --care-dir care_data --db acm_results.db
+        python scripts\acm_seed_demo.py --care-dir sim_data\sample --db acm_results.db
     }
     $setupCare = $true
 }

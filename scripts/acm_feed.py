@@ -75,7 +75,7 @@ def load_increment(spec: SourceSpec, since: Optional[pd.Timestamp]) -> pd.DataFr
         if spec.timestamp_col not in df.columns:
             raise ValueError(f"timestamp column '{spec.timestamp_col}' not in "
                              f"{spec.source_ref} (columns: {list(df.columns)[:8]}...)")
-        df[spec.timestamp_col] = pd.to_datetime(df[spec.timestamp_col])
+        df[spec.timestamp_col] = pd.to_datetime(df[spec.timestamp_col], format="ISO8601", utc=True)
         if since is not None:
             df = df[df[spec.timestamp_col] > since]
     else:
