@@ -177,7 +177,7 @@ document.querySelectorAll(".tab").forEach((b) => b.addEventListener("click", () 
 
 // Theme picker
 const selTheme = document.getElementById("sel-theme");
-selTheme.value = document.documentElement.dataset.theme || "dark-factory";
+selTheme.value = document.documentElement.dataset.theme || "dark-forge";
 selTheme.addEventListener("change", (e) => {
   const next = e.target.value;
   document.body.dataset.theme = next;
