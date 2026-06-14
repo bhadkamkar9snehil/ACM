@@ -119,7 +119,8 @@ Set-Location $InstallDir
 Step "Python packages" {
     python -m pip install --quiet --upgrade pip
     python -m pip install --quiet pandas numpy polars pyarrow scikit-learn scipy `
-        structlog matplotlib remotezip pytest fastapi uvicorn httpx
+        structlog matplotlib remotezip pytest fastapi uvicorn httpx `
+        asyncua paho-mqtt
 }
 Step "Verify imports" {
     python -c "import pandas, numpy, polars, sklearn, matplotlib, fastapi, uvicorn; import core.pipeline, scripts.acm_store, scripts.acm_service"

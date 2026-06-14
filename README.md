@@ -55,15 +55,38 @@ Open PowerShell and run:
 ```powershell
 irm https://raw.githubusercontent.com/bhadkamkar9snehil/ACM/main/setup_acm.ps1 | iex
 ```
-This installs Git and Python (3.11+) if missing, clones the ACM repository to `$HOME\ACM`, installs all dependencies, and runs an automated self-test.
+
+The script is fully interactive — it handles everything in one shot:
+
+| What it does automatically | Optional prompts |
+|---|---|
+| Installs Git and Python 3.11+ if missing | **[1/2] Industrial Simulator** — clone and wire up the Simulator so ACM reads live OPC UA tag data as its historian |
+| Clones ACM to `$HOME\ACM` | **[2/2] CARE demo data** — download 3 real wind-turbine SCADA events (~30 MB) so ACM can score them immediately, before you have any live data |
+| Installs all Python dependencies (including `asyncua` and `paho-mqtt` for live streaming) | |
+| Detects SQL Server if present; falls back to SQLite | |
+| Runs an automated self-test | |
+
+After the script finishes:
+
+```powershell
+# 1. Start the ACM service
+cd $HOME\ACM
+python scripts\acm_service.py
+
+# 2. Open the control panel
+start http://localhost:8765
+```
+
+- **CARE demo data:** click **Run Now** in the Admin panel — 3 assets score immediately.
+- **Simulator:** double-click `RUN_SIMULATOR.bat` in `$HOME\Simulator`, load any CSV, start replay — ACM picks it up as `simulator/opc_ua` on the next tick.
 
 ### 2. Updating an Existing Installation
-The setup script acts as both an installer and an updater! To update your installation to the latest version:
+The setup script acts as both an installer and an updater. To update to the latest version:
 1. Close the ACM service if it is running.
-2. Open PowerShell and run the **exact same setup command** as above.
+2. Run the **exact same setup command** above.
 
-The script will automatically detect your existing installation, pull the latest changes from GitHub, and upgrade any new Python dependencies.
-Your local data (`acm.db`, `acm_results.db`) and local configurations are safely ignored by Git and **will be preserved**.
+The script detects your existing installation, pulls the latest changes, and upgrades any new dependencies.
+Your local data (`acm.db`, `acm_results.db`) and configurations are Git-ignored and **will be preserved**.
 ---
 
 ## Self-Tuned Alarm Rules Explained
@@ -202,13 +225,16 @@ flowchart LR
 
 -  **`scripts/`**: Command-line scripts for service operation, one-shot execution, and validation.
   -  **`acm_service.py`**: Runs the FastAPI scheduler service and serves the web control panel interface.
-  -  **`acm_feed.py`**: Handles data caching and the readiness/maturity gate to protect the historian from bulk queries.
+  -  **`acm_feed.py`**: Handles data caching and the readiness/maturity gate; dispatches to CSV, SQL, OPC UA, or MQTT sources.
+  -  **`acm_opcua_bridge.py`**: Asyncio singleton that polls an OPC UA server and buffers tag rows into SQLite so worker processes can read them like any historian.
+  -  **`acm_mqtt_bridge.py`**: Thread-based singleton that subscribes to an MQTT broker and buffers flat-topic payloads into SQLite.
   -  **`acm_run.py`**: Runs batch parallel scoring CLI over raw CSV or SQL datasets into the SQL store.
   -  **`acm_store.py`**: Manages SQL schemas, syncs config parameters, and ingests offline benchmark runs.
   -  **`acm_report.py`**: Generates self-contained, interactive HTML diagnostic reports for any selected assets.
+  -  **`acm_seed_demo.py`**: Idempotent seeder — registers CARE CSV assets and/or an OPC UA asset into the monitored-assets table. Used by setup and safe to re-run.
   -  **`robustness_matrix.py`**: Validates sensitivity and false-alarm rates across a synthetic matrix of asset and fault types.
   -  **`care_benchmark.py`**: Evaluates performance metrics against the public CARE-to-Compare wind farm dataset.
-  -  **`download_care_dataset.py`**: Utility script to download and extract the CARE wind farm datasets from Zenodo.
+  -  **`download_care_dataset.py`**: Downloads CARE wind-turbine SCADA events from Zenodo using HTTP range requests. Use `--count N` to limit to N events per farm.
 
 -  **`static/`**: Front-end asset directory containing the web dashboard layout and script assets.
   -  **`index.html`**: Entry point page structure for the Operator, Reliability Engineer, and Admin panels.
