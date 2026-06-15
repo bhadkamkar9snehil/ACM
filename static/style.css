@@ -1216,16 +1216,16 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
 [data-mode="advanced"] .op-layout {
   display: grid;
   grid-template-columns: 200px 1fr;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: auto auto 1fr;
   grid-template-areas:
     "kpis   health"
-    "matrix matrix"
-    "causes causes";
+    "kpis   causes"
+    "matrix matrix";
   gap: 8px;
 }
-[data-mode="advanced"] .op-kpis   { grid-area: kpis; }
+[data-mode="advanced"] .op-kpis   { grid-area: kpis; align-self: start; }
 [data-mode="advanced"] .op-health { grid-area: health; }
-[data-mode="advanced"] .op-matrix { grid-area: matrix; }
+[data-mode="advanced"] .op-matrix { grid-area: matrix; min-height: 300px; }
 [data-mode="advanced"] .op-causes { grid-area: causes; }
 
 /* KPI tiles: horizontal row in basic → compact vertical sidebar in advanced */

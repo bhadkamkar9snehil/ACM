@@ -500,12 +500,12 @@ async function refreshOperator(useCache = false) {
 
     const days = Object.keys(dayMap).sort().slice(-30);
     if (days.length === 0) {
-      healthEl.style.cssText = "height:120px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:11px;";
+      healthEl.style.cssText = "height:80px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:12px;";
       healthEl.textContent = "No history yet.";
     } else {
       const W_total = healthEl.clientWidth || 500;
-      const H_bars = 90, GAP = 1;
-      const barW = Math.max(3, Math.floor((W_total - 8) / days.length) - GAP);
+      const H_bars = 130, GAP = 2;
+      const barW = Math.max(4, Math.floor((W_total - 16) / days.length) - GAP);
       const W = days.length * (barW + GAP) - GAP;
       const maxN = Math.max(...days.map(d => dayMap[d].ok + dayMap[d].warn + dayMap[d].alarm), 1);
       const dpr = window.devicePixelRatio || 1;
@@ -531,12 +531,12 @@ async function refreshOperator(useCache = false) {
         }
       });
 
-      healthEl.style.cssText = "padding:6px 8px;display:block;";
+      healthEl.style.cssText = "padding:8px 10px;display:block;";
       healthEl.append(cvs);
       const leg = document.createElement("div");
-      leg.style.cssText = "display:flex;justify-content:space-between;font-size:9px;color:var(--muted);font-family:'Share Tech Mono',monospace;margin-top:3px;";
+      leg.style.cssText = "display:flex;justify-content:space-between;font-size:11px;color:var(--muted);font-family:'Share Tech Mono',monospace;margin-top:5px;";
       leg.innerHTML = `<span>${days[0]}</span>
-        <span style="display:flex;gap:8px;">
+        <span style="display:flex;gap:12px;">
           <span style="color:var(--ok)">■ ok</span>
           <span style="color:var(--warn)">■ warn</span>
           <span style="color:var(--bad)">■ alarm</span>
@@ -577,17 +577,17 @@ async function refreshOperator(useCache = false) {
       causesBody.innerHTML = `<span style="color:var(--ok)">✓ No active alarm causes</span>`;
     } else {
       const maxCnt = sorted[0][1];
-      causesBody.style.padding = "8px";
+      causesBody.style.cssText = "padding:10px 12px;";
       causesBody.innerHTML = sorted.map(([cause, cnt]) => {
         const pct = fleet.length > 0 ? Math.round(cnt / fleet.length * 100) : 0;
         const barW = Math.round(cnt / maxCnt * 100);
-        return `<div style="margin-bottom:8px;">
-          <div style="display:flex;justify-content:space-between;margin-bottom:3px;">
-            <span style="font-size:11px;color:var(--ink);">${cause}</span>
-            <span style="font-size:9px;color:var(--muted);font-family:'Share Tech Mono',monospace;">${cnt}&nbsp;assets&nbsp;(${pct}%)</span>
+        return `<div style="margin-bottom:10px;">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px;">
+            <span style="font-size:13px;color:var(--ink);font-weight:600;">${cause}</span>
+            <span style="font-size:11px;color:var(--muted);font-family:'Share Tech Mono',monospace;white-space:nowrap;margin-left:8px;">${cnt}&nbsp;assets&nbsp;(${pct}%)</span>
           </div>
-          <div style="background:var(--bg);height:5px;border-radius:2px;">
-            <div style="background:var(--bad);width:${barW}%;height:100%;border-radius:2px;opacity:.75;transition:width .3s;"></div>
+          <div style="background:var(--bg2);height:10px;border-radius:3px;overflow:hidden;">
+            <div style="background:var(--bad);width:${barW}%;height:100%;border-radius:3px;opacity:.8;transition:width .4s;"></div>
           </div>
         </div>`;
       }).join("");
