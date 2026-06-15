@@ -68,3 +68,8 @@ data_cache/
 sim_data/generated/
 sim_data/uploads/
 ## sim_data/sample/ is intentionally tracked (seeded CSVs)
+
+# Local data / runtime files
+sim_data/sample/care_farmA_*.csv
+sim_data/sample_old/
+test.csv

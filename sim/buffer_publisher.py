@@ -27,10 +27,14 @@ class BufferPublisher:
 
     def _ensure_table(self) -> None:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        with sqlite3.connect(self.db_path) as con:
-            con.execute(
-                "CREATE TABLE IF NOT EXISTS mqtt_buffer(ts TEXT, payload_json TEXT)"
-            )
+        con = sqlite3.connect(self.db_path)
+        try:
+            with con:
+                con.execute(
+                    "CREATE TABLE IF NOT EXISTS mqtt_buffer(ts TEXT, payload_json TEXT)"
+                )
+        finally:
+            con.close()
 
     async def configure_tags(self, config: Any) -> None:
         self._tag_names = {}
@@ -57,20 +61,27 @@ class BufferPublisher:
         for node_id, (value, _dtype) in values.items():
             col_name = self._tag_names.get(node_id) or node_id.split(".")[-1]
             payload[col_name] = value
-        with sqlite3.connect(self.db_path) as con:
-            con.execute(
-                "INSERT INTO mqtt_buffer (ts, payload_json) VALUES (?, ?)",
-                (ts, json.dumps(payload, default=str)),
-            )
+        con = sqlite3.connect(self.db_path)
+        try:
+            with con:
+                con.execute(
+                    "INSERT INTO mqtt_buffer (ts, payload_json) VALUES (?, ?)",
+                    (ts, json.dumps(payload, default=str)),
+                )
+        finally:
+            con.close()
 
     def get_endpoint(self) -> str:
         return f"acm://buffer:{self.db_path}"
 
     def get_status(self) -> dict[str, Any]:
+        count = 0
+        con = sqlite3.connect(self.db_path)
         try:
-            with sqlite3.connect(self.db_path) as con:
-                row = con.execute("SELECT COUNT(*) FROM mqtt_buffer").fetchone()
-                count = row[0] if row else 0
+            row = con.execute("SELECT COUNT(*) FROM mqtt_buffer").fetchone()
+            count = row[0] if row else 0
         except Exception:
-            count = 0
+            pass
+        finally:
+            con.close()
         return {"connected": True, "buffer_rows": count, "db_path": str(self.db_path)}

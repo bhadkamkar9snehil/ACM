@@ -157,8 +157,11 @@ async def _run_buffer_publisher(db_path: Path) -> int:
 
     await pub.stop()
 
-    with sqlite3.connect(db_path) as con:
+    con = sqlite3.connect(db_path)
+    try:
         rows = con.execute("SELECT COUNT(*) FROM mqtt_buffer").fetchone()[0]
+    finally:
+        con.close()
     return rows
 
 
@@ -170,8 +173,11 @@ def test_buffer_publisher() -> None:
         check("5 rows written to mqtt_buffer", rows == 5, f"got {rows}")
 
         # Verify payload shape
-        with sqlite3.connect(db_path) as con:
+        con = sqlite3.connect(db_path)
+        try:
             last = con.execute("SELECT payload_json FROM mqtt_buffer ORDER BY ts DESC LIMIT 1").fetchone()
+        finally:
+            con.close()
         payload = json.loads(last[0])
         check("payload contains published_at", "published_at" in payload)
         check("payload contains tag values", "temperature" in payload and "pressure" in payload,
@@ -401,8 +407,11 @@ async def _run_live_replay_to_buffer(db_path: Path) -> int:
 
     csv_path.unlink(missing_ok=True)
 
-    with sqlite3.connect(db_path) as con:
+    con = sqlite3.connect(db_path)
+    try:
         return con.execute("SELECT COUNT(*) FROM mqtt_buffer").fetchone()[0]
+    finally:
+        con.close()
 
 
 def test_live_replay_pipeline() -> None:
