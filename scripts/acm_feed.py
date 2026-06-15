@@ -35,12 +35,15 @@ SOURCE_KINDS = ("csv", "table", "query", "opcua", "mqtt")
 MIN_TRAIN_DAYS = 14.0
 STALE_AFTER_HOURS = 24.0
 
+# Valid SQL identifier: letters, digits, underscore only.
+_IDENT_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
+
 
 @dataclass
 class SourceSpec:
     """Where one asset's raw data comes from."""
     asset_key: str
-    source_kind: str            # csv | table | query
+    source_kind: str            # csv | table | query | opcua | mqtt
     source_ref: str             # file path, table name, or SQL query
     conn_ref: Optional[str] = None      # pyodbc connection string (table/query)
     timestamp_col: str = "time_stamp"
@@ -50,6 +53,25 @@ class SourceSpec:
         if self.source_kind not in SOURCE_KINDS:
             raise ValueError(f"source_kind must be one of {SOURCE_KINDS}, "
                              f"got '{self.source_kind}'")
+        # Validate timestamp_col and status_col as safe SQL identifiers to
+        # prevent column-name injection into f-string SQL (table/query paths).
+        if not _IDENT_RE.match(self.timestamp_col):
+            raise ValueError(
+                f"timestamp_col must be a valid SQL identifier (letters, digits, "
+                f"underscore), got '{self.timestamp_col}'"
+            )
+        if self.status_col and not _IDENT_RE.match(self.status_col):
+            raise ValueError(
+                f"status_col must be a valid SQL identifier, got '{self.status_col}'"
+            )
+        # For table source_kind, source_ref is interpolated as a table name.
+        # Block the most obvious injection characters.
+        if self.source_kind == "table":
+            if any(c in self.source_ref for c in (";", "--", "/*", "*/")):
+                raise ValueError(
+                    f"source_ref for table source_kind contains disallowed characters: "
+                    f"'{self.source_ref}'"
+                )
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -96,116 +118,85 @@ def load_increment(spec: SourceSpec, since: Optional[pd.Timestamp]) -> pd.DataFr
         if spec.timestamp_col not in df.columns:
             raise ValueError(f"timestamp column '{spec.timestamp_col}' not in source "
                              f"(columns: {list(df.columns)[:8]}...)")
-        df[spec.timestamp_col] = pd.to_datetime(df[spec.timestamp_col], utc=True)
+        df[spec.timestamp_col] = pd.to_datetime(df[spec.timestamp_col], utc=True, errors="coerce")
     return df.sort_values(spec.timestamp_col).reset_index(drop=True)
+
+
+def _load_sqlite_buffer_increment(
+    db_path: str, table: str, spec: SourceSpec, since: Optional[pd.Timestamp]
+) -> pd.DataFrame:
+    """Shared reader for the SQLite bridge DBs (OPC UA and MQTT).
+
+    Both bridges write rows with the same schema:
+        ts TEXT NOT NULL, payload_json TEXT NOT NULL
+    This function reads, deserialises, normalises the timestamp column, and
+    returns a UTC-aware DataFrame.  Returns an empty DataFrame on any error
+    or when no rows match.
+    """
+    import json as _json
+    import sqlite3 as _sqlite3
+
+    if not Path(db_path).exists():
+        return pd.DataFrame()
+
+    since_str = since.isoformat() if since is not None else None
+    with _sqlite3.connect(db_path) as con:
+        if since_str is not None:
+            rows = con.execute(
+                f"SELECT payload_json FROM {table} WHERE ts > ? ORDER BY ts",
+                (since_str,),
+            ).fetchall()
+        else:
+            rows = con.execute(
+                f"SELECT payload_json FROM {table} ORDER BY ts"
+            ).fetchall()
+
+    records = []
+    for (json_str,) in rows:
+        try:
+            records.append(_json.loads(json_str))
+        except Exception:
+            pass
+
+    if not records:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(records)
+    ts_col = spec.timestamp_col or "published_at"
+    if ts_col not in df.columns:
+        for alias in ("published_at", "timestamp", "ts"):
+            if alias in df.columns:
+                df = df.rename(columns={alias: ts_col})
+                break
+    if ts_col not in df.columns:
+        return pd.DataFrame()
+
+    df[ts_col] = pd.to_datetime(df[ts_col], utc=True, errors="coerce")
+    df = df.dropna(subset=[ts_col])
+    return df.sort_values(ts_col).reset_index(drop=True)
 
 
 def _load_opcua_increment(spec: SourceSpec, since: Optional[pd.Timestamp]) -> pd.DataFrame:
     """Read buffered OPC UA tag rows from the SQLite bridge DB.
 
-    spec.conn_ref     — path to opcua_buffer.db (falls back to
-                        data_cache/opcua_buffer.db)
+    spec.conn_ref      — path to opcua_buffer.db (falls back to
+                         data_cache/opcua_buffer.db)
     spec.timestamp_col — column name used when building DataFrames
                          (the buffer always stores "published_at"; we rename)
     """
-    import json as _json
-    import sqlite3 as _sqlite3
-
     db_path = spec.conn_ref or str(ROOT / "data_cache" / "opcua_buffer.db")
-    if not Path(db_path).exists():
-        return pd.DataFrame()
-
-    since_str = since.isoformat() if since is not None else None
-    con = _sqlite3.connect(db_path)
-    try:
-        if since_str is not None:
-            rows = con.execute(
-                "SELECT payload_json FROM opcua_buffer WHERE ts > ? ORDER BY ts",
-                (since_str,),
-            ).fetchall()
-        else:
-            rows = con.execute(
-                "SELECT payload_json FROM opcua_buffer ORDER BY ts"
-            ).fetchall()
-    finally:
-        con.close()
-
-    records = []
-    for (json_str,) in rows:
-        try:
-            records.append(_json.loads(json_str))
-        except Exception:
-            pass
-
-    if not records:
-        return pd.DataFrame()
-
-    df = pd.DataFrame(records)
-    ts_col = spec.timestamp_col or "published_at"
-    if ts_col not in df.columns:
-        for alias in ("published_at", "timestamp", "ts"):
-            if alias in df.columns:
-                df = df.rename(columns={alias: ts_col})
-                break
-    if ts_col not in df.columns:
-        return pd.DataFrame()
-
-    df[ts_col] = pd.to_datetime(df[ts_col], utc=True, errors="coerce")
-    df = df.dropna(subset=[ts_col])
-    return df.sort_values(ts_col).reset_index(drop=True)
+    return _load_sqlite_buffer_increment(db_path, "opcua_buffer", spec, since)
 
 
 def _load_mqtt_increment(spec: SourceSpec, since: Optional[pd.Timestamp]) -> pd.DataFrame:
     """Read buffered flat MQTT payloads from the SQLite bridge DB.
 
-    spec.conn_ref  — path to mqtt_buffer.db (falls back to data_cache/mqtt_buffer.db)
+    spec.conn_ref      — path to mqtt_buffer.db (falls back to
+                         data_cache/mqtt_buffer.db)
     spec.timestamp_col — column to parse as timestamp (default "published_at")
     """
-    import json as _json
-    import sqlite3 as _sqlite3
-
     db_path = spec.conn_ref or str(ROOT / "data_cache" / "mqtt_buffer.db")
-    if not Path(db_path).exists():
-        return pd.DataFrame()
-
-    since_str = since.isoformat() if since is not None else None
-    con = _sqlite3.connect(db_path)
-    try:
-        if since_str is not None:
-            rows = con.execute(
-                "SELECT payload_json FROM mqtt_buffer WHERE ts > ? ORDER BY ts",
-                (since_str,),
-            ).fetchall()
-        else:
-            rows = con.execute(
-                "SELECT payload_json FROM mqtt_buffer ORDER BY ts"
-            ).fetchall()
-    finally:
-        con.close()
-
-    records = []
-    for (json_str,) in rows:
-        try:
-            records.append(_json.loads(json_str))
-        except Exception:
-            pass
-
-    if not records:
-        return pd.DataFrame()
-
-    df = pd.DataFrame(records)
-    ts_col = spec.timestamp_col or "published_at"
-    if ts_col not in df.columns:
-        for alias in ("published_at", "timestamp", "ts"):
-            if alias in df.columns:
-                df = df.rename(columns={alias: ts_col})
-                break
-    if ts_col not in df.columns:
-        return pd.DataFrame()
-
-    df[ts_col] = pd.to_datetime(df[ts_col], utc=True, errors="coerce")
-    df = df.dropna(subset=[ts_col])
-    return df.sort_values(ts_col).reset_index(drop=True)
+    return _load_sqlite_buffer_increment(db_path, "mqtt_buffer", spec, since)
 
 
 def cache_path(cache_dir: Path | str, asset_key: str) -> Path:
@@ -219,6 +210,8 @@ def _read_ts_column(path: Path, ts_col: str) -> Optional[pd.Series]:
     Parquet's columnar storage means we load a single column's byte range
     rather than all N sensor channels — O(rows) instead of O(rows × cols).
     Returns None when the file is missing or empty.
+    Always returns a UTC-aware Series so comparisons with tz-aware increments
+    never raise TypeError.
     """
     if not path.exists():
         return None
@@ -226,7 +219,7 @@ def _read_ts_column(path: Path, ts_col: str) -> Optional[pd.Series]:
         tbl = _pq.read_table(str(path), columns=[ts_col])
         if len(tbl) == 0:
             return None
-        return pd.to_datetime(tbl.column(ts_col).to_pandas())
+        return pd.to_datetime(tbl.column(ts_col).to_pandas(), utc=True)
     except Exception:
         return None
 
@@ -251,11 +244,13 @@ def update_cache(spec: SourceSpec, cache_dir: Path | str,
     # Fast path: read only the timestamp column — avoids loading 600+ sensor
     # columns just to find the maximum timestamp.
     ts_series = _read_ts_column(path, spec.timestamp_col)
-    since = ts_series.max() if ts_series is not None else None
+    # Guard against all-NaT series: NaT.max() is NaT, and NaT is not None,
+    # so it would silently pass to load_increment and freeze the cache.
+    since = ts_series.max() if (ts_series is not None and ts_series.notna().any()) else None
 
     inc = load_increment(spec, since)
 
-    if not len(inc):
+    if inc.empty:
         # No new data — skip the expensive full read and atomic write.
         if ts_series is not None and len(ts_series):
             last_ts = since
@@ -268,8 +263,15 @@ def update_cache(spec: SourceSpec, cache_dir: Path | str,
 
     # New data available — full read, merge, trim, write.
     cached = pd.read_parquet(path) if path.exists() else None
+    if cached is not None:
+        # Normalise to UTC so pd.concat never raises on mixed tz-awareness.
+        # Parquet files written before this fix may contain tz-naive timestamps
+        # (e.g. from a CSV cold-start); incoming inc is always tz-aware UTC.
+        cached[spec.timestamp_col] = pd.to_datetime(
+            cached[spec.timestamp_col], utc=True, errors="coerce"
+        )
     df = pd.concat([cached, inc], ignore_index=True) if cached is not None else inc
-    if not len(df):
+    if df.empty:
         return CacheInfo(last_ts=None, n_rows=0, span_days=0.0, pulled_rows=0)
     df = df.drop_duplicates(subset=spec.timestamp_col, keep="last") \
            .sort_values(spec.timestamp_col).reset_index(drop=True)
@@ -327,7 +329,8 @@ def score_cached(cache_file: str, spec_dict: dict, score_days: float) -> Dict:
     try:
         from core.pipeline import score_asset
         df = pd.read_parquet(cache_file)
-        df[spec.timestamp_col] = pd.to_datetime(df[spec.timestamp_col], utc=True)
+        df[spec.timestamp_col] = pd.to_datetime(df[spec.timestamp_col], utc=True, errors="coerce")
+        df = df.dropna(subset=[spec.timestamp_col])
         ts = df[spec.timestamp_col]
         # Adaptive split: the score window never takes more than a third of
         # the history. A fixed 30-day window on a young asset starved the
