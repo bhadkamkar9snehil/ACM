@@ -184,4 +184,12 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except SystemExit:
+        raise
+    except Exception as exc:
+        import traceback
+        print(f"ERROR: {exc}", flush=True)
+        traceback.print_exc()
+        raise SystemExit(1)

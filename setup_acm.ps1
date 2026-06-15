@@ -147,7 +147,18 @@ if ($testExit -eq 0) {
     Write-Host " to investigate." -ForegroundColor DarkGray
 }
 
-Step "Fault datasets" { python scripts\generate_fault_dataset.py }
+# Fault datasets — non-fatal: CSVs are pre-committed in git; regeneration is a bonus.
+Write-Host "    $([char]0x00B7)  Fault datasets" -NoNewline
+$faultOut = python scripts\generate_fault_dataset.py 2>&1; $faultCode = $LASTEXITCODE
+$faultOut | Out-File $Log -Append
+if ($faultCode -eq 0) {
+    Write-Host "`r    $([char]0x2713)  Fault datasets"
+} else {
+    Write-Host "`r    !  Fault datasets (non-fatal — pre-built CSVs already in repo)" -ForegroundColor Yellow
+    Write-Host "       Run " -NoNewline -ForegroundColor DarkGray
+    Write-Host "python scripts\generate_fault_dataset.py" -ForegroundColor Cyan -NoNewline
+    Write-Host " to investigate." -ForegroundColor DarkGray
+}
 
 # --- Backend detection --------------------------------------------------------
 $backendLabel = "SQLite  $([char]0x00B7)  zero-config default"
