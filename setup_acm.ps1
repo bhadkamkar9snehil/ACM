@@ -262,28 +262,32 @@ Write-Host "  $backendLabel" -ForegroundColor DarkGray
 Write-Host $Sep -ForegroundColor DarkGray
 
 # --- Next steps ---------------------------------------------------------------
+$NL = [System.Environment]::NewLine
 Write-Host ""
-Write-Host "  Next steps" -ForegroundColor White
-Write-Host ""
-Write-Host "  1  Start the service" -ForegroundColor DarkGray
-Write-Host "       " -NoNewline; Write-Host "python scripts\acm_service.py" -ForegroundColor Cyan
-Write-Host "       Open " -NoNewline
-Write-Host "http://localhost:8765" -ForegroundColor Cyan -NoNewline
-Write-Host "  $([char]0x2192)  Admin  $([char]0x2192)  Onboard assets" -ForegroundColor DarkGray
-Write-Host ""
+Write-Host "  ╔══════════════════════════════════════════════════════════╗" -ForegroundColor Yellow
+Write-Host "  ║                    NEXT STEPS                           ║" -ForegroundColor Yellow
+Write-Host "  ╠══════════════════════════════════════════════════════════╣" -ForegroundColor Yellow
+Write-Host "  ║                                                          ║" -ForegroundColor Yellow
+Write-Host "  ║  1.  START THE SERVICE                                   ║" -ForegroundColor Yellow
+Write-Host "  ║                                                          ║" -ForegroundColor Yellow
+Write-Host "  ║      " -NoNewline -ForegroundColor Yellow
+Write-Host "python scripts\acm_service.py" -NoNewline -ForegroundColor Cyan
+Write-Host "                    ║" -ForegroundColor Yellow
+Write-Host "  ║                                                          ║" -ForegroundColor Yellow
+Write-Host "  ║      Then open: " -NoNewline -ForegroundColor Yellow
+Write-Host "http://localhost:8765" -NoNewline -ForegroundColor Cyan
+Write-Host "                   ║" -ForegroundColor Yellow
+Write-Host "  ║                                                          ║" -ForegroundColor Yellow
 if ($setupCare) {
-    Write-Host "  2  Score CARE assets now" -ForegroundColor DarkGray
-    Write-Host "       10 care_demo assets registered + Farm A CSVs in Simulate tab — click " -NoNewline -ForegroundColor DarkGray
-    Write-Host "Run Now" -ForegroundColor Cyan -NoNewline
-    Write-Host " in the Admin panel." -ForegroundColor DarkGray
-    Write-Host ""
+Write-Host "  ║  2.  Score CARE assets: click  RUN NOW  in the UI       ║" -ForegroundColor Yellow
+Write-Host "  ║      (10 wind-turbine assets pre-registered)             ║" -ForegroundColor Yellow
+Write-Host "  ║                                                          ║" -ForegroundColor Yellow
 }
 if (-not $setupCare) {
-    Write-Host "  2  One-shot run" -ForegroundColor DarkGray
-    Write-Host "       " -NoNewline
-    Write-Host "python scripts\acm_run.py --csv data.csv --timestamp-col time --score-days 30 --report out.html" -ForegroundColor DarkGray
-    Write-Host ""
+Write-Host "  ║  2.  One-shot batch run:                                 ║" -ForegroundColor Yellow
+Write-Host "  ║      python scripts\acm_run.py --csv data.csv           ║" -ForegroundColor Yellow
+Write-Host "  ║                                                          ║" -ForegroundColor Yellow
 }
-Write-Host "     Boot: Task Scheduler 'At startup'  $([char]0x00B7)  or wrap with NSSM" -ForegroundColor DarkGray
-Write-Host $Sep -ForegroundColor DarkGray
+Write-Host "  ║  Boot at startup: Task Scheduler  or  NSSM              ║" -ForegroundColor Yellow
+Write-Host "  ╚══════════════════════════════════════════════════════════╝" -ForegroundColor Yellow
 Write-Host ""

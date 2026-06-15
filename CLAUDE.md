@@ -5,6 +5,37 @@
 
 ---
 
+## Table of Contents
+
+1. [Architecture Overview](#architecture-overview)
+2. [Key Files](#key-files-table)
+3. [Data Source Kinds](#data-source-kinds)
+4. [Simulator ↔ ACM Integration](#simulator--acm-integration)
+5. [SQLite Buffer Pattern](#sqlite-buffer-pattern-core-decoupling-mechanism)
+6. [OPC UA Bridge Details](#opc-ua-bridge-details)
+7. [Store: acm_store.py](#store-scriptsacm_storepy)
+8. [Test Suite](#test-suite)
+9. [Setup Scripts](#setup-scripts)
+10. [CARE Dataset](#care-to-compare-dataset)
+11. [Simulator Integration — sim/ Package](#simulator-integration--sim-package)
+12. [Config Split](#config-split-enforced-by-test)
+13. [Windows Compatibility](#windows-compatibility)
+14. [Key Implementation Patterns](#key-implementation-patterns)
+15. [UI Codebase Map](#ui-codebase-map--static-appjs--indexhtml--stylecss) ← **Start here for any UI work**
+16. [API Endpoints](#api-endpoints--key-responses)
+17. [Mistakes Made in Earlier Sessions](#mistakes-made-in-earlier-sessions-never-repeat) ← **Read before starting any task**
+18. [Detailed Data Flow](#detailed-data-flow-per-source-kind)
+19. [Debugging Asset Scoring Issues](#debugging-asset-scoring-issues)
+20. [Future-Agent Guidance](#future-agent-guidance)
+21. [Service Start Command](#service-start-command)
+22. [UI Testing](#ui-testing)
+23. [Fault Datasets](#fault-datasets-sim_datasample)
+24. [Git Workflow](#git-workflow)
+25. [UI Font Sizes](#ui-font-sizes-canonical-after-2026-06-15-upsize)
+26. [User Working Style](#user-working-style)
+
+---
+
 ## Architecture Overview
 
 ACM is a stateless, self-tuning anomaly scoring service for industrial assets. Three layers:
@@ -592,6 +623,12 @@ Full scored result for engineer view. Key fields: `rows` (list of score dicts), 
 24. **Files tab → Replay navigation** — `sendToReplay(filename, source)` added to SIM IIFE. Calls `populateReplayFileList()` then sets the replay file select to the target file. "→ Replay" button added in Files table Actions column.
 25. **Operator tab layout overhaul** — "Top Alarm Causes" moved to right column directly below Fleet Health History (causes now in row 2 beside kpis, matrix takes full-width row 3 with `1fr` height). Fleet Health History bars increased 90→130px, legend font 9→11px. Alarm Causes bars 5→10px, label 11→13px bold, count 9→11px. Grid: `auto auto 1fr` rows with `kpis` spanning rows 1-2 via grid-template-areas.
 26. **Update ACM button — made prominent** — moved to header as `#btn-update-acm-hdr` with class `btn-hdr btn-warn` (amber, always visible in header-right alongside Pause/Run Now). The old Admin card button (`#btn-update-acm`) was removed. Both call the same `doUpdate()` helper. `POST /api/service/update` runs `git pull --ff-only` + re-seeds assets (line 674 in `acm_service.py`). Requires service restart to apply code changes.
+27. **Alarm shading / pattern / co-firing use `fused > alertZ`** — NOT the stored `alarm` boolean column from the DB. The per-row `alarm` column can be 0 even when `fused > alert_z` due to the self-distrust gate in the rule engine. Switching to `fused[i] > alertZ` makes all three visualisations consistent and always show exceedances: chart shading, alarm pattern heatmap, co-firing matrix. `alertZ` comes from `meta.asset.alert_z`.
+28. **Alarm shading opacity doubled** — all `--chart-alarm-fill` CSS vars increased from ~0.20-0.25 to ~0.40-0.50 across all 11 themes.
+29. **Reliability Metrics whitespace fixed** — `align-self: start` added to `.eng-mttd`. Without this the grid item stretches to fill the co-firing matrix's tall cell, creating empty space below the 4 KPI tiles.
+30. **sendToReplay race condition fixed** — clicking `[data-sim-pane="replay"]` triggered `populateReplayFileList()` concurrently with our explicit `await populateReplayFileList()` call, causing the auto-selected first file to overwrite our target. Fix: switch pane directly via DOM classList manipulation (no `.click()`), then `await populateReplayFileList()`, then set `sel.value` and call `loadTagPlan()`.
+31. **Setup script Next Steps made unmissable** — both `setup_acm.ps1` and `setup.sh` now show a yellow double-line box (╔═╗ style) with START THE SERVICE, python command, URL, and RUN NOW instruction. Was previously easy to miss in the wall of install output.
+32. **CLAUDE.md got a Table of Contents** — added at the top. Jump targets: "Start here for UI work" → UI Codebase Map; "Read before starting any task" → Mistakes Made.
 
 ---
 

@@ -58,7 +58,7 @@
   --chart-score: var(--ok);
   --chart-score-fill: var(--ok-lo);
   --chart-alert: var(--bad);
-  --chart-alarm-fill: rgba(232,135,10,.25);
+  --chart-alarm-fill: rgba(232,135,10,.50);
   --favicon-bg: #221f16;
   --favicon-stroke: #e8870a;
   /* Detector palette — shared across all themes */
@@ -121,7 +121,7 @@
   --chart-score: var(--ok);
   --chart-score-fill: var(--ok-lo);
   --chart-alert: var(--bad);
-  --chart-alarm-fill: rgba(245,158,11,.25);
+  --chart-alarm-fill: rgba(245,158,11,.48);
   --favicon-bg: #121822;
   --favicon-stroke: #f59e0b;
 }
@@ -179,7 +179,7 @@
   --chart-score: var(--ok);
   --chart-score-fill: var(--ok-lo);
   --chart-alert: var(--bad);
-  --chart-alarm-fill: rgba(203,75,22,.25);
+  --chart-alarm-fill: rgba(203,75,22,.45);
   --favicon-bg: #fdf6e3;
   --favicon-stroke: #cb4b16;
 }
@@ -235,7 +235,7 @@
   --chart-score: var(--ok);
   --chart-score-fill: var(--ok-lo);
   --chart-alert: var(--bad);
-  --chart-alarm-fill: rgba(0,112,224,.20);
+  --chart-alarm-fill: rgba(0,112,224,.40);
   --favicon-bg: #eaeff5;
   --favicon-stroke: #0070e0;
 }
@@ -291,7 +291,7 @@
   --chart-score: var(--ok);
   --chart-score-fill: var(--ok-lo);
   --chart-alert: var(--bad);
-  --chart-alarm-fill: rgba(10,122,138,.22);
+  --chart-alarm-fill: rgba(10,122,138,.44);
   --favicon-bg: #dce2e8;
   --favicon-stroke: #0a7a8a;
 }
@@ -347,7 +347,7 @@
   --chart-score: var(--ok);
   --chart-score-fill: var(--ok-lo);
   --chart-alert: var(--bad);
-  --chart-alarm-fill: rgba(79,70,229,.20);
+  --chart-alarm-fill: rgba(79,70,229,.40);
   --favicon-bg: #f0f0f2;
   --favicon-stroke: #4f46e5;
 }
@@ -403,7 +403,7 @@
   --chart-score: var(--ok);
   --chart-score-fill: var(--ok-lo);
   --chart-alert: var(--bad);
-  --chart-alarm-fill: rgba(160,72,40,.22);
+  --chart-alarm-fill: rgba(160,72,40,.44);
   --favicon-bg: #e8e5e0;
   --favicon-stroke: #a04828;
 }
@@ -459,7 +459,7 @@
   --chart-score: var(--ok);
   --chart-score-fill: var(--ok-lo);
   --chart-alert: var(--bad);
-  --chart-alarm-fill: rgba(139,26,42,.22);
+  --chart-alarm-fill: rgba(139,26,42,.44);
   --favicon-bg: #f0ece4;
   --favicon-stroke: #8b1a2a;
 }
@@ -515,7 +515,7 @@
   --chart-score: var(--ok);
   --chart-score-fill: var(--ok-lo);
   --chart-alert: var(--bad);
-  --chart-alarm-fill: rgba(45,110,48,.22);
+  --chart-alarm-fill: rgba(45,110,48,.44);
   --favicon-bg: #e8ecdf;
   --favicon-stroke: #2d6e30;
 }
@@ -571,7 +571,7 @@
   --chart-score: var(--ok);
   --chart-score-fill: var(--ok-lo);
   --chart-alert: var(--bad);
-  --chart-alarm-fill: rgba(0,56,168,.20);
+  --chart-alarm-fill: rgba(0,56,168,.40);
   --favicon-bg: #eef1f5;
   --favicon-stroke: #0038a8;
 }
@@ -627,7 +627,7 @@
   --chart-score: var(--ok);
   --chart-score-fill: var(--ok-lo);
   --chart-alert: var(--bad);
-  --chart-alarm-fill: rgba(192,57,43,.22);
+  --chart-alarm-fill: rgba(192,57,43,.44);
   --favicon-bg: #f6f2ea;
   --favicon-stroke: #c0392b;
 }
@@ -1257,7 +1257,7 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
 [data-mode="advanced"] .eng-cofiring  { grid-area: cofiring; min-height: 160px; }
 [data-mode="advanced"] .eng-daily     { grid-area: daily;    min-height: 200px; }
 [data-mode="advanced"] .eng-histogram { grid-area: histogram; min-height: 160px; }
-[data-mode="advanced"] .eng-mttd      { grid-area: mttd; }
+[data-mode="advanced"] .eng-mttd      { grid-area: mttd; align-self: start; }
 
 /* Score chart: scales with viewport height so it isn't tiny on tall/4K monitors */
 [data-mode="basic"]    #eng-chart uplot { height: max(220px, 20vh); }
