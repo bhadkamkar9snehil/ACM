@@ -651,7 +651,7 @@ html { height: 100%; color-scheme: dark; }
 body {
   height: 100%; display: flex; flex-direction: column;
   font-family: 'Barlow', sans-serif;
-  font-size: 13px; line-height: 1.45;
+  font-size: 15px; line-height: 1.50;
   color: var(--ink); background: var(--bg);
   overflow: hidden;
 }
@@ -714,12 +714,12 @@ body {
 }
 .stat-cell .lbl {
   font-family: 'Share Tech Mono', monospace;
-  font-size: 8px; letter-spacing: .10em; color: rgba(255,255,255,.40);
+  font-size: 9px; letter-spacing: .10em; color: rgba(255,255,255,.40);
   text-transform: uppercase;
 }
 .stat-cell .val {
   font-family: 'Share Tech Mono', monospace;
-  font-size: 11px; font-weight: 700; color: rgba(255,255,255,.90);
+  font-size: 13px; font-weight: 700; color: rgba(255,255,255,.90);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .stat-cell input.val {
@@ -737,7 +737,7 @@ body {
 /* ── 3-D Buttons ────────────────────────────────────────── */
 .btn {
   font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif-condensed, sans-serif;
-  font-size: 12px; font-weight: 700; letter-spacing: .07em;
+  font-size: 13px; font-weight: 700; letter-spacing: .07em;
   text-transform: uppercase;
   border: 1px solid var(--line2);
   background: var(--btn-face);
@@ -773,8 +773,8 @@ body {
 .btn-bad:hover    { background: color-mix(in srgb,var(--bad) 85%,#fff 15%); color:#fff; }
 .btn-warn   { background: var(--warn);  border-color: color-mix(in srgb,var(--warn) 60%,#000 40%);  color:#000; }
 .btn-warn:hover   { background: color-mix(in srgb,var(--warn) 85%,#fff 15%); }
-.btn-sm     { font-size: 10px; padding: 3px 8px; }
-.btn-hdr    { background: rgba(255,255,255,.08); border-color: rgba(255,255,255,.20); color:#fff; font-size:11px; padding:4px 9px; }
+.btn-sm     { font-size: 11px; padding: 3px 8px; }
+.btn-hdr    { background: rgba(255,255,255,.08); border-color: rgba(255,255,255,.20); color:#fff; font-size:12px; padding:4px 9px; }
 .btn-hdr:hover { background: rgba(255,255,255,.16); }
 .btn-hdr.btn-brand { background: var(--brand); border-color: color-mix(in srgb,var(--brand) 60%,#000 40%); color:#fff; }
 .btn-hdr.btn-ok  { background: var(--ok);  border-color: color-mix(in srgb,var(--ok) 60%,#000 40%); color:#fff; }
@@ -816,7 +816,7 @@ select.btn optgroup {
 }
 .tab {
   font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif-condensed, sans-serif;
-  font-size: 12px; font-weight: 700; letter-spacing: .07em;
+  font-size: 13px; font-weight: 700; letter-spacing: .07em;
   text-transform: uppercase;
   border: 1px solid var(--line); border-bottom: none;
   background: var(--bg3); color: var(--ink2);
@@ -836,7 +836,7 @@ select.btn optgroup {
 }
 .tab-num {
   font-family: 'Share Tech Mono', monospace;
-  font-size: 9px; opacity: .6; margin-right: 4px;
+  font-size: 10px; opacity: .6; margin-right: 4px;
 }
 
 /* ── Main + panels (fixed layout) ──────────────────────── */
@@ -862,7 +862,7 @@ select.btn optgroup {
 .card:last-child { margin-bottom: 0; }
 .card-title {
   font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif-condensed, sans-serif;
-  font-size: 12px; font-weight: 800; letter-spacing: .10em;
+  font-size: 13px; font-weight: 800; letter-spacing: .10em;
   text-transform: uppercase; color: var(--brand);
   border-bottom: 1px solid var(--line);
   padding-bottom: 6px; margin-bottom: 10px;
@@ -880,7 +880,7 @@ select.btn optgroup {
 /* ── Forms ──────────────────────────────────────────────── */
 input, select, textarea {
   font-family: 'Share Tech Mono', monospace;
-  font-size: 12px; color: var(--ink);
+  font-size: 14px; color: var(--ink);
   background: var(--bg2); border: 1px solid var(--line);
   padding: 5px 8px; border-radius: 0;
   box-shadow: inset 0 2px 4px rgba(0,0,0,.10);
@@ -898,7 +898,7 @@ input[type="checkbox"] { width: auto; accent-color: var(--brand); }
 table.data { border-collapse: collapse; width: 100%; }
 table.data th {
   font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif-condensed, sans-serif;
-  text-align: left; font-weight: 700; font-size: 10px;
+  text-align: left; font-weight: 700; font-size: 11px;
   letter-spacing: .10em; text-transform: uppercase; color: var(--muted);
   border-bottom: 1px solid var(--line2);
   padding: 5px 9px; background: var(--bg3); position: sticky; top: 0; z-index: 1;
@@ -906,7 +906,7 @@ table.data th {
 table.data td {
   padding: 6px 9px; border-bottom: 1px solid var(--line);
   font-family: 'Share Tech Mono', monospace;
-  font-size: 11.5px;
+  font-size: 13px;
   font-variant-numeric: tabular-nums;
 }
 table.data .num, table.data td.num { text-align: right; }
@@ -930,11 +930,11 @@ table.data tr.is-alarm td { background: var(--bad-lo); }
 
 .kpi-num {
   font-family: 'Share Tech Mono', monospace;
-  font-size: 14px; font-weight: bold; color: var(--ink);
+  font-size: 16px; font-weight: bold; color: var(--ink);
 }
 .kpi-cap {
   font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif-condensed, sans-serif;
-  font-size: 10px; font-weight: 700; letter-spacing: .09em;
+  font-size: 11px; font-weight: 700; letter-spacing: .09em;
   text-transform: uppercase; color: var(--muted); margin-top: 2px;
 }
 .kpi.ok .kpi-num, .kpi.alarm .kpi-num, .kpi.warn .kpi-num, .kpi.accent .kpi-num { color: var(--bg); }
@@ -946,7 +946,7 @@ table.data tr.is-alarm td { background: var(--bad-lo); }
   display: inline-flex; align-items: center; gap: 5px;
   padding: 2px 8px;
   font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif-condensed, sans-serif;
-  font-size: 10px; font-weight: 700; letter-spacing: .09em;
+  font-size: 11px; font-weight: 700; letter-spacing: .09em;
   text-transform: uppercase;
   border: 1px solid var(--line2);
   background: var(--bg3); color: var(--muted);
@@ -981,12 +981,12 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
   background: var(--bg3); border: 1px solid var(--line);
   padding: 2px 10px;
   font-family: 'Share Tech Mono', monospace;
-  font-size: 11px; color: var(--muted);
+  font-size: 12px; color: var(--muted);
 }
 .chip b { color: var(--ink); font-variant-numeric: tabular-nums; }
 
 /* ── Hints ──────────────────────────────────────────────── */
-.hint { font-size: 11px; color: var(--muted); line-height: 1.5; font-style: italic; margin: 4px 0; }
+.hint { font-size: 12px; color: var(--muted); line-height: 1.5; font-style: italic; margin: 4px 0; }
 .muted { color: var(--muted); }
 
 /* ── Alert banner (culprits) ────────────────────────────── */
@@ -995,7 +995,7 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
   background: var(--bad-lo);
   padding: 6px 12px;
   font-family: 'Share Tech Mono', monospace;
-  font-size: 11px; color: var(--bad);
+  font-size: 12px; color: var(--bad);
 }
 .msgbar b { color: var(--ink); }
 
@@ -1008,22 +1008,22 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
 }
 .health-cell .v {
   font-family: 'Share Tech Mono', monospace;
-  font-size: 14px; font-weight: bold; color: var(--ink);
+  font-size: 16px; font-weight: bold; color: var(--ink);
 }
 .health-cell .k {
   font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif-condensed, sans-serif;
-  font-size: 10px; font-weight: 700; letter-spacing: .09em;
+  font-size: 11px; font-weight: 700; letter-spacing: .09em;
   text-transform: uppercase; color: var(--muted); margin-top: 2px;
 }
-.attn { margin-top: 8px; font-size: 12px; }
-.attn div { padding: 3px 0; color: var(--warn); font-family: 'Share Tech Mono', monospace; font-size: 11px; }
+.attn { margin-top: 8px; font-size: 13px; }
+.attn div { padding: 3px 0; color: var(--warn); font-family: 'Share Tech Mono', monospace; font-size: 12px; }
 
 /* ── Terminal / Run log ─────────────────────────────────── */
 .term {
   background: var(--term-bg); color: var(--term-ink);
   border: 1px solid var(--line); padding: 10px 12px;
   max-height: 260px; overflow: auto;
-  font-family: 'Share Tech Mono', monospace; font-size: 11px; line-height: 1.6;
+  font-family: 'Share Tech Mono', monospace; font-size: 13px; line-height: 1.6;
   white-space: pre-wrap; margin: 0;
   box-shadow: inset 0 2px 5px rgba(0,0,0,.5);
 }
@@ -1085,7 +1085,7 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
   background: var(--bg4); border: 1px solid var(--line2);
   border-left: 3px solid var(--brand);
   padding: 8px 14px;
-  font-family: 'Share Tech Mono', monospace; font-size: 12px;
+  font-family: 'Share Tech Mono', monospace; font-size: 13px;
   min-width: 220px; max-width: 340px;
   box-shadow: var(--shadow-card); animation: slidein .18s ease-out;
   color: var(--ink);
@@ -1138,7 +1138,7 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
   grid-template-columns: 220px 90px 150px 80px 200px 1fr 60px;
   gap: 10px; padding: 8px 12px 8px 30px; align-items: center;
   border-bottom: 1px dashed rgba(255,255,255,0.05);
-  font-family: 'Share Tech Mono', monospace; font-size: 13px;
+  font-family: 'Share Tech Mono', monospace; font-size: 14px;
 }
 .mega-asset-row.collapsed + .mega-alarms { display: none; }
 .mega-timeline { display: flex; align-items: center; gap: 2px; width: 100%; }
@@ -1205,9 +1205,9 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
 
 /* ── Card density in Advanced mode ──────────────────────── */
 [data-mode="advanced"] .card { padding: 8px 10px; }
-[data-mode="advanced"] table.data td { padding: 4px 7px; font-size: 11px; }
-[data-mode="advanced"] .card-title { font-size: 11px; padding-bottom: 4px; margin-bottom: 6px; }
-[data-mode="advanced"] table.data th { font-size: 9px; }
+[data-mode="advanced"] table.data td { padding: 4px 7px; font-size: 12px; }
+[data-mode="advanced"] .card-title { font-size: 12px; padding-bottom: 4px; margin-bottom: 6px; }
+[data-mode="advanced"] table.data th { font-size: 10px; }
 
 /* ── Operator tab — op-layout ────────────────────────────── */
 .op-layout { display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 0; }
@@ -1308,7 +1308,7 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
   border-top: 1px solid var(--line2);
   border-bottom: 1px solid var(--line);
   font-family: 'Barlow Condensed', sans-serif;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: .08em;
   text-transform: uppercase;
@@ -1391,7 +1391,7 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
 
 .sub-tab {
   font-family: 'Barlow Condensed', sans-serif;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
   letter-spacing: 0.07em;
   text-transform: uppercase;
@@ -1450,12 +1450,12 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
   background: var(--bg3);
   border-bottom: 1px solid var(--line);
   flex-shrink: 0;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .output-src-tab {
   font-family: 'Barlow Condensed', sans-serif;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;

@@ -1,7 +1,7 @@
 # ACM — Codebase Knowledge Base
 
 > Maintained for future agents. Update this file whenever you learn something new about the codebase.
-> Last updated: session 013M57Jr3CpacwDMxVebD5r6 (2026-06-14)
+> Last updated: session 01Dkd7AbjS8Sd5ChfYiNa1yR (2026-06-15)
 
 ---
 
@@ -390,6 +390,8 @@ Generator produces data with timestamps shifted so the last row ≈ now.
 10. **`pd.to_datetime` without `format='ISO8601'`** — generators write timestamps with fractional seconds (`2026-01-01T00:00:00.100000Z`). Without `format="ISO8601", utc=True`, pandas raises a parse error. Always use `pd.to_datetime(df[col], format="ISO8601", utc=True)` in `acm_feed.py` for CSV timestamps.
 11. **Replay pill not updating immediately** — `refreshSimStatus()` polls every 3 seconds. After `doStartReplay()` / `doStopReplay()` succeeds, call `refreshSimStatus()` immediately so the header stat-cell reflects the new state without a 3-second lag. Fixed in `app.js`.
 12. **Playwright `wait_for_function` picks up stale DOM** — after a sub-tab switch, `wait_for_function("length > 0")` may fire on cached content before the async API fetch completes. Use `wait_for_function(f"length > {previous_count}")` when you expect the count to change, or `wait_for_selector` for a specific element.
+13. **`Step "Fault datasets"` was fatal in `setup_acm.ps1`** — caused the whole installer to abort if `generate_fault_dataset.py` exited non-zero on Windows. Fixed by switching to the non-fatal warn pattern (same as self-test). The fault CSVs are pre-committed in `sim_data/sample/` so the step is "nice to regenerate" only.
+14. **UI base font-size 13px is too small on standard Windows displays** — increased to 15px. All component pixel sizes scaled up proportionally (+2 to +3px). See "UI Font Sizes" section below for the canonical values.
 
 ---
 
@@ -581,11 +583,48 @@ Requires: `pip install playwright && playwright install chromium`
 
 ## Git Workflow
 
-- Development branch for session 013M57Jr3CpacwDMxVebD5r6: pushed directly to `main`
-- Previous sessions used `claude/upbeat-hopper-m39epw`, `claude/epic-archimedes-7dkrwf` (both merged to main)
+- Development branch for session 01Dkd7AbjS8Sd5ChfYiNa1yR: `claude/focused-albattani-t9876j` → merged to `main`
+- Previous sessions: 013M57Jr3CpacwDMxVebD5r6 pushed directly to `main`; earlier used `claude/upbeat-hopper-m39epw`, `claude/epic-archimedes-7dkrwf` (both merged to main)
 - Pattern: commit to dev branch → push dev → `git checkout main` → `git merge dev --no-edit` → `git push origin main`
 - If push fails due to diverged remote: `git pull origin main --rebase` then push again
 - Never force-push, never `--no-verify`
+
+---
+
+## UI Font Sizes (canonical after 2026-06-15 upsize)
+
+All sizes live in `static/style.css`. Changed from the original small-screen values to be readable on standard Windows displays.
+
+| Element | Before | After |
+|---|---|---|
+| `body` base | 13px | 15px |
+| `body` line-height | 1.45 | 1.50 |
+| `input/select/textarea` | 12px | 14px |
+| `.btn` | 12px | 13px |
+| `.btn-sm` | 10px | 11px |
+| `.btn-hdr` | 11px | 12px |
+| `.tab` | 12px | 13px |
+| `.tab-num` | 9px | 10px |
+| `.card-title` | 12px | 13px |
+| `table.data td` | 11.5px | 13px |
+| `table.data th` | 10px | 11px |
+| `[data-mode="advanced"] table.data td` | 11px | 12px |
+| `[data-mode="advanced"] table.data th` | 9px | 10px |
+| `.kpi-num` | 14px | 16px |
+| `.kpi-cap` | 10px | 11px |
+| `.stat-cell .lbl` | 8px | 9px |
+| `.stat-cell .val` | 11px | 13px |
+| `.badge` | 10px | 11px |
+| `.chip` | 11px | 12px |
+| `.hint` | 11px | 12px |
+| `.term` | 11px | 13px |
+| `.toast` | 12px | 13px |
+| `.health-cell .v` | 14px | 16px |
+| `.health-cell .k` | 10px | 11px |
+| `.msgbar` | 11px | 12px |
+| `.attn div` | 11px | 12px |
+| `.mega-farm-hdr` | 11px | 12px |
+| `.mega-alarm-row` | 13px | 14px |
 
 ---
 
