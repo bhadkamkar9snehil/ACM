@@ -67,7 +67,7 @@ def main() -> int:
             csv_names = sorted(csv_names)[: args.count * len(args.farms)]
 
         total = len(csv_names)
-        print(f"Downloading {total} file(s) for farm(s) {', '.join(args.farms)} → {dest}")
+        print(f"Downloading {total} file(s) for farm(s) {', '.join(args.farms)} -> {dest}")
 
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
