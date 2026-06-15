@@ -354,6 +354,189 @@ Generator produces data with timestamps shifted so the last row ≈ now.
 
 ---
 
+## UI Codebase Map — `static/` (app.js / index.html / style.css)
+
+### app.js — Function Locations (approximate line numbers)
+
+| Function | ~Line | Purpose |
+|---|---|---|
+| `api(url, opts)` | 140 | Fetch wrapper — throws on non-2xx, returns JSON |
+| `toast(msg, kind)` | 155 | Show bottom-right toast: `ok`/`warn`/`err` |
+| `badge(state)` | 162 | Returns coloured `<span class="badge">` for asset state |
+| `sparkline(data)` | 170 | Mini SVG trend line from sparkline array |
+| `refreshService()` | 220 | Fetches `/api/service`, updates header stat-cells |
+| `updateCountdown()` | 247 | Updates next-tick countdown every second |
+| `refreshOperator()` | 321 | Renders Operator tab: KPIs, fleet matrix, health history, alarm causes |
+| `renderTimeline()` | 348 | 24-hr alarm timeline blocks inside `refreshOperator` |
+| `ackAlarm()` | 598 | Opens modal to acknowledge alarm via `POST /api/alarms/ack` |
+| `openEngineer(key)` | 614 | Sets `selectedAsset` and switches to Engineer tab |
+| `fillAssetSelectors()` | 619 | Fetches fleet, populates `#eng-asset` (scored only) and `#adm-runs-asset` (all) |
+| `refreshEngineer()` | 696 | Renders Engineer tab — chart, culprits, heatmap, cofiring, daily, mttd |
+| `refreshAdmin()` | 1443 | Renders Admin tab — health, assets table, run history, config, audit |
+| `refresh()` | 1669 | Main poll loop called every 20s — calls per-tab refresh |
+| SIM IIFE starts | ~1700 | `(function(){ ... })()` — all `/api/sim/*` UI code |
+| `refreshFiles()` | 1949 | Renders Files sub-tab table with Preview/→Replay/Delete buttons |
+| `populateReplayFileList()` | 2008 | Fills `#sim-replay-file` select with files from `/api/sim/files` |
+| `sendToReplay(fn, src)` | ~2222 | Navigates to Replay sub-tab and pre-selects file |
+| Update ACM handler | ~2277 | `doUpdate()` — calls `POST /api/service/update`, streams output to log panel |
+
+### app.js — Key Rendering Details
+
+**Fleet Health History** (`refreshOperator`, ~line 484):
+- Canvas-based stacked bar chart. `H_bars=130`, `GAP=2`, `barW = max(4, floor((W-16)/days)/GAP)`
+- Data from `/api/fleet/sparklines` — `{asset_key: [[dayStr, fusedMax], ...]}`
+- Day bucketed: `fusedMax ≥ 3.5 → alarm`, `≥ 2.0 → warn`, else ok
+- Legend font 11px `Share Tech Mono`, legend uses CSS vars `--ok / --warn / --bad`
+
+**Top Alarm Causes** (`refreshOperator`, ~line 549):
+- 4 categories matched from `rules_fired` string: `sustained`, `rate`, `avail`, `heads:`
+- Bar: `height:10px`, label `font-size:13px bold`, count `font-size:11px`
+- Background `var(--bg2)`, fill `var(--bad)` at 80% opacity
+
+**Fleet Operations Matrix** (`refreshOperator`, ~line 379):
+- `#mega-matrix` div populated with `<div class="mega-hdr">` + per-asset `<div class="mega-asset-row collapsed">`
+- Asset rows grouped by farm prefix (everything before first `_` in asset key)
+- Double-click → `openEngineer(asset_key)`. Single click toggles alarm episode rows
+- Timeline: 24 one-hour blocks, `danger` if `peak_fused > 5.0`, else `warn`
+
+**Engineer Chart** (`refreshEngineer`, ~line 830):
+- uPlot instance. Series: `[x, fused_z, alert_z, AR1, PCA-SPE, PCA-T2, IForest, GMM, OMR]`
+- Series indices 3-8 (detectors) have `show: false` by default — toggled by `.det-toggle` buttons
+- `.det-toggle` buttons get `btn.classList.remove("active")` on every render reset
+
+**Co-firing Matrix** (`refreshEngineer`, ~line 1270):
+- Canvas. `CELL=44, GAP=2, LABEL=44`, font `bold 11px "Barlow Condensed"`
+- Only renders for alarm samples; `freq[r][c] = pct of r-active rows where c also active`
+
+**Alarm Pattern Heatmap** (`refreshEngineer`, ~line 1361):
+- Canvas. `LABEL_W=42, LABEL_H=20, GAP=1, CELL_H=26`, `CELL_W = max(10, floor((containerW-LABEL_W-12)/24))`
+- Day-of-week × hour grid, color = alarm fraction
+
+### index.html — Key Element IDs
+
+| ID | Location | Purpose |
+|---|---|---|
+| `#mega-matrix` | Operator tab | Fleet operations matrix container |
+| `#op-health-chart` | Operator tab | Fleet health history canvas parent |
+| `#op-causes-body` | Operator tab | Alarm causes bar chart container |
+| `#eng-asset` | Engineer tab | Asset selector dropdown (scored assets only) |
+| `#eng-days` | Engineer tab | Days selector (7/30/90) |
+| `#eng-chart` | Engineer tab | uPlot chart mount point |
+| `#eng-pattern-body` | Engineer tab | Alarm pattern heatmap canvas parent |
+| `#eng-cofiring-body` | Engineer tab (adv) | Co-firing matrix canvas parent |
+| `#adm-health` | Admin tab | Service health grid (workers, tick, backend) |
+| `#adm-assets tbody` | Admin tab | Monitored assets table rows |
+| `#adm-runs-asset` | Admin tab | Asset filter for run history |
+| `#btn-update-acm-hdr` | Header `.hdr-right` | **Primary Update button** — always visible, `btn-hdr btn-warn` |
+| `#btn-runnow` | Header `.hdr-right` | Run Now — `btn-hdr btn-ok` |
+| `#btn-sim-start` | Header `.hdr-right` | Replay Start — hidden unless replay configured |
+| `#sim-pill` | Header stat strip | Replay state badge |
+| `#sim-file-pill` | Header stat strip | Active replay file name |
+| `#output-panel` | Page bottom | Log strip (expandable, 180px default) |
+| `#output-log` | Inside output panel | `<pre class="term">` log content |
+| `#sim-files-body` | Simulate → Files | Files table tbody |
+| `#sim-replay-file` | Simulate → Replay | File selector for replay |
+| `#sim-replay-source` | Simulate → Replay | Source selector (generated/sample/uploaded) |
+| `#sim-replay-publisher` | Simulate → Replay | Publisher mode (opcua/mqtt/both) — defaults to `opcua` |
+
+### style.css — Grid Layouts (advanced mode)
+
+**Operator tab** (`.op-layout`, ~line 1216):
+```
+columns: 200px 1fr
+rows:    auto auto 1fr
+areas:   "kpis   health"
+         "kpis   causes"    ← causes sits below health, kpis spans both rows
+         "matrix matrix"    ← matrix fills 1fr height
+```
+
+**Engineer tab** (`.eng-layout`, ~line 1239):
+```
+columns: 3fr 2fr
+rows:    auto auto auto auto auto auto
+areas:   "topbar    topbar"
+         "culprits  culprits"
+         "chart     pattern"
+         "mttd      cofiring"   ← mttd (Reliability Metrics) is row 4 — near the top
+         "episodes  histogram"
+         "daily     daily"
+```
+
+**Admin tab** (`.adm-layout`, ~line 1269):
+```
+columns: 1fr 1fr
+rows:    auto auto auto auto
+areas:   "health  health"
+         "assets  runhist"
+         "runs    runs"
+         "config  audit"
+         "log     log"
+```
+
+### style.css — Button Classes
+
+| Class | Appearance | Use |
+|---|---|---|
+| `.btn` | Base 3-D button, `--brand` accent | General actions |
+| `.btn-sm` | `font-size:14px, padding:3px 8px` | Small inline buttons in tables/cards |
+| `.btn-hdr` | Semi-transparent, white text, `15px` | Header row buttons |
+| `.btn-hdr.btn-ok` | Green, `--ok` | Positive header actions (Run Now, Replay Start) |
+| `.btn-hdr.btn-bad` | Red, `--bad` | Destructive header actions (Pause, Stop) |
+| `.btn-hdr.btn-warn` | Amber, `--warn` | Notable header actions (Update) |
+| `.btn-brand` | `--brand` fill | Primary CTA inside cards |
+| `.btn-bad` | Red fill | Destructive inline (Delete) |
+| `.btn-warn` | Amber fill | Warning inline (Ack alarm) |
+
+---
+
+## API Endpoints — Key Responses
+
+### `GET /api/fleet`
+Returns `list[dict]` — one entry per `monitored_assets` row that is enabled:
+```json
+{
+  "asset_key": "care/A/40",
+  "grp": "care_demo",
+  "state": "ALARM",            // NEW|MATURING|READY|OK|WARN|ALARM|ERROR|STALE
+  "last_fused": 3.82,          // null if no score yet
+  "last_ts": "2025-10-28T12:48:00Z",
+  "rules_fired": "sustained deviation",
+  "unacked_alarms": 98,
+  "source_kind": "csv",
+  "source_ref": "/path/to/file.csv"
+}
+```
+`last_fused === null` means asset has never been scored (MATURING/NEW). `fillAssetSelectors()` filters to `last_fused !== null` for the Engineer dropdown.
+
+### `GET /api/fleet/sparklines`
+Returns `{asset_key: [[dayStr, fusedMax], ...]}` — 30-day daily max fused scores per asset.
+
+### `GET /api/service`
+```json
+{
+  "status": "TICKING",
+  "backend": "sqlite",
+  "workers": 4,
+  "tick_minutes": 30,
+  "last_tick_at": "2026-06-15T...",
+  "last_tick_duration_s": 363.6,
+  "runtimes": [...],
+  "attention": [...]
+}
+```
+
+### `POST /api/service/update`
+Runs `git pull --ff-only` in ACM root + re-seeds CARE assets. Returns:
+```json
+{"lines": ["── Pulling...", "Already up to date.", "── Done ──"], "restart_required": true}
+```
+Output streamed to `#output-log` via `SIM.log()`. Service must be restarted for code to take effect.
+
+### `GET /api/asset/{key}`
+Full scored result for engineer view. Key fields: `rows` (list of score dicts), `columns` (list of column names), `idx` (column name → index map), `alert_z` (threshold line value).
+
+---
+
 ## Config Split (enforced by test)
 
 - **Human config** (`configs/config_table.csv`, synced to `config` table): categories `data`, `sql`, `runtime` only
@@ -408,7 +591,7 @@ Generator produces data with timestamps shifted so the last row ≈ now.
 23. **Co-firing matrix and alarm heatmap readability** — CELL increased to 44 (from 28), LABEL to 44 (from 32), font to 11px (from 7px). Alarm pattern CELL_H to 26 (from 20), LABEL_W to 42 (from 30), LABEL_H to 20 (from 16), fonts to 11px/10px.
 24. **Files tab → Replay navigation** — `sendToReplay(filename, source)` added to SIM IIFE. Calls `populateReplayFileList()` then sets the replay file select to the target file. "→ Replay" button added in Files table Actions column.
 25. **Operator tab layout overhaul** — "Top Alarm Causes" moved to right column directly below Fleet Health History (causes now in row 2 beside kpis, matrix takes full-width row 3 with `1fr` height). Fleet Health History bars increased 90→130px, legend font 9→11px. Alarm Causes bars 5→10px, label 11→13px bold, count 9→11px. Grid: `auto auto 1fr` rows with `kpis` spanning rows 1-2 via grid-template-areas.
-26. **Update ACM button already exists** — `POST /api/service/update` in `acm_service.py` (line 674) runs `git pull --ff-only` + re-seeds assets. UI button `#btn-update-acm` lives in the Admin / ML Ops tab → Service Health card (top-right corner). Outputs progress lines to the output panel. Requires service restart to apply code changes (no hot-reload).
+26. **Update ACM button — made prominent** — moved to header as `#btn-update-acm-hdr` with class `btn-hdr btn-warn` (amber, always visible in header-right alongside Pause/Run Now). The old Admin card button (`#btn-update-acm`) was removed. Both call the same `doUpdate()` helper. `POST /api/service/update` runs `git pull --ff-only` + re-seeds assets (line 674 in `acm_service.py`). Requires service restart to apply code changes.
 
 ---
 

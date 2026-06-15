@@ -2275,35 +2275,40 @@ if (document.readyState === 'loading') {
 
 // ── Update ACM button ──────────────────────────────────────────────────────
 (function () {
-  function init() {
-    const btn = document.getElementById('btn-update-acm');
-    if (!btn) return;
-    btn.addEventListener('click', async function () {
-      btn.disabled = true;
-      btn.textContent = '↻ Updating…';
-      // Expand output panel so user can watch progress
-      const panel = document.getElementById('output-panel');
-      if (panel) panel.style.height = '260px';
-      try {
-        const res = await fetch('/api/service/update', { method: 'POST',
-          headers: { 'Content-Type': 'application/json' }, body: '{}' });
-        const data = await res.json();
-        (data.lines || []).forEach(function (ln) {
-          SIM.log(ln, 'acm', ln.toLowerCase().includes('error') || ln.toLowerCase().includes('fail') ? 'error' : 'info');
-        });
-        if (data.restart_required) {
-          SIM.log('Restart the service (Ctrl+C → python scripts/acm_service.py) to apply code changes.', 'acm', 'warn');
-        }
-        toast('Update complete — restart service to apply code changes', 'ok');
-      } catch (e) {
-        SIM.log('Update request failed: ' + e.message, 'acm', 'error');
-        toast('Update failed: ' + e.message, 'err');
-      } finally {
-        btn.disabled = false;
-        btn.textContent = '↑ Update ACM';
+  async function doUpdate(btn, originalLabel) {
+    btn.disabled = true;
+    btn.textContent = '↻ Updating…';
+    const panel = document.getElementById('output-panel');
+    if (panel) panel.style.height = '260px';
+    try {
+      const res = await fetch('/api/service/update', { method: 'POST',
+        headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      const data = await res.json();
+      (data.lines || []).forEach(function (ln) {
+        SIM.log(ln, 'acm', ln.toLowerCase().includes('error') || ln.toLowerCase().includes('fail') ? 'error' : 'info');
+      });
+      if (data.restart_required) {
+        SIM.log('Restart the service (Ctrl+C → python scripts/acm_service.py) to apply.', 'acm', 'warn');
       }
-    });
+      toast('Update complete — restart service to apply', 'ok');
+    } catch (e) {
+      SIM.log('Update failed: ' + e.message, 'acm', 'error');
+      toast('Update failed: ' + e.message, 'err');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = originalLabel;
+    }
   }
+
+  function init() {
+    // Header button (always visible)
+    const hdrBtn = document.getElementById('btn-update-acm-hdr');
+    if (hdrBtn) hdrBtn.addEventListener('click', () => doUpdate(hdrBtn, '↑ Update'));
+    // Legacy admin card button
+    const admBtn = document.getElementById('btn-update-acm');
+    if (admBtn) admBtn.addEventListener('click', () => doUpdate(admBtn, '↑ Update ACM'));
+  }
+
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
   } else {

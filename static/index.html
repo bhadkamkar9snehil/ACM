@@ -55,6 +55,7 @@
     <button type="button" class="btn btn-hdr btn-ok"   id="btn-runnow">⟳ Run now</button>
     <button type="button" class="btn btn-hdr btn-ok hidden" id="btn-sim-start">▶ Replay</button>
     <button type="button" class="btn btn-hdr btn-bad hidden" id="btn-sim-stop">■ Stop</button>
+    <button type="button" class="btn btn-hdr btn-warn" id="btn-update-acm-hdr" title="Pull latest code from git and refresh asset registrations">↑ Update</button>
     <select class="btn btn-hdr" id="sel-theme" aria-label="Switch theme" title="Switch theme" style="cursor:pointer; padding-right:6px;">
       <optgroup label="─── Dark ───">
         <option value="dark-forge" selected>Forge Dark</option>
@@ -264,11 +265,7 @@
       <div class="adm-layout">
 
         <div class="adm-health card">
-          <div class="card-title">Service Health
-            <div class="ct-right">
-              <button type="button" class="btn btn-sm" id="btn-update-acm">↑ Update ACM</button>
-            </div>
-          </div>
+          <div class="card-title">Service Health</div>
           <div id="adm-health"></div>
         </div>
 
