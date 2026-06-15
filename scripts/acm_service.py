@@ -666,6 +666,41 @@ def create_app(backend: str = "sqlite", db: Optional[str] = "acm_results.db",
         svc.run_now_event.set()
         return {"triggered": keys or "all"}
 
+    @app.post("/api/service/update")
+    async def update_acm():
+        """Pull latest code and refresh asset registrations without restarting."""
+        import subprocess
+        lines: list[str] = []
+
+        async def _run(cmd: list[str], label: str) -> bool:
+            try:
+                result = await asyncio.to_thread(
+                    subprocess.run, cmd,
+                    capture_output=True, text=True, cwd=str(ROOT), timeout=120,
+                )
+                for ln in (result.stdout + result.stderr).splitlines():
+                    if ln.strip():
+                        lines.append(ln)
+                return result.returncode == 0
+            except Exception as exc:
+                lines.append(f"{label} failed: {exc}")
+                return False
+
+        lines.append("── Pulling latest code ──────────────────")
+        await _run(["git", "pull", "--ff-only"], "git pull")
+
+        lines.append("── Refreshing asset registrations ───────")
+        care_dir = ROOT / "sim_data" / "sample"
+        if any(care_dir.glob("care_farm[ABC]_*.csv")):
+            await _run([sys.executable, "scripts/acm_seed_demo.py",
+                        "--care-dir", str(care_dir), "--db", svc.db or "acm_results.db"],
+                       "seed")
+        else:
+            lines.append("No CARE CSVs found in sim_data/sample/ — skipping seed")
+
+        lines.append("── Done — restart the service to apply code changes ──")
+        return {"lines": lines, "restart_required": True}
+
     return app
 
 
