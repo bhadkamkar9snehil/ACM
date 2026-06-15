@@ -887,13 +887,13 @@ async function refreshEngineer(useCache = false) {
           renderHeatmap();
         }
       }],
-      draw: [(u) => {   // alarm shading — wherever fused exceeds alert threshold
+      draw: [(u) => {   // alarm shading
         const ctx = u.ctx;
         ctx.save();
         ctx.fillStyle = getCss("--chart-alarm-fill");
         let start = null;
-        for (let i = 0; i <= fused.length; i++) {
-          const on = i < fused.length && fused[i] != null && fused[i] > alertZ;
+        for (let i = 0; i <= alarm.length; i++) {
+          const on = i < alarm.length && alarm[i];
           if (on && start === null) start = i;
           if (!on && start !== null) {
             const x0 = u.valToPos(ts[start], "x", true);
@@ -1282,7 +1282,7 @@ async function refreshEngineer(useCache = false) {
     const selfCounts = new Array(N6).fill(0);
 
     for (let i = 0; i < s.rows.length; i++) {
-      if (fused[i] == null || fused[i] <= alertZ) continue; // only above-threshold samples
+      if (!s.rows[i][idx.alarm]) continue; // only alarm samples
       const active = DET_VARS.map(col => (s.rows[i][idx[col]] ?? 0) >= THRESH);
       for (let r = 0; r < N6; r++) {
         if (!active[r]) continue;
@@ -1293,7 +1293,7 @@ async function refreshEngineer(useCache = false) {
       }
     }
 
-    const totalAlarmSamples = fused.filter(v => v != null && v > alertZ).length;
+    const totalAlarmSamples = s.rows.filter(r => r[idx.alarm]).length;
     if (totalAlarmSamples === 0) {
       coBody.innerHTML = `<span style="color:var(--muted);font-size:11px;">No alarm data.</span>`;
     } else {
@@ -1375,7 +1375,7 @@ async function refreshEngineer(useCache = false) {
       const dow = (date.getDay() + 6) % 7; // 0=Mon … 6=Sun
       const hr = date.getHours();
       totalCnt[dow][hr]++;
-      if (fused[i] != null && fused[i] > alertZ) alarmCnt[dow][hr]++;
+      if (alarm[i]) alarmCnt[dow][hr]++;
     }
 
     const DAY_LABELS = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
@@ -1429,10 +1429,10 @@ async function refreshEngineer(useCache = false) {
 
     patBody.style.cssText = "padding:8px;display:block;";
     patBody.append(cvs);
-    const totalAlarmPts = fused.filter(v => v != null && v > alertZ).length;
+    const totalAlarmPts = alarm.reduce((acc, v) => acc + (v ? 1 : 0), 0);
     const patNote = document.createElement("div");
     patNote.style.cssText = "font-size:9px;color:var(--muted);margin-top:6px;font-family:'Share Tech Mono',monospace;";
-    patNote.textContent = `${totalAlarmPts} above-threshold pts · ${ts.length} total · color = fraction`;
+    patNote.textContent = `${totalAlarmPts} alarm pts · ${ts.length} total · color = alarm fraction`;
     patBody.append(patNote);
   }
 }
