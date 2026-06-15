@@ -155,12 +155,36 @@ def write_rows(filename: str, rows: list[dict[str, Any]], source: str = "generat
     return path
 
 
+_metadata_cache: dict[str, tuple[int, int, int, float]] = {}
+
 def _fast_count(path: Path) -> tuple[int, int]:
+    try:
+        stat = path.stat()
+        size = stat.st_size
+        mtime = stat.st_mtime
+    except Exception:
+        size = 0
+        mtime = 0.0
+
+    path_str = str(path.resolve())
+    if path_str in _metadata_cache:
+        col_count, row_count, cached_size, cached_mtime = _metadata_cache[path_str]
+        if cached_size == size and cached_mtime == mtime:
+            return col_count, row_count
+
+    col_count, row_count = _compute_fast_count(path)
+    _metadata_cache[path_str] = (col_count, row_count, size, mtime)
+    return col_count, row_count
+
+def _compute_fast_count(path: Path) -> tuple[int, int]:
     if path.suffix.lower() == ".xlsx":
-        from openpyxl import load_workbook
-        wb = load_workbook(str(path), read_only=True, data_only=True)
-        ws = wb.active
-        return ws.max_column, max(0, ws.max_row - 1)
+        try:
+            from openpyxl import load_workbook
+            wb = load_workbook(str(path), read_only=True, data_only=True)
+            ws = wb.active
+            return ws.max_column, max(0, ws.max_row - 1)
+        except Exception:
+            return 0, 0
     
     import pandas as pd
     try:
@@ -169,13 +193,23 @@ def _fast_count(path: Path) -> tuple[int, int]:
     except Exception:
         col_count = 0
         
-    with path.open("r", newline="", encoding="utf-8-sig") as f:
-        reader = csv.reader(f)
-        try:
-            next(reader)
-        except StopIteration:
-            pass
-        return col_count, sum(1 for _ in reader)
+    row_count = 0
+    try:
+        with path.open("rb") as f:
+            header = f.readline()
+            if header:
+                buf_size = 1024 * 1024
+                chunk = f.read(buf_size)
+                last_byte = b""
+                while chunk:
+                    row_count += chunk.count(b'\n')
+                    last_byte = chunk[-1:]
+                    chunk = f.read(buf_size)
+                if row_count > 0 and last_byte != b'\n':
+                    row_count += 1
+    except Exception:
+        row_count = 0
+    return col_count, row_count
 
 def list_files() -> list[CsvFileRecord]:
     ensure_dirs()
