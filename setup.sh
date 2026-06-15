@@ -77,16 +77,13 @@ echo ""
 echo "  ${DIM}Python packages${RST}"
 
 step "Upgrade pip" "$PYTHON" -m pip install --quiet --upgrade pip
-step "Core packages" "$PYTHON" -m pip install --quiet \
+step "Python packages" "$PYTHON" -m pip install --quiet \
     pandas numpy polars pyarrow scikit-learn scipy \
-    fastapi uvicorn python-multipart \
-    asyncua paho-mqtt openpyxl remotezip \
-    pyodbc 2>/dev/null || true
-# pyodbc is optional — skip cleanly on systems without ODBC headers
-step "Install packages" "$PYTHON" -m pip install --quiet \
-    pandas numpy polars pyarrow scikit-learn scipy \
-    fastapi uvicorn python-multipart \
-    asyncua paho-mqtt openpyxl remotezip
+    structlog matplotlib remotezip pytest httpx \
+    fastapi uvicorn python-multipart pydantic \
+    asyncua paho-mqtt openpyxl
+# pyodbc requires ODBC headers — skip silently on systems without them
+"$PYTHON" -m pip install --quiet pyodbc >> "$LOG" 2>&1 || true
 
 # ── Directories ───────────────────────────────────────────────────────────────
 step "Create directories" "$PYTHON" -c "
@@ -101,18 +98,20 @@ print('OK')
 echo ""
 echo "  ${DIM}Verification${RST}"
 
-step "Import check" "$PYTHON" -c "
+step "Verify imports" "$PYTHON" -c "
 import sys; sys.path.insert(0,'.')
+import pandas, numpy, polars, sklearn, matplotlib, fastapi, uvicorn
+import core.pipeline, scripts.acm_store, scripts.acm_service
 from sim.generator_registry import list_generators
 from sim.buffer_publisher import BufferPublisher
 from sim.sim_adapter import SimAdapter
 from scripts.acm_sim_routes import router
-print(f'  {len(list_generators())} generators, {len(router.routes)} sim routes — OK')
+print(f'{len(list_generators())} generators, {len(router.routes)} sim routes — OK')
 "
 
-warn_step "Self-test (fast)" "$PYTHON" -m pytest tests/ -m "not slow" -q --tb=no 2>&1 | tail -3
+warn_step "Self-test" "$PYTHON" -m pytest tests/ -m "not slow" -q --tb=no -p no:warnings
 
-step "Fault datasets" "$PYTHON" scripts/generate_fault_dataset.py
+warn_step "Fault datasets" "$PYTHON" scripts/generate_fault_dataset.py
 
 # ── Optional: Simulator ───────────────────────────────────────────────────────
 echo ""

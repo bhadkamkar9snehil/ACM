@@ -42,6 +42,7 @@ Data sources  →  SQLite buffer / parquet cache  →  Pipeline workers  →  SQ
 | `configs/config_table.csv` | Human-editable runtime config (151 rows, equipment IDs: 0/global, 1, 2621, 5000-5092, 8634). Categories: data, sql, runtime ONLY. |
 | `setup_acm.ps1` | One-command Windows installer + updater |
 | `setup.sh` | One-command Linux/macOS installer (mirrors setup_acm.ps1) |
+| `docs/ml-book.html` | Self-contained interactive ML reference book — 8 chapters, Chart.js demos, Forge Dark theme, print-optimised |
 | `static/index.html` | Single-page UI entry point (Operator / Engineer / Admin / Simulate tabs) |
 | `static/app.js` | Client-side polling, chart rendering, API commands; SIM IIFE module appended |
 | `static/style.css` | 14 themes (5 dark, 9 light); sim/output panel rules appended |
@@ -191,11 +192,12 @@ Single command: `irm https://raw.githubusercontent.com/bhadkamkar9snehil/ACM/mai
 
 Flow:
 1. Prerequisites: Git, Python 3.11+ (auto-installs via winget or direct installer)
-2. Install: clone/update ACM, pip packages (includes `asyncua`, `paho-mqtt` — see constraint below), verify imports, self-test (non-fatal)
-3. Backend detection: tries SQL Server via pyodbc, falls back to SQLite
-4. **[1/2] Optional: Simulator** — clone to `$HOME\Simulator`, validate bundled runtime at `runtime\python\python.exe`, run `ensure-env`, seed `simulator/opc_ua` asset
-5. **[2/2] Optional: CARE demo** — download 10 Farm A events (~360 MB), copy to `sim_data\sample\` as `wind_turbine_farmA_01.csv` ... `_10.csv`, seed as `care_demo` assets
-6. Summary + context-aware next steps (adapts text based on what was seeded)
+2. Install: clone/update ACM, create directories, pip packages (full list below), detect SQL Server via pyodbc (pyodbc silent if no ODBC headers), verify imports (both core + sim), self-test (non-fatal), fault datasets (non-fatal)
+3. **[1/2] Optional: Simulator** — clone to `$HOME\Simulator`, validate bundled runtime at `runtime\python\python.exe`, run `ensure-env`, seed `simulator/opc_ua` asset
+4. **[2/2] Optional: CARE demo** — download 10 Farm A events (~360 MB) to `sim_data\sample\`, seed as `care_demo` assets
+5. Summary + context-aware next steps (adapts text based on what was seeded)
+
+**Full pip install list (both scripts):** `pandas numpy polars pyarrow scikit-learn scipy structlog matplotlib remotezip pytest httpx fastapi uvicorn python-multipart pydantic asyncua paho-mqtt openpyxl` + `pyodbc` (optional, silent on failure)
 
 **Critical constraint: `asyncua` and `paho-mqtt` MUST stay in the pip install step.** The bridges catch `ImportError` silently, so if these packages are removed the bridges will fail at runtime with no visible error. Discovered when OPC UA seeding worked but the bridge never actually connected.
 
@@ -207,13 +209,16 @@ Single command: `bash <(curl -fsSL https://raw.githubusercontent.com/bhadkamkar9
 Mirror of the PowerShell script for Linux/macOS:
 1. Python 3.11+ check (exits if not found — does not auto-install)
 2. Clone / `git pull --ff-only` ACM
-3. pip install: `pandas numpy polars pyarrow scikit-learn scipy fastapi uvicorn python-multipart asyncua paho-mqtt openpyxl remotezip`
+3. pip install (same list as PS1): all packages + pyodbc silent-optional
 4. Create directories: `sim_data/sample`, `sim_data/generated`, `sim_data/uploads`, `data_cache`, `configs`
-5. Import check: `list_generators()`, `BufferPublisher`, `SimAdapter`, `acm_sim_routes.router`
-6. Self-test (non-fatal): `pytest tests/ -m "not slow" -q --tb=no`
-7. **[1/2] Optional: Simulator** — if `~/Simulator` exists, offer to seed OPC UA asset
-8. **[2/2] Optional: CARE demo** — download 10 Farm A events, `--sim-dir sim_data/sample`
-9. Summary: start command + URLs
+5. Verify imports: core.pipeline, acm_store, acm_service, list_generators(), BufferPublisher, SimAdapter, acm_sim_routes.router
+6. Self-test (non-fatal): `pytest tests/ -m "not slow" -q --tb=no -p no:warnings`
+7. Fault datasets (non-fatal): `python scripts/generate_fault_dataset.py`
+8. **[1/2] Optional: Simulator** — if `~/Simulator` exists, offer to seed OPC UA asset
+9. **[2/2] Optional: CARE demo** — download 10 Farm A events (`--farms A --count 10`, defaults dest to `sim_data/sample`), seed as `care_demo` assets
+10. Summary: start command + URLs
+
+**download_care_dataset.py**: `--dest` optional (defaults to `sim_data/sample`); `--farms A --count 10` is all you need.
 
 **`step` helper** — prints `·  name`, runs command, overwrites with `✓` (green) or `✗` (red) + exits.
 **`warn_step` helper** — same but prints `!` (yellow) + continues on failure.
@@ -392,6 +397,9 @@ Generator produces data with timestamps shifted so the last row ≈ now.
 12. **Playwright `wait_for_function` picks up stale DOM** — after a sub-tab switch, `wait_for_function("length > 0")` may fire on cached content before the async API fetch completes. Use `wait_for_function(f"length > {previous_count}")` when you expect the count to change, or `wait_for_selector` for a specific element.
 13. **`Step "Fault datasets"` was fatal in `setup_acm.ps1`** — caused the whole installer to abort if `generate_fault_dataset.py` exited non-zero on Windows. Fixed by switching to the non-fatal warn pattern (same as self-test). The fault CSVs are pre-committed in `sim_data/sample/` so the step is "nice to regenerate" only.
 14. **UI base font-size 13px is too small on standard Windows displays** — increased to 15px. All component pixel sizes scaled up proportionally (+2 to +3px). See "UI Font Sizes" section below for the canonical values.
+15. **`--sim-dir` flag does not exist in `download_care_dataset.py`** — the script only has `--dest`, `--farms`, `--count`. The default `--dest` already points to `sim_data/sample` so no extra flag is needed. CLAUDE.md had the wrong flag; setup scripts now corrected.
+16. **`setup.sh` had three bugs**: (a) duplicate pip install block (pyodbc optional then same packages again mandatory), (b) `warn_step "Self-test" ... | tail -3` pipe was applying to warn_step's own printf output, not pytest, (c) `step "Fault datasets"` was fatal. All fixed: single install block, pipe removed, fault step changed to `warn_step`.
+17. **`setup_acm.ps1` missing packages**: `python-multipart`, `openpyxl`, `pydantic` were absent from the pip install list but required by FastAPI multipart upload and sim routes. Also missing `structlog`, `matplotlib`, `pytest`, `httpx` (were present but needed to stay). All added.
 
 ---
 

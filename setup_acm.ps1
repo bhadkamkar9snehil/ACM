@@ -116,14 +116,37 @@ Step "Clone / update" {
     }
 }
 Set-Location $InstallDir
+Step "Create directories" {
+    python -c "
+from pathlib import Path
+for d in ('sim_data/sample','sim_data/generated','sim_data/uploads','data_cache','configs'):
+    Path(d).mkdir(parents=True, exist_ok=True)
+    (Path(d) / '.gitkeep').touch()
+print('OK')
+"
+}
 Step "Python packages" {
     python -m pip install --quiet --upgrade pip
     python -m pip install --quiet pandas numpy polars pyarrow scikit-learn scipy `
-        structlog matplotlib remotezip pytest fastapi uvicorn httpx `
-        asyncua paho-mqtt
+        structlog matplotlib remotezip pytest httpx `
+        fastapi uvicorn python-multipart pydantic `
+        asyncua paho-mqtt openpyxl
+}
+Step "SQL Server driver (optional)" {
+    # pyodbc requires ODBC headers — silently skip if unavailable
+    python -m pip install --quiet pyodbc 2>$null; $global:LASTEXITCODE = 0
 }
 Step "Verify imports" {
-    python -c "import pandas, numpy, polars, sklearn, matplotlib, fastapi, uvicorn; import core.pipeline, scripts.acm_store, scripts.acm_service"
+    python -c "
+import sys; sys.path.insert(0,'.')
+import pandas, numpy, polars, sklearn, matplotlib, fastapi, uvicorn
+import core.pipeline, scripts.acm_store, scripts.acm_service
+from sim.generator_registry import list_generators
+from sim.buffer_publisher import BufferPublisher
+from sim.sim_adapter import SimAdapter
+from scripts.acm_sim_routes import router
+print(f'{len(list_generators())} generators, {len(router.routes)} sim routes — OK')
+"
 }
 # Self-test — non-fatal: a failing test does not undo a working install.
 Write-Host "    $([char]0x00B7)  Self-test" -NoNewline
