@@ -185,29 +185,33 @@ def _compute_fast_count(path: Path) -> tuple[int, int]:
             return ws.max_column, max(0, ws.max_row - 1)
         except Exception:
             return 0, 0
-    
-    import pandas as pd
-    try:
-        df_cols = pd.read_csv(str(path), sep=None, engine="python", nrows=0)
-        col_count = len(df_cols.columns)
-    except Exception:
-        col_count = 0
-        
+
+    col_count = 0
     row_count = 0
     try:
-        with path.open("rb") as f:
+        import csv
+        with path.open("r", encoding="utf-8-sig", newline="") as f:
+            sample = f.read(8192)
+            f.seek(0)
+            try:
+                dialect = csv.Sniffer().sniff(sample)
+            except Exception:
+                dialect = csv.excel
             header = f.readline()
             if header:
+                reader = csv.reader([header], dialect=dialect)
+                col_count = len(next(reader))
                 buf_size = 1024 * 1024
                 chunk = f.read(buf_size)
-                last_byte = b""
+                last_byte = ""
                 while chunk:
-                    row_count += chunk.count(b'\n')
+                    row_count += chunk.count('\n')
                     last_byte = chunk[-1:]
                     chunk = f.read(buf_size)
-                if row_count > 0 and last_byte != b'\n':
+                if row_count > 0 and last_byte != '\n':
                     row_count += 1
     except Exception:
+        col_count = 0
         row_count = 0
     return col_count, row_count
 
