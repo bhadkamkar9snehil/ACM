@@ -541,7 +541,7 @@
           <div style="font-size:14px;line-height:1.6;">
             <b>ACM (Asset Condition Monitor)</b> is an unsupervised machine learning platform that monitors industrial assets (wind turbines, pumps, generators) with <i>no labels, no training data, and no manual tuning</i>. It learns what "normal" looks like from the first tick and automatically sets anomaly thresholds.
             <br><br>
-            It ingests raw data via <b>CSV files, OPC UA streams, SQL databases, or MQTT</b>.
+            It ingests raw data via <b>CSV files, OPC UA streams, or SQL databases</b>.
           </div>
         </div>
 
@@ -578,7 +578,7 @@
             <div style="font-size:14px;line-height:1.6;">
               <b>Goal:</b> Configure the platform, onboard new assets, and manage pipelines.<br>
               <ul style="margin:8px 0 0;padding-left:20px;">
-                <li><b>Onboard Assets:</b> Register a new asset by pointing ACM to its data source (CSV, OPC UA, or MQTT).</li>
+                <li><b>Onboard Assets:</b> Register a new asset by pointing ACM to its data source (CSV, OPC UA, or SQL).</li>
                 <li><b>Run Now:</b> Force ACM to score historical data instantly (great for bulk CSV evaluation).</li>
                 <li><b>System Config:</b> Tweak ML thresholds, pager limits, and dashboard aesthetics.</li>
                 <li><b>Logs:</b> Review the background task runner's output to debug ingest failures.</li>
@@ -592,7 +592,7 @@
               <ul style="margin:8px 0 0;padding-left:20px;">
                 <li><b>Generate:</b> Create programmatic synthetic data (Sine waves, Random Walk, Spikes) to test basic detector capabilities.</li>
                 <li><b>Files (Replay):</b> Upload real-world CSV files (like the CARE dataset). Click <span class="badge">Replay</span> to stream the file line-by-line into the system as if it were a live asset.</li>
-                <li><b>Viewing Live Replays:</b> If you are replaying data via the Internal MQTT buffer, go to the <b>Reliability Engineer</b> tab and select the <code>simulator/internal</code> asset to watch the data score live!</li>
+                <li><b>Viewing Live Replays:</b> Configure Replay with <b>OPC-UA</b> publisher and click Start — ACM automatically registers the <code>simulator/opc_ua</code> asset and begins scoring live data. Watch it in the <b>Reliability Engineer</b> tab.</li>
               </ul>
             </div>
           </div>

@@ -690,9 +690,13 @@ function heatColor(z) {
 
 let cachedEngineerData = null;
 async function refreshEngineer(useCache = false) {
-  await fillAssetSelectors();
-  const key = $("#eng-asset").value;
-  if (!key) return;
+  let key = $("#eng-asset").value;
+  if (!key) {
+    // Selectors not populated yet — fill them now and retry
+    await fillAssetSelectors();
+    key = $("#eng-asset").value;
+    if (!key) return;
+  }
   selectedAsset = key;
   const days = +$("#eng-days").value;
   
@@ -1428,7 +1432,11 @@ async function refreshEngineer(useCache = false) {
     patBody.append(patNote);
   }
 }
-$("#eng-asset").addEventListener("change", (e) => { selectedAsset = e.target.value; refreshEngineer(); });
+$("#eng-asset").addEventListener("change", (e) => {
+  selectedAsset = e.target.value;
+  cachedEngineerData = null;  // force fresh fetch — never show a different asset's cached chart
+  refreshEngineer();
+});
 $("#eng-days").addEventListener("change", refreshEngineer);
 
 // --------------------------------------------------------------- admin ----
@@ -1657,7 +1665,13 @@ async function refresh() {
   try {
     await refreshService();
     if (activeTab === "operator") await refreshOperator();
-    else if (activeTab === "engineer") await refreshEngineer();
+    else if (activeTab === "engineer") {
+      // Refresh the asset list from the server, then render the selected asset.
+      // fillAssetSelectors is NOT called inside refreshEngineer to avoid
+      // race conditions overwriting the user's dropdown selection.
+      await fillAssetSelectors();
+      await refreshEngineer();
+    }
     else await refreshAdmin();
   } catch (e) {
     console.error(e);
