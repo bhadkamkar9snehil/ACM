@@ -116,7 +116,8 @@ def _load_opcua_increment(spec: SourceSpec, since: Optional[pd.Timestamp]) -> pd
         return pd.DataFrame()
 
     since_str = since.isoformat() if since is not None else None
-    with _sqlite3.connect(db_path) as con:
+    con = _sqlite3.connect(db_path)
+    try:
         if since_str is not None:
             rows = con.execute(
                 "SELECT payload_json FROM opcua_buffer WHERE ts > ? ORDER BY ts",
@@ -126,6 +127,8 @@ def _load_opcua_increment(spec: SourceSpec, since: Optional[pd.Timestamp]) -> pd
             rows = con.execute(
                 "SELECT payload_json FROM opcua_buffer ORDER BY ts"
             ).fetchall()
+    finally:
+        con.close()
 
     records = []
     for (json_str,) in rows:
@@ -166,7 +169,8 @@ def _load_mqtt_increment(spec: SourceSpec, since: Optional[pd.Timestamp]) -> pd.
         return pd.DataFrame()
 
     since_str = since.isoformat() if since is not None else None
-    with _sqlite3.connect(db_path) as con:
+    con = _sqlite3.connect(db_path)
+    try:
         if since_str is not None:
             rows = con.execute(
                 "SELECT payload_json FROM mqtt_buffer WHERE ts > ? ORDER BY ts",
@@ -176,6 +180,8 @@ def _load_mqtt_increment(spec: SourceSpec, since: Optional[pd.Timestamp]) -> pd.
             rows = con.execute(
                 "SELECT payload_json FROM mqtt_buffer ORDER BY ts"
             ).fetchall()
+    finally:
+        con.close()
 
     records = []
     for (json_str,) in rows:

@@ -768,6 +768,48 @@ async function refreshEngineer(useCache = false) {
   const rowH = cv.height / Z_COLS.length;
   const ctx = cv.getContext("2d");
 
+  if (plot) {
+    plot.destroy();
+    plot = null;
+  }
+
+  if (ts.length === 0) {
+    $("#eng-chart").innerHTML = `
+      <div style="height: 180px; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--muted); border: 1px dashed var(--line); border-radius: 4px; background: var(--bg2); font-family: sans-serif;">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-bottom: 8px; opacity: 0.5;">
+          <path d="M3 3v18h18" />
+          <path d="M18.7 8l-5.1 5.2-2.8-2.7L7 14.3" />
+        </svg>
+        <span style="font-size: 11px;">No historical score data available for this asset</span>
+      </div>
+    `;
+
+    // Clear heatmap
+    ctx.clearRect(0, 0, cv.width, cv.height);
+
+    // Clear state-change lane
+    const sl = $("#eng-statelane");
+    const slCtx = sl.getContext("2d");
+    slCtx.clearRect(0, 0, sl.width, sl.height);
+
+    // Clear episodes table
+    const eb = $("#eng-episodes tbody");
+    eb.replaceChildren();
+    $("#eng-eps-empty").classList.remove("hidden");
+
+    // Clear daily stats table
+    const db = $("#eng-daily tbody");
+    db.replaceChildren();
+
+    // Clear availability trend
+    const availEl = $("#eng-avail-chart");
+    availEl.innerHTML = "";
+    availEl.style.cssText = "padding:4px 8px 0;height:48px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:10px;";
+    availEl.textContent = "No availability data yet.";
+
+    return;
+  }
+
   let currentI0 = 0;
   let currentI1 = s.rows.length - 1;
 
