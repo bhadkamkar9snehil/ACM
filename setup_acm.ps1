@@ -171,20 +171,19 @@ print(f'{len(list_generators())} generators, {len(router.routes)} sim routes —
 "
 }
 # Self-test — non-fatal: a failing test does not undo a working install.
-Write-Host "    $([char]0x00B7)  Self-test" -NoNewline
-$testOut  = python -m pytest tests/ -q --no-header -p no:warnings -m "not slow" `
-                --basetemp="$InstallDir\.pytest_basetemp" 2>&1
+Write-Host "    $([char]0x00B7)  Self-test"
+$testOut = python -u -m pytest tests/ -q --no-header -p no:warnings -m "not slow" `
+                --basetemp="$InstallDir\.pytest_basetemp" 2>&1 | ForEach-Object {
+    $_ | Out-File $Log -Append
+    Write-Host "         $_" -ForegroundColor DarkGray
+    $_
+}
 $testExit = $LASTEXITCODE
-$testOut | Out-File $Log -Append
 $summary  = ($testOut | Where-Object { $_ -match "passed|failed|error" } | Select-Object -Last 1)
 if ($testExit -eq 0) {
-    Write-Host "`r    " -NoNewline
-    Write-Host ([char]0x2713) -ForegroundColor Green -NoNewline
-    Write-Host "  Self-test  " -NoNewline; Write-Host "$summary" -ForegroundColor DarkGray
+    Write-Host "    $([char]0x2713)  Self-test  " -NoNewline -ForegroundColor Green; Write-Host "$summary" -ForegroundColor DarkGray
 } else {
-    Write-Host "`r    " -NoNewline
-    Write-Host "!" -ForegroundColor Yellow -NoNewline
-    Write-Host "  Self-test (some tests failed — ACM is still usable)" -ForegroundColor Yellow
+    Write-Host "    !  Self-test (some tests failed — ACM is still usable)" -ForegroundColor Yellow
     if ($summary) { Write-Host "       $summary" -ForegroundColor DarkGray }
     Write-Host "       Full log: $Log" -ForegroundColor DarkGray
     Write-Host "       Run " -NoNewline -ForegroundColor DarkGray
@@ -193,13 +192,17 @@ if ($testExit -eq 0) {
 }
 
 # Fault datasets — non-fatal: CSVs are pre-committed in git; regeneration is a bonus.
-Write-Host "    $([char]0x00B7)  Fault datasets" -NoNewline
-$faultOut = python scripts\generate_fault_dataset.py 2>&1; $faultCode = $LASTEXITCODE
-$faultOut | Out-File $Log -Append
+Write-Host "    $([char]0x00B7)  Fault datasets"
+$faultOut = python -u scripts\generate_fault_dataset.py 2>&1 | ForEach-Object {
+    $_ | Out-File $Log -Append
+    Write-Host "         $_" -ForegroundColor DarkGray
+    $_
+}
+$faultCode = $LASTEXITCODE
 if ($faultCode -eq 0) {
-    Write-Host "`r    $([char]0x2713)  Fault datasets"
+    Write-Host "    $([char]0x2713)  Fault datasets" -ForegroundColor Green
 } else {
-    Write-Host "`r    !  Fault datasets (non-fatal — pre-built CSVs already in repo)" -ForegroundColor Yellow
+    Write-Host "    !  Fault datasets (non-fatal — pre-built CSVs already in repo)" -ForegroundColor Yellow
     Write-Host "       Run " -NoNewline -ForegroundColor DarkGray
     Write-Host "python scripts\generate_fault_dataset.py" -ForegroundColor Cyan -NoNewline
     Write-Host " to investigate." -ForegroundColor DarkGray
