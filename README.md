@@ -56,8 +56,8 @@ Both scripts are interactive and handle everything automatically:
 
 | Automatic | Optional prompts |
 |---|---|
-| Git + Python 3.11+ (Windows only — auto-installs via winget or direct installer) | **[1/2] Industrial Simulator** — wire ACM to live OPC UA tag data for in-the-loop anomaly detection |
-| Clone ACM to `~/ACM` | **[2/2] CARE demo data** — download 10 real wind-turbine SCADA events (~360 MB) so ACM can score them immediately |
+| Git + Python 3.11+ (Windows only — auto-installs via winget or direct installer) | **[1/1] CARE demo data** — download 10 real wind-turbine SCADA events (~360 MB) so ACM can score them immediately |
+| Clone ACM to `~/ACM` | |
 | Install all Python dependencies | |
 | Create runtime directories | |
 | Detect SQL Server (falls back to SQLite) | |
@@ -135,15 +135,29 @@ All thresholds are self-tuned from the history. No human configuration required.
 
 ---
 
-## Simulate Tab
+## Simulator Guide
 
-ACM includes an in-process industrial data simulator — no external services needed. The **Simulate** tab exposes three panels:
+ACM includes an embedded, in-process industrial data simulator. No external services are needed. The **Simulate** tab and the backend integrate seamlessly.
 
-- **Generate** — 11 domain generators (rotary equipment, petroleum pipeline, gas pipeline, power plant, and six steel-plant process units). Each generator produces labeled CSVs with realistic fault signatures for use as demo data or benchmark input.
-- **Files** — browse, upload, and inspect all CSV files in `sim_data/`. Click any file to see column types, a preview, and row/column counts.
-- **Replay** — stream any CSV file as live tag data at configurable speeds, written to `data_cache/mqtt_buffer.db` for ACM to score on the next tick, exactly as if it were live MQTT or OPC UA data.
+### 1. Generate Synthetic Data
+- Go to the **Simulate > Generate** tab.
+- Select from 11 domain generators (rotary equipment, petroleum pipeline, gas pipeline, power plant, and six steel-plant process units).
+- Each generator produces a labeled CSV with realistic fault signatures (e.g. `fault_rotary_bearing.csv`).
+- The generated CSVs are automatically placed in `sim_data/generated/`.
 
-Ten fault datasets are pre-generated in `sim_data/sample/` so the Simulate tab is ready to use immediately after setup.
+### 2. Replay Files Live
+You can stream any CSV file into ACM line-by-line exactly as if it were a live MQTT or OPC UA feed:
+- Go to the **Simulate > Files** tab.
+- Click on any file (e.g., the downloaded CARE datasets or the generated fault datasets).
+- A preview of the columns will load. Click the **Replay** button.
+- Choose your replay speed and start the simulation. 
+- The data is written to an internal buffer (`data_cache/mqtt_buffer.db`).
+
+### 3. View Live Simulated Data
+To watch the anomaly scores update live as your replay runs:
+- Go to the **Reliability Engineer** tab.
+- From the asset dropdown, select the `simulator/internal` asset (which listens to the replay buffer).
+- Watch the Fused Anomaly Score and 6-detector heatmap update in real-time as the simulator pumps data in!
 
 ---
 
