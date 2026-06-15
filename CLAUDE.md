@@ -629,6 +629,7 @@ Full scored result for engineer view. Key fields: `rows` (list of score dicts), 
 30. **sendToReplay race condition fixed** — clicking `[data-sim-pane="replay"]` triggered `populateReplayFileList()` concurrently with our explicit `await populateReplayFileList()` call, causing the auto-selected first file to overwrite our target. Fix: switch pane directly via DOM classList manipulation (no `.click()`), then `await populateReplayFileList()`, then set `sel.value` and call `loadTagPlan()`.
 31. **Setup script Next Steps made unmissable** — both `setup_acm.ps1` and `setup.sh` now show a yellow double-line box (╔═╗ style) with START THE SERVICE, python command, URL, and RUN NOW instruction. Was previously easy to miss in the wall of install output.
 32. **CLAUDE.md got a Table of Contents** — added at the top. Jump targets: "Start here for UI work" → UI Codebase Map; "Read before starting any task" → Mistakes Made.
+33. **NEVER change alarm logic when asked for visual prominence** — when user says "make the shading more prominent", that means increase CSS opacity / color intensity ONLY. It does NOT mean change the data logic from `alarm[i]` (stored DB boolean) to `fused[i] > alertZ`. The co-firing matrix, alarm pattern heatmap, and chart shading all intentionally use the stored `alarm` column which reflects the rule engine's decision (including self-distrust gate). Changing the source data breaks the semantics of all three visualisations. Only touch CSS (`--chart-alarm-fill` opacity) for prominence requests.
 
 ---
 
