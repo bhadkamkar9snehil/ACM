@@ -93,7 +93,11 @@ def load_increment(spec: SourceSpec, since: Optional[pd.Timestamp]) -> pd.DataFr
     if spec.source_kind == "mqtt":
         return _load_mqtt_increment(spec, since)
     if spec.source_kind == "csv":
-        df = pd.read_csv(spec.source_ref, sep=None, engine='python')
+        # Resolve relative paths from ROOT so the service CWD doesn't matter.
+        src = Path(spec.source_ref)
+        if not src.is_absolute():
+            src = ROOT / src
+        df = pd.read_csv(str(src), sep=None, engine='python')
         if spec.timestamp_col not in df.columns:
             raise ValueError(f"timestamp column '{spec.timestamp_col}' not in "
                              f"{spec.source_ref} (columns: {list(df.columns)[:8]}...)")

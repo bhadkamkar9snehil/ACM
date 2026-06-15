@@ -26,14 +26,16 @@ def main() -> int:
                     help="Directory containing fault_*.csv files from generate_fault_dataset.py")
     ap.add_argument("--opcua", metavar="ENDPOINT",
                     help="OPC UA endpoint to register, e.g. opc.tcp://localhost:4840/simulator")
+    ap.add_argument("--mqtt", action="store_true",
+                    help="Register simulator/internal MQTT buffer asset")
     ap.add_argument("--db", default="acm_results.db",
                     help="SQLite DB path (default: acm_results.db)")
     ap.add_argument("--grp", default=None,
                     help="Group name for CARE assets (default: care_demo)")
     args = ap.parse_args()
 
-    if not args.care_dir and not args.fault_dir and not args.opcua:
-        ap.error("Provide at least one of --care-dir, --fault-dir, or --opcua")
+    if not args.care_dir and not args.fault_dir and not args.opcua and not args.mqtt:
+        ap.error("Provide at least one of --care-dir, --fault-dir, --opcua, or --mqtt")
 
     from scripts.acm_store import Store
     store = Store("sqlite", db=args.db)
@@ -42,11 +44,20 @@ def main() -> int:
     inserted = 0
     skipped = 0
 
+    # UPSERT: insert new rows; for already-seeded rows update the path and
+    # group, and reset ERROR/STALE to NEW so the next tick retries them.
+    # This fixes broken absolute paths when the user re-runs setup after
+    # moving the ACM directory or downloading data to a different location.
     INSERT = (
-        "INSERT OR IGNORE INTO monitored_assets "
+        "INSERT INTO monitored_assets "
         "(asset_key, grp, enabled, source_kind, source_ref, conn_ref, "
         "timestamp_col, status_col, added_at, state) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?)"
+        "VALUES (?,?,?,?,?,?,?,?,?,?) "
+        "ON CONFLICT(asset_key) DO UPDATE SET "
+        "  source_ref = excluded.source_ref, "
+        "  grp        = excluded.grp, "
+        "  enabled    = 1, "
+        "  state      = CASE WHEN state IN ('ERROR','STALE') THEN 'NEW' ELSE state END"
     )
 
     if args.care_dir:
@@ -69,8 +80,11 @@ def main() -> int:
                 continue
             farm_letter, original_stem = m.group(1), m.group(2)
             asset_key = f"care/{farm_letter}/{original_stem}"
+            # Always store path relative to ROOT so it survives directory
+            # moves and works regardless of the CWD used to run this script.
+            rel = csv_path.resolve().relative_to(ROOT)
             store.execute(INSERT, (
-                asset_key, grp, 1, "csv", str(csv_path.resolve()),
+                asset_key, grp, 1, "csv", str(rel),
                 None, "time_stamp", "status_type_id", now, "NEW",
             ))
 
@@ -78,8 +92,13 @@ def main() -> int:
             farm_letter = datasets_dir.parent.name.split()[-1]
             for csv_path in sorted(datasets_dir.glob("*.csv")):
                 asset_key = f"care/{farm_letter}/{csv_path.stem}"
+                try:
+                    rel = csv_path.resolve().relative_to(ROOT)
+                    src_ref = str(rel)
+                except ValueError:
+                    src_ref = str(csv_path.resolve())
                 store.execute(INSERT, (
-                    asset_key, grp, 1, "csv", str(csv_path.resolve()),
+                    asset_key, grp, 1, "csv", src_ref,
                     None, "time_stamp", "status_type_id", now, "NEW",
                 ))
 
@@ -99,8 +118,12 @@ def main() -> int:
         for csv_path in fault_csvs:
             # fault_rotary_bearing.csv -> fault/rotary_bearing
             asset_key = f"fault/{csv_path.stem[len('fault_'):]}"
+            try:
+                src_ref = str(csv_path.resolve().relative_to(ROOT))
+            except ValueError:
+                src_ref = str(csv_path.resolve())
             store.execute(INSERT, (
-                asset_key, grp, 1, "csv", str(csv_path.resolve()),
+                asset_key, grp, 1, "csv", src_ref,
                 None, "timestamp", None, now, "NEW",
             ))
         fault_rows = store.fetch(
@@ -109,20 +132,12 @@ def main() -> int:
         n_fault = fault_rows[0]["n"] if fault_rows else 0
         print(f"Fault ({grp}): {n_fault} asset(s) now registered")
 
-    asset_key = "simulator/internal"
-    before = store.fetch(
-        "SELECT COUNT(*) AS n FROM monitored_assets WHERE asset_key = ?",
-        (asset_key,),
-    )[0]["n"]
-    store.execute(INSERT, (
-        asset_key, "simulator", 1, "mqtt", "",
-        str(ROOT / "data_cache" / "mqtt_buffer.db"), "published_at", None, now, "NEW",
-    ))
-    after = store.fetch(
-        "SELECT COUNT(*) AS n FROM monitored_assets WHERE asset_key = ?",
-        (asset_key,),
-    )[0]["n"]
-    if after > before:
+    if args.mqtt or args.opcua:
+        asset_key = "simulator/internal"
+        store.execute(INSERT, (
+            asset_key, "simulator", 1, "mqtt", "",
+            str(ROOT / "data_cache" / "mqtt_buffer.db"), "published_at", None, now, "NEW",
+        ))
         print(f"Internal: registered '{asset_key}' -> mqtt_buffer.db")
 
     if args.opcua:

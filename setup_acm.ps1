@@ -232,7 +232,10 @@ Section "Optional Integrations"
 Write-Host ""
 
 if (Test-Path "sim_data\sample\care_farmA_0.csv") {
-    Write-Host "  [1/1]  CARE-to-Compare demo data — already downloaded." -ForegroundColor DarkGray
+    Write-Host "  [1/1]  CARE-to-Compare demo data — already downloaded, refreshing asset paths." -ForegroundColor DarkGray
+    Step "Register CARE assets" {
+        python scripts\acm_seed_demo.py --care-dir sim_data\sample --db acm_results.db
+    }
     $setupCare = $true
 } else {
     $ans = Read-Host "  [1/1]  CARE-to-Compare demo data — real wind-turbine SCADA data, score immediately`n         Download 10 events from Farm A (~360 MB)? [y/N]"

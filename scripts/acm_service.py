@@ -254,8 +254,13 @@ class Service:
                 counts["errors"] += 1
                 continue
             counts["ingested"] += 1
+            # CSV assets are static files — the staleness clock is meaningless
+            # for historical data (CARE timestamps are years old). Only live
+            # sources (opcua / mqtt) need the staleness gate.
+            stale_hrs = (float("inf") if specs[key].source_kind == "csv"
+                         else self.stale_after_hours)
             state = readiness(info.span_days, info.last_ts, now,
-                              self.min_train_days, self.stale_after_hours,
+                              self.min_train_days, stale_hrs,
                               fast_track=fast_track_map.get(key, False))
             if state == "READY":
                 ready.append(key)
