@@ -49,20 +49,41 @@ def resolve_csv_path(filename: str, source: str) -> Path:
 def read_rows(path: Path, max_rows: int | None = None) -> tuple[list[str], list[dict[str, str]]]:
     if path.suffix.lower() == ".xlsx":
         return read_xlsx_rows(path, max_rows=max_rows)
-    
-    import pandas as pd
+
+    import csv
+    columns: list[str] = []
+    rows: list[dict[str, str]] = []
+
     try:
-        df = pd.read_csv(str(path), sep=None, engine="python", nrows=max_rows)
-    except pd.errors.EmptyDataError:
+        with path.open("r", encoding="utf-8-sig", newline="") as f:
+            sample = f.read(8192)
+            f.seek(0)
+            try:
+                dialect = csv.Sniffer().sniff(sample)
+            except Exception:
+                dialect = csv.excel
+
+            reader = csv.DictReader(f, dialect=dialect)
+            if not reader.fieldnames:
+                raise ValueError("File has no header.")
+
+            columns = [str(c).strip() for c in reader.fieldnames]
+            if len(set(columns)) != len(columns):
+                raise ValueError("File has duplicate columns.")
+
+            for idx, row in enumerate(reader):
+                if max_rows is not None and idx >= max_rows:
+                    break
+                clean_row = {k: (v or "") for k, v in row.items()}
+                rows.append(clean_row)
+    except ValueError:
+        raise
+    except Exception as e:
+        raise ValueError(f"Failed to read CSV: {e}")
+
+    if not columns:
         raise ValueError("File has no header.")
-        
-    df = df.fillna("")
-    columns = [str(c).strip() for c in df.columns]
-    if len(set(columns)) != len(columns):
-        raise ValueError("File has duplicate columns.")
-        
-    df.columns = columns
-    rows = df.astype(str).to_dict(orient="records")
+
     return columns, rows
 
 
