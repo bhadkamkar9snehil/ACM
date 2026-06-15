@@ -231,15 +231,20 @@ $setupCare = $false
 Section "Optional Integrations"
 Write-Host ""
 
-$ans = Read-Host "  [1/1]  CARE-to-Compare demo data — real wind-turbine SCADA data, score immediately`n         Download 10 events from Farm A (~360 MB)? [y/N]"
-if ($ans -match '^[yY]') {
-    Step-Visible "Download CARE events" {
-        python scripts\download_care_dataset.py --farms A --count 10
-    }
-    Step "Register CARE assets" {
-        python scripts\acm_seed_demo.py --care-dir sim_data\sample --db acm_results.db
-    }
+if (Test-Path "sim_data\sample\care_farmA_0.csv") {
+    Write-Host "  [1/1]  CARE-to-Compare demo data — already downloaded." -ForegroundColor DarkGray
     $setupCare = $true
+} else {
+    $ans = Read-Host "  [1/1]  CARE-to-Compare demo data — real wind-turbine SCADA data, score immediately`n         Download 10 events from Farm A (~360 MB)? [y/N]"
+    if ($ans -match '^[yY]') {
+        Step-Visible "Download CARE events" {
+            python scripts\download_care_dataset.py --farms A --count 10
+        }
+        Step "Register CARE assets" {
+            python scripts\acm_seed_demo.py --care-dir sim_data\sample --db acm_results.db
+        }
+        $setupCare = $true
+    }
 }
 
 # --- Summary ------------------------------------------------------------------
