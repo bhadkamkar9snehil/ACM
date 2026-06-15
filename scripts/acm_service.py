@@ -154,9 +154,14 @@ class Service:
         # Simulator integration — lazy import so ACM starts even if sim deps are missing
         try:
             from sim.sim_adapter import SimAdapter
-            from scripts.acm_sim_routes import set_adapter
+            from scripts.acm_sim_routes import set_adapter, set_store as _set_sim_store
             self.sim = SimAdapter()
             set_adapter(self.sim)
+            _svc = self
+            def _run_now_cb(asset_key: str) -> None:
+                _svc.run_now_assets = [asset_key]
+                _svc.run_now_event.set()
+            _set_sim_store(self.store, _run_now_cb)
         except Exception as _sim_err:
             print(f"[sim] Simulator module unavailable: {_sim_err}", flush=True)
             self.sim = None

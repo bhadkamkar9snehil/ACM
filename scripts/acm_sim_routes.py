@@ -18,6 +18,8 @@ import sim.csv_manager as csv_mgr
 router = APIRouter(prefix="/api/sim", tags=["simulator"])
 
 _adapter: Any = None
+_store: Any = None
+_run_now_cb = None
 
 
 def set_adapter(adapter: Any) -> None:
@@ -25,10 +27,42 @@ def set_adapter(adapter: Any) -> None:
     _adapter = adapter
 
 
+def set_store(store: Any, run_now_cb=None) -> None:
+    global _store, _run_now_cb
+    _store = store
+    _run_now_cb = run_now_cb
+
+
 def _require_adapter():
     if _adapter is None:
         raise HTTPException(503, "Simulator not initialised")
     return _adapter
+
+
+def _register_opcua_in_acm() -> None:
+    """UPSERT simulator/opc_ua into monitored_assets and trigger a run-now tick."""
+    if _store is None:
+        return
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+    _store.execute(
+        "INSERT INTO monitored_assets "
+        "(asset_key, grp, enabled, source_kind, source_ref, conn_ref, "
+        "timestamp_col, status_col, added_at, state, fast_track) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?) "
+        "ON CONFLICT(asset_key) DO UPDATE SET "
+        "  source_ref = excluded.source_ref, "
+        "  enabled    = 1, "
+        "  state      = CASE WHEN state IN ('ERROR','STALE') THEN 'NEW' ELSE state END",
+        (
+            "simulator/opc_ua", "simulator", 1, "opcua",
+            "opc.tcp://localhost:4840/simulator",
+            None, "published_at", None, now, "NEW", 1,
+        ),
+    )
+    _store.commit()
+    if _run_now_cb is not None:
+        _run_now_cb("simulator/opc_ua")
 
 
 @router.get("/generators")
@@ -128,9 +162,16 @@ async def configure_replay(body: dict):
 async def start_replay():
     adp = _require_adapter()
     try:
-        return await adp.start_replay()
+        result = await adp.start_replay()
     except Exception as e:
         raise HTTPException(422, str(e))
+    try:
+        mode = adp.get_status().get("publisher_mode", "")
+        if mode in ("opcua", "both"):
+            _register_opcua_in_acm()
+    except Exception:
+        pass  # non-fatal — replay works even if ACM registration fails
+    return result
 
 
 @router.post("/replay/stop")
@@ -143,9 +184,16 @@ async def stop_replay():
 async def restart_replay():
     adp = _require_adapter()
     try:
-        return await adp.restart_replay()
+        result = await adp.restart_replay()
     except Exception as e:
         raise HTTPException(422, str(e))
+    try:
+        mode = adp.get_status().get("publisher_mode", "")
+        if mode in ("opcua", "both"):
+            _register_opcua_in_acm()
+    except Exception:
+        pass
+    return result
 
 
 @router.get("/replay/current-values")
