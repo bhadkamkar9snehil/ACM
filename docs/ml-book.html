@@ -1,0 +1,1300 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ACM — ML Core Reference</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;900&family=Barlow:wght@400;500;600&family=Share+Tech+Mono&display=block" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+/* ── CSS Variables ─────────────────────────────────────────────────────── */
+:root {
+  --bg: #1a1710; --bg2: #221f16; --bg3: #2a2620; --bg4: #332e26;
+  --ink: #ede0c0; --ink2: #e0d0b0; --muted: #a5968b;
+  --brand: #e8870a; --brand-lo: rgba(232,135,10,.14); --brand-hi: #ffaa33;
+  --ok: #44c49a; --warn: #f0c040; --bad: #e05050;
+  --term-bg: #0e0c08; --term-ink: #7a6e58; --term-hi: #ffe8a0;
+  --line: #3a3428; --line2: #504838; --card: #221f16;
+  --radius: 6px; --max: 860px;
+}
+[data-theme="light"] {
+  --bg: #f5f2eb; --bg2: #ede9de; --bg3: #e4dfd2; --bg4: #d8d2c3;
+  --ink: #2a2318; --ink2: #3a3020; --muted: #7a6e58;
+  --brand: #c06a00; --brand-lo: rgba(192,106,0,.12); --brand-hi: #e07800;
+  --ok: #2a9870; --warn: #c0900a; --bad: #c03030;
+  --term-bg: #e8e4d8; --term-ink: #6a6050; --term-hi: #a06000;
+  --line: #ccc5b0; --line2: #b8b0a0; --card: #ede9de;
+}
+
+/* ── Reset & Base ──────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  font-family: 'Barlow', system-ui, sans-serif;
+  font-size: 16px; line-height: 1.6;
+  background: var(--bg); color: var(--ink);
+  transition: background .2s, color .2s;
+}
+a { color: var(--brand-hi); text-decoration: none; }
+a:hover { text-decoration: underline; }
+code, pre, .mono { font-family: 'Share Tech Mono', 'Courier New', monospace; }
+
+/* ── Layout ────────────────────────────────────────────────────────────── */
+.page { max-width: var(--max); margin: 0 auto; padding: 0 1.5rem; }
+
+/* ── Header ────────────────────────────────────────────────────────────── */
+.site-header {
+  position: sticky; top: 0; z-index: 100;
+  background: var(--bg2); border-bottom: 1px solid var(--line);
+  padding: .75rem 0;
+}
+.site-header .inner {
+  max-width: var(--max); margin: 0 auto; padding: 0 1.5rem;
+  display: flex; align-items: center; gap: 1rem;
+}
+.site-logo { font-family: 'Barlow Condensed', sans-serif; font-weight: 900; font-size: 1.3rem; color: var(--brand); letter-spacing: .05em; }
+.site-title { font-family: 'Barlow Condensed', sans-serif; font-size: 1rem; color: var(--muted); font-weight: 400; }
+.header-spacer { flex: 1; }
+.theme-btn {
+  background: var(--bg3); border: 1px solid var(--line);
+  color: var(--ink); cursor: pointer; border-radius: var(--radius);
+  padding: .35rem .75rem; font-size: .85rem; font-family: inherit;
+  transition: background .15s;
+}
+.theme-btn:hover { background: var(--bg4); }
+
+/* ── TOC sidebar ───────────────────────────────────────────────────────── */
+.layout { display: grid; grid-template-columns: 220px 1fr; gap: 2rem; padding: 2rem 1.5rem; max-width: 1100px; margin: 0 auto; }
+@media (max-width: 720px) { .layout { grid-template-columns: 1fr; } .toc-wrap { display: none; } }
+.toc-wrap { position: sticky; top: 64px; align-self: start; max-height: calc(100vh - 80px); overflow-y: auto; }
+.toc { font-size: .85rem; }
+.toc h4 { font-family: 'Barlow Condensed', sans-serif; letter-spacing: .08em; color: var(--muted); font-size: .75rem; text-transform: uppercase; margin-bottom: .5rem; }
+.toc ol { list-style: none; padding: 0; }
+.toc li { margin: .2rem 0; }
+.toc a { color: var(--muted); font-size: .82rem; }
+.toc a:hover { color: var(--brand-hi); }
+
+/* ── Chapters ──────────────────────────────────────────────────────────── */
+.chapter { margin-bottom: 4rem; }
+.ch-label { font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: .75rem; letter-spacing: .12em; text-transform: uppercase; color: var(--brand); margin-bottom: .4rem; }
+.ch-title { font-family: 'Barlow Condensed', sans-serif; font-weight: 900; font-size: 2.2rem; color: var(--ink); line-height: 1.1; margin-bottom: 1.2rem; }
+.ch-title .num { color: var(--brand); margin-right: .3rem; }
+h3 { font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 1.25rem; color: var(--ink2); margin: 1.8rem 0 .6rem; }
+h4 { font-family: 'Barlow', sans-serif; font-weight: 600; font-size: 1rem; color: var(--ink2); margin: 1.2rem 0 .4rem; }
+p { margin-bottom: .9rem; color: var(--ink2); }
+ul, ol { margin: .5rem 0 .9rem 1.5rem; }
+li { margin-bottom: .3rem; }
+li p { margin-bottom: .3rem; }
+.divider { border: none; border-top: 1px solid var(--line); margin: 2.5rem 0; }
+
+/* ── Cards / Callouts ──────────────────────────────────────────────────── */
+.card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 1.2rem 1.4rem; margin: 1.2rem 0; }
+.callout { border-left: 3px solid var(--brand); background: var(--brand-lo); border-radius: 0 var(--radius) var(--radius) 0; padding: .8rem 1rem; margin: 1rem 0; font-size: .93rem; }
+.callout.ok { border-color: var(--ok); background: rgba(68,196,154,.1); }
+.callout.warn { border-color: var(--warn); background: rgba(240,192,64,.1); }
+.callout.bad { border-color: var(--bad); background: rgba(224,80,80,.1); }
+
+/* ── Tables ────────────────────────────────────────────────────────────── */
+.table-wrap { overflow-x: auto; margin: 1rem 0; }
+table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+th { background: var(--bg3); color: var(--brand); font-family: 'Barlow Condensed', sans-serif; font-weight: 700; letter-spacing: .04em; text-align: left; padding: .5rem .8rem; border-bottom: 2px solid var(--line2); white-space: nowrap; }
+td { padding: .45rem .8rem; border-bottom: 1px solid var(--line); color: var(--ink2); vertical-align: top; }
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: var(--bg3); }
+.mono-cell { font-family: 'Share Tech Mono', monospace; font-size: .85rem; color: var(--brand-hi); }
+
+/* ── Code blocks ───────────────────────────────────────────────────────── */
+pre { background: var(--term-bg); color: var(--term-hi); border: 1px solid var(--line); border-radius: var(--radius); padding: 1rem 1.2rem; overflow-x: auto; font-size: .85rem; line-height: 1.55; margin: 1rem 0; }
+pre .c { color: var(--term-ink); } /* comments */
+pre .k { color: var(--brand-hi); } /* keywords */
+pre .s { color: var(--ok); }       /* strings */
+pre .n { color: var(--warn); }     /* numbers */
+code { background: var(--bg3); color: var(--brand-hi); border-radius: 3px; padding: .1em .35em; font-size: .87em; }
+
+/* ── Charts ────────────────────────────────────────────────────────────── */
+.chart-card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 1.2rem; margin: 1.2rem 0; }
+.chart-title { font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: .95rem; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-bottom: .8rem; }
+.chart-wrap { position: relative; height: 220px; }
+.chart-wrap.tall { height: 280px; }
+.chart-controls { display: flex; gap: .6rem; flex-wrap: wrap; margin-bottom: .8rem; }
+.btn { background: var(--bg3); border: 1px solid var(--line2); color: var(--ink); border-radius: var(--radius); padding: .3rem .75rem; font-size: .82rem; cursor: pointer; font-family: inherit; transition: background .15s; }
+.btn:hover, .btn.active { background: var(--brand); color: #fff; border-color: var(--brand); }
+
+/* ── KPI pills ─────────────────────────────────────────────────────────── */
+.kpi-row { display: flex; gap: .8rem; flex-wrap: wrap; margin: 1rem 0; }
+.kpi { background: var(--bg3); border: 1px solid var(--line); border-radius: var(--radius); padding: .6rem 1rem; text-align: center; min-width: 100px; }
+.kpi .v { font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 1.5rem; color: var(--brand); }
+.kpi .l { font-size: .75rem; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+
+/* ── Detector grid ─────────────────────────────────────────────────────── */
+.det-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: .8rem; margin: 1rem 0; }
+.det-card { background: var(--bg3); border: 1px solid var(--line); border-radius: var(--radius); padding: 1rem; }
+.det-name { font-family: 'Barlow Condensed', sans-serif; font-weight: 700; color: var(--brand); font-size: 1rem; margin-bottom: .3rem; }
+.det-weight { float: right; font-family: 'Share Tech Mono', monospace; font-size: .85rem; color: var(--warn); }
+.det-desc { font-size: .85rem; color: var(--muted); }
+
+/* ── Pipeline flow ─────────────────────────────────────────────────────── */
+.pipe-flow { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; margin: 1.2rem 0; }
+.pipe-step { background: var(--bg3); border: 1px solid var(--line2); border-radius: var(--radius); padding: .5rem .9rem; font-size: .85rem; font-family: 'Barlow Condensed', sans-serif; font-weight: 600; letter-spacing: .04em; color: var(--ink2); }
+.pipe-step.highlight { background: var(--brand-lo); border-color: var(--brand); color: var(--brand-hi); }
+.pipe-arrow { color: var(--muted); font-size: 1.1rem; }
+
+/* ── Footer ────────────────────────────────────────────────────────────── */
+.site-footer { border-top: 1px solid var(--line); text-align: center; padding: 2rem 1rem; font-size: .82rem; color: var(--muted); margin-top: 3rem; }
+
+/* ── Print ─────────────────────────────────────────────────────────────── */
+@media print {
+  :root { --bg: #fff; --bg2: #f5f5f5; --bg3: #ebebeb; --bg4: #ddd; --ink: #111; --ink2: #222; --muted: #666; --brand: #b05000; --brand-hi: #b05000; --card: #f5f5f5; --line: #ccc; --term-bg: #f5f5f0; --term-hi: #333; --term-ink: #888; }
+  .site-header, .toc-wrap, .theme-btn, .chart-controls, .btn { display: none !important; }
+  .layout { grid-template-columns: 1fr; }
+  .chapter { break-before: page; }
+  .chart-wrap { height: 180px; }
+  a { color: inherit; }
+}
+
+/* ── Responsive ────────────────────────────────────────────────────────── */
+@media (max-width: 560px) {
+  .ch-title { font-size: 1.7rem; }
+  .kpi-row { gap: .5rem; }
+  .kpi { min-width: 80px; }
+  .det-grid { grid-template-columns: 1fr 1fr; }
+  pre { font-size: .78rem; }
+}
+</style>
+</head>
+<body>
+
+<header class="site-header">
+  <div class="inner">
+    <span class="site-logo">ACM</span>
+    <span class="site-title">ML Core Reference</span>
+    <div class="header-spacer"></div>
+    <button class="theme-btn" onclick="toggleTheme()">☀ Light / Dark</button>
+  </div>
+</header>
+
+<div class="layout">
+  <!-- TOC -->
+  <nav class="toc-wrap" aria-label="Table of contents">
+    <div class="toc">
+      <h4>Contents</h4>
+      <ol>
+        <li><a href="#ch1">1 — What Is ACM?</a></li>
+        <li><a href="#ch2">2 — The Pipeline</a></li>
+        <li><a href="#ch3">3 — Feature Engineering</a></li>
+        <li><a href="#ch4">4 — The Six Detectors</a>
+          <ol style="margin:.3rem 0 0 .8rem">
+            <li><a href="#det-ar1">AR1</a></li>
+            <li><a href="#det-pca">PCA-SPE / T²</a></li>
+            <li><a href="#det-iforest">Isolation Forest</a></li>
+            <li><a href="#det-gmm">GMM</a></li>
+            <li><a href="#det-omr">OMR</a></li>
+          </ol>
+        </li>
+        <li><a href="#ch5">5 — Calibration</a></li>
+        <li><a href="#ch6">6 — Fusion</a></li>
+        <li><a href="#ch7">7 — Alarm Rules</a></li>
+        <li><a href="#ch8">8 — End-to-End Example</a></li>
+      </ol>
+    </div>
+  </nav>
+
+  <!-- Main content -->
+  <main>
+
+<!-- ══════════════════════════════════════════════════════════════════════
+     CHAPTER 1 — What is ACM?
+══════════════════════════════════════════════════════════════════════ -->
+<section class="chapter" id="ch1">
+  <div class="ch-label">Chapter 1</div>
+  <h2 class="ch-title"><span class="num">1</span>What Is ACM?</h2>
+
+  <p>ACM (<strong>Asset Condition Monitor</strong>) watches industrial assets — pumps, compressors, wind turbines, pipeline sections — and tells you when something is wrong. The core constraint: <strong>no labels, ever</strong>. You can't tell ACM "this event was a fault". It has to figure that out entirely from the raw sensor history.</p>
+
+  <div class="callout">
+    <strong>The problem:</strong> Industrial equipment fails slowly, irregularly, and differently every time. Labels are scarce (you only label faults you already found), anomaly rates are low (&lt;1%), and each site has different sensors, cadences, and operating envelopes. Per-site threshold tuning is expensive and brittle.
+  </div>
+
+  <h3>ACM's answer</h3>
+  <p>Fully unsupervised. On every tick:</p>
+  <ol>
+    <li>Read the new sensor rows from the historian (CSV, SQL, OPC UA, or MQTT).</li>
+    <li>Re-learn "normal" from scratch on the trailing history (no persisted model files).</li>
+    <li>Score the recent window against that learned normal using six independent detectors.</li>
+    <li>Fuse the detector scores with correlation discounting.</li>
+    <li>Run cadence-aware alarm rules that tune their own thresholds from the same history.</li>
+  </ol>
+
+  <div class="kpi-row">
+    <div class="kpi"><div class="v">6</div><div class="l">Detectors</div></div>
+    <div class="kpi"><div class="v">0</div><div class="l">Labels required</div></div>
+    <div class="kpi"><div class="v">4</div><div class="l">Alarm rules</div></div>
+    <div class="kpi"><div class="v">∞</div><div class="l">Asset types</div></div>
+  </div>
+
+  <h3>What ACM is not</h3>
+  <ul>
+    <li><strong>Not a supervised model.</strong> No training set, no ground-truth labels, no per-asset retraining campaign.</li>
+    <li><strong>Not a rule engine.</strong> No engineer sets "temperature > 85°C = alert".</li>
+    <li><strong>Not stateful across ticks.</strong> Every tick re-fits detectors on the full trailing window. The "memory" is the parquet cache, not a persisted model object.</li>
+  </ul>
+
+  <div class="chart-card">
+    <div class="chart-title">Conceptual Data Flow</div>
+    <div style="display:flex;align-items:center;flex-wrap:wrap;gap:.5rem;padding:.5rem 0">
+      <div class="pipe-step highlight">Sensor History</div>
+      <span class="pipe-arrow">→</span>
+      <div class="pipe-step">Rolling Features</div>
+      <span class="pipe-arrow">→</span>
+      <div class="pipe-step">6 Detectors</div>
+      <span class="pipe-arrow">→</span>
+      <div class="pipe-step">Calibration</div>
+      <span class="pipe-arrow">→</span>
+      <div class="pipe-step">Fusion</div>
+      <span class="pipe-arrow">→</span>
+      <div class="pipe-step highlight">Fused Z-Score</div>
+      <span class="pipe-arrow">→</span>
+      <div class="pipe-step">Alarm Rules</div>
+      <span class="pipe-arrow">→</span>
+      <div class="pipe-step highlight">ALERT / OK</div>
+    </div>
+  </div>
+
+  <h3>Live demo: what "anomaly" means numerically</h3>
+  <p>Click the buttons to inject a fault into the simulated sensor signal and watch how the fused score responds.</p>
+
+  <div class="chart-card">
+    <div class="chart-title">Sensor signal and anomaly score</div>
+    <div class="chart-controls">
+      <button class="btn active" onclick="ch1Demo('normal', this)">Normal</button>
+      <button class="btn" onclick="ch1Demo('drift', this)">Slow Drift</button>
+      <button class="btn" onclick="ch1Demo('spike', this)">Spike</button>
+      <button class="btn" onclick="ch1Demo('step', this)">Step Change</button>
+    </div>
+    <div class="chart-wrap tall">
+      <canvas id="ch1Canvas"></canvas>
+    </div>
+  </div>
+</section>
+
+<hr class="divider">
+
+<!-- ══════════════════════════════════════════════════════════════════════
+     CHAPTER 2 — The Pipeline
+══════════════════════════════════════════════════════════════════════ -->
+<section class="chapter" id="ch2">
+  <div class="ch-label">Chapter 2</div>
+  <h2 class="ch-title"><span class="num">2</span>The Pipeline</h2>
+
+  <p>Every call to <code>score_asset()</code> in <code>core/pipeline.py</code> executes these stages in order, with no mutable state carried across calls.</p>
+
+  <h3>Stage overview</h3>
+
+  <div class="table-wrap">
+    <table>
+      <tr><th>Stage</th><th>What happens</th><th>Key output</th></tr>
+      <tr><td>1. Channel roles</td><td>Classify each sensor as PRIMARY (raw) or DERIVED (pre-computed window stat like _min/_max/_std). Derived channels skip rolling feature engineering to avoid compounding noise.</td><td>primary / derived lists</td></tr>
+      <tr><td>2. Rolling features</td><td>Compute per-sensor rolling statistics over a 16-sample window: median, MAD, mean, std, OLS slope, skew, kurtosis, spectral energy (3 FFT bands). All in Polars, float32.</td><td>Feature matrix</td></tr>
+      <tr><td>3. Interleaved split</td><td>Every 5th block of rows becomes the calibration holdout (≈20%). The remaining ≈80% are the training set. NOT a tail holdout — blocks are interleaved across the full history to prevent seasonal bias.</td><td>train / score DataFrames</td></tr>
+      <tr><td>4. Six detectors</td><td>Fit each detector on training rows, score all rows. Each detector produces a raw anomaly score per timestamp.</td><td>Raw score arrays</td></tr>
+      <tr><td>5. Calibration</td><td>Convert each raw score to a robust Z-score using the holdout's median/MAD (with contamination filtering). Each detector gets its own calibrator.</td><td>Z-score arrays</td></tr>
+      <tr><td>6. Fusion</td><td>Weighted sum of Z-scores, with correlation discounting (detectors that fire together have their combined weight reduced). Auto-tuned weights converge toward detectors that best separate episodes.</td><td>Fused Z-score</td></tr>
+      <tr><td>7. Alarm rules</td><td>Four cadence-aware rules (sustained, rate, per-head, availability) plus a self-distrust gate. All thresholds derived from the same history.</td><td>ALERT mask + rule fired</td></tr>
+    </table>
+  </div>
+
+  <h3>The interleaved split (critical detail)</h3>
+  <p>Most anomaly detectors use a tail holdout: "first N% is training, last M% is scoring." ACM uses an <strong>interleaved holdout</strong>: every 5th block across the whole history is the calibration set. This means:</p>
+  <ul>
+    <li>Calibration captures variance from across all seasons, load regimes, and day/night patterns.</li>
+    <li>A tail holdout on a 2-week window would calibrate only against last week's operating conditions. An interleaved holdout captures the full distribution.</li>
+    <li>The training set is the remaining ~80% (non-holdout blocks).</li>
+  </ul>
+
+  <div class="chart-card">
+    <div class="chart-title">Interleaved split — visualised (stride = 5)</div>
+    <div class="chart-wrap" style="height:120px">
+      <canvas id="splitCanvas"></canvas>
+    </div>
+    <p style="font-size:.82rem;color:var(--muted);margin-top:.5rem">
+      Orange = calibration holdout (every 5th block). Blue = training. The detector is fit on blue, calibrated on orange.
+    </p>
+  </div>
+
+  <h3>Stateless re-fit</h3>
+  <div class="callout">
+    The pipeline carries no model state between ticks. On every tick: read parquet → split → fit → score → calibrate → fuse → alarm. This means the model always reflects the latest "normal" baseline. A long holiday shutdown doesn't poison the model — it simply becomes part of the new normal on return.
+  </div>
+
+  <h3>Adaptive score window</h3>
+  <p>To prevent young assets from starving their training set, ACM uses an adaptive score window:</p>
+  <pre><code>score_eff = min(score_days, max(1.0, span_days / 3.0))</code></pre>
+  <p>This ensures the scoring window is never more than a third of the available history, keeping the train/score ratio sensible even during the maturation phase.</p>
+</section>
+
+<hr class="divider">
+
+<!-- ══════════════════════════════════════════════════════════════════════
+     CHAPTER 3 — Feature Engineering
+══════════════════════════════════════════════════════════════════════ -->
+<section class="chapter" id="ch3">
+  <div class="ch-label">Chapter 3</div>
+  <h2 class="ch-title"><span class="num">3</span>Feature Engineering</h2>
+
+  <p>Raw sensor values are poor inputs for detectors because they conflate level changes with variance changes, and are sensitive to scale. ACM computes rolling statistics that make deviations from "normal" directly comparable across sensors.</p>
+
+  <h3>Window size: 16 samples</h3>
+  <p>All rolling statistics use a 16-sample window. At 10-minute SCADA cadence this is ~2.7 hours. At 1 Hz this is 16 seconds. The window is intentionally short to be responsive to rapid changes; the detectors themselves operate on the full history.</p>
+
+  <h3>Feature families</h3>
+  <div class="table-wrap">
+    <table>
+      <tr><th>Feature</th><th>Formula (per sensor)</th><th>Catches</th></tr>
+      <tr><td><code>_med</code></td><td>Rolling median (16-sample)</td><td>Level shift robustly (ignores outliers)</td></tr>
+      <tr><td><code>_mad</code></td><td>Rolling MAD (16-sample)</td><td>Variance change robustly</td></tr>
+      <tr><td><code>_mean</code></td><td>Rolling mean (16-sample)</td><td>Level shift including outlier influence</td></tr>
+      <tr><td><code>_std</code></td><td>Rolling std (16-sample)</td><td>Variance change (outlier-sensitive)</td></tr>
+      <tr><td><code>_slope</code></td><td>Rolling OLS slope (16-sample)</td><td>Trends and ramps</td></tr>
+      <tr><td><code>_skew</code></td><td>Rolling skewness (clipped ±100)</td><td>Distribution asymmetry shift</td></tr>
+      <tr><td><code>_kurt</code></td><td>Rolling kurtosis (clipped ±1000)</td><td>Impulsive / heavy-tailed behaviour</td></tr>
+      <tr><td><code>_rz</code></td><td>(value - rolling_med) / (1.4826 × rolling_MAD)</td><td>Deviation in robust z-score units</td></tr>
+      <tr><td><code>_energy_0/1/2</code></td><td>log1p(Σ|FFT|² in band), 3 bands: [0, 0.1], [0.1, 0.3], [0.3, 0.5] × Nyquist</td><td>Spectral regime changes (bearing freq, harmonics)</td></tr>
+    </table>
+  </div>
+
+  <h3>Channel role detection</h3>
+  <p>If a historian exports both raw values and pre-computed window stats (e.g., <code>PUMP_SPEED</code>, <code>PUMP_SPEED_min</code>, <code>PUMP_SPEED_max</code>, <code>PUMP_SPEED_std</code>), computing rolling statistics <em>on top</em> of the pre-computed stats adds noise without signal. ACM's <code>detect_channel_roles()</code> identifies derived channels by verifying the mathematical relationship on the actual data:</p>
+  <ul>
+    <li><strong>_min candidates:</strong> x_min ≤ base for ≥98% of samples</li>
+    <li><strong>_max candidates:</strong> x_max ≥ base for ≥98% of samples</li>
+    <li><strong>_std candidates:</strong> x_std ≥ 0 for ≥99% of samples AND median(x_std) ≤ 3× spread(base)</li>
+  </ul>
+  <p>Anything that doesn't verify is treated as PRIMARY. The safe default is always to engineer more features.</p>
+
+  <div class="chart-card">
+    <div class="chart-title">Interactive: rolling features on a sensor signal</div>
+    <div class="chart-controls">
+      <button class="btn active" onclick="featDemo('rz', this)">Robust Z (rz)</button>
+      <button class="btn" onclick="featDemo('med', this)">Median</button>
+      <button class="btn" onclick="featDemo('slope', this)">Slope</button>
+      <button class="btn" onclick="featDemo('energy', this)">Spectral Energy</button>
+    </div>
+    <div class="chart-wrap tall">
+      <canvas id="featCanvas"></canvas>
+    </div>
+  </div>
+
+  <h3>The robust Z-score</h3>
+  <p>The <code>_rz</code> feature normalises each sensor onto the same scale without being pulled by outliers:</p>
+  <pre>rz = (x[t] - rolling_median[t]) / (1.4826 × rolling_MAD[t])</pre>
+  <p>The 1.4826 factor makes MAD numerically consistent with standard deviation for Gaussian data (MAD ≈ 0.6745σ → 1/0.6745 ≈ 1.4826). For non-Gaussian data this preserves rank-ordering without distorting the scale.</p>
+
+  <h3>Spectral energy (FFT bands)</h3>
+  <p>Each sensor's 16-sample window is FFT'd and energy is summed in three normalised-frequency bands:</p>
+  <div class="table-wrap">
+    <table>
+      <tr><th>Band</th><th>Normalised freq range</th><th>At 1 Hz sampling (Nyquist = 0.5 Hz)</th></tr>
+      <tr><td>Band 0 (low)</td><td>0 – 0.1 × Nyquist</td><td>0 – 0.05 Hz (very slow oscillations)</td></tr>
+      <tr><td>Band 1 (mid)</td><td>0.1 – 0.3 × Nyquist</td><td>0.05 – 0.15 Hz (medium periodicity)</td></tr>
+      <tr><td>Band 2 (high)</td><td>0.3 – 0.5 × Nyquist</td><td>0.15 – 0.5 Hz (rapid oscillations / noise)</td></tr>
+    </table>
+  </div>
+  <p>Energy values are log1p-compressed to prevent the quadratic scaling of raw FFT power from dominating downstream detectors.</p>
+</section>
+
+<hr class="divider">
+
+<!-- ══════════════════════════════════════════════════════════════════════
+     CHAPTER 4 — The Six Detectors
+══════════════════════════════════════════════════════════════════════ -->
+<section class="chapter" id="ch4">
+  <div class="ch-label">Chapter 4</div>
+  <h2 class="ch-title"><span class="num">4</span>The Six Detectors</h2>
+
+  <p>ACM runs six independent detectors in parallel. Each catches a different class of anomaly. The diversity is intentional: no single detector is good at everything, and their disagreements are as informative as their agreements.</p>
+
+  <div class="det-grid">
+    <div class="det-card">
+      <div class="det-name">AR1 <span class="det-weight">w=0.20</span></div>
+      <div class="det-desc">Auto-regressive residuals. Catches slow drift and mean-shift that a model of "today predicts tomorrow" misses.</div>
+    </div>
+    <div class="det-card">
+      <div class="det-name">PCA-SPE <span class="det-weight">w=0.30</span></div>
+      <div class="det-desc">Reconstruction error. Catches structural novelty — a combination of sensors that has never appeared before.</div>
+    </div>
+    <div class="det-card">
+      <div class="det-name">PCA-T² <span class="det-weight">w=0.20</span></div>
+      <div class="det-desc">Hotelling's T². Catches regime shift in the principal component space — operating in a known but unusual configuration.</div>
+    </div>
+    <div class="det-card">
+      <div class="det-name">IForest <span class="det-weight">w=0.15</span></div>
+      <div class="det-desc">Isolation Forest. Catches transient spikes and outlier clusters — points that are "easy to isolate" from the rest.</div>
+    </div>
+    <div class="det-card">
+      <div class="det-name">GMM <span class="det-weight">w=0.05</span></div>
+      <div class="det-desc">Gaussian Mixture Model. Catches mode changes — operation at low likelihood under the learned normal envelope.</div>
+    </div>
+    <div class="det-card">
+      <div class="det-name">OMR <span class="det-weight">w=0.10</span></div>
+      <div class="det-desc">Per-feature OMR residuals. Catches per-sensor anomalies; used to rank which channel is misbehaving.</div>
+    </div>
+  </div>
+
+  <div class="callout ok">
+    The weights shown above (AR1=0.20, PCA-SPE=0.30, PCA-T²=0.20, IForest=0.15, GMM=0.05, OMR=0.10) are starting points. ACM auto-tunes these per asset using episode separability metrics, blended with exponential moving average (learning rate 0.30).
+  </div>
+
+  <!-- AR1 -->
+  <h3 id="det-ar1">AR1 — Auto-Regressive Residuals</h3>
+  <p><strong>Hyperparameters:</strong> window=256, alpha=0.05 (significance), z_cap=8.0</p>
+  <p>AR1 fits a first-order auto-regressive model: <code>x[t] = φ·x[t-1] + ε[t]</code>. The residuals <code>ε[t]</code> should be zero-mean white noise under normal conditions. When the asset drifts, transitions, or changes mean, the residuals become systematically non-zero.</p>
+
+  <p>Why window=256? At 10-minute cadence, 256 samples ≈ 1.8 days. This is long enough to learn stable operating dynamics but short enough to adapt to load changes over a few shifts.</p>
+
+  <div class="chart-card">
+    <div class="chart-title">AR1 residuals: normal vs drift</div>
+    <div class="chart-wrap">
+      <canvas id="ar1Canvas"></canvas>
+    </div>
+    <p style="font-size:.82rem;color:var(--muted);margin-top:.5rem">Blue = AR1 residuals (normal). Orange = residuals during slow drift. The residuals develop a sustained bias when the trend outpaces the AR model.</p>
+  </div>
+
+  <!-- PCA -->
+  <h3 id="det-pca">PCA-SPE and PCA-T²</h3>
+  <p><strong>Hyperparameters:</strong> n_components=5, svd_solver="randomized", batch_size=4096</p>
+
+  <p>PCA finds the 5 directions of maximum variance in the sensor feature matrix. Think of them as the "normal operating modes" of the asset. Every new observation is then characterised by:</p>
+
+  <ul>
+    <li><strong>T² (Hotelling's T²):</strong> How far is this point from the centre in the principal component space? High T² = operating at an unusual combination of the known modes.</li>
+    <li><strong>SPE (Squared Prediction Error):</strong> How well does the PCA model reconstruct this point? High SPE = the observation requires a <em>new</em> direction not in the training data — structural novelty.</li>
+  </ul>
+
+  <div class="chart-card">
+    <div class="chart-title">PCA score plane: T² and SPE</div>
+    <div class="chart-wrap">
+      <canvas id="pcaCanvas"></canvas>
+    </div>
+    <p style="font-size:.82rem;color:var(--muted);margin-top:.5rem">Each point is one timestamp projected onto the first two PCs. Blue = training (normal). Orange = anomalous points. Inner ellipse = T² control limit. A point outside the cluster but near the plane has high T²; a point off the plane has high SPE.</p>
+  </div>
+
+  <h4>Why 5 components?</h4>
+  <p>5 PCs typically explain 80–95% of variance in industrial sensor data, capturing the dominant operating modes (load, speed, temperature). More components add noise; fewer miss important correlations. The randomized SVD solver makes this efficient for wide feature matrices (hundreds of sensors).</p>
+
+  <!-- IForest -->
+  <h3 id="det-iforest">Isolation Forest</h3>
+  <p><strong>Hyperparameters:</strong> n_estimators=100, max_samples=2048, contamination=0.01, random_state=17</p>
+
+  <p>Isolation Forest builds 100 random decision trees. For each tree, a point's anomaly score is its average path length to isolation: <strong>anomalies are few and different, so they isolate quickly</strong> (short path). Normal points cluster together and take longer to isolate (long path).</p>
+
+  <div class="chart-card">
+    <div class="chart-title">Isolation path length: normal vs anomaly</div>
+    <div class="chart-wrap" style="height:160px">
+      <canvas id="iforestCanvas"></canvas>
+    </div>
+    <p style="font-size:.82rem;color:var(--muted);margin-top:.5rem">Average isolation depth across 100 trees. Short path (left) = easy to isolate = anomaly. Long path = clustered with normal data.</p>
+  </div>
+
+  <h4>max_samples=2048</h4>
+  <p>Each tree is built on a random subsample of 2048 training points (not the full history). This controls memory use, prevents the path-length ceiling problem on large datasets, and adds randomness that makes the ensemble robust. At 10-min cadence, 2048 samples ≈ 14 days.</p>
+
+  <!-- GMM -->
+  <h3 id="det-gmm">Gaussian Mixture Model (GMM)</h3>
+  <p><strong>Hyperparameters:</strong> k_min=2, k_max=3, covariance_type="diag", n_init=3, BIC search</p>
+
+  <p>GMM fits k Gaussian components to the feature matrix. Each point's anomaly score is its negative log-likelihood under the mixture: <code>score = -log p(x | GMM)</code>. Points that fall in low-density regions (between clusters, or far from any cluster) get high scores.</p>
+
+  <h4>BIC search for k</h4>
+  <p>ACM tries k=2 and k=3, fits GMM for each, and picks the k that minimises BIC (Bayesian Information Criterion). BIC balances fit quality against model complexity: adding a component only helps if it genuinely splits the data into distinct operating modes.</p>
+
+  <h4>Diagonal covariance</h4>
+  <p>Using diagonal covariance (no cross-sensor correlation inside each component) keeps fitting stable on high-dimensional feature matrices. Full covariance would require estimating n_features² parameters per component, leading to near-singular matrices.</p>
+
+  <div class="chart-card">
+    <div class="chart-title">GMM: two operating modes (k=2) + anomaly scoring</div>
+    <div class="chart-wrap">
+      <canvas id="gmmCanvas"></canvas>
+    </div>
+    <p style="font-size:.82rem;color:var(--muted);margin-top:.5rem">Blue = low load regime, teal = high load regime. Orange × = anomalous points in low-density regions. GMM score is the negative log-probability under the fitted mixture.</p>
+  </div>
+
+  <!-- OMR -->
+  <h3 id="det-omr">OMR — Per-Feature Residuals</h3>
+  <p><strong>Hyperparameters:</strong> n_components=5, model_type="auto", min_samples=100</p>
+
+  <p>OMR fits a dimensionality-reduction model (PCA or similar) per sensor, then scores each sensor's residual independently. Unlike PCA-SPE (which gives one score for the whole asset), OMR gives one score <em>per sensor</em>. This directly identifies <strong>which channel is misbehaving</strong>, powering ACM's "culprit sensor" ranking.</p>
+
+  <div class="callout warn">
+    OMR also feeds the per-head alarm rule (R3). If one sensor's OMR score fires repeatedly over 7 days while the fused score stays normal, it can still raise an R3 alarm — catching sensor-specific faults that the fused signal dilutes.
+  </div>
+
+  <h3>Detector comparison chart</h3>
+  <div class="chart-card">
+    <div class="chart-title">Each detector's response to four fault types</div>
+    <div class="chart-controls">
+      <button class="btn active" onclick="detComp('bearing', this)">Bearing fault</button>
+      <button class="btn" onclick="detComp('drift', this)">Slow drift</button>
+      <button class="btn" onclick="detComp('spike', this)">Spike</button>
+      <button class="btn" onclick="detComp('structural', this)">Structural novelty</button>
+    </div>
+    <div class="chart-wrap tall">
+      <canvas id="detCompCanvas"></canvas>
+    </div>
+  </div>
+</section>
+
+<hr class="divider">
+
+<!-- ══════════════════════════════════════════════════════════════════════
+     CHAPTER 5 — Calibration
+══════════════════════════════════════════════════════════════════════ -->
+<section class="chapter" id="ch5">
+  <div class="ch-label">Chapter 5</div>
+  <h2 class="ch-title"><span class="num">5</span>Calibration</h2>
+
+  <p>Each detector produces a raw score in its own units: AR1 gives residual magnitudes, IForest gives path ratios in [0,1], GMM gives negative log-likelihoods. You can't meaningfully fuse these without first putting them on a common scale.</p>
+
+  <h3>The ScoreCalibrator</h3>
+  <p>ACM uses a MAD/median calibrator (<code>ScoreCalibrator</code> in <code>core/fuse.py</code>). For each detector:</p>
+  <ol>
+    <li><strong>Filter contamination</strong> from the holdout scores (see below).</li>
+    <li><strong>Compute median and MAD</strong> of the cleaned holdout scores.</li>
+    <li><strong>Convert to Z-score:</strong> <code>z = (x - median) / (1.4826 × MAD)</code></li>
+    <li><strong>Self-tune the threshold:</strong> set at the quantile corresponding to a 0.1% false-positive rate on the holdout.</li>
+  </ol>
+
+  <pre><span class="c"># ScoreCalibrator.fit() core logic</span>
+x_clean = contamination_filter(x_holdout)
+med = np.median(x_clean)
+mad = np.median(np.abs(x_clean - med))
+scale = mad * <span class="n">1.4826</span>
+q_thresh = np.quantile(x_clean, <span class="n">0.999</span>)  <span class="c"># target_fp_rate = 0.001</span></pre>
+
+  <h3>Contamination filtering</h3>
+  <p>Training data is rarely clean — faults happen during the historical window too. If anomalous scores contaminate the holdout, the calibrator's median and MAD become inflated, making the threshold too permissive (more false negatives). ACM filters them out first using <strong>iterative MAD</strong>:</p>
+
+  <ol>
+    <li>Compute median and MAD of the current data.</li>
+    <li>Exclude points where |z_MAD| > 4.0 (more than 4 robust sigmas from median).</li>
+    <li>Recompute median and MAD on the retained data.</li>
+    <li>Repeat until the median converges (tol=0.001) or 10 iterations.</li>
+    <li>Guard: never exclude more than 30% of the data.</li>
+  </ol>
+
+  <div class="chart-card">
+    <div class="chart-title">Contamination filtering: before and after</div>
+    <div class="chart-controls">
+      <button class="btn active" onclick="calDemo('before', this)">Before filter</button>
+      <button class="btn" onclick="calDemo('after', this)">After filter</button>
+    </div>
+    <div class="chart-wrap">
+      <canvas id="calCanvas"></canvas>
+    </div>
+    <p style="font-size:.82rem;color:var(--muted);margin-top:.5rem">The contaminated histogram (left) has a heavy upper tail from fault events in the training window. After filtering, the tail is removed and the calibrator sees a clean "normal" distribution.</p>
+  </div>
+
+  <h3>Why MAD instead of mean/std?</h3>
+  <div class="table-wrap">
+    <table>
+      <tr><th>Statistic</th><th>Breakdown point</th><th>Behaviour with 10% outliers</th></tr>
+      <tr><td>Mean + Std</td><td class="mono-cell">0%</td><td>One outlier can inflate σ arbitrarily</td></tr>
+      <tr><td>Median + MAD</td><td class="mono-cell">50%</td><td>Up to 50% contamination before breakdown</td></tr>
+    </table>
+  </div>
+  <p>With contamination rates up to 30% in real fault histories, MAD calibration prevents thresholds from being set too high to detect real faults.</p>
+
+  <h3>Z-score clipping</h3>
+  <p>Calibrated Z-scores are hard-clipped to ±8.0 (adaptive) and ±10.0 (hard limit). This prevents one catastrophically-failed sensor from dominating the fused score and saturating the display. The adaptive clip is set at 1.5× the 99th percentile of training Z-scores.</p>
+</section>
+
+<hr class="divider">
+
+<!-- ══════════════════════════════════════════════════════════════════════
+     CHAPTER 6 — Fusion
+══════════════════════════════════════════════════════════════════════ -->
+<section class="chapter" id="ch6">
+  <div class="ch-label">Chapter 6</div>
+  <h2 class="ch-title"><span class="num">6</span>Fusion</h2>
+
+  <p>Six calibrated Z-scores must be combined into one fused anomaly score. A simple average would be dominated by correlated detectors. ACM uses correlation-discounted weighted fusion.</p>
+
+  <h3>Starting weights</h3>
+  <div class="table-wrap">
+    <table>
+      <tr><th>Detector</th><th>Starting weight</th><th>Rationale</th></tr>
+      <tr><td>PCA-SPE</td><td class="mono-cell">0.30</td><td>Best overall at structural novelty; most sensitive on wide sensor sets</td></tr>
+      <tr><td>AR1</td><td class="mono-cell">0.20</td><td>Strong on slow drift; highly interpretable residuals</td></tr>
+      <tr><td>PCA-T²</td><td class="mono-cell">0.20</td><td>Complements SPE by catching in-plane shifts rather than out-of-plane novelty</td></tr>
+      <tr><td>IForest</td><td class="mono-cell">0.15</td><td>Good on transient spikes; uncorrelated with PCA detectors</td></tr>
+      <tr><td>OMR</td><td class="mono-cell">0.10</td><td>Per-channel resolution; useful for culprit ranking</td></tr>
+      <tr><td>GMM</td><td class="mono-cell">0.05</td><td>Mode-change; tends to correlate with PCA-T² so gets lower starting weight</td></tr>
+    </table>
+  </div>
+
+  <h3>Correlation discounting</h3>
+  <p>When two detectors fire together consistently (Spearman ρ > 0.95 by default), their combined weight is reduced. The intuition: if PCA-SPE and PCA-T² both fire on the same events, you haven't gained two independent votes — you've got one signal counted twice. Discounting brings the effective contribution back to one.</p>
+
+  <pre><span class="c"># Pseudo-code for correlation discount</span>
+<span class="k">for</span> det_a, det_b <span class="k">in</span> all_pairs:
+    rho = spearmanr(z_a, z_b).correlation
+    <span class="k">if</span> abs(rho) > <span class="n">0.95</span>:
+        w[det_a] *= (1 - abs(rho)) / 2
+        w[det_b] *= (1 - abs(rho)) / 2
+weights = renormalize(weights)</pre>
+
+  <h3>Auto-tuning</h3>
+  <p>On each tick, ACM optionally tunes the weights using episode separability: for each detector, it computes how well that detector distinguishes known anomaly episodes from normal periods. Detectors with higher episode separability get more weight. The update is blended with the existing weights:</p>
+
+  <pre>w_new = (1 - lr) × w_old + lr × w_episode
+<span class="c"># lr = 0.30 (learning rate)</span>
+<span class="c"># Per-detector drift is clamped to ±20% per tick</span></pre>
+
+  <div class="chart-card">
+    <div class="chart-title">Fusion demo: adjust detector weights</div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:.6rem;margin-bottom:.8rem;font-size:.82rem">
+      <label>PCA-SPE <input type="range" id="w-pca-spe" min="0" max="100" value="30" oninput="updateFusion()"> <span id="lbl-pca-spe">0.30</span></label>
+      <label>AR1 <input type="range" id="w-ar1" min="0" max="100" value="20" oninput="updateFusion()"> <span id="lbl-ar1">0.20</span></label>
+      <label>PCA-T² <input type="range" id="w-pca-t2" min="0" max="100" value="20" oninput="updateFusion()"> <span id="lbl-pca-t2">0.20</span></label>
+      <label>IForest <input type="range" id="w-iforest" min="0" max="100" value="15" oninput="updateFusion()"> <span id="lbl-iforest">0.15</span></label>
+      <label>OMR <input type="range" id="w-omr" min="0" max="100" value="10" oninput="updateFusion()"> <span id="lbl-omr">0.10</span></label>
+      <label>GMM <input type="range" id="w-gmm" min="0" max="100" value="5" oninput="updateFusion()"> <span id="lbl-gmm">0.05</span></label>
+    </div>
+    <div class="chart-wrap tall">
+      <canvas id="fusionCanvas"></canvas>
+    </div>
+  </div>
+
+  <h3>Fused score interpretation</h3>
+  <div class="table-wrap">
+    <table>
+      <tr><th>Fused Z-score</th><th>Interpretation</th><th>Alarm state</th></tr>
+      <tr><td class="mono-cell">&lt; 1.5</td><td>Well within normal envelope</td><td>OK</td></tr>
+      <tr><td class="mono-cell">1.5 – 3.0</td><td>Elevated — watch</td><td>WARN</td></tr>
+      <tr><td class="mono-cell">&gt; 3.0</td><td>Clear anomaly territory</td><td>Potential ALERT (subject to rules)</td></tr>
+      <tr><td class="mono-cell">&gt; 5.0</td><td>Severe anomaly</td><td>ALERT if rules confirm</td></tr>
+    </table>
+  </div>
+  <p>A fused score &gt;3.0 does <em>not</em> immediately raise an alarm. It must clear the cadence-aware alarm rules in Chapter 7.</p>
+</section>
+
+<hr class="divider">
+
+<!-- ══════════════════════════════════════════════════════════════════════
+     CHAPTER 7 — Alarm Rules
+══════════════════════════════════════════════════════════════════════ -->
+<section class="chapter" id="ch7">
+  <div class="ch-label">Chapter 7</div>
+  <h2 class="ch-title"><span class="num">7</span>Alarm Rules</h2>
+
+  <p>A high fused score is necessary but not sufficient for an alarm. ACM routes the fused score through four cadence-aware rules and a self-distrust gate. All thresholds are derived from the asset's own history — never set manually.</p>
+
+  <div class="kpi-row">
+    <div class="kpi"><div class="v">1h</div><div class="l">R1 persist floor</div></div>
+    <div class="kpi"><div class="v">24h</div><div class="l">R2 rate window</div></div>
+    <div class="kpi"><div class="v">7d</div><div class="l">R3 per-head window</div></div>
+    <div class="kpi"><div class="v">48h</div><div class="l">R4 availability floor</div></div>
+    <div class="kpi"><div class="v">50%</div><div class="l">Distrust threshold</div></div>
+  </div>
+
+  <h3>R1 — Sustained anomaly</h3>
+  <p>The fused score must stay above the alert threshold for at least <em>persist</em> consecutive samples, where persist is 1.5× the longest healthy excursion seen in the training set (minimum: 1h of samples).</p>
+
+  <pre><span class="c"># Self-tuning: find the lowest quantile threshold</span>
+<span class="c"># whose implied persistence is physically sensible</span>
+<span class="k">for</span> q <span class="k">in</span> (0.98, 0.99, 0.995, 0.999):
+    thr = max(ALERT_Z_FLOOR, quantile(train_fused, q))
+    persist = max(persist_floor, longest_run(train_fused >= thr) × SAFETY + 1)
+    <span class="k">if</span> persist <= max_persist:  <span class="c"># max 12h</span>
+        <span class="k">break</span></pre>
+
+  <p>The 1.5× safety factor (SAFETY) means the alarm only fires when the anomaly lasts longer than the worst-case healthy excursion would ever last by chance. This eliminates false alarms from brief transient deviations that happen to exceed the threshold momentarily.</p>
+
+  <h3>R2 — 24-hour rate</h3>
+  <p>Some faults cause intermittent spikes that individually reset (a valve that chatters under load). R1 misses these because no single excursion is sustained. R2 counts them: what fraction of the trailing 24-hour window is above the alert level?</p>
+
+  <pre>rate = rolling_mean(score >= alert_z, window=24h_samples)
+<span class="c"># Threshold: base_rate × 1.5 + 0.05</span>
+<span class="c"># (1.5× the worst healthy 24h density, plus 5pp additive headroom)</span>
+alarm_rate = sustained_mask(rate >= rate_thr, persist=persist_floor)</pre>
+
+  <p>The +5pp additive headroom prevents false alarms when healthy base rates are very small (e.g., 4% × 1.5 = 6% threshold is too close; 4% × 1.5 + 5% = 11% is robust). Real faults run at 30–50%+ rates.</p>
+
+  <h3>R3 — Per-head 7-day rate</h3>
+  <p>R3 is the same rate calculation applied independently to each detector's Z-score over a 7-day window. If a single detector (say, AR1 for a bearing) repeatedly fires over a week while the fused score stays moderate, R3 catches the chronic degradation that multi-sensor fusion dilutes.</p>
+
+  <h3>R4 — Availability</h3>
+  <p>A failed asset goes silent. R4 fires when the asset is in a non-operating status (not normal or idling) for longer than the 95th percentile of historical stop durations × 1.5, with a minimum floor of 48h.</p>
+
+  <pre><span class="c"># 95th percentile of historical stop durations</span>
+p95_stop = percentile(historical_stop_runs, 95)
+avail_thr = max(48h_samples, p95_stop × 1.5 + 1)
+<span class="c"># If fewer than 20 stops in history: use 48h floor only</span></pre>
+
+  <h3>Self-Distrust Gate</h3>
+  <p>A drifted baseline looks like a universal anomaly: the alarm fires from the very first evaluable sample and never stops. A real fault has an <strong>onset</strong> — a quiet period before the fault begins.</p>
+
+  <p>ACM's self-distrust gate discards a rule's output if:</p>
+  <ul>
+    <li>The rule claims alarm for &gt;50% of the scoring window, AND</li>
+    <li>The first alarm occurs within 5% of the window start (i.e., no quiet prefix)</li>
+  </ul>
+
+  <div class="callout">
+    The distrust gate protects against stale baselines. If you haven't received data for 3 months and the asset's operating conditions changed completely, the first tick after reconnection would generate wall-to-wall alarms. The gate suppresses them and logs "distrusted: sustained" in the alarm record.
+  </div>
+
+  <div class="chart-card">
+    <div class="chart-title">Alarm rules interactive demo</div>
+    <div class="chart-controls">
+      <button class="btn active" onclick="alarmDemo('ok', this)">Normal</button>
+      <button class="btn" onclick="alarmDemo('r1', this)">R1 sustained</button>
+      <button class="btn" onclick="alarmDemo('r2', this)">R2 intermittent</button>
+      <button class="btn" onclick="alarmDemo('distrust', this)">Distrusted baseline</button>
+    </div>
+    <div class="chart-wrap tall">
+      <canvas id="alarmCanvas"></canvas>
+    </div>
+  </div>
+
+  <h3>Alarm priority</h3>
+  <div class="table-wrap">
+    <table>
+      <tr><th>Rule</th><th>Fires when</th><th>Best at</th></tr>
+      <tr><td>R1 Sustained</td><td>Score stays high for ≥ 1h</td><td>Developing faults, step changes</td></tr>
+      <tr><td>R2 Rate</td><td>Dense high-score cluster in 24h</td><td>Intermittent faults, chatter</td></tr>
+      <tr><td>R3 Per-head</td><td>One detector fires repeatedly over 7d</td><td>Chronic single-sensor degradation</td></tr>
+      <tr><td>R4 Availability</td><td>Asset silent for ≥ 48h</td><td>Catastrophic failure, data loss</td></tr>
+    </table>
+  </div>
+  <p>Rules are OR-combined: any one rule firing produces an ALERT. The <code>rule_fired</code> column in the database records which rules contributed (e.g., "sustained+rate").</p>
+</section>
+
+<hr class="divider">
+
+<!-- ══════════════════════════════════════════════════════════════════════
+     CHAPTER 8 — End-to-End Example
+══════════════════════════════════════════════════════════════════════ -->
+<section class="chapter" id="ch8">
+  <div class="ch-label">Chapter 8</div>
+  <h2 class="ch-title"><span class="num">8</span>End-to-End Example</h2>
+
+  <p>Let's trace a bearing fault from raw sensor data through every stage to an alarm. This mirrors the <code>fault_rotary_bearing.csv</code> fault dataset in <code>sim_data/sample/</code>.</p>
+
+  <h3>The scenario</h3>
+  <p>A rotating machine has 12 sensors: shaft speed, vibration X/Y, bearing temperatures (×4), lube oil pressure, inlet/outlet temperature, power draw. A bearing defect develops at the 40% mark. The first 40% of the 72,000-row dataset is <code>state=NORMAL</code>; the last 60% is <code>state=bearing_fault</code>.</p>
+
+  <h3>Stage-by-stage trace</h3>
+
+  <div class="table-wrap">
+    <table>
+      <tr><th>Stage</th><th>Input</th><th>Output</th><th>Key observation</th></tr>
+      <tr><td>Channel roles</td><td>12 raw sensors</td><td>All PRIMARY (no derived channels)</td><td>All 12 sensors get rolling feature engineering</td></tr>
+      <tr><td>Rolling features</td><td>12 sensors × 72,000 rows</td><td>~96 features (8 stats × 12 sensors)</td><td>bearing_temp_rz starts rising after row 28,800</td></tr>
+      <tr><td>Interleaved split</td><td>96 features, 72,000 rows</td><td>~57,600 train, ~14,400 holdout</td><td>Both train and holdout span the full duration (interleaved)</td></tr>
+      <tr><td>AR1</td><td>Train fit → score all</td><td>Residuals array</td><td>Speed and vibration residuals grow in fault zone</td></tr>
+      <tr><td>PCA-SPE</td><td>5-component PCA</td><td>SPE array</td><td>Bearing temps + vibration create out-of-plane structure — SPE spikes</td></tr>
+      <tr><td>PCA-T²</td><td>Same 5-component PCA</td><td>T² array</td><td>Dataset moves to different region of PC space in fault zone — high T²</td></tr>
+      <tr><td>IForest</td><td>100 trees, 2048 samples</td><td>Anomaly scores</td><td>Vibration spikes during bearing fault are easily isolated</td></tr>
+      <tr><td>GMM</td><td>BIC picks k=2</td><td>NLL scores</td><td>Fault state is low-likelihood under either component</td></tr>
+      <tr><td>OMR</td><td>Per-sensor PCA</td><td>Per-sensor residuals</td><td>bearing_temp_1, bearing_temp_2 top the culprit ranking</td></tr>
+      <tr><td>Calibration</td><td>Holdout raw scores</td><td>Z-scores (one per detector)</td><td>Contamination filter removes a few early fault events from holdout</td></tr>
+      <tr><td>Fusion</td><td>6 Z-score arrays</td><td>Fused Z-score</td><td>Score builds from Z≈1 at normal to Z≈4–6 in fault zone</td></tr>
+      <tr><td>Alarm rules</td><td>Fused Z, train fused</td><td>ALERT mask</td><td>R1 fires at row ~30,000 (≈1h after first sustained elevation)</td></tr>
+    </table>
+  </div>
+
+  <div class="chart-card">
+    <div class="chart-title">Bearing fault end-to-end: all detectors + fused score</div>
+    <div class="chart-wrap tall" style="height:320px">
+      <canvas id="e2eCanvas"></canvas>
+    </div>
+    <p style="font-size:.82rem;color:var(--muted);margin-top:.5rem">
+      Grey background = fault zone (after row 28,800 / 40% mark). Thick orange line = fused Z-score. Vertical dashed red = alarm onset (R1 fires). Individual detector Z-scores shown as thinner lines.
+    </p>
+  </div>
+
+  <h3>What the Engineer sees</h3>
+  <ul>
+    <li><strong>Operator tab:</strong> Asset state badge changes from READY→ALERT. Fused score chart shows the rising curve.</li>
+    <li><strong>Engineer tab:</strong> Six-detector heatmap shows PCA-SPE and AR1 firing first; IForest and GMM catch up. Culprit sensor ranking shows bearing_temp_1 and bearing_temp_2 at the top.</li>
+    <li><strong>Admin tab:</strong> Run log shows <code>rule_fired=sustained</code>, <code>alert_z=3.2</code>, <code>persist=7</code>. State transitions: NEW → MATURING → READY → ALERT.</li>
+  </ul>
+
+  <h3>Scoring at CARE scale</h3>
+  <p>The CARE-to-Compare dataset has 95 labelled wind-turbine fault events across three farms (86–957 sensors each). ACM runs unsupervised against this benchmark. The interleaved split, contamination filtering, and alarm rules are the same — only the sensor count and cadence differ (10-minute SCADA).</p>
+
+  <div class="callout ok">
+    You can reproduce this pipeline on any of the 10 pre-built fault CSVs in <code>sim_data/sample/</code>: <code>python scripts/acm_run.py --csv sim_data/sample/fault_rotary_bearing.csv --timestamp-col time_stamp --score-days 60 --report bearing.html</code>
+  </div>
+
+  <h3>Key numbers at a glance</h3>
+  <div class="table-wrap">
+    <table>
+      <tr><th>Parameter</th><th>Value</th><th>Location</th></tr>
+      <tr><td>Feature window</td><td class="mono-cell">16 samples</td><td>core/ml_defaults.py → features.window</td></tr>
+      <tr><td>FFT bands (normalised)</td><td class="mono-cell">0.0, 0.1, 0.3, 0.5 × Nyquist</td><td>core/ml_defaults.py → features.fft_bands</td></tr>
+      <tr><td>AR1 window</td><td class="mono-cell">256 samples</td><td>core/ml_defaults.py → models.ar1.window</td></tr>
+      <tr><td>PCA components</td><td class="mono-cell">5</td><td>core/ml_defaults.py → models.pca.n_components</td></tr>
+      <tr><td>IForest trees</td><td class="mono-cell">100</td><td>core/ml_defaults.py → models.iforest.n_estimators</td></tr>
+      <tr><td>IForest max_samples</td><td class="mono-cell">2048</td><td>core/ml_defaults.py → models.iforest.max_samples</td></tr>
+      <tr><td>GMM k range</td><td class="mono-cell">2 – 3</td><td>core/ml_defaults.py → models.gmm.k_min/k_max</td></tr>
+      <tr><td>Calibration method</td><td class="mono-cell">Iterative MAD</td><td>core/fuse.py → CalibrationContaminationFilter</td></tr>
+      <tr><td>Contamination filter z</td><td class="mono-cell">4.0σ</td><td>core/ml_defaults.py → thresholds.contamination_filter.z_threshold</td></tr>
+      <tr><td>Max exclusion rate</td><td class="mono-cell">30%</td><td>core/fuse.py → MAX_EXCLUSION_RATE</td></tr>
+      <tr><td>Alert Z floor</td><td class="mono-cell">3.0</td><td>core/alarm_rules.py → ALERT_Z_FLOOR</td></tr>
+      <tr><td>Persist safety factor</td><td class="mono-cell">1.5×</td><td>core/alarm_rules.py → SAFETY</td></tr>
+      <tr><td>Distrust coverage</td><td class="mono-cell">50%</td><td>core/alarm_rules.py → DISTRUST_COVERAGE</td></tr>
+      <tr><td>Fusion learning rate</td><td class="mono-cell">0.30</td><td>core/ml_defaults.py → fusion.auto_tune.learning_rate</td></tr>
+      <tr><td>Min fusion weight</td><td class="mono-cell">0.05</td><td>core/ml_defaults.py → fusion.auto_tune.min_weight</td></tr>
+    </table>
+  </div>
+</section>
+
+  </main>
+</div>
+
+<footer class="site-footer">
+  ACM ML Core Reference · Generated from source ·
+  <a href="https://github.com/bhadkamkar9snehil/ACM">github.com/bhadkamkar9snehil/ACM</a>
+</footer>
+
+<!-- ══════════════════════════════════════════════════════════════════════
+     JAVASCRIPT — all chart logic
+══════════════════════════════════════════════════════════════════════ -->
+<script>
+// ── Theme toggle ─────────────────────────────────────────────────────────────
+function toggleTheme() {
+  const html = document.documentElement;
+  html.setAttribute('data-theme', html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  Object.values(chartRegistry).forEach(c => { try { c.update(); } catch(e){} });
+}
+
+// ── Chart defaults ────────────────────────────────────────────────────────────
+Chart.defaults.font.family = "'Share Tech Mono', monospace";
+Chart.defaults.font.size = 11;
+Chart.defaults.color = getComputedStyle(document.documentElement).getPropertyValue('--muted').trim() || '#a5968b';
+
+function cssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+const BRAND  = () => cssVar('--brand');
+const BRAND_HI = () => cssVar('--brand-hi');
+const OK     = () => cssVar('--ok');
+const WARN   = () => cssVar('--warn');
+const BAD    = () => cssVar('--bad');
+const MUTED  = () => cssVar('--muted');
+const LINE   = () => cssVar('--line');
+const INK2   = () => cssVar('--ink2');
+
+const COLORS = ['#e8870a','#44c49a','#f0c040','#e05050','#5095d8','#c060c0','#50d8d0'];
+
+const chartRegistry = {};
+
+function mkChart(id, cfg) {
+  const ctx = document.getElementById(id);
+  if (!ctx) return null;
+  if (chartRegistry[id]) chartRegistry[id].destroy();
+  const c = new Chart(ctx, cfg);
+  chartRegistry[id] = c;
+  return c;
+}
+
+function baseLineOpts(title) {
+  return {
+    responsive: true, maintainAspectRatio: false, animation: { duration: 300 },
+    plugins: { legend: { labels: { color: () => MUTED(), boxWidth: 12, padding: 10 } }, tooltip: { mode: 'index', intersect: false }, title: title ? { display: false } : undefined },
+    scales: {
+      x: { ticks: { color: () => MUTED(), maxTicksLimit: 8 }, grid: { color: () => LINE() } },
+      y: { ticks: { color: () => MUTED() }, grid: { color: () => LINE() } }
+    }
+  };
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function randn(n, mean=0, std=1) {
+  const a = [];
+  for (let i=0; i<n; i++) {
+    let u=0, v=0;
+    while (!u) u = Math.random();
+    while (!v) v = Math.random();
+    a.push(mean + std * Math.sqrt(-2*Math.log(u)) * Math.cos(2*Math.PI*v));
+  }
+  return a;
+}
+function linspace(a,b,n) { const r=[]; for(let i=0;i<n;i++) r.push(a+(b-a)*i/(n-1)); return r; }
+function movingAvg(arr, w) { return arr.map((_,i) => { const s=Math.max(0,i-w+1); const sl=arr.slice(s,i+1); return sl.reduce((a,b)=>a+b,0)/sl.length; }); }
+function clamp(x,lo,hi) { return Math.max(lo,Math.min(hi,x)); }
+
+// ── Ch1 Demo ──────────────────────────────────────────────────────────────────
+let ch1CurrentMode = 'normal';
+function generateCh1Data(mode) {
+  const N=200, labels=Array.from({length:N},(_,i)=>i);
+  const sig=[], score=[];
+  for (let i=0;i<N;i++) {
+    let s = Math.sin(i*0.1)*2 + randn(1,0,0.5)[0];
+    let sc = 0.5 + Math.abs(randn(1,0,0.3)[0]);
+    if (mode==='drift' && i>80) { s += (i-80)*0.04; sc += (i-80)*0.025; }
+    if (mode==='spike' && (i===120||i===140||i===160)) { s += 6; sc += 4; }
+    if (mode==='step' && i>100) { s += 5; sc = 3 + Math.abs(randn(1,0,0.4)[0]); }
+    sig.push(s); score.push(clamp(sc,0,8));
+  }
+  return {labels, sig, score};
+}
+function ch1Demo(mode, btn) {
+  ch1CurrentMode = mode;
+  document.querySelectorAll('.chart-controls .btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  const {labels, sig, score} = generateCh1Data(mode);
+  const alarmThresh = Array(200).fill(3.0);
+  mkChart('ch1Canvas', {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Sensor signal', data: sig, borderColor: OK(), borderWidth: 1.5, pointRadius: 0, yAxisID:'y' },
+        { label: 'Fused Z-score', data: score, borderColor: BRAND(), borderWidth: 2, pointRadius: 0, yAxisID:'y2' },
+        { label: 'Alert threshold', data: alarmThresh, borderColor: BAD(), borderWidth: 1, borderDash:[4,4], pointRadius: 0, yAxisID:'y2' }
+      ]
+    },
+    options: { ...baseLineOpts(), scales: {
+      x: { ticks:{color:()=>MUTED(),maxTicksLimit:6}, grid:{color:()=>LINE()} },
+      y: { ticks:{color:()=>MUTED()}, grid:{color:()=>LINE()}, title:{display:true,text:'Signal',color:()=>MUTED()} },
+      y2: { position:'right', ticks:{color:()=>MUTED()}, grid:{display:false}, title:{display:true,text:'Z-score',color:()=>MUTED()}, min:0, max:8 }
+    }}
+  });
+}
+window.addEventListener('load', () => { ch1Demo('normal', document.querySelector('#ch1 .btn')); });
+
+// ── Ch2 Split demo ───────────────────────────────────────────────────────────
+window.addEventListener('load', () => {
+  const N=60, labels=Array.from({length:N},(_,i)=>i);
+  const train=[], holdout=[];
+  for (let i=0;i<N;i++) { if(i%5===4){holdout.push(1);train.push(null);}else{train.push(1);holdout.push(null);} }
+  mkChart('splitCanvas', {
+    type: 'bar',
+    data: { labels, datasets: [
+      {label:'Training',data:train,backgroundColor:'#5095d8',barThickness:'flex'},
+      {label:'Holdout (calibration)',data:holdout,backgroundColor:BRAND(),barThickness:'flex'}
+    ]},
+    options: { responsive:true, maintainAspectRatio:false, animation:{duration:0},
+      plugins:{legend:{labels:{color:()=>MUTED(),boxWidth:12}}},
+      scales:{ x:{display:false}, y:{display:false,stacked:true} }
+    }
+  });
+});
+
+// ── Ch3 Feature demo ──────────────────────────────────────────────────────────
+function generateFeatData(type) {
+  const N=200, labels=Array.from({length:N},(_,i)=>i);
+  const raw=[];
+  for (let i=0;i<N;i++) {
+    let v = Math.sin(i*0.15)*3 + randn(1,0,0.6)[0];
+    if (i>120) v += (i-120)*0.05;
+    raw.push(v);
+  }
+  const W=16;
+  function rollingMed(arr,w) {
+    return arr.map((_,i)=>{const s=arr.slice(Math.max(0,i-w+1),i+1).sort((a,b)=>a-b);return s[Math.floor(s.length/2)];});
+  }
+  function rollingMad(arr,w) {
+    const med=rollingMed(arr,w);
+    return arr.map((_,i)=>{const s=arr.slice(Math.max(0,i-w+1),i+1);const m=med[i];const diffs=s.map(x=>Math.abs(x-m)).sort((a,b)=>a-b);return diffs[Math.floor(diffs.length/2)];});
+  }
+  const med=rollingMed(raw,W), mad=rollingMad(raw,W);
+  const rz=raw.map((v,i)=>(v-med[i])/(1.4826*Math.max(mad[i],1e-6)));
+  const slope=raw.map((_,i)=>{if(i<2)return 0;const sl=raw.slice(Math.max(0,i-W+1),i+1);const n=sl.length,t=linspace(0,n-1,n),tm=t.reduce((a,b)=>a+b,0)/n,xm=sl.reduce((a,b)=>a+b,0)/n;let num=0,den=0;t.forEach((tv,j)=>{num+=(tv-tm)*(sl[j]-xm);den+=(tv-tm)**2;});return den>1e-9?num/den:0;});
+  function fftEnergy(arr,lo,hi,N2=16) {
+    const result=[];
+    for (let i=0;i<arr.length;i++) {
+      const sl=arr.slice(Math.max(0,i-N2+1),i+1);
+      const n=sl.length; if(n<4){result.push(0);continue;}
+      const nyq=0.5;const loH=lo*nyq,hiH=hi*nyq;
+      let energy=0;
+      for (let k=0;k<Math.floor(n/2)+1;k++) {
+        const freq=k/n; if(freq<loH||freq>=hiH) continue;
+        let re=0,im=0;
+        for(let j=0;j<n;j++){re+=sl[j]*Math.cos(2*Math.PI*k*j/n);im-=sl[j]*Math.sin(2*Math.PI*k*j/n);}
+        energy+=re*re+im*im;
+      }
+      result.push(Math.log1p(energy));
+    }
+    return result;
+  }
+  if (type==='rz') return {labels, primary:raw, feature:rz, primaryLabel:'Raw signal', featureLabel:'Robust Z (rz)'};
+  if (type==='med') return {labels, primary:raw, feature:med, primaryLabel:'Raw signal', featureLabel:'Rolling median (16)'};
+  if (type==='slope') return {labels, primary:raw, feature:slope, primaryLabel:'Raw signal', featureLabel:'Rolling OLS slope (16)'};
+  if (type==='energy') { const e=fftEnergy(raw,0.1,0.3); return {labels,primary:raw,feature:e,primaryLabel:'Raw signal',featureLabel:'Mid-band spectral energy'}; }
+}
+function featDemo(type, btn) {
+  document.querySelectorAll('#ch3 .chart-controls .btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  const {labels,primary,feature,primaryLabel,featureLabel} = generateFeatData(type);
+  mkChart('featCanvas',{
+    type:'line',
+    data:{labels,datasets:[
+      {label:primaryLabel,data:primary,borderColor:OK(),borderWidth:1.5,pointRadius:0,yAxisID:'y'},
+      {label:featureLabel,data:feature,borderColor:BRAND(),borderWidth:2,pointRadius:0,yAxisID:'y2'}
+    ]},
+    options:{...baseLineOpts(),scales:{
+      x:{ticks:{color:()=>MUTED(),maxTicksLimit:6},grid:{color:()=>LINE()}},
+      y:{ticks:{color:()=>MUTED()},grid:{color:()=>LINE()},title:{display:true,text:primaryLabel,color:()=>MUTED()}},
+      y2:{position:'right',ticks:{color:()=>MUTED()},grid:{display:false},title:{display:true,text:featureLabel,color:()=>MUTED()}}
+    }}
+  });
+}
+window.addEventListener('load',()=>{featDemo('rz',document.querySelector('#ch3 .btn'));});
+
+// ── AR1 demo ──────────────────────────────────────────────────────────────────
+window.addEventListener('load',()=>{
+  const N=200,labels=Array.from({length:N},(_,i)=>i);
+  const normal=[],drift=[];
+  let phi=0.9,v=0;
+  for(let i=0;i<N;i++){
+    v=phi*v+randn(1,0,0.5)[0];
+    const pred=phi*v; const resid=v-pred;
+    normal.push(resid+randn(1,0,0.15)[0]);
+    const driftV=v+(i>80?(i-80)*0.03:0);
+    drift.push(driftV-phi*(i>0?driftV-0.03:0)+randn(1,0,0.15)[0]);
+  }
+  mkChart('ar1Canvas',{
+    type:'line',
+    data:{labels,datasets:[
+      {label:'Normal residuals',data:normal,borderColor:OK(),borderWidth:1.5,pointRadius:0},
+      {label:'Residuals during drift',data:drift,borderColor:WARN(),borderWidth:1.5,pointRadius:0}
+    ]},
+    options:{...baseLineOpts(),plugins:{...baseLineOpts().plugins,annotation:{annotations:{zero:{type:'line',yMin:0,yMax:0,borderColor:MUTED(),borderWidth:1}}}}}
+  });
+});
+
+// ── PCA demo ──────────────────────────────────────────────────────────────────
+window.addEventListener('load',()=>{
+  const N=300;
+  const normal_x=[],normal_y=[],anom_x=[],anom_y=[];
+  for(let i=0;i<N;i++){
+    const x=randn(1,0,1.5)[0],y=randn(1,0,0.6)[0]+x*0.4;
+    normal_x.push(x);normal_y.push(y);
+  }
+  for(let i=0;i<20;i++){
+    const x=randn(1,3,0.8)[0],y=randn(1,3,0.8)[0];
+    anom_x.push(x);anom_y.push(y);
+  }
+  mkChart('pcaCanvas',{
+    type:'scatter',
+    data:{datasets:[
+      {label:'Normal (training)',data:normal_x.map((x,i)=>({x,y:normal_y[i]})),backgroundColor:'rgba(80,149,216,0.3)',borderColor:'rgba(80,149,216,0.5)',pointRadius:3},
+      {label:'Anomalous',data:anom_x.map((x,i)=>({x,y:anom_y[i]})),backgroundColor:'rgba(232,135,10,0.6)',borderColor:BRAND(),pointRadius:5,pointStyle:'crossRot'}
+    ]},
+    options:{responsive:true,maintainAspectRatio:false,animation:{duration:0},
+      plugins:{legend:{labels:{color:()=>MUTED(),boxWidth:12}}},
+      scales:{x:{ticks:{color:()=>MUTED()},grid:{color:()=>LINE()},title:{display:true,text:'PC1',color:()=>MUTED()}},
+              y:{ticks:{color:()=>MUTED()},grid:{color:()=>LINE()},title:{display:true,text:'PC2',color:()=>MUTED()}}}}
+  });
+});
+
+// ── IForest depth demo ────────────────────────────────────────────────────────
+window.addEventListener('load',()=>{
+  const labels=['Very anomalous','Anomalous','Borderline','Normal (sparse)','Normal (clustered)','Dense normal'];
+  const depths=[2.3,3.1,5.2,7.8,9.4,11.2];
+  mkChart('iforestCanvas',{
+    type:'bar',
+    data:{labels,datasets:[{
+      label:'Mean isolation depth (↑ = more normal)',
+      data:depths,
+      backgroundColor:depths.map(d=>d<5?BAD():d<8?WARN():OK())
+    }]},
+    options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,animation:{duration:0},
+      plugins:{legend:{display:false}},
+      scales:{x:{ticks:{color:()=>MUTED()},grid:{color:()=>LINE()}},y:{ticks:{color:()=>MUTED()},grid:{display:false}}}}
+  });
+});
+
+// ── GMM demo ──────────────────────────────────────────────────────────────────
+window.addEventListener('load',()=>{
+  const N=250;
+  const mode1_x=[],mode1_y=[],mode2_x=[],mode2_y=[],anom_x=[],anom_y=[];
+  for(let i=0;i<150;i++){mode1_x.push(randn(1,1,0.8)[0]);mode1_y.push(randn(1,1,0.5)[0]);}
+  for(let i=0;i<100;i++){mode2_x.push(randn(1,4,0.7)[0]);mode2_y.push(randn(1,3,0.5)[0]);}
+  for(let i=0;i<15;i++){anom_x.push(randn(1,2.5,0.4)[0]);anom_y.push(randn(1,-1,0.4)[0]);}
+  mkChart('gmmCanvas',{
+    type:'scatter',
+    data:{datasets:[
+      {label:'Mode 1 (low load)',data:mode1_x.map((x,i)=>({x,y:mode1_y[i]})),backgroundColor:'rgba(80,149,216,0.35)',borderColor:'rgba(80,149,216,0.6)',pointRadius:3},
+      {label:'Mode 2 (high load)',data:mode2_x.map((x,i)=>({x,y:mode2_y[i]})),backgroundColor:'rgba(68,196,154,0.35)',borderColor:OK(),pointRadius:3},
+      {label:'Anomalous (low density)',data:anom_x.map((x,i)=>({x,y:anom_y[i]})),backgroundColor:'rgba(232,135,10,0.7)',borderColor:BRAND(),pointRadius:6,pointStyle:'crossRot'}
+    ]},
+    options:{responsive:true,maintainAspectRatio:false,animation:{duration:0},
+      plugins:{legend:{labels:{color:()=>MUTED(),boxWidth:12}}},
+      scales:{x:{ticks:{color:()=>MUTED()},grid:{color:()=>LINE()}},y:{ticks:{color:()=>MUTED()},grid:{color:()=>LINE()}}}}
+  });
+});
+
+// ── Calibration demo ──────────────────────────────────────────────────────────
+function generateCalData(filtered) {
+  const N=50;
+  const labels=Array.from({length:N},(_,i)=>(i*0.2).toFixed(1));
+  const normal=randn(400,1.2,0.5).filter(x=>x>0);
+  const contam=filtered?[]:randn(60,4.5,0.8).filter(x=>x>0);
+  const all=[...normal,...contam];
+  const bins=Array.from({length:N},(_,i)=>i*0.2);
+  const counts=bins.map(b=>all.filter(x=>x>=b&&x<b+0.2).length);
+  return {labels,counts};
+}
+function calDemo(type, btn) {
+  document.querySelectorAll('#ch5 .chart-controls .btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  const {labels,counts}=generateCalData(type==='after');
+  mkChart('calCanvas',{
+    type:'bar',
+    data:{labels,datasets:[{
+      label: type==='before'?'Raw holdout scores (contaminated)':'Filtered holdout scores (clean)',
+      data:counts,
+      backgroundColor: type==='before'?'rgba(232,135,10,0.5)':'rgba(68,196,154,0.5)',
+      borderColor: type==='before'?BRAND():OK(), borderWidth:1
+    }]},
+    options:{responsive:true,maintainAspectRatio:false,animation:{duration:300},
+      plugins:{legend:{labels:{color:()=>MUTED()}}},
+      scales:{x:{ticks:{color:()=>MUTED(),maxTicksLimit:10},grid:{color:()=>LINE()},title:{display:true,text:'Raw detector score',color:()=>MUTED()}},
+              y:{ticks:{color:()=>MUTED()},grid:{color:()=>LINE()},title:{display:true,text:'Count',color:()=>MUTED()}}}}
+  });
+}
+window.addEventListener('load',()=>{calDemo('before',document.querySelector('#ch5 .btn'));});
+
+// ── Fusion demo ───────────────────────────────────────────────────────────────
+const fusionBase = {
+  'pca-spe': Array.from({length:200},(_,i)=>{ let z=randn(1,0.5,0.7)[0]; if(i>130) z+=Math.min((i-130)*0.08,5); return clamp(z,0,8); }),
+  'ar1':     Array.from({length:200},(_,i)=>{ let z=randn(1,0.4,0.6)[0]; if(i>140) z+=Math.min((i-140)*0.06,4); return clamp(z,0,8); }),
+  'pca-t2':  Array.from({length:200},(_,i)=>{ let z=randn(1,0.3,0.5)[0]; if(i>135) z+=Math.min((i-135)*0.07,4.5); return clamp(z,0,8); }),
+  'iforest': Array.from({length:200},(_,i)=>{ let z=randn(1,0.6,0.9)[0]; if(i>150&&Math.random()>0.5) z+=3; return clamp(z,0,8); }),
+  'omr':     Array.from({length:200},(_,i)=>{ let z=randn(1,0.4,0.7)[0]; if(i>125) z+=Math.min((i-125)*0.04,3); return clamp(z,0,8); }),
+  'gmm':     Array.from({length:200},(_,i)=>{ let z=randn(1,0.5,0.8)[0]; if(i>145) z+=Math.min((i-145)*0.05,3); return clamp(z,0,8); })
+};
+function updateFusion() {
+  const keys=['pca-spe','ar1','pca-t2','iforest','omr','gmm'];
+  const rawW=keys.map(k=>parseFloat(document.getElementById('w-'+k).value));
+  const total=rawW.reduce((a,b)=>a+b,0)||1;
+  const w=rawW.map(v=>v/total);
+  keys.forEach((k,i)=>{document.getElementById('lbl-'+k).textContent=w[i].toFixed(2);});
+  const N=200,labels=Array.from({length:N},(_,i)=>i);
+  const fused=Array.from({length:N},(_,i)=>keys.reduce((s,k,j)=>s+w[j]*fusionBase[k][i],0));
+  mkChart('fusionCanvas',{
+    type:'line',
+    data:{labels,datasets:[
+      ...keys.map((k,i)=>({label:k.toUpperCase(),data:fusionBase[k],borderColor:COLORS[i]+'80',borderWidth:1,pointRadius:0,borderDash:[3,3]})),
+      {label:'FUSED (weighted)',data:fused,borderColor:BRAND(),borderWidth:3,pointRadius:0},
+      {label:'Alert (3.0)',data:Array(N).fill(3),borderColor:BAD(),borderWidth:1,borderDash:[4,4],pointRadius:0}
+    ]},
+    options:{...baseLineOpts(),scales:{x:{ticks:{color:()=>MUTED(),maxTicksLimit:6},grid:{color:()=>LINE()}},y:{ticks:{color:()=>MUTED()},grid:{color:()=>LINE()},min:0,max:8}}}
+  });
+}
+window.addEventListener('load',updateFusion);
+
+// ── Detector comparison ───────────────────────────────────────────────────────
+const detCompData = {
+  bearing: { ar1:[0.3,0.8,1.5,2.8,4.2,5.0], 'pca-spe':[0.2,0.6,1.8,3.5,5.2,6.0], 'pca-t2':[0.2,0.5,1.2,2.9,4.5,5.5], iforest:[0.8,1.0,1.2,2.0,3.2,4.0], gmm:[0.4,0.6,0.9,2.0,3.0,3.8], omr:[0.3,0.9,2.0,3.8,5.5,6.5] },
+  drift:   { ar1:[0.3,1.0,2.5,4.0,5.5,6.5], 'pca-spe':[0.2,0.4,0.8,1.5,2.0,2.5], 'pca-t2':[0.2,0.6,1.2,2.0,2.8,3.2], iforest:[0.5,0.6,0.8,0.9,1.0,1.2], gmm:[0.3,0.5,0.8,1.2,1.6,2.0], omr:[0.3,0.8,1.5,2.5,3.5,4.0] },
+  spike:   { ar1:[0.2,0.4,0.5,0.6,0.5,0.4], 'pca-spe':[0.2,0.8,2.0,3.5,2.0,0.8], 'pca-t2':[0.2,1.2,3.0,4.5,3.0,1.0], iforest:[0.8,2.0,5.0,7.0,5.0,2.0], gmm:[0.5,1.5,4.0,5.5,4.0,1.5], omr:[0.3,1.0,3.0,5.0,3.0,1.0] },
+  structural:{'ar1':[0.3,0.4,0.5,0.5,0.6,0.6],'pca-spe':[0.2,1.0,3.0,5.0,6.5,7.0],'pca-t2':[0.2,0.4,0.8,1.5,2.0,2.5],iforest:[0.7,0.9,1.2,1.5,1.8,2.0],gmm:[0.4,0.6,0.9,1.2,1.5,1.8],omr:[0.3,0.8,2.0,3.5,4.5,5.0]}
+};
+function detComp(type, btn) {
+  document.querySelectorAll('#ch4 .chart-controls .btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  const d=detCompData[type]; const labels=['t=0','t=1h','t=3h','t=6h','t=12h','t=24h'];
+  const keys=['ar1','pca-spe','pca-t2','iforest','gmm','omr'];
+  mkChart('detCompCanvas',{
+    type:'line',
+    data:{labels,datasets:keys.map((k,i)=>({label:k.toUpperCase(),data:d[k],borderColor:COLORS[i],borderWidth:2,pointRadius:4,tension:0.3}))},
+    options:{...baseLineOpts(),scales:{
+      x:{ticks:{color:()=>MUTED()},grid:{color:()=>LINE()}},
+      y:{ticks:{color:()=>MUTED()},grid:{color:()=>LINE()},min:0,max:8,title:{display:true,text:'Detector Z-score',color:()=>MUTED()}}
+    }}
+  });
+}
+window.addEventListener('load',()=>{detComp('bearing',document.querySelector('#ch4 .chart-controls .btn'));});
+
+// ── Alarm demo ────────────────────────────────────────────────────────────────
+function generateAlarmData(mode) {
+  const N=200,labels=Array.from({length:N},(_,i)=>i);
+  const score=[], alarm=[];
+  for(let i=0;i<N;i++){
+    let z=0.5+Math.abs(randn(1,0,0.4)[0]);
+    let al=false;
+    if(mode==='r1'&&i>80){ z=3.5+randn(1,0,0.5)[0]; if(i>88) al=true; }
+    if(mode==='r2'&&i>80&&(i%15<4)){ z=4+randn(1,0,0.6)[0]; if(z>3) al=true; }
+    if(mode==='distrust'){ z=4+randn(1,0,0.5)[0]; al=(i>5); }
+    score.push(clamp(z,0,8));
+    alarm.push(al&&mode!=='distrust'?3.0:al&&mode==='distrust'?null:null);
+  }
+  const distrusted=mode==='distrust';
+  return {labels,score,alarm,distrusted};
+}
+function alarmDemo(mode, btn) {
+  document.querySelectorAll('#ch7 .chart-controls .btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  const {labels,score,alarm,distrusted}=generateAlarmData(mode);
+  const datasets=[
+    {label:'Fused Z-score',data:score,borderColor:distrusted?MUTED():BRAND(),borderWidth:2,pointRadius:0},
+    {label:'Alert threshold (3.0)',data:Array(200).fill(3.0),borderColor:BAD(),borderWidth:1,borderDash:[4,4],pointRadius:0}
+  ];
+  if(!distrusted&&mode!=='ok') datasets.push({label:'ALARM',data:alarm,borderColor:'transparent',backgroundColor:'rgba(224,80,80,0.2)',fill:true,pointRadius:0});
+  if(distrusted) datasets.push({label:'DISTRUSTED (suppressed)',data:Array(200).fill(3.0),borderColor:WARN(),borderWidth:2,borderDash:[2,4],pointRadius:0});
+  mkChart('alarmCanvas',{
+    type:'line',
+    data:{labels,datasets},
+    options:{...baseLineOpts(),scales:{
+      x:{ticks:{color:()=>MUTED(),maxTicksLimit:6},grid:{color:()=>LINE()}},
+      y:{ticks:{color:()=>MUTED()},grid:{color:()=>LINE()},min:0,max:8}
+    }}
+  });
+}
+window.addEventListener('load',()=>{alarmDemo('ok',document.querySelector('#ch7 .btn'));});
+
+// ── E2E bearing fault demo ────────────────────────────────────────────────────
+window.addEventListener('load',()=>{
+  const N=300,faultAt=120;
+  const labels=Array.from({length:N},(_,i)=>i);
+  function ramp(i,start,rate,cap){return i>start?Math.min((i-start)*rate,cap):0;}
+  const ar1 =Array.from({length:N},(_,i)=>clamp(0.4+Math.abs(randn(1,0,0.3)[0])+ramp(i,faultAt,0.04,4),0,8));
+  const spe  =Array.from({length:N},(_,i)=>clamp(0.3+Math.abs(randn(1,0,0.35)[0])+ramp(i,faultAt,0.06,5.5),0,8));
+  const t2   =Array.from({length:N},(_,i)=>clamp(0.3+Math.abs(randn(1,0,0.3)[0])+ramp(i,faultAt,0.05,4.5),0,8));
+  const iff  =Array.from({length:N},(_,i)=>clamp(0.7+Math.abs(randn(1,0,0.6)[0])+(i>faultAt&&Math.random()>0.6?2.5:0),0,8));
+  const gmm  =Array.from({length:N},(_,i)=>clamp(0.5+Math.abs(randn(1,0,0.5)[0])+ramp(i,faultAt+15,0.04,3.5),0,8));
+  const omr  =Array.from({length:N},(_,i)=>clamp(0.4+Math.abs(randn(1,0,0.35)[0])+ramp(i,faultAt,0.07,6),0,8));
+  const fused=Array.from({length:N},(_,i)=>clamp(0.3*spe[i]+0.2*ar1[i]+0.2*t2[i]+0.15*iff[i]+0.05*gmm[i]+0.1*omr[i],0,8));
+  const alarmStart=faultAt+8;
+
+  const bgPlugin={id:'faultBg',beforeDraw(chart){
+    const {ctx,chartArea:{left,right,top,bottom},scales:{x}}=chart;
+    const x0=x.getPixelForValue(faultAt); const x1=x.getPixelForValue(N-1);
+    ctx.save();ctx.fillStyle='rgba(224,80,80,0.07)';ctx.fillRect(x0,top,x1-x0,bottom-top);
+    ctx.fillStyle='rgba(224,80,80,0.15)';ctx.fillRect(x.getPixelForValue(alarmStart),top,2,bottom-top);
+    ctx.restore();
+  }};
+
+  mkChart('e2eCanvas',{
+    type:'line',
+    data:{labels,datasets:[
+      {label:'AR1',data:ar1,borderColor:COLORS[0]+'88',borderWidth:1,pointRadius:0,borderDash:[3,3]},
+      {label:'PCA-SPE',data:spe,borderColor:COLORS[1]+'88',borderWidth:1,pointRadius:0,borderDash:[3,3]},
+      {label:'PCA-T²',data:t2,borderColor:COLORS[2]+'88',borderWidth:1,pointRadius:0,borderDash:[3,3]},
+      {label:'IForest',data:iff,borderColor:COLORS[3]+'88',borderWidth:1,pointRadius:0,borderDash:[3,3]},
+      {label:'GMM',data:gmm,borderColor:COLORS[4]+'88',borderWidth:1,pointRadius:0,borderDash:[3,3]},
+      {label:'OMR',data:omr,borderColor:COLORS[5]+'88',borderWidth:1,pointRadius:0,borderDash:[3,3]},
+      {label:'FUSED',data:fused,borderColor:BRAND(),borderWidth:3,pointRadius:0},
+      {label:'Alert (3.0)',data:Array(N).fill(3),borderColor:BAD(),borderWidth:1,borderDash:[4,4],pointRadius:0}
+    ]},
+    options:{responsive:true,maintainAspectRatio:false,animation:{duration:0},
+      plugins:{legend:{labels:{color:()=>MUTED(),boxWidth:10,font:{size:10}}},tooltip:{mode:'index',intersect:false}},
+      scales:{
+        x:{ticks:{color:()=>MUTED(),maxTicksLimit:8},grid:{color:()=>LINE()}},
+        y:{ticks:{color:()=>MUTED()},grid:{color:()=>LINE()},min:0,max:9,title:{display:true,text:'Z-score',color:()=>MUTED()}}
+      }
+    },
+    plugins:[bgPlugin]
+  });
+});
+</script>
+</body>
+</html>
