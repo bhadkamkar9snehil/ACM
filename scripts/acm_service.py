@@ -358,6 +358,7 @@ def create_app(backend: str = "sqlite", db: Optional[str] = "acm_results.db",
         return FileResponse(STATIC_DIR / "index.html")
 
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+    app.mount("/docs", StaticFiles(directory=str(ROOT / "docs")), name="docs")
     try:
         from scripts.acm_sim_routes import router as sim_router
         app.include_router(sim_router)

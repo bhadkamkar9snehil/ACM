@@ -2208,3 +2208,28 @@ if (document.readyState === 'loading') {
 } else {
   SIM.init();
 }
+
+// ── HELP sub-tabs ─────────────────────────────────────────────────────────
+(function HELP() {
+  function init() {
+    const rail = document.getElementById('help-tabs');
+    if (!rail) return;
+    const guidePane = document.getElementById('help-pane-guide');
+    const bookPane  = document.getElementById('help-pane-book');
+    rail.addEventListener('click', function (e) {
+      const btn = e.target.closest('[data-help-tab]');
+      if (!btn) return;
+      const which = btn.dataset.helpTab;
+      rail.querySelectorAll('.sub-tab').forEach(function (b) {
+        b.classList.toggle('active', b === btn);
+      });
+      guidePane.style.display = which === 'guide' ? 'block' : 'none';
+      bookPane.style.display  = which === 'book'  ? 'flex'  : 'none';
+    });
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+}());

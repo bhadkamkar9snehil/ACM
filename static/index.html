@@ -523,7 +523,14 @@
 
   <!-- 🟨🟨🟨🟨🟨🟨🟨🟨🟨🟨🟨🟨🟨🟨 05 HELP 🟨🟨🟨🟨🟨🟨🟨🟨🟨🟨🟨🟨🟨🟨🟨🟨🟨🟨🟨🟨🟨🟨🟨 -->
   <section id="tab-help" class="tabpane">
-    <div class="panel-scroll">
+    <!-- Inner sub-tab rail -->
+    <div class="sub-tab-rail" id="help-tabs">
+      <button type="button" class="sub-tab active" data-help-tab="guide">Guide</button>
+      <button type="button" class="sub-tab" data-help-tab="book">ML Reference Book</button>
+    </div>
+
+    <!-- ── Guide pane ─────────────────────────────────── -->
+    <div id="help-pane-guide" class="panel-scroll" style="overflow-y:auto;display:block;">
       <div style="padding:20px;max-width:1100px;margin:0 auto;display:flex;flex-direction:column;gap:16px;">
         <div class="card">
           <div class="card-title">ACM Guide &amp; Architecture</div>
@@ -587,6 +594,11 @@
           </div>
         </div>
       </div>
+    </div>
+
+    <!-- ── ML Reference Book pane ─────────────────────── -->
+    <div id="help-pane-book" style="flex:1;overflow:hidden;display:none;">
+      <iframe class="book-frame" src="/docs/ml-book.html" title="ACM ML Reference Book"></iframe>
     </div>
   </section>
 

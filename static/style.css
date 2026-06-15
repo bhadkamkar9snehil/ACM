@@ -1485,3 +1485,9 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
   .sub-tab-rail { flex-wrap: wrap; }
   .output-panel { height: 160px; }
 }
+
+/* ── Help tab — ML book iframe fills the pane ───────── */
+.book-frame {
+  width: 100%; height: 100%;
+  border: none; display: block;
+}
