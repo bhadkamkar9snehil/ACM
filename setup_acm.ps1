@@ -52,6 +52,28 @@ function Step($name, [scriptblock]$body) {
     }
 }
 
+function Step-Visible($name, [scriptblock]$body) {
+    Write-Host "    $([char]0x00B7)  $name"
+    try {
+        $oldEAP = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        $global:LASTEXITCODE = 0
+        & $body 2>&1 | Tee-Object -Append -FilePath $Log | ForEach-Object {
+            Write-Host "         $_" -ForegroundColor DarkGray
+        }
+        $ErrorActionPreference = $oldEAP
+        if ($LASTEXITCODE -ne 0) {
+            throw "Command failed with exit code $LASTEXITCODE"
+        }
+        Write-Host "    $([char]0x2713)  $name (Complete)" -ForegroundColor Green
+    } catch {
+        Write-Host "    $([char]0x2717)  $name (Failed)" -ForegroundColor Red
+        Write-Host "       $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "       Log: $Log" -ForegroundColor DarkGray
+        throw
+    }
+}
+
 function Refresh-Path {
     $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
                 [Environment]::GetEnvironmentVariable("Path", "User")
@@ -242,7 +264,7 @@ if ($ans -match '^[yY]') {
 Write-Host ""
 $ans = Read-Host "  [2/2]  CARE-to-Compare demo data — real wind-turbine SCADA data, score immediately`n         Download 10 events from Farm A (~360 MB)? [y/N]"
 if ($ans -match '^[yY]') {
-    Step "Download CARE events" {
+    Step-Visible "Download CARE events" {
         python scripts\download_care_dataset.py --farms A --count 10
     }
     Step "Register CARE assets" {
