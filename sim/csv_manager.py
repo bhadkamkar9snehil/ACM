@@ -105,16 +105,19 @@ def read_full_csv(filename: str, source: str, max_rows: int | None = None) -> tu
 
 def metadata(filename: str, source: str, preview_rows: int = 10) -> CsvMetadata:
     path = resolve_csv_path(filename, source)
-    columns, rows = read_rows(path)
+    columns, rows = read_rows(path, max_rows=preview_rows)
     inferred = infer_types(rows, columns)
     mappings = default_tag_mappings(columns, inferred)
+    
+    _, row_count = _fast_count(path)
+    
     return CsvMetadata(
         filename=path.name,
         source=source,  # type: ignore[arg-type]
-        row_count=len(rows),
+        row_count=row_count,
         column_count=len(columns),
         columns=columns,
-        preview=rows[:preview_rows],
+        preview=rows,
         inferred_types=inferred,  # type: ignore[arg-type]
         modified_at=_mtime(path),
         default_tag_mappings=mappings,
@@ -159,13 +162,20 @@ def _fast_count(path: Path) -> tuple[int, int]:
         ws = wb.active
         return ws.max_column, max(0, ws.max_row - 1)
     
+    import pandas as pd
+    try:
+        df_cols = pd.read_csv(str(path), sep=None, engine="python", nrows=0)
+        col_count = len(df_cols.columns)
+    except Exception:
+        col_count = 0
+        
     with path.open("r", newline="", encoding="utf-8-sig") as f:
         reader = csv.reader(f)
         try:
-            columns = next(reader)
+            next(reader)
         except StopIteration:
-            return 0, 0
-        return len(columns), sum(1 for _ in reader)
+            pass
+        return col_count, sum(1 for _ in reader)
 
 def list_files() -> list[CsvFileRecord]:
     ensure_dirs()
