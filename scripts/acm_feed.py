@@ -140,7 +140,8 @@ def _load_sqlite_buffer_increment(
         return pd.DataFrame()
 
     since_str = since.isoformat() if since is not None else None
-    with _sqlite3.connect(db_path) as con:
+    con = _sqlite3.connect(db_path)
+    try:
         if since_str is not None:
             rows = con.execute(
                 f"SELECT payload_json FROM {table} WHERE ts > ? ORDER BY ts",
@@ -150,6 +151,8 @@ def _load_sqlite_buffer_increment(
             rows = con.execute(
                 f"SELECT payload_json FROM {table} ORDER BY ts"
             ).fetchall()
+    finally:
+        con.close()
 
     records = []
     for (json_str,) in rows:
