@@ -49,18 +49,20 @@ def resolve_csv_path(filename: str, source: str) -> Path:
 def read_rows(path: Path, max_rows: int | None = None) -> tuple[list[str], list[dict[str, str]]]:
     if path.suffix.lower() == ".xlsx":
         return read_xlsx_rows(path, max_rows=max_rows)
-    with path.open("r", newline="", encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f)
-        if not reader.fieldnames:
-            raise ValueError("File has no header.")
-        columns = [c.strip() for c in reader.fieldnames]
-        if len(set(columns)) != len(columns):
-            raise ValueError("File has duplicate columns.")
-        rows: list[dict[str, str]] = []
-        for idx, row in enumerate(reader):
-            if max_rows is not None and idx >= max_rows:
-                break
-            rows.append({col: row.get(col, "") for col in columns})
+    
+    import pandas as pd
+    try:
+        df = pd.read_csv(str(path), sep=None, engine="python", nrows=max_rows)
+    except pd.errors.EmptyDataError:
+        raise ValueError("File has no header.")
+        
+    df = df.fillna("")
+    columns = [str(c).strip() for c in df.columns]
+    if len(set(columns)) != len(columns):
+        raise ValueError("File has duplicate columns.")
+        
+    df.columns = columns
+    rows = df.astype(str).to_dict(orient="records")
     return columns, rows
 
 

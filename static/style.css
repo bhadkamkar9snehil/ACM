@@ -651,7 +651,7 @@ html { height: 100%; color-scheme: dark; }
 body {
   height: 100%; display: flex; flex-direction: column;
   font-family: 'Barlow', sans-serif;
-  font-size: 15px; line-height: 1.50;
+  font-size: 18px; line-height: 1.50;
   color: var(--ink); background: var(--bg);
   overflow: hidden;
   zoom: 1.15;
@@ -686,19 +686,19 @@ body {
   display: flex; align-items: center; justify-content: center;
   color: var(--brand);
   font-family: 'Share Tech Mono', monospace;
-  font-size: 16px; font-weight: bold;
+  font-size: 19px; font-weight: bold;
   background: rgba(0,0,0,.30);
   flex-shrink: 0;
 }
 .hdr-titles { display: flex; flex-direction: column; gap: 1px; }
 .hdr-titles .eyebrow {
   font-family: 'Share Tech Mono', monospace;
-  font-size: 9px; letter-spacing: .14em; color: rgba(255,255,255,.45);
+  font-size: 12px; letter-spacing: .14em; color: rgba(255,255,255,.45);
   text-transform: uppercase;
 }
 .hdr-titles h1 {
   font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif-condensed, sans-serif;
-  font-size: 18px; font-weight: 900; letter-spacing: .06em;
+  font-size: 21px; font-weight: 900; letter-spacing: .06em;
   text-transform: uppercase; color: #fff; line-height: 1; margin: 0;
 }
 .hdr-titles h1 span { color: var(--brand-hi); }
@@ -715,12 +715,12 @@ body {
 }
 .stat-cell .lbl {
   font-family: 'Share Tech Mono', monospace;
-  font-size: 9px; letter-spacing: .10em; color: rgba(255,255,255,.40);
+  font-size: 12px; letter-spacing: .10em; color: rgba(255,255,255,.40);
   text-transform: uppercase;
 }
 .stat-cell .val {
   font-family: 'Share Tech Mono', monospace;
-  font-size: 13px; font-weight: 700; color: rgba(255,255,255,.90);
+  font-size: 16px; font-weight: 700; color: rgba(255,255,255,.90);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .stat-cell input.val {
@@ -738,7 +738,7 @@ body {
 /* ── 3-D Buttons ────────────────────────────────────────── */
 .btn {
   font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif-condensed, sans-serif;
-  font-size: 13px; font-weight: 700; letter-spacing: .07em;
+  font-size: 16px; font-weight: 700; letter-spacing: .07em;
   text-transform: uppercase;
   border: 1px solid var(--line2);
   background: var(--btn-face);
@@ -774,8 +774,8 @@ body {
 .btn-bad:hover    { background: color-mix(in srgb,var(--bad) 85%,#fff 15%); color:#fff; }
 .btn-warn   { background: var(--warn);  border-color: color-mix(in srgb,var(--warn) 60%,#000 40%);  color:#000; }
 .btn-warn:hover   { background: color-mix(in srgb,var(--warn) 85%,#fff 15%); }
-.btn-sm     { font-size: 11px; padding: 3px 8px; }
-.btn-hdr    { background: rgba(255,255,255,.08); border-color: rgba(255,255,255,.20); color:#fff; font-size:12px; padding:4px 9px; }
+.btn-sm     { font-size: 14px; padding: 3px 8px; }
+.btn-hdr    { background: rgba(255,255,255,.08); border-color: rgba(255,255,255,.20); color:#fff; font-size: 15px; padding:4px 9px; }
 .btn-hdr:hover { background: rgba(255,255,255,.16); }
 .btn-hdr.btn-brand { background: var(--brand); border-color: color-mix(in srgb,var(--brand) 60%,#000 40%); color:#fff; }
 .btn-hdr.btn-ok  { background: var(--ok);  border-color: color-mix(in srgb,var(--ok) 60%,#000 40%); color:#fff; }
@@ -797,7 +797,7 @@ select.btn option, select.btn optgroup {
   color: var(--ink);
   font-family: 'Barlow', sans-serif;
   text-transform: none;
-  font-size: 13px;
+  font-size: 16px;
   letter-spacing: normal;
   font-weight: 500;
 }
@@ -817,7 +817,7 @@ select.btn optgroup {
 }
 .tab {
   font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif-condensed, sans-serif;
-  font-size: 13px; font-weight: 700; letter-spacing: .07em;
+  font-size: 16px; font-weight: 700; letter-spacing: .07em;
   text-transform: uppercase;
   border: 1px solid var(--line); border-bottom: none;
   background: var(--bg3); color: var(--ink2);
@@ -837,7 +837,7 @@ select.btn optgroup {
 }
 .tab-num {
   font-family: 'Share Tech Mono', monospace;
-  font-size: 10px; opacity: .6; margin-right: 4px;
+  font-size: 13px; opacity: .6; margin-right: 4px;
 }
 
 /* ── Main + panels (fixed layout) ──────────────────────── */
@@ -863,7 +863,7 @@ select.btn optgroup {
 .card:last-child { margin-bottom: 0; }
 .card-title {
   font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif-condensed, sans-serif;
-  font-size: 13px; font-weight: 800; letter-spacing: .10em;
+  font-size: 16px; font-weight: 800; letter-spacing: .10em;
   text-transform: uppercase; color: var(--brand);
   border-bottom: 1px solid var(--line);
   padding-bottom: 6px; margin-bottom: 10px;
@@ -881,7 +881,7 @@ select.btn optgroup {
 /* ── Forms ──────────────────────────────────────────────── */
 input, select, textarea {
   font-family: 'Share Tech Mono', monospace;
-  font-size: 14px; color: var(--ink);
+  font-size: 17px; color: var(--ink);
   background: var(--bg2); border: 1px solid var(--line);
   padding: 5px 8px; border-radius: 0;
   box-shadow: inset 0 2px 4px rgba(0,0,0,.10);
@@ -899,7 +899,7 @@ input[type="checkbox"] { width: auto; accent-color: var(--brand); }
 table.data { border-collapse: collapse; width: 100%; }
 table.data th {
   font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif-condensed, sans-serif;
-  text-align: left; font-weight: 700; font-size: 11px;
+  text-align: left; font-weight: 700; font-size: 14px;
   letter-spacing: .10em; text-transform: uppercase; color: var(--muted);
   border-bottom: 1px solid var(--line2);
   padding: 5px 9px; background: var(--bg3); position: sticky; top: 0; z-index: 1;
@@ -907,7 +907,7 @@ table.data th {
 table.data td {
   padding: 6px 9px; border-bottom: 1px solid var(--line);
   font-family: 'Share Tech Mono', monospace;
-  font-size: 13px;
+  font-size: 16px;
   font-variant-numeric: tabular-nums;
 }
 table.data .num, table.data td.num { text-align: right; }
@@ -931,11 +931,11 @@ table.data tr.is-alarm td { background: var(--bad-lo); }
 
 .kpi-num {
   font-family: 'Share Tech Mono', monospace;
-  font-size: 16px; font-weight: bold; color: var(--ink);
+  font-size: 19px; font-weight: bold; color: var(--ink);
 }
 .kpi-cap {
   font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif-condensed, sans-serif;
-  font-size: 11px; font-weight: 700; letter-spacing: .09em;
+  font-size: 14px; font-weight: 700; letter-spacing: .09em;
   text-transform: uppercase; color: var(--muted); margin-top: 2px;
 }
 .kpi.ok .kpi-num, .kpi.alarm .kpi-num, .kpi.warn .kpi-num, .kpi.accent .kpi-num { color: var(--bg); }
@@ -947,7 +947,7 @@ table.data tr.is-alarm td { background: var(--bad-lo); }
   display: inline-flex; align-items: center; gap: 5px;
   padding: 2px 8px;
   font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif-condensed, sans-serif;
-  font-size: 11px; font-weight: 700; letter-spacing: .09em;
+  font-size: 14px; font-weight: 700; letter-spacing: .09em;
   text-transform: uppercase;
   border: 1px solid var(--line2);
   background: var(--bg3); color: var(--muted);
@@ -969,8 +969,8 @@ table.data tr.is-alarm td { background: var(--bad-lo); }
 .h-gauge { width: 40px; height: 6px; background: var(--bg4); border-radius: 3px; overflow: hidden; display: flex; }
 .h-gauge-fill { height: 100%; transition: width 0.3s ease; }
 
-.delta-up { background: var(--bad-lo); color: var(--bad); font-size: 10px; font-variant-numeric: tabular-nums; padding: 2px 6px; border-radius: 10px; }
-.delta-down { background: var(--ok-lo); color: var(--ok); font-size: 10px; font-variant-numeric: tabular-nums; padding: 2px 6px; border-radius: 10px; }
+.delta-up { background: var(--bad-lo); color: var(--bad); font-size: 13px; font-variant-numeric: tabular-nums; padding: 2px 6px; border-radius: 10px; }
+.delta-down { background: var(--ok-lo); color: var(--ok); font-size: 13px; font-variant-numeric: tabular-nums; padding: 2px 6px; border-radius: 10px; }
 th.num-gauge { padding-right: 96px !important; }
 
 table.data tr.row-alarm td { background: var(--bad-lo) !important; }
@@ -982,12 +982,12 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
   background: var(--bg3); border: 1px solid var(--line);
   padding: 2px 10px;
   font-family: 'Share Tech Mono', monospace;
-  font-size: 12px; color: var(--muted);
+  font-size: 15px; color: var(--muted);
 }
 .chip b { color: var(--ink); font-variant-numeric: tabular-nums; }
 
 /* ── Hints ──────────────────────────────────────────────── */
-.hint { font-size: 12px; color: var(--muted); line-height: 1.5; font-style: italic; margin: 4px 0; }
+.hint { font-size: 15px; color: var(--muted); line-height: 1.5; font-style: italic; margin: 4px 0; }
 .muted { color: var(--muted); }
 
 /* ── Alert banner (culprits) ────────────────────────────── */
@@ -996,7 +996,7 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
   background: var(--bad-lo);
   padding: 6px 12px;
   font-family: 'Share Tech Mono', monospace;
-  font-size: 12px; color: var(--bad);
+  font-size: 15px; color: var(--bad);
 }
 .msgbar b { color: var(--ink); }
 
@@ -1009,22 +1009,22 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
 }
 .health-cell .v {
   font-family: 'Share Tech Mono', monospace;
-  font-size: 16px; font-weight: bold; color: var(--ink);
+  font-size: 19px; font-weight: bold; color: var(--ink);
 }
 .health-cell .k {
   font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif-condensed, sans-serif;
-  font-size: 11px; font-weight: 700; letter-spacing: .09em;
+  font-size: 14px; font-weight: 700; letter-spacing: .09em;
   text-transform: uppercase; color: var(--muted); margin-top: 2px;
 }
-.attn { margin-top: 8px; font-size: 13px; }
-.attn div { padding: 3px 0; color: var(--warn); font-family: 'Share Tech Mono', monospace; font-size: 12px; }
+.attn { margin-top: 8px; font-size: 16px; }
+.attn div { padding: 3px 0; color: var(--warn); font-family: 'Share Tech Mono', monospace; font-size: 15px; }
 
 /* ── Terminal / Run log ─────────────────────────────────── */
 .term {
   background: var(--term-bg); color: var(--term-ink);
   border: 1px solid var(--line); padding: 10px 12px;
   max-height: 260px; overflow: auto;
-  font-family: 'Share Tech Mono', monospace; font-size: 13px; line-height: 1.6;
+  font-family: 'Share Tech Mono', monospace; font-size: 16px; line-height: 1.6;
   white-space: pre-wrap; margin: 0;
   box-shadow: inset 0 2px 5px rgba(0,0,0,.5);
 }
@@ -1037,11 +1037,11 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
 
 /* ── uPlot ──────────────────────────────────────────────── */
 .uplot { background: transparent; }
-.u-legend { color: var(--muted); font-size: 11px; font-family: 'Share Tech Mono', monospace; }
+.u-legend { color: var(--muted); font-size: 14px; font-family: 'Share Tech Mono', monospace; }
 .u-select { background: var(--brand-lo); }
 
 /* ── Legend ─────────────────────────────────────────────── */
-.legend { color: var(--muted); font-size: 11px; display: flex; gap: 12px; align-items: center; }
+.legend { color: var(--muted); font-size: 14px; display: flex; gap: 12px; align-items: center; }
 .legend .sw { display: inline-block; width: 14px; height: 3px; margin-right: 4px; vertical-align: middle; }
 .legend .sw.dash {
   background: repeating-linear-gradient(90deg, var(--bad) 0 3px, transparent 3px 6px);
@@ -1049,7 +1049,7 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
 }
 
 /* ── Empty state ────────────────────────────────────────── */
-.empty { color: var(--muted); text-align: center; padding: 24px 0 12px; font-size: 12px; font-style: italic; }
+.empty { color: var(--muted); text-align: center; padding: 24px 0 12px; font-size: 15px; font-style: italic; }
 
 /* ── Modal ──────────────────────────────────────────────── */
 #modal-backdrop {
@@ -1065,7 +1065,7 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
 }
 #modal h3 {
   font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif-condensed, sans-serif;
-  font-size: 16px; font-weight: 800; letter-spacing: .08em;
+  font-size: 19px; font-weight: 800; letter-spacing: .08em;
   text-transform: uppercase; color: var(--brand);
   margin: 0 0 14px; border-bottom: 1px solid var(--line); padding-bottom: 8px;
 }
@@ -1073,12 +1073,12 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
 #modal-form label {
   display: flex; flex-direction: column; gap: 4px;
   font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif-condensed, sans-serif;
-  font-size: 10px; font-weight: 700; letter-spacing: .09em;
+  font-size: 13px; font-weight: 700; letter-spacing: .09em;
   text-transform: uppercase; color: var(--ink2);
 }
 #modal-form input, #modal-form select { width: 100%; }
 #modal-form .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 6px; }
-#modal-form .err { color: var(--bad); font-size: 11px; font-family: 'Share Tech Mono', monospace; min-height: 1em; }
+#modal-form .err { color: var(--bad); font-size: 14px; font-family: 'Share Tech Mono', monospace; min-height: 1em; }
 
 /* ── Toasts ─────────────────────────────────────────────── */
 #toasts { position: fixed; right: 16px; bottom: 16px; display: flex; flex-direction: column; gap: 6px; z-index: 200; }
@@ -1086,7 +1086,7 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
   background: var(--bg4); border: 1px solid var(--line2);
   border-left: 3px solid var(--brand);
   padding: 8px 14px;
-  font-family: 'Share Tech Mono', monospace; font-size: 13px;
+  font-family: 'Share Tech Mono', monospace; font-size: 16px;
   min-width: 220px; max-width: 340px;
   box-shadow: var(--shadow-card); animation: slidein .18s ease-out;
   color: var(--ink);
@@ -1107,7 +1107,7 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
 #eng-heatlabels {
   display: flex; flex-direction: column; justify-content: space-around;
   font-family: 'Share Tech Mono', monospace;
-  font-size: 9px; color: var(--muted); padding-right: 6px; text-align: right;
+  font-size: 12px; color: var(--muted); padding-right: 6px; text-align: right;
   min-width: 52px;
 }
 #eng-heatmap { display: block; image-rendering: pixelated; flex: 1; border: 1px solid var(--line); }
@@ -1139,14 +1139,14 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
   grid-template-columns: 220px 90px 150px 80px 200px 1fr 60px;
   gap: 10px; padding: 8px 12px 8px 30px; align-items: center;
   border-bottom: 1px dashed rgba(255,255,255,0.05);
-  font-family: 'Share Tech Mono', monospace; font-size: 14px;
+  font-family: 'Share Tech Mono', monospace; font-size: 17px;
 }
 .mega-asset-row.collapsed + .mega-alarms { display: none; }
 .mega-timeline { display: flex; align-items: center; gap: 2px; width: 100%; }
 .mt-block { flex: 1; height: 16px; background: var(--bg3); border-radius: 1px; }
 .mt-block.warn { background: var(--warn); }
 .mt-block.danger { background: #e05050; }
-.mt-empty { color: var(--muted); font-size: 11px; font-family: sans-serif; font-style: italic; }
+.mt-empty { color: var(--muted); font-size: 14px; font-family: sans-serif; font-style: italic; }
 
 /* ── Engineer tab — eng-layout fills panel-scroll ───────── */
 /* display:block (like admin) lets eng-layout grow to natural height so panel-scroll can scroll it.
@@ -1181,7 +1181,7 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
   color: var(--ink);
   padding: 6px 10px;
   font-family: 'Share Tech Mono', monospace;
-  font-size: 12px;
+  font-size: 15px;
   pointer-events: none;
   z-index: 1000;
   transform: translate(-50%, -100%);
@@ -1206,9 +1206,9 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
 
 /* ── Card density in Advanced mode ──────────────────────── */
 [data-mode="advanced"] .card { padding: 8px 10px; }
-[data-mode="advanced"] table.data td { padding: 4px 7px; font-size: 12px; }
-[data-mode="advanced"] .card-title { font-size: 12px; padding-bottom: 4px; margin-bottom: 6px; }
-[data-mode="advanced"] table.data th { font-size: 10px; }
+[data-mode="advanced"] table.data td { padding: 4px 7px; font-size: 15px; }
+[data-mode="advanced"] .card-title { font-size: 15px; padding-bottom: 4px; margin-bottom: 6px; }
+[data-mode="advanced"] table.data th { font-size: 13px; }
 
 /* ── Operator tab — op-layout ────────────────────────────── */
 .op-layout { display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 0; }
@@ -1231,7 +1231,7 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
 /* KPI tiles: horizontal row in basic → compact vertical sidebar in advanced */
 [data-mode="advanced"] .op-kpis .kpis { grid-template-columns: 1fr; gap: 4px; margin-bottom: 0; }
 [data-mode="advanced"] .op-kpis .kpi  { padding: 6px 10px; }
-[data-mode="advanced"] .op-kpis .kpi-num { font-size: 18px; }
+[data-mode="advanced"] .op-kpis .kpi-num { font-size: 21px; }
 
 /* ── Engineer tab — eng-layout ───────────────────────────── */
 .eng-layout { display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 0; }
@@ -1309,7 +1309,7 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
   border-top: 1px solid var(--line2);
   border-bottom: 1px solid var(--line);
   font-family: 'Barlow Condensed', sans-serif;
-  font-size: 12px;
+  font-size: 15px;
   font-weight: 700;
   letter-spacing: .08em;
   text-transform: uppercase;
@@ -1323,7 +1323,7 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
 
 /* ── Last-alarm badge (C8) ───────────────────────────────── */
 .last-alarm-badge {
-  font-size: 9px;
+  font-size: 12px;
   background: var(--bad-lo);
   color: var(--bad);
   padding: 1px 5px;
@@ -1362,7 +1362,7 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
 /* On monitors ≤700px tall the 5-tile sidebar eats too much of the matrix height */
 @media (max-height: 700px) {
   [data-mode="advanced"] .op-kpis .kpi     { padding: 3px 8px; }
-  [data-mode="advanced"] .op-kpis .kpi-num { font-size: 14px; }
+  [data-mode="advanced"] .op-kpis .kpi-num { font-size: 17px; }
   [data-mode="advanced"] .op-kpis .kpis    { gap: 2px; }
 }
 
@@ -1372,7 +1372,7 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
 
 .lbl-sm {
   font-family: 'Barlow Condensed', sans-serif;
-  font-size: 10px;
+  font-size: 13px;
   font-weight: 700;
   letter-spacing: 0.09em;
   text-transform: uppercase;
@@ -1392,7 +1392,7 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
 
 .sub-tab {
   font-family: 'Barlow Condensed', sans-serif;
-  font-size: 13px;
+  font-size: 16px;
   font-weight: 700;
   letter-spacing: 0.07em;
   text-transform: uppercase;
@@ -1451,12 +1451,12 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
   background: var(--bg3);
   border-bottom: 1px solid var(--line);
   flex-shrink: 0;
-  font-size: 12px;
+  font-size: 15px;
 }
 
 .output-src-tab {
   font-family: 'Barlow Condensed', sans-serif;
-  font-size: 12px;
+  font-size: 15px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;

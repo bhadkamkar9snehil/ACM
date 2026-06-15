@@ -109,6 +109,22 @@ def main() -> int:
         n_fault = fault_rows[0]["n"] if fault_rows else 0
         print(f"Fault ({grp}): {n_fault} asset(s) now registered")
 
+    asset_key = "simulator/internal"
+    before = store.fetch(
+        "SELECT COUNT(*) AS n FROM monitored_assets WHERE asset_key = ?",
+        (asset_key,),
+    )[0]["n"]
+    store.execute(INSERT, (
+        asset_key, "simulator", 1, "mqtt", "",
+        str(ROOT / "data_cache" / "mqtt_buffer.db"), "published_at", None, now, "NEW",
+    ))
+    after = store.fetch(
+        "SELECT COUNT(*) AS n FROM monitored_assets WHERE asset_key = ?",
+        (asset_key,),
+    )[0]["n"]
+    if after > before:
+        print(f"Internal: registered '{asset_key}' -> mqtt_buffer.db")
+
     if args.opcua:
         asset_key = "simulator/opc_ua"
         before = store.fetch(

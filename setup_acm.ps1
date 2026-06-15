@@ -226,46 +226,12 @@ try {
 } catch {}
 
 # --- Optional Integrations ----------------------------------------------------
-$setupSim  = $false
 $setupCare = $false
 
 Section "Optional Integrations"
 Write-Host ""
 
-$ans = Read-Host "  [1/2]  Industrial Simulator — stream CSV replay over OPC UA into ACM`n         Set up the Simulator alongside ACM? [y/N]"
-if ($ans -match '^[yY]') {
-    $SimDir = "$HOME\Simulator"
-    Step "Clone Simulator" {
-        if (Test-Path "$SimDir\.git") {
-            git -C $SimDir fetch origin main
-            git -C $SimDir checkout main
-            git -C $SimDir reset --hard origin/main
-        } else {
-            git clone --branch main --single-branch https://github.com/bhadkamkar9snehil/Simulator.git $SimDir
-        }
-    }
-    $PyExe = "$SimDir\runtime\python\python.exe"
-    if (-not (Test-Path $PyExe)) {
-        Write-Host "  " -NoNewline
-        Write-Host ([char]0x2717) -ForegroundColor Red -NoNewline
-        Write-Host "  Bundled Python runtime not found at $PyExe"
-        Write-Host "     The Simulator requires its bundled runtime."
-        Write-Host "     Run setup_simulator.ps1 first to build it, then re-run this script."
-    } else {
-        Step "Build Simulator environment" {
-            Push-Location $SimDir
-            & $PyExe suite_runtime.py ensure-env
-            Pop-Location
-        }
-        Step "Register OPC UA asset" {
-            python scripts\acm_seed_demo.py --opcua opc.tcp://localhost:4840/simulator --db acm_results.db
-        }
-        $setupSim = $true
-    }
-}
-
-Write-Host ""
-$ans = Read-Host "  [2/2]  CARE-to-Compare demo data — real wind-turbine SCADA data, score immediately`n         Download 10 events from Farm A (~360 MB)? [y/N]"
+$ans = Read-Host "  [1/1]  CARE-to-Compare demo data — real wind-turbine SCADA data, score immediately`n         Download 10 events from Farm A (~360 MB)? [y/N]"
 if ($ans -match '^[yY]') {
     Step-Visible "Download CARE events" {
         python scripts\download_care_dataset.py --farms A --count 10
@@ -304,16 +270,7 @@ if ($setupCare) {
     Write-Host " in the Admin panel." -ForegroundColor DarkGray
     Write-Host ""
 }
-if ($setupSim) {
-    Write-Host "  $( if ($setupCare) { '3' } else { '2' } )  Start the Simulator" -ForegroundColor DarkGray
-    Write-Host "       Double-click " -NoNewline -ForegroundColor DarkGray
-    Write-Host "RUN_SIMULATOR.bat" -ForegroundColor Cyan -NoNewline
-    Write-Host " in $HOME\Simulator" -ForegroundColor DarkGray
-    Write-Host "       Load a CSV, start OPC UA replay — ACM will score it as " -NoNewline -ForegroundColor DarkGray
-    Write-Host "simulator/opc_ua" -ForegroundColor Cyan
-    Write-Host ""
-}
-if (-not $setupCare -and -not $setupSim) {
+if (-not $setupCare) {
     Write-Host "  2  One-shot run" -ForegroundColor DarkGray
     Write-Host "       " -NoNewline
     Write-Host "python scripts\acm_run.py --csv data.csv --timestamp-col time --score-days 30 --report out.html" -ForegroundColor DarkGray
