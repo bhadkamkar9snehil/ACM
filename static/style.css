@@ -654,6 +654,7 @@ body {
   font-size: 15px; line-height: 1.50;
   color: var(--ink); background: var(--bg);
   overflow: hidden;
+  zoom: 1.15;
 }
 
 /* ── Scrollbars ─────────────────────────────────────────── */

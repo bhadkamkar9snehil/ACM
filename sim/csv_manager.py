@@ -150,19 +150,34 @@ def write_rows(filename: str, rows: list[dict[str, Any]], source: str = "generat
     return path
 
 
+def _fast_count(path: Path) -> tuple[int, int]:
+    if path.suffix.lower() == ".xlsx":
+        from openpyxl import load_workbook
+        wb = load_workbook(str(path), read_only=True, data_only=True)
+        ws = wb.active
+        return ws.max_column, max(0, ws.max_row - 1)
+    
+    with path.open("r", newline="", encoding="utf-8-sig") as f:
+        reader = csv.reader(f)
+        try:
+            columns = next(reader)
+        except StopIteration:
+            return 0, 0
+        return len(columns), sum(1 for _ in reader)
+
 def list_files() -> list[CsvFileRecord]:
     ensure_dirs()
     records: list[CsvFileRecord] = []
     for source, directory in SOURCE_DIRS.items():
         for path in sorted(list(directory.glob("*.csv")) + list(directory.glob("*.xlsx"))):
             try:
-                columns, rows = read_rows(path)
+                col_count, row_count = _fast_count(path)
                 records.append(CsvFileRecord(
                     filename=path.name,
                     source=source,  # type: ignore[arg-type]
                     path=str(path.relative_to(ROOT)),
-                    row_count=len(rows),
-                    column_count=len(columns),
+                    row_count=row_count,
+                    column_count=col_count,
                     modified_at=_mtime(path),
                 ))
             except Exception:
