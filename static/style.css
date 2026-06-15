@@ -654,7 +654,6 @@ body {
   font-size: 18px; line-height: 1.50;
   color: var(--ink); background: var(--bg);
   overflow: hidden;
-  zoom: 1.15;
 }
 
 /* ── Scrollbars ─────────────────────────────────────────── */
@@ -680,22 +679,7 @@ body {
   height: 54px;
 }
 .hdr-brand { display: flex; align-items: center; gap: 10px; }
-.logo-icon {
-  width: 30px; height: 30px;
-  border: 1px solid var(--brand);
-  display: flex; align-items: center; justify-content: center;
-  color: var(--brand);
-  font-family: 'Share Tech Mono', monospace;
-  font-size: 19px; font-weight: bold;
-  background: rgba(0,0,0,.30);
-  flex-shrink: 0;
-}
 .hdr-titles { display: flex; flex-direction: column; gap: 1px; }
-.hdr-titles .eyebrow {
-  font-family: 'Share Tech Mono', monospace;
-  font-size: 12px; letter-spacing: .14em; color: rgba(255,255,255,.45);
-  text-transform: uppercase;
-}
 .hdr-titles h1 {
   font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif-condensed, sans-serif;
   font-size: 21px; font-weight: 900; letter-spacing: .06em;
@@ -940,7 +924,7 @@ table.data tr.is-alarm td { background: var(--bad-lo); }
 }
 .kpi.ok .kpi-num, .kpi.alarm .kpi-num, .kpi.warn .kpi-num, .kpi.accent .kpi-num { color: var(--bg); }
 .kpi.ok .kpi-cap, .kpi.alarm .kpi-cap, .kpi.warn .kpi-cap, .kpi.accent .kpi-cap { color: var(--bg); opacity: 0.85; }
-.kpi.alarm.lit { border-color: rgba(0,0,0,0.3); box-shadow: 0 0 18px var(--bad-lo), inset 0 2px 6px rgba(0,0,0,0.25); }
+.kpi.alarm.lit { border-color: rgba(0,0,0,0.3); box-shadow: 0 0 18px var(--bad), inset 0 2px 6px rgba(0,0,0,0.25); }
 
 /* ── Badges ─────────────────────────────────────────────── */
 .badge {
@@ -1115,20 +1099,21 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
 /* ── Operator tab — left col fixed height ────────────────── */
 /* ── Mega Operations Matrix ───────────────────────────────── */
 .mega-list { display: flex; flex-direction: column; width: 100%; min-width: 900px; }
-.mega-hdr { 
-  display: grid; 
+.mega-hdr {
+  display: grid;
   grid-template-columns: 220px 90px 150px 80px 200px 1fr 60px;
   gap: 10px; padding: 8px 12px;
   font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif-condensed, sans-serif; font-weight: 700;
   color: var(--muted); text-transform: uppercase;
   border-bottom: 2px solid var(--line);
   position: sticky; top: 0; z-index: 20; background: var(--bg2);
+  height: var(--mega-hdr-h, 33px); box-sizing: content-box;
 }
 .mega-asset-row {
   display: grid;
   grid-template-columns: 220px 90px 150px 80px 200px 1fr 60px;
   gap: 10px; padding: 10px 12px; align-items: center;
-  position: sticky; top: 33px; z-index: 10;
+  position: sticky; top: var(--mega-hdr-h, 33px); z-index: 10;
   background: var(--bg); border-bottom: 1px solid var(--line);
   cursor: pointer;
 }
@@ -1145,7 +1130,7 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
 .mega-timeline { display: flex; align-items: center; gap: 2px; width: 100%; }
 .mt-block { flex: 1; height: 16px; background: var(--bg3); border-radius: 1px; }
 .mt-block.warn { background: var(--warn); }
-.mt-block.danger { background: #e05050; }
+.mt-block.danger { background: var(--bad); }
 .mt-empty { color: var(--muted); font-size: 14px; font-family: sans-serif; font-style: italic; }
 
 /* ── Engineer tab — eng-layout fills panel-scroll ───────── */
@@ -1484,6 +1469,7 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
 @media (max-width: 900px) {
   .sub-tab-rail { flex-wrap: wrap; }
   .output-panel { height: 160px; }
+  .main { padding-bottom: 170px; }
 }
 
 /* ── Help tab — ML book iframe fills the pane ───────── */

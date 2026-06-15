@@ -251,7 +251,7 @@ function updateCountdown() {
     return;
   }
   const lastMs = typeof window.lastTickAt === "string"
-    ? new Date(window.lastTickAt.replace(" ", "T")).getTime()
+    ? Date.parse(window.lastTickAt.replace(" ", "T").replace(/Z?$/, "Z"))
     : window.lastTickAt * 1000;
   const nextMs = lastMs + (window.tickMinutes * 60000);
   const nowMs = Date.now();
@@ -410,7 +410,7 @@ async function refreshOperator(useCache = false) {
       currentFarm = farm;
       const farmAssets = fleet.filter(x => farmPrefix(x.asset_key) === farm);
       const farmAlarm = farmAssets.filter(x => x.state === "ALARM").length;
-      const farmWarn = farmAssets.filter(x => x.state === "WARN").length;
+      const farmWarn = farmAssets.filter(x => ["ERROR","STALE"].includes(x.state)).length;
       const farmHdr = document.createElement("div");
       farmHdr.className = "mega-farm-hdr";
       const dot = farmAlarm ? "var(--bad)" : farmWarn ? "var(--warn)" : "var(--ok)";
@@ -427,7 +427,7 @@ async function refreshOperator(useCache = false) {
     const aRow = document.createElement("div");
     aRow.className = "mega-asset-row collapsed";
     aRow.innerHTML = `
-      <div style="font-weight:bold; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${a.asset_key}">
+      <div style="font-weight:bold; color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${a.asset_key}">
         <span class="chevron" style="display:inline-block;width:14px;color:var(--muted);">${assetAlarms.length ? '►' : ' '}</span>
         ${a.asset_key}
         ${lastAlarmBadge(assetAlarms)}
@@ -694,6 +694,7 @@ function heatColor(z) {
 
 let cachedEngineerData = null;
 async function refreshEngineer(useCache = false) {
+  const getCss = (v) => getComputedStyle(document.body).getPropertyValue(v).trim();
   let key = $("#eng-asset").value;
   if (!key) {
     // Selectors not populated yet — fill them now and retry
@@ -835,7 +836,6 @@ async function refreshEngineer(useCache = false) {
     });
   };
 
-  const getCss = (v) => getComputedStyle(document.body).getPropertyValue(v).trim();
   // Build detector series for Advanced mode
   const detectorSeries = [
     { label: "AR1", stroke: getCss("--det-ar1"), width: 1, points: { show: false }, show: false, value: (u, v) => fmtNum(v) },
@@ -846,7 +846,6 @@ async function refreshEngineer(useCache = false) {
     { label: "OMR", stroke: getCss("--det-omr"), width: 1, points: { show: false }, show: false, value: (u, v) => fmtNum(v) },
   ];
 
-  if (plot) plot.destroy();
   plot = new uPlot({
     width, height: 200,
     cursor: { y: false },
@@ -2222,9 +2221,9 @@ const SIM = (() => {
   async function sendToReplay(filename, source) {
     // Switch the Simulate tab's active pane to Replay directly (avoids race with
     // the pane button's click listener which calls populateReplayFileList concurrently)
-    document.querySelectorAll('[data-sim-pane]').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('[data-sim-tab]').forEach(b => b.classList.remove('active'));
     document.querySelectorAll('.sim-pane').forEach(p => p.classList.add('hidden'));
-    const replayBtn = document.querySelector('[data-sim-pane="replay"]');
+    const replayBtn = document.querySelector('[data-sim-tab="replay"]');
     if (replayBtn) replayBtn.classList.add('active');
     const replayPane = document.getElementById('sim-pane-replay');
     if (replayPane) replayPane.classList.remove('hidden');
@@ -2303,12 +2302,8 @@ if (document.readyState === 'loading') {
   }
 
   function init() {
-    // Header button (always visible)
     const hdrBtn = document.getElementById('btn-update-acm-hdr');
     if (hdrBtn) hdrBtn.addEventListener('click', () => doUpdate(hdrBtn, '↑ Update'));
-    // Legacy admin card button
-    const admBtn = document.getElementById('btn-update-acm');
-    if (admBtn) admBtn.addEventListener('click', () => doUpdate(admBtn, '↑ Update ACM'));
   }
 
   if (document.readyState === 'loading') {
