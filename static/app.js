@@ -618,12 +618,16 @@ function openEngineer(assetKey) {
 
 async function fillAssetSelectors() {
   const fleet = await api("/api/fleet");
-  const keys = fleet.map((a) => a.asset_key).sort();
+  // Only show assets that have actual score data (last_fused not null)
+  const scoredAssets = fleet.filter((a) => a.last_fused !== null && a.last_fused !== undefined);
+  const keys = scoredAssets.map((a) => a.asset_key).sort();
+  const allKeys = fleet.map((a) => a.asset_key).sort();
   for (const sel of [$("#eng-asset"), $("#adm-runs-asset")]) {
     const cur = sel.value;
-    sel.replaceChildren(...keys.map((k) => new Option(k, k)));
-    sel.value = keys.includes(selectedAsset) ? selectedAsset
-              : keys.includes(cur) ? cur : keys[0] || "";
+    const useKeys = sel.id === "eng-asset" ? keys : allKeys;
+    sel.replaceChildren(...useKeys.map((k) => new Option(k, k)));
+    sel.value = useKeys.includes(selectedAsset) ? selectedAsset
+              : useKeys.includes(cur) ? cur : useKeys[0] || "";
   }
   if (!selectedAsset) selectedAsset = $("#eng-asset").value;
 }
@@ -834,12 +838,12 @@ async function refreshEngineer(useCache = false) {
   const getCss = (v) => getComputedStyle(document.body).getPropertyValue(v).trim();
   // Build detector series for Advanced mode
   const detectorSeries = [
-    { label: "AR1", stroke: getCss("--det-ar1"), width: 1, points: { show: false }, value: (u, v) => fmtNum(v) },
-    { label: "PCA-SPE", stroke: getCss("--det-pca-spe"), width: 1, points: { show: false }, value: (u, v) => fmtNum(v) },
-    { label: "PCA-T2", stroke: getCss("--det-pca-t2"), width: 1, points: { show: false }, value: (u, v) => fmtNum(v) },
-    { label: "IForest", stroke: getCss("--det-iforest"), width: 1, points: { show: false }, value: (u, v) => fmtNum(v) },
-    { label: "GMM", stroke: getCss("--det-gmm"), width: 1, points: { show: false }, value: (u, v) => fmtNum(v) },
-    { label: "OMR", stroke: getCss("--det-omr"), width: 1, points: { show: false }, value: (u, v) => fmtNum(v) },
+    { label: "AR1", stroke: getCss("--det-ar1"), width: 1, points: { show: false }, show: false, value: (u, v) => fmtNum(v) },
+    { label: "PCA-SPE", stroke: getCss("--det-pca-spe"), width: 1, points: { show: false }, show: false, value: (u, v) => fmtNum(v) },
+    { label: "PCA-T2", stroke: getCss("--det-pca-t2"), width: 1, points: { show: false }, show: false, value: (u, v) => fmtNum(v) },
+    { label: "IForest", stroke: getCss("--det-iforest"), width: 1, points: { show: false }, show: false, value: (u, v) => fmtNum(v) },
+    { label: "GMM", stroke: getCss("--det-gmm"), width: 1, points: { show: false }, show: false, value: (u, v) => fmtNum(v) },
+    { label: "OMR", stroke: getCss("--det-omr"), width: 1, points: { show: false }, show: false, value: (u, v) => fmtNum(v) },
   ];
 
   if (plot) plot.destroy();
@@ -913,15 +917,15 @@ async function refreshEngineer(useCache = false) {
     s.rows.map(r => r[idx["omr_z"]]),
   ], $("#eng-chart"));
 
-  // Detector toggle buttons (Advanced mode only)
+  // Detector toggle buttons (Advanced mode only) — hidden by default, active class cleared
   document.querySelectorAll(".det-toggle").forEach((btn, i) => {
+    btn.classList.remove("active");
     const seriesIdx = 3 + i; // Series 0=x, 1=fused, 2=alertZ, 3-8=detectors
-    btn.addEventListener("click", () => {
+    btn.onclick = () => {
       btn.classList.toggle("active");
-      // Toggle series visibility
       const show = btn.classList.contains("active");
       plot.setSeries(seriesIdx, { show });
-    });
+    };
   });
 
   // detector heat strip, aligned to the chart's plotted area
@@ -1298,8 +1302,8 @@ async function refreshEngineer(useCache = false) {
         row.map(v => selfCounts[r] > 0 ? v / selfCounts[r] : 0)
       );
 
-      const CELL = 28, GAP = 2;
-      const LABEL = 32; // left label width
+      const CELL = 44, GAP = 2;
+      const LABEL = 44; // left label width
       const W = LABEL + N6 * (CELL + GAP) - GAP;
       const H = LABEL + N6 * (CELL + GAP) - GAP;
       const dpr = window.devicePixelRatio || 1;
@@ -1313,7 +1317,7 @@ async function refreshEngineer(useCache = false) {
       ctx.clearRect(0, 0, W, H);
 
       // Column labels (top)
-      ctx.font = `bold ${Math.round(7 * dpr) / dpr}px "Barlow Condensed", sans-serif`;
+      ctx.font = `bold 11px "Barlow Condensed", sans-serif`;
       ctx.textAlign = "center";
       DET_NAMES.forEach((name, c) => {
         ctx.fillStyle = getCss(DET_VARS_CSS[c]);
@@ -1377,9 +1381,9 @@ async function refreshEngineer(useCache = false) {
     const DAY_LABELS = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
     const dpr = window.devicePixelRatio || 1;
     const containerW = patBody.parentElement?.clientWidth || 320;
-    const LABEL_W = 30, LABEL_H = 16, GAP = 1;
-    const CELL_W = Math.max(8, Math.floor((containerW - LABEL_W - 12) / 24));
-    const CELL_H = 20;
+    const LABEL_W = 42, LABEL_H = 20, GAP = 1;
+    const CELL_W = Math.max(10, Math.floor((containerW - LABEL_W - 12) / 24));
+    const CELL_H = 26;
     const W = LABEL_W + 24 * (CELL_W + GAP) - GAP;
     const H = LABEL_H + 7 * (CELL_H + GAP) - GAP;
 
@@ -1392,7 +1396,7 @@ async function refreshEngineer(useCache = false) {
 
     // Hour axis labels: 0 3 6 9 12 15 18 21
     ctx2.fillStyle = getCss("--muted");
-    ctx2.font = `${8}px "Barlow Condensed", sans-serif`;
+    ctx2.font = `11px "Barlow Condensed", sans-serif`;
     ctx2.textAlign = "center";
     for (let h = 0; h < 24; h += 3) {
       const x = LABEL_W + h * (CELL_W + GAP) + CELL_W / 2;
@@ -1404,7 +1408,7 @@ async function refreshEngineer(useCache = false) {
       const y = LABEL_H + r * (CELL_H + GAP);
       ctx2.fillStyle = getCss("--muted");
       ctx2.textAlign = "right";
-      ctx2.font = `${8}px "Barlow Condensed", sans-serif`;
+      ctx2.font = `11px "Barlow Condensed", sans-serif`;
       ctx2.fillText(lbl, LABEL_W - 4, y + CELL_H / 2 + 3);
 
       for (let h = 0; h < 24; h++) {
@@ -1414,11 +1418,11 @@ async function refreshEngineer(useCache = false) {
         const x = LABEL_W + h * (CELL_W + GAP);
         ctx2.fillStyle = tot === 0 ? getCss("--bg3") : heatColor(frac * 8);
         ctx2.fillRect(x, y, CELL_W, CELL_H);
-        if (al > 0 && CELL_W >= 12) {
+        if (al > 0 && CELL_W >= 10) {
           ctx2.fillStyle = frac > 0.5 ? getCss("--bg") : getCss("--ink2");
-          ctx2.font = `${7}px "Share Tech Mono", monospace`;
+          ctx2.font = `10px "Share Tech Mono", monospace`;
           ctx2.textAlign = "center";
-          ctx2.fillText(al, x + CELL_W / 2, y + CELL_H / 2 + 2.5);
+          ctx2.fillText(al, x + CELL_W / 2, y + CELL_H / 2 + 3);
         }
       }
     });
@@ -1958,6 +1962,7 @@ const SIM = (() => {
         <td>${esc(f.modified_at?.slice(0,16)||'—')}</td>
         <td style="white-space:nowrap;">
           <button class="btn btn-sm" onclick="SIM.previewFile('${esc(f.filename)}','${esc(f.source)}')">Preview</button>
+          <button class="btn btn-sm" onclick="SIM.sendToReplay('${esc(f.filename)}','${esc(f.source)}')">→ Replay</button>
           <button class="btn btn-sm btn-bad" onclick="SIM.deleteFile('${esc(f.filename)}','${esc(f.source)}')">Delete</button>
         </td></tr>`).join('');
     } catch (e) {
@@ -2214,7 +2219,27 @@ const SIM = (() => {
     log('Simulator module initialized', 'sim', 'info');
   }
 
-  return { init, previewFile, deleteFile, log };
+  async function sendToReplay(filename, source) {
+    // Switch to Replay sub-tab
+    const replayBtn = document.querySelector('[data-sim-pane="replay"]');
+    if (replayBtn) replayBtn.click();
+    // Populate file list then select the target file
+    await populateReplayFileList();
+    const sel = document.getElementById('sim-replay-file');
+    if (sel) {
+      // Find the option matching this filename+source
+      const opt = Array.from(sel.options).find(o => o.value === filename && o.dataset.source === source);
+      if (opt) {
+        sel.value = filename;
+        const srcSel = document.getElementById('sim-replay-source');
+        if (srcSel) srcSel.value = source;
+        await loadTagPlan(filename, source);
+      }
+    }
+    log(`Selected for replay: ${filename} (${source})`, 'sim', 'info');
+  }
+
+  return { init, previewFile, deleteFile, sendToReplay, log };
 })();
 
 if (document.readyState === 'loading') {

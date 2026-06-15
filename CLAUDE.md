@@ -1,7 +1,7 @@
 # ACM — Codebase Knowledge Base
 
 > Maintained for future agents. Update this file whenever you learn something new about the codebase.
-> Last updated: session 01Dkd7AbjS8Sd5ChfYiNa1yR (2026-06-15)
+> Last updated: session 01WdhcTS2X6Za1NZGfnAkPFQ (2026-06-15)
 
 ---
 
@@ -400,6 +400,13 @@ Generator produces data with timestamps shifted so the last row ≈ now.
 15. **`--sim-dir` flag does not exist in `download_care_dataset.py`** — the script only has `--dest`, `--farms`, `--count`. The default `--dest` already points to `sim_data/sample` so no extra flag is needed. CLAUDE.md had the wrong flag; setup scripts now corrected.
 16. **`setup.sh` had three bugs**: (a) duplicate pip install block (pyodbc optional then same packages again mandatory), (b) `warn_step "Self-test" ... | tail -3` pipe was applying to warn_step's own printf output, not pytest, (c) `step "Fault datasets"` was fatal. All fixed: single install block, pipe removed, fault step changed to `warn_step`.
 17. **`setup_acm.ps1` missing packages**: `python-multipart`, `openpyxl`, `pydantic` were absent from the pip install list but required by FastAPI multipart upload and sim routes. Also missing `structlog`, `matplotlib`, `pytest`, `httpx` (were present but needed to stay). All added.
+18. **OPC UA is now the default replay transport** — `sim-replay-publisher` dropdown defaults to `opcua`. `BufferPublisher` (mqtt_buffer.db) is no longer the default; it's only used if explicitly chosen. `_register_opcua_in_acm()` in `acm_sim_routes.py` auto-registers `simulator/opc_ua` asset and triggers run-now when replay starts in opcua/both mode.
+19. **`fillAssetSelectors()` race condition** — calling it inside every `refreshEngineer()` caused concurrent poll calls to overwrite the dropdown during an async await, showing the wrong asset's chart. Fix: `fillAssetSelectors()` only in the `refresh()` poll loop, never inside `refreshEngineer()`. `cachedEngineerData = null` in the change handler forces fresh fetch.
+20. **Files tab + Preview were slow** — `pd.read_csv` with `sep=None, engine='python'` scanned the entire file to detect delimiter. Fixed by replacing with `csv.Sniffer` reading only the first 8KB for dialect detection, then `csv.DictReader` for row reading. No pandas import for column count / preview in `sim/csv_manager.py`.
+21. **Detector series hidden by default** — added `show: false` to all 6 detector series in uPlot config. `btn.classList.remove("active")` on every chart render resets toggle button states. Only fused z + alert_z are shown by default.
+22. **Engineer tab grid layout** — `mttd` (Reliability Metrics) moved from last row to row 4 (beside cofiring), so it appears near the top-right after the chart. Layout: topbar → culprits → chart/pattern → mttd/cofiring → episodes/histogram → daily/daily.
+23. **Co-firing matrix and alarm heatmap readability** — CELL increased to 44 (from 28), LABEL to 44 (from 32), font to 11px (from 7px). Alarm pattern CELL_H to 26 (from 20), LABEL_W to 42 (from 30), LABEL_H to 20 (from 16), fonts to 11px/10px.
+24. **Files tab → Replay navigation** — `sendToReplay(filename, source)` added to SIM IIFE. Calls `populateReplayFileList()` then sets the replay file select to the target file. "→ Replay" button added in Files table Actions column.
 
 ---
 

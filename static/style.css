@@ -1244,9 +1244,9 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
     "topbar    topbar"
     "culprits  culprits"
     "chart     pattern"
-    "episodes  cofiring"
-    "daily     histogram"
-    "mttd      mttd";
+    "mttd      cofiring"
+    "episodes  histogram"
+    "daily     daily";
   gap: 8px;
 }
 [data-mode="advanced"] .eng-topbar    { grid-area: topbar; }
