@@ -1987,11 +1987,17 @@ const SIM = (() => {
       <td><code style="font-size:11px;">${esc(t.tag_name)}</code></td>
       <td><span class="badge">${esc(t.data_type)}</span></td>
     </tr>`).join('');
+    
+    const updateCount = () => {
+      const c = document.getElementById('sim-tag-count');
+      if(c) c.textContent = `(${currentTagMappings.filter(t=>t.enabled).length} / ${currentTagMappings.length} enabled)`;
+    };
+    updateCount();
+    
     tbody.querySelectorAll('input[type=checkbox]').forEach(cb => {
       cb.addEventListener('change', () => {
         currentTagMappings[parseInt(cb.dataset.tagIdx)].enabled = cb.checked;
-        const c = document.getElementById('sim-tag-count');
-        if(c) c.textContent = `(${currentTagMappings.filter(t=>t.enabled).length} / ${currentTagMappings.length} enabled)`;
+        updateCount();
       });
     });
   }
