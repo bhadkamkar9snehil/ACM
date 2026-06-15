@@ -1,13 +1,13 @@
-"""Performance regression tests and micro-benchmarks.
+﻿"""Performance regression tests and micro-benchmarks.
 
 Three areas covered, none touching core ML:
 
-  1. SQL  — v_asset_now CTE view: correctness + query-plan efficiency.
-  2. Feed — update_cache fast path: no full read/write when no new data.
-  3. API  — _TTLCache: hit/miss, expiry, invalidation, mutation side-effects.
+  1. SQL  â€” v_asset_now CTE view: correctness + query-plan efficiency.
+  2. Feed â€” update_cache fast path: no full read/write when no new data.
+  3. API  â€” _TTLCache: hit/miss, expiry, invalidation, mutation side-effects.
 
 Benchmarks use wall-clock ratios rather than fixed thresholds so they are
-stable across CI machines.  A 2× ratio is required for the caching wins; the
+stable across CI machines.  A 2Ã— ratio is required for the caching wins; the
 SQL plan test counts table-access operations rather than timing (deterministic).
 """
 from __future__ import annotations
@@ -86,7 +86,7 @@ def _insert_alarms(con: sqlite3.Connection, key: str, n: int,
 
 def _plant_csv(tmp_path: Path, name: str, n: int, seed: int = 42) -> Path:
     rng = np.random.default_rng(seed)
-    ts = pd.date_range("2026-01-01", periods=n, freq="10min")
+    ts = pd.date_range("2026-01-01", periods=n, freq="10min", tz="UTC")
     df = pd.DataFrame({
         "time_stamp": ts,
         **{f"sensor_{j}": rng.standard_normal(n) for j in range(10)},
@@ -97,7 +97,7 @@ def _plant_csv(tmp_path: Path, name: str, n: int, seed: int = 42) -> Path:
 
 
 # ===========================================================================
-# 1. SQL — v_asset_now correctness
+# 1. SQL â€” v_asset_now correctness
 # ===========================================================================
 
 class TestViewCorrectness:
@@ -175,7 +175,7 @@ class TestViewCorrectness:
             "SELECT alarm_episodes, unacked_alarms FROM v_asset_now "
             "WHERE asset_key='farm/A5'").fetchone()
         assert row[0] == 3, "all alarm episodes must be counted"
-        assert row[1] == 0, "all acked → unacked must be 0"
+        assert row[1] == 0, "all acked â†’ unacked must be 0"
 
     def test_ack_reflects_immediately(self, tmp_path):
         """Acknowledging an alarm must decrement unacked_alarms via the view."""
@@ -235,19 +235,19 @@ class TestViewCorrectness:
             return (time.perf_counter() - t0) / 5
 
         t10 = _load(10)
-        t100 = _load(100)  # 10× more assets
+        t100 = _load(100)  # 10Ã— more assets
 
-        # Allow up to 50× overhead (generous for CI), but the old O(4N) pattern
+        # Allow up to 50Ã— overhead (generous for CI), but the old O(4N) pattern
         # would be much worse.  Reject a clearly super-linear regression.
         ratio = t100 / max(t10, 1e-6)
         assert ratio < 100, (
-            f"v_asset_now query scaled {ratio:.1f}× for 10× more assets "
+            f"v_asset_now query scaled {ratio:.1f}Ã— for 10Ã— more assets "
             f"(t10={t10*1000:.1f}ms, t100={t100*1000:.1f}ms). "
             "Suspected correlated-subquery regression.")
 
 
 # ===========================================================================
-# 2. Feed — update_cache fast path
+# 2. Feed â€” update_cache fast path
 # ===========================================================================
 
 class TestUpdateCacheFastPath:
@@ -322,7 +322,7 @@ class TestUpdateCacheFastPath:
         """_read_ts_column must return only the timestamp series, not all columns."""
         rng = np.random.default_rng(0)
         n = 300
-        ts = pd.date_range("2026-01-01", periods=n, freq="10min")
+        ts = pd.date_range("2026-01-01", periods=n, freq="10min", tz="UTC")
         df = pd.DataFrame({"time_stamp": ts,
                            **{f"col_{i}": rng.standard_normal(n) for i in range(50)}})
         p = tmp_path / "wide.parquet"
@@ -339,7 +339,7 @@ class TestUpdateCacheFastPath:
         rng = np.random.default_rng(1)
         n = 2000
         n_cols = 100
-        ts = pd.date_range("2026-01-01", periods=n, freq="10min")
+        ts = pd.date_range("2026-01-01", periods=n, freq="10min", tz="UTC")
         df = pd.DataFrame({"time_stamp": ts,
                            **{f"s_{i}": rng.standard_normal(n) for i in range(n_cols)}})
         p = tmp_path / "wide.parquet"
@@ -366,7 +366,7 @@ class TestUpdateCacheFastPath:
         """Fast path must compute n_rows within the window, not the full file length."""
         rng = np.random.default_rng(2)
         n = 1440  # 10 days at 10min
-        ts = pd.date_range("2026-01-01", periods=n, freq="10min")
+        ts = pd.date_range("2026-01-01", periods=n, freq="10min", tz="UTC")
         df = pd.DataFrame({"time_stamp": ts, "val": rng.standard_normal(n)})
 
         # Seed the parquet cache directly (bypass update_cache initial load).
@@ -375,7 +375,7 @@ class TestUpdateCacheFastPath:
         p = cache_dir / "trim_asset.parquet"
         df.to_parquet(p, index=False)
 
-        # Source CSV has one stale row (older than the cache max) → increment is empty.
+        # Source CSV has one stale row (older than the cache max) â†’ increment is empty.
         stale = pd.DataFrame({"time_stamp": [pd.Timestamp("2025-01-01")], "val": [0.0]})
         csv = tmp_path / "stale.csv"
         stale.to_csv(csv, index=False)
@@ -387,14 +387,14 @@ class TestUpdateCacheFastPath:
         info = update_cache(spec, cache_dir, train_window_days=5.0)
         assert info.pulled_rows == 0, "stale CSV must produce no new rows"
         expected_rows = n // 2
-        # Allow ±2 rows for boundary rounding at the window edge
+        # Allow Â±2 rows for boundary rounding at the window edge
         assert abs(info.n_rows - expected_rows) <= 2, (
             f"5-day window on 10-day cache: expected ~{expected_rows} rows, "
             f"got {info.n_rows}")
 
 
 # ===========================================================================
-# 3. API — _TTLCache correctness
+# 3. API â€” _TTLCache correctness
 # ===========================================================================
 
 class TestTTLCache:
@@ -456,7 +456,7 @@ class TestTTLCache:
 
 
 # ===========================================================================
-# 4. API endpoints — cache integration via FastAPI TestClient
+# 4. API endpoints â€” cache integration via FastAPI TestClient
 # ===========================================================================
 
 @pytest.fixture
@@ -561,7 +561,7 @@ class TestFleetCacheIntegration:
         client.get("/api/service")
         assert svc.api_cache.get("fleet") is not _MISS
 
-        # Drive a tick directly (no assets → counts all zero, but cache is cleared)
+        # Drive a tick directly (no assets â†’ counts all zero, but cache is cleared)
         asyncio.run(svc.tick_once())
         assert svc.api_cache.get("fleet") is _MISS, \
             "api_cache must be cleared by tick_once"
@@ -603,10 +603,10 @@ class TestFleetCacheIntegration:
             "fleet cache must be invalidated after retire"
 
     def test_cache_hit_is_faster_than_miss(self, app_client):
-        """Cache hit must be at least 2× faster than a cold DB query."""
+        """Cache hit must be at least 2Ã— faster than a cold DB query."""
         client, svc = app_client
 
-        # Cold (miss) — measure 3 cold calls (cache cleared each time)
+        # Cold (miss) â€” measure 3 cold calls (cache cleared each time)
         cold_times = []
         for _ in range(3):
             svc.api_cache.clear()
@@ -615,7 +615,7 @@ class TestFleetCacheIntegration:
             cold_times.append(time.perf_counter() - t0)
         cold_avg = sum(cold_times) / len(cold_times)
 
-        # Warm (hit) — cache is now populated
+        # Warm (hit) â€” cache is now populated
         warm_times = []
         for _ in range(10):
             t0 = time.perf_counter()
@@ -629,7 +629,7 @@ class TestFleetCacheIntegration:
 
 
 # ===========================================================================
-# 5. Index existence — verify DDL creates the expected indexes
+# 5. Index existence â€” verify DDL creates the expected indexes
 # ===========================================================================
 
 class TestIndexes:

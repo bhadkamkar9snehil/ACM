@@ -1,4 +1,4 @@
-"""ML correctness tests — synthetic data with KNOWN injected faults.
+﻿"""ML correctness tests â€” synthetic data with KNOWN injected faults.
 
 These tests exist to catch real regressions in detection behaviour:
   - injected faults MUST raise alarms (sensitivity)
@@ -26,12 +26,12 @@ def make_plant(n: int, start: str = "2025-01-01", seed: int = 7,
                phase0: int = 0, ambient_offset: float = 0.0) -> pd.DataFrame:
     """Synthetic 9-channel plant: ambient + load drive correlated sensors.
 
-    phase0 keeps the daily cycle CONTINUOUS across train/score boundaries —
+    phase0 keeps the daily cycle CONTINUOUS across train/score boundaries â€”
     real plants do not teleport between operating points.
     ambient_offset models weather: temps follow it (an EXPLAINED shift).
     """
     rng = np.random.RandomState(seed)
-    idx = pd.date_range(start, periods=n, freq="10min")
+    idx = pd.date_range(start, periods=n, freq="10min", tz="UTC")
     phase = (np.arange(n) + phase0) * 2 * np.pi / 144
     load = 50 + 30 * np.sin(phase) + rng.normal(0, 3, n)
     ambient = ambient_offset + 15 + 5 * np.sin(phase / 6) + rng.normal(0, 0.5, n)
@@ -92,7 +92,7 @@ class TestFaultSensitivity:
             f"correlation break missed (rule={res.decision.rule_fired})"
 
     def test_intermittent_spiking_detected(self):
-        # vibration spikes under high load only — intermittent, rate-rule shape
+        # vibration spikes under high load only â€” intermittent, rate-rule shape
         def spiky(s):
             high = s["load"].to_numpy() > 65
             bump = np.where(high, 1.2, 0.0) + RNG.normal(0, 0.05, len(s))

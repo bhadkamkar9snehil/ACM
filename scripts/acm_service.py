@@ -245,7 +245,7 @@ class Service:
                                 self.train_window_days) for k in keys_list),
             return_exceptions=True)
         ready: List[str] = []
-        now = pd.Timestamp.now()
+        now = pd.Timestamp.now(tz="UTC")
         for key, info in zip(keys_list, infos):
             if isinstance(info, BaseException):
                 msg = f"ingest: {type(info).__name__}: {info}"

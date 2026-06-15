@@ -96,7 +96,7 @@ def load_increment(spec: SourceSpec, since: Optional[pd.Timestamp]) -> pd.DataFr
         if spec.timestamp_col not in df.columns:
             raise ValueError(f"timestamp column '{spec.timestamp_col}' not in source "
                              f"(columns: {list(df.columns)[:8]}...)")
-        df[spec.timestamp_col] = pd.to_datetime(df[spec.timestamp_col])
+        df[spec.timestamp_col] = pd.to_datetime(df[spec.timestamp_col], utc=True)
     return df.sort_values(spec.timestamp_col).reset_index(drop=True)
 
 
@@ -321,7 +321,7 @@ def score_cached(cache_file: str, spec_dict: dict, score_days: float) -> Dict:
     try:
         from core.pipeline import score_asset
         df = pd.read_parquet(cache_file)
-        df[spec.timestamp_col] = pd.to_datetime(df[spec.timestamp_col])
+        df[spec.timestamp_col] = pd.to_datetime(df[spec.timestamp_col], utc=True)
         ts = df[spec.timestamp_col]
         # Adaptive split: the score window never takes more than a third of
         # the history. A fixed 30-day window on a young asset starved the

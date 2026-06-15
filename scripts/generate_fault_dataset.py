@@ -173,7 +173,7 @@ def main() -> int:
         print("Onboard as ACM assets:")
         print(f"  python scripts/acm_seed_demo.py --fault-dir {dest} --db acm_results.db")
         print()
-        print("Or replay in Simulate tab → Files → select file → Load → Replay")
+        print("Or replay in Simulate tab -> Files -> select file -> Load -> Replay")
 
     if skipped:
         print(f"\nSkipped {len(skipped)} dataset(s):")
