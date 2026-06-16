@@ -2164,13 +2164,21 @@ const SIM = (() => {
       await simPost('/replay/start');
       replayRunning = true;
       if(statusEl) statusEl.textContent = '▶ Running';
-      log('Replay started', 'sim', 'info');
+      const fileName = document.getElementById('sim-replay-file')?.value || 'unknown';
+      log(`Replay started: ${fileName}`, 'sim', 'info');
       document.getElementById('btn-replay-start')?.classList.add('hidden');
       document.getElementById('btn-replay-stop')?.classList.remove('hidden');
       document.getElementById('btn-replay-restart')?.classList.remove('hidden');
       document.getElementById('btn-sim-start')?.classList.add('hidden');
       document.getElementById('btn-sim-stop')?.classList.remove('hidden');
       refreshSimStatus();
+      // Update ACM asset to show which file is being replayed
+      try {
+        await api(`/api/monitored-assets/simulator%2Fopc_ua`, {
+          method: 'PATCH',
+          body: { state_detail: `Replaying: ${fileName}` }
+        });
+      } catch (_) {}  // Silent fail if update doesn't work
     } catch (e) {
       if(statusEl) statusEl.textContent = 'Error: ' + e.message;
       log('Start failed: ' + e.message, 'sim', 'error');
@@ -2188,6 +2196,13 @@ const SIM = (() => {
       document.getElementById('btn-replay-stop')?.classList.add('hidden');
       document.getElementById('btn-replay-restart')?.classList.add('hidden');
       document.getElementById('btn-sim-start')?.classList.remove('hidden');
+      // Clear replay file info from asset
+      try {
+        await api(`/api/monitored-assets/simulator%2Fopc_ua`, {
+          method: 'PATCH',
+          body: { state_detail: null }
+        });
+      } catch (_) {}  // Silent fail if update doesn't work
       document.getElementById('btn-sim-stop')?.classList.add('hidden');
       refreshSimStatus();
     } catch (e) { log('Stop failed: ' + e.message, 'sim', 'error'); }
@@ -2200,16 +2215,17 @@ const SIM = (() => {
       const tbody = document.getElementById('sim-live-body');
       const updEl = document.getElementById('sim-live-updated');
       if (!tbody) return;
-      if (updEl && resp.updated_at) updEl.textContent = resp.updated_at.slice(11,19) + ' UTC';
+      const fileName = document.getElementById('sim-replay-file')?.value || 'unknown file';
+      if (updEl && resp.updated_at) updEl.textContent = `${fileName} · ${resp.updated_at.slice(11,19)} UTC`;
       const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
       tbody.innerHTML = (resp.values||[]).map(v => {
         const changed = liveValPrev[v.node_id] !== String(v.value);
         liveValPrev[v.node_id] = String(v.value);
         return `<tr class="${changed?'val-changed':''}">
-          <td><code style="font-size:11px;">${esc(v.tag_name)}</code></td>
-          <td class="num" style="font-family:'Share Tech Mono',monospace;">${esc(String(v.value??'—'))}</td>
-          <td>${esc(v.data_type)}</td>
-          <td style="font-size:10px;color:var(--muted);">${esc(v.last_updated?.slice(11,19)||'—')}</td>
+          <td><code style="font-size:16px;font-family:'Share Tech Mono',monospace;">${esc(v.tag_name)}</code></td>
+          <td class="num" style="font-family:'Share Tech Mono',monospace;font-size:18px;">${esc(String(v.value??'—'))}</td>
+          <td style="font-size:16px;">${esc(v.data_type)}</td>
+          <td style="font-size:14px;color:var(--muted);">${esc(v.last_updated?.slice(11,19)||'—')}</td>
         </tr>`;
       }).join('');
     } catch (_) {}
