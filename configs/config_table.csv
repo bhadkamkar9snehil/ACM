@@ -49,7 +49,7 @@ EquipID,Category,ParamPath,ParamValue,ValueType,LastUpdated,UpdatedBy,ChangeReas
 0,runtime,timestamp_tz,local,string,2025-10-27 00:00:00,SYSTEM,local_time_policy,
 0,runtime,train_window_days,180,int,2026-06-12 06:26:45,SYSTEM,trailing_raw_cache_window,
 0,runtime,version,v10.1.0,string,2025-12-11 00:00:00,COPILOT,config_cleanup_update_to_current_version,
-0,runtime,workers,2,int,2026-06-12 06:26:45,SYSTEM,parallel_scoring_workers_per_tick,
+0,runtime,workers,0,int,2026-06-16 08:00:00,SYSTEM,persistent_pool_0_auto_scales_to_cpu_count,
 0,sql,database,ACM,string,2025-10-27 00:00:00,SYSTEM,initial_config,
 0,sql,deadlock_retry.attempts,3,int,2025-10-27 00:00:00,SYSTEM,initial_config,
 0,sql,deadlock_retry.backoff_seconds,2,int,2025-10-27 00:00:00,SYSTEM,initial_config,

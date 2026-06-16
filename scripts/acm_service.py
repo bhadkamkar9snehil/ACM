@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import multiprocessing as mp
+import os
 import sys
 import time
 from concurrent.futures import ProcessPoolExecutor
@@ -135,7 +136,15 @@ class Service:
         self._host = str(cfg_get(cfg, "runtime.service.host", "127.0.0.1"))
         self._port = int(cfg_get(cfg, "runtime.service.port", 8765))
         self.cache_dir = ROOT / str(cfg_get(cfg, "runtime.cache_dir", "data_cache"))
-        self.workers = int(cfg_get(cfg, "runtime.workers", 2))
+        raw_workers = int(cfg_get(cfg, "runtime.workers", 0))
+        self.workers = raw_workers if raw_workers > 0 else (os.cpu_count() or 4)
+        # Persistent pool — spawned once at service start, reused across all ticks.
+        # Spawn (not fork): parent runs Polars/BLAS thread pools; forking a threaded
+        # process deadlocks children on inherited mutexes. Spawn is also Windows-correct.
+        self._pool = ProcessPoolExecutor(
+            max_workers=self.workers,
+            mp_context=mp.get_context("spawn"),
+        )
         self.train_window_days = float(cfg_get(cfg, "runtime.train_window_days", 180.0))
         self.min_train_days = float(cfg_get(cfg, "runtime.min_train_days", 14.0))
         self.stale_after_hours = float(cfg_get(cfg, "runtime.stale_after_hours", 24.0))
@@ -279,21 +288,22 @@ class Service:
                 self.set_asset_state(key, state, detail)
                 counts["skipped"] += 1
 
-        # Phase C: parallel stateless re-learn + score. Spawn, not fork:
-        # the parent runs Polars/BLAS thread pools, and forking a threaded
-        # process deadlocks children on inherited mutexes. Spawn is also
-        # exactly what Windows does — one behaviour everywhere.
+        # Phase C: parallel stateless re-learn + score via the persistent pool.
         outputs: List[dict] = []
         if ready:
             loop = asyncio.get_running_loop()
-            with ProcessPoolExecutor(max_workers=self.workers,
-                                     mp_context=mp.get_context("spawn")) as pool:
-                futs = [loop.run_in_executor(
-                            pool, score_cached,
-                            str(cache_path(self.cache_dir, k)),
-                            specs[k].to_dict(), self.score_days)
-                        for k in ready]
-                outputs = list(await asyncio.gather(*futs))
+            futs = [loop.run_in_executor(
+                        self._pool, score_cached,
+                        str(cache_path(self.cache_dir, k)),
+                        specs[k].to_dict(), self.score_days)
+                    for k in ready]
+            outputs = list(await asyncio.gather(*futs, return_exceptions=True))
+            # Unwrap any exceptions returned by gather into error dicts
+            outputs = [
+                {"asset_key": ready[i], "error": str(o)}
+                if isinstance(o, Exception) else o
+                for i, o in enumerate(outputs)
+            ]
 
         # Phase D: serial ingest in the parent (single store writer)
         for o in outputs:
@@ -362,6 +372,7 @@ def create_app(backend: str = "sqlite", db: Optional[str] = "acm_results.db",
             task.cancel()
         if svc.sim:
             await svc.sim.stop()
+        svc._pool.shutdown(wait=False)
         svc.store.close()
 
     app = FastAPI(title="ACM — Asset Condition Monitor", lifespan=lifespan)
