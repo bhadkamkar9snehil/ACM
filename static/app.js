@@ -660,7 +660,7 @@ async function refreshOperator(useCache = false) {
       healthEl.style.cssText = "padding:8px 10px;display:block;";
       healthEl.append(cvs);
       const leg = document.createElement("div");
-      leg.style.cssText = "display:flex;justify-content:space-between;font-size:11px;color:var(--muted);font-family:'Share Tech Mono',monospace;margin-top:5px;";
+      leg.style.cssText = "display:flex;justify-content:space-between;font-size:13px;color:var(--muted);font-family:'Share Tech Mono',monospace;margin-top:8px;";
       leg.innerHTML = `<span>${days[0]}</span>
         <span style="display:flex;gap:12px;">
           <span style="color:var(--ok)">■ ok</span>
