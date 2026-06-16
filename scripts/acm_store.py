@@ -480,7 +480,7 @@ def ack_alarm(store: "Store", asset_key: str, start_ts: str, by: str, note: str)
 
 
 def get_service_state(store: "Store", default_tick_minutes: int = 15) -> dict:
-    """Single-row service state; seeded on first read."""
+    """Single-row service state; seeded on first read (starts paused to require explicit user action)."""
     cur = store.con.cursor()
     cur.execute(f"SELECT paused, tick_minutes, last_tick_at, last_tick_duration_s, started_at "
                 f"FROM {store.t('service_state')} WHERE id = 1")
@@ -488,10 +488,10 @@ def get_service_state(store: "Store", default_tick_minutes: int = 15) -> dict:
     if row is None:
         now = datetime.now(timezone.utc).isoformat(sep=" ", timespec="seconds")
         store.execute(f"INSERT INTO {store.t('service_state')} "
-                      f"(id, paused, tick_minutes, started_at) VALUES (1, 0, ?, ?)",
+                      f"(id, paused, tick_minutes, started_at) VALUES (1, 1, ?, ?)",
                       (int(default_tick_minutes), now))
         store.commit()
-        return {"paused": 0, "tick_minutes": int(default_tick_minutes),
+        return {"paused": 1, "tick_minutes": int(default_tick_minutes),
                 "last_tick_at": None, "last_tick_duration_s": None, "started_at": now}
     return {"paused": int(row[0]), "tick_minutes": int(row[1]),
             "last_tick_at": str(row[2]) if row[2] is not None else None,
