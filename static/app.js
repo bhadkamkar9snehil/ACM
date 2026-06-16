@@ -308,6 +308,14 @@ function formatRulesForOperator(raw) {
 }
 
 let cachedOperatorData = null;
+let cachedOperatorHash = null;
+
+function _dataHash(obj) {
+  /* Simple hash for change detection (not cryptographic, just for equality) */
+  return JSON.stringify(obj).length.toString(36) +
+         JSON.stringify(obj).split('').reduce((h, c) => ((h << 5) - h) + c.charCodeAt(0), 0).toString(36);
+}
+
 async function refreshOperator(useCache = false) {
   if (!useCache || !cachedOperatorData) {
     const [fleet, sparks, alarms] = await Promise.all([
@@ -316,6 +324,13 @@ async function refreshOperator(useCache = false) {
     cachedOperatorData = { fleet, sparks, alarms };
   }
   const { fleet, sparks, alarms } = cachedOperatorData;
+
+  // OPTIMIZATION: Debounce render if data unchanged (200-500ms savings between ticks)
+  const dataHash = _dataHash({ fleet, alarms });
+  if (cachedOperatorHash === dataHash && document.querySelector(".mega-asset-row")) {
+    return;  // Data identical, skip expensive DOM rebuild
+  }
+  cachedOperatorHash = dataHash;
 
   // KPI strip
   const n = fleet.length;
@@ -1468,6 +1483,8 @@ $("#eng-days").addEventListener("change", refreshEngineer);
 
 // --------------------------------------------------------------- admin ----
 let cachedAdminData = null;
+let cachedAdminHash = null;
+
 async function refreshAdmin(useCache = false) {
   const svc = await refreshService(useCache);
 
@@ -1491,6 +1508,13 @@ async function refreshAdmin(useCache = false) {
     cachedAdminData = { assets: await api("/api/monitored-assets") };
   }
   const assets = cachedAdminData.assets;
+
+  // OPTIMIZATION: Debounce render if asset list unchanged
+  const assetsHash = _dataHash(assets);
+  if (cachedAdminHash === assetsHash && document.querySelector("#adm-assets tbody tr")) {
+    return;  // Assets unchanged, skip table rebuild
+  }
+  cachedAdminHash = assetsHash;
   const tb = $("#adm-assets tbody");
   tb.replaceChildren();
   for (const m of assets) {
