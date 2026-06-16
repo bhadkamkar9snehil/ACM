@@ -473,24 +473,23 @@ async function refreshOperator(useCache = false) {
     stateCell.append(badge(a.state));
     sparkCell.append(sparklineBar(sparks[a.asset_key] || []));
 
-    aRow.addEventListener("click", (e) => {
-      if (e.target.tagName !== 'BUTTON') {
-        const isColl = aRow.classList.toggle('collapsed');
-        const chev = aRow.querySelector('.chevron');
-        if (chev && assetAlarms.length) chev.textContent = isColl ? '►' : '▼';
-      }
-    });
-    aRow.addEventListener("dblclick", () => openEngineer(a.asset_key));
-    frag.append(aRow);
+    // OPTIMIZATION 3.2: Lazy-load alarm episodes (don't render on initial load)
+    let alContainer = null;
+    let alarmsRendered = false;
 
-    // Alarm Rows
-    if (assetAlarms.length > 0) {
-      const alContainer = document.createElement("div");
-      alContainer.className = "mega-alarms";
+    const renderAlarmRows = () => {
+      if (alarmsRendered) return;
+      alarmsRendered = true;
+
+      if (!alContainer) {
+        alContainer = document.createElement("div");
+        alContainer.className = "mega-alarms";
+        aRow.after(alContainer);
+      }
+
       for (const al of assetAlarms) {
         const alRow = document.createElement("div");
         alRow.className = "mega-alarm-row";
-        const ackId = `mr-ack-${a.asset_key}-${al.start_ts.replace(/[: ]/g, '')}`;
         alRow.innerHTML = `
           <div style="color:var(--muted);">└── Episode</div>
           <div>${fmtTs(al.start_ts)}</div>
@@ -506,8 +505,20 @@ async function refreshOperator(useCache = false) {
         alRow.querySelector('[data-ack-cell]').append(btn);
         alContainer.append(alRow);
       }
-      frag.append(alContainer);
-    }
+    };
+
+    aRow.addEventListener("click", (e) => {
+      if (e.target.tagName !== 'BUTTON') {
+        const isColl = aRow.classList.toggle('collapsed');
+        const chev = aRow.querySelector('.chevron');
+        if (chev && assetAlarms.length) chev.textContent = isColl ? '►' : '▼';
+
+        // Lazy-load alarm rows when expanding
+        if (!isColl && assetAlarms.length) renderAlarmRows();
+      }
+    });
+    aRow.addEventListener("dblclick", () => openEngineer(a.asset_key));
+    frag.append(aRow);
   }
 
   // OPTIMIZATION 4: Single append to DOM (single reflow instead of 415+)
