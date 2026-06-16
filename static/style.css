@@ -1457,6 +1457,14 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
   font-size: 13px;
   color: var(--muted);
 }
+.output-log-table .log-stage {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
 .output-log-table .log-asset {
   font-family: 'Share Tech Mono', monospace;
   font-size: 11px;

@@ -1917,11 +1917,14 @@ const SIM = (() => {
       const lvl = e.level.toUpperCase();
       const lvlBadge = `<span class="badge ${lvl}">${lvl}</span>`;
       const srcBadge = `<span class="log-src-label">${e.src === 'sim' ? 'SIM' : 'ACM'}</span>`;
+      const stageCell = e.stage
+        ? `<span class="log-stage">${e.stage}</span>`
+        : `<span style="color:var(--muted);font-size:10px;">—</span>`;
       const assetCell = e.asset
         ? `<span class="log-asset">${e.asset}</span>`
         : `<span style="color:var(--muted);font-size:10px;">—</span>`;
       const msg = String(e.text).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-      return `<tr><td class="log-ts">${e.ts}</td><td>${lvlBadge}</td><td>${srcBadge}</td><td>${assetCell}</td><td class="log-msg">${msg}</td></tr>`;
+      return `<tr><td class="log-ts">${e.ts}</td><td>${lvlBadge}</td><td>${srcBadge}</td><td>${stageCell}</td><td>${assetCell}</td><td class="log-msg">${msg}</td></tr>`;
     }).join('');
     
     const el = document.getElementById('output-line-count');
@@ -1957,15 +1960,23 @@ const SIM = (() => {
       }
     }
 
-    // Extract asset from ACM pipeline lines: "  [stage] grp/asset_key: message"
-    const assetMatch = cleanText.match(/^\s*\[\S+\]\s+([\w\-]+\/[\w\-\/]+):/);
+    // Extract stage + asset from ACM pipeline lines: "  [stage] grp/asset_key: message"
+    let stage = null;
+    const assetMatch = cleanText.match(/^\s*\[(\S+)\]\s+([\w\-]+\/[\w\-\/]+):/);
     if (assetMatch) {
-      asset = assetMatch[1];
-      // Strip the "[stage] asset_key: " prefix from message so message col is clean
+      stage = assetMatch[1];
+      asset = assetMatch[2];
       cleanText = cleanText.replace(/^\s*\[\S+\]\s+[\w\-]+\/[\w\-\/]+:\s*/, '');
+    } else {
+      // Lines with stage but no asset: "[tick] ...", "[sim] ..."
+      const stageMatch = cleanText.match(/^\s*\[(\S+)\]\s*/);
+      if (stageMatch) {
+        stage = stageMatch[1];
+        cleanText = cleanText.replace(/^\s*\[\S+\]\s*/, '');
+      }
     }
 
-    return { ts, text: cleanText, level, asset };
+    return { ts, text: cleanText, level, asset, stage };
   }
 
   function initOutputPanel() {
@@ -2162,7 +2173,7 @@ const SIM = (() => {
           if (ln.id > lastLogId) {
             lastLogId = ln.id;
             const parsed = parseBackendLogLine(ln.text);
-            outputLines.push({ ts: parsed.ts, text: parsed.text, src: 'acm', level: parsed.level, asset: parsed.asset || null, time: Date.now() });
+            outputLines.push({ ts: parsed.ts, text: parsed.text, src: 'acm', level: parsed.level, asset: parsed.asset || null, stage: parsed.stage || null, time: Date.now() });
             if (outputLines.length > 2000) outputLines = outputLines.slice(-2000);
             renderOutputLog();
           }
@@ -2193,6 +2204,7 @@ const SIM = (() => {
                 src: 'acm',
                 level: parsed.level,
                 asset: parsed.asset || null,
+                stage: parsed.stage || null,
                 time: Date.now()
               });
             });
