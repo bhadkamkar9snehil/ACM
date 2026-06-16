@@ -170,26 +170,37 @@ from scripts.acm_sim_routes import router
 print(f'{len(list_generators())} generators, {len(router.routes)} sim routes — OK')
 "
 }
-# Self-test — non-fatal: a failing test does not undo a working install.
-Write-Host "    $([char]0x00B7)  Self-test"
-$testOut = python -u -m pytest tests/ -q --no-header -p no:warnings -m "not slow" `
-                --basetemp="$InstallDir\.pytest_basetemp" 2>&1 | ForEach-Object {
-    $_ | Out-File $Log -Append
-    Write-Host "         $_" -ForegroundColor DarkGray
-    $_
+# Smoke test — verify ACM can start and respond to HTTP (instead of slow pytest)
+$_smokeDb = "$env:TEMP\acm_smoke_$PID.db"
+$_smokeLog = "$env:TEMP\acm_smoke_$PID.log"
+Write-Host "    $([char]0x00B7)  Smoke test (ACM starts)" -NoNewline
+$_proc = Start-Process python `
+    -ArgumentList "scripts\acm_service.py","--port","8766","--db","$_smokeDb" `
+    -WorkingDirectory $InstallDir -PassThru -WindowStyle Hidden `
+    -RedirectStandardOutput "$_smokeLog" -RedirectStandardError "$_smokeLog"
+$_ok = $false
+for ($_i = 0; $_i -lt 6; $_i++) {
+    Start-Sleep 2
+    try {
+        $_r = Invoke-WebRequest -Uri "http://127.0.0.1:8766/api/service" `
+            -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
+        if ($_r.StatusCode -eq 200) { $_ok = $true; break }
+    } catch {}
 }
-$testExit = $LASTEXITCODE
-$summary  = ($testOut | Where-Object { $_ -match "passed|failed|error" } | Select-Object -Last 1)
-if ($testExit -eq 0) {
-    Write-Host "    $([char]0x2713)  Self-test  " -NoNewline -ForegroundColor Green; Write-Host "$summary" -ForegroundColor DarkGray
+try { $_proc.Kill() } catch {}
+try { Wait-Process -Id $_proc.Id -ErrorAction SilentlyContinue } catch {}
+Remove-Item "$_smokeDb","$_smokeLog" -ErrorAction SilentlyContinue
+if ($_ok) {
+    Write-Host "`r    $([char]0x2713)  Smoke test (ACM starts)" -ForegroundColor Green
 } else {
-    Write-Host "    !  Self-test (some tests failed — ACM is still usable)" -ForegroundColor Yellow
-    if ($summary) { Write-Host "       $summary" -ForegroundColor DarkGray }
-    Write-Host "       Full log: $Log" -ForegroundColor DarkGray
-    Write-Host "       Run " -NoNewline -ForegroundColor DarkGray
-    Write-Host "python -m pytest tests/ -v" -ForegroundColor Cyan -NoNewline
-    Write-Host " to investigate." -ForegroundColor DarkGray
+    Write-Host "`r    !  Smoke test (non-fatal)" -ForegroundColor Yellow
 }
+
+# Show CI status reminder
+Write-Host ""
+Write-Host "  $([char]0x00B7)  GitHub CI Status" -ForegroundColor DarkGray
+Write-Host "    Check test results at: https://github.com/bhadkamkar9snehil/ACM/actions" -ForegroundColor DarkGray
+Write-Host "    Run locally: python -m pytest tests/ -v" -ForegroundColor DarkGray
 
 # Fault datasets — non-fatal: CSVs are pre-committed in git; regeneration is a bonus.
 Write-Host "    $([char]0x00B7)  Fault datasets"

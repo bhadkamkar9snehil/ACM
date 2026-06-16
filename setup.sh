@@ -109,7 +109,30 @@ from scripts.acm_sim_routes import router
 print(f'{len(list_generators())} generators, {len(router.routes)} sim routes — OK')
 "
 
-warn_step "Self-test" "$PYTHON" -m pytest tests/ -m "not slow" -q --tb=no -p no:warnings
+# Smoke test — verify ACM can start and respond to HTTP (instead of slow pytest)
+warn_step "Smoke test (ACM starts)" bash -c '
+  export PYTHONPATH="."
+  _smoke_db="/tmp/acm_smoke_$$.db"
+  _smoke_log="/tmp/acm_smoke_$$.log"
+  "$1" scripts/acm_service.py --port 8766 --db "$_smoke_db" > "$_smoke_log" 2>&1 &
+  _pid=$!
+  _ok=0
+  for _i in 1 2 3 4 5 6; do
+    sleep 2
+    _code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8766/api/service 2>/dev/null)
+    [ "$_code" = "200" ] && _ok=1 && break
+  done
+  kill "$_pid" 2>/dev/null
+  wait "$_pid" 2>/dev/null
+  rm -f "$_smoke_db" "$_smoke_log"
+  [ $_ok -eq 1 ]
+' - "$PYTHON"
+
+# Show CI status reminder
+echo ""
+printf "  ${DIM}GitHub CI Status${RST}\n"
+printf "    Check test results at: https://github.com/bhadkamkar9snehil/ACM/actions\n"
+printf "    Run locally: python -m pytest tests/ -v\n"
 
 warn_step "Fault datasets" "$PYTHON" scripts/generate_fault_dataset.py
 

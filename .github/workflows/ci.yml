@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+    branches: [main]
+
+jobs:
+  fast-tests:
+    name: Tests (fast)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          pip install pandas numpy polars pyarrow scikit-learn scipy structlog \
+            matplotlib remotezip pytest httpx fastapi uvicorn python-multipart \
+            pydantic asyncua paho-mqtt openpyxl
+      - name: Run fast tests
+        run: python -m pytest tests/ -m "not slow" -v --tb=short
+
+  slow-tests:
+    name: Tests (slow)
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          pip install pandas numpy polars pyarrow scikit-learn scipy structlog \
+            matplotlib remotezip pytest httpx fastapi uvicorn python-multipart \
+            pydantic asyncua paho-mqtt openpyxl
+      - name: Run slow tests
+        run: python -m pytest tests/ -m slow -v --tb=short
+        timeout-minutes: 20
