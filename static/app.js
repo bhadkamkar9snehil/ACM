@@ -317,6 +317,7 @@ function formatRulesForOperator(raw) {
 
 let cachedOperatorData = null;
 let cachedOperatorHash = null;
+const _scoringNow = new Set();  // assets triggered programmatically (show ⟳ in matrix)
 
 function _dataHash(obj) {
   /* Simple hash for change detection (not cryptographic, just for equality) */
@@ -498,7 +499,11 @@ async function refreshOperator(useCache = false) {
 
     // Per-asset Score button — state-aware
     const scoreBtn = document.createElement("button");
-    if (a.state === "MATURING") {
+    if (_scoringNow.has(a.asset_key)) {
+      scoreBtn.className = "btn btn-sm btn-warn";
+      scoreBtn.textContent = "⟳ Scoring…";
+      scoreBtn.disabled = true;
+    } else if (a.state === "MATURING") {
       scoreBtn.className = "btn btn-sm";
       scoreBtn.textContent = "Maturing";
       scoreBtn.disabled = true;
@@ -2393,11 +2398,36 @@ const SIM = (() => {
         if (!err.message?.includes('409')) throw err;
         // 409 = already registered — fine, just score it
       }
+      // Snapshot last_run_at so we can detect when scoring completes
+      const fleetSnap = await api('/api/fleet');
+      const snapRow = fleetSnap.find(r => r.asset_key === assetKey);
+      const prevRunAt = snapRow?.last_run_at ?? null;
+
+      _scoringNow.add(assetKey);
       await api('/api/service/run-now', { method: 'POST', body: { assets: [assetKey] } });
       toast(`${assetKey} — scoring now`, 'ok', 4000);
+
+      // Set as selected so it appears in engineer dropdown immediately
+      selectedAsset = assetKey;
       document.querySelector('.tab[data-tab="operator"]').click();
       cachedOperatorHash = null; cachedOperatorData = null;
       await refreshOperator();
+
+      // Poll until scoring completes, then clear spinner and refresh
+      let tries = 0;
+      const poll = setInterval(async () => {
+        tries++;
+        try {
+          const fd = await api('/api/fleet');
+          const row = fd.find(r => r.asset_key === assetKey);
+          if ((row && row.last_run_at !== prevRunAt) || tries > 30) {
+            clearInterval(poll);
+            _scoringNow.delete(assetKey);
+            cachedOperatorHash = null; cachedOperatorData = null;
+            await refreshOperator();
+          }
+        } catch (_) { if (tries > 30) { clearInterval(poll); _scoringNow.delete(assetKey); } }
+      }, 2000);
     } catch (err) {
       toast(err.message, 'err');
     }
