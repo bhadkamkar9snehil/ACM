@@ -319,6 +319,7 @@ class Service:
                     (_now(), key))
                 self.store.commit()
                 counts["errors"] += 1
+                print(f"  [error] {key}: {o['error']}", flush=True)
                 continue
             res = o["result"]
             st.ingest_result(self.store, groups[key], key, res, keep_history=True)
@@ -332,6 +333,7 @@ class Service:
                 (_now(), str(res.ts[-1]), float(res.runtime_s), key))
             self.store.commit()
             counts["scored"] += 1
+            print(f"  [scored] {key}: fused={float(res.decision.fused.mean()):.2f}", flush=True)
 
         st.set_service_state(self.store, last_tick_at=_now(),
                              last_tick_duration_s=round(time.time() - t0, 1))

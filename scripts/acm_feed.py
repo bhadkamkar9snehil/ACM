@@ -345,7 +345,8 @@ def score_cached(cache_file: str, spec_dict: dict, score_days: float) -> Dict:
         # rules' 500-sample minimum — silently disarming the rate and
         # per-head rules, the ones that catch single-channel faults.
         span_days = (ts.iloc[-1] - ts.iloc[0]).total_seconds() / 86400.0
-        score_eff = min(score_days, max(1.0, span_days / 3.0))
+        score_eff = min(score_days, span_days / 3.0)
+        score_eff = max(score_eff, span_days * 0.05)  # always score at least 5% of history
         cut = ts.iloc[-1] - pd.Timedelta(days=score_eff)
         train_df, score_df = df[ts < cut], df[ts >= cut]
         if not len(train_df) or not len(score_df):
