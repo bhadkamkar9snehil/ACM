@@ -1217,78 +1217,15 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
 /* ── Operator tab — op-layout ────────────────────────────── */
 .op-layout { display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 0; }
 
-[data-mode="advanced"] .op-layout {
-  display: grid;
-  grid-template-columns: 200px 1fr;
-  grid-template-rows: auto auto 1fr;
-  grid-template-areas:
-    "kpis   health"
-    "kpis   causes"
-    "matrix matrix";
-  gap: 8px;
-}
-[data-mode="advanced"] .op-kpis   { grid-area: kpis; align-self: start; }
-[data-mode="advanced"] .op-health { grid-area: health; }
-[data-mode="advanced"] .op-matrix { grid-area: matrix; min-height: 300px; }
-[data-mode="advanced"] .op-causes { grid-area: causes; }
-
-/* KPI tiles: horizontal row in basic → compact vertical sidebar in advanced */
-[data-mode="advanced"] .op-kpis .kpis { grid-template-columns: 1fr; gap: 4px; margin-bottom: 0; }
-[data-mode="advanced"] .op-kpis .kpi  { padding: 6px 10px; }
-[data-mode="advanced"] .op-kpis .kpi-num { font-size: 21px; }
-
 /* ── Engineer tab — eng-layout ───────────────────────────── */
 .eng-layout { display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 0; }
 
-[data-mode="advanced"] .eng-layout {
-  display: grid;
-  grid-template-columns: 3fr 2fr;
-  grid-template-rows: auto auto auto auto auto auto;
-  grid-template-areas:
-    "topbar    topbar"
-    "culprits  culprits"
-    "chart     pattern"
-    "mttd      cofiring"
-    "episodes  histogram"
-    "daily     daily";
-  gap: 8px;
-}
-[data-mode="advanced"] .eng-topbar    { grid-area: topbar; }
-[data-mode="advanced"] .eng-culprits  { grid-area: culprits; }
-[data-mode="advanced"] .eng-chart     { grid-area: chart; }
-[data-mode="advanced"] .eng-pattern   { grid-area: pattern; }
-[data-mode="advanced"] .eng-episodes  { grid-area: episodes; min-height: 200px; }
-[data-mode="advanced"] .eng-cofiring  { grid-area: cofiring; min-height: 160px; }
-[data-mode="advanced"] .eng-daily     { grid-area: daily;    min-height: 200px; }
-[data-mode="advanced"] .eng-histogram { grid-area: histogram; min-height: 160px; }
-[data-mode="advanced"] .eng-mttd      { grid-area: mttd; align-self: start; }
-
 /* Score chart: scales with viewport height so it isn't tiny on tall/4K monitors */
 [data-mode="basic"]    #eng-chart uplot { height: max(220px, 20vh); }
-[data-mode="advanced"] #eng-chart uplot { height: max(180px, 18vh); }
+[data-mode="advanced"] #eng-chart uplot { height: max(220px, 20vh); }
 
 /* ── Admin tab — adm-layout ──────────────────────────────── */
 .adm-layout { display: flex; flex-direction: column; gap: 10px; }
-
-[data-mode="advanced"] .adm-layout {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  grid-template-areas:
-    "health  health"
-    "assets  runhist"
-    "runs    runs"
-    "config  config"
-    "audit   audit"
-    "log     log";
-  gap: 8px;
-}
-[data-mode="advanced"] .adm-health  { grid-area: health; }
-[data-mode="advanced"] .adm-assets  { grid-area: assets; }
-[data-mode="advanced"] .adm-runhist { grid-area: runhist; }
-[data-mode="advanced"] .adm-runs    { grid-area: runs; }
-[data-mode="advanced"] .adm-config  { grid-area: config; }
-[data-mode="advanced"] .adm-audit   { grid-area: audit; }
-[data-mode="advanced"] .adm-log     { grid-area: log; }
 
 /* ── A3 Episode detector contribution strip ──────────────── */
 .cause-strip {
@@ -1352,23 +1289,6 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
   box-shadow: 0 0 6px currentColor;
 }
 
-/* ── Responsive: collapse grids below 900px ─────────────── */
-@media (max-width: 900px) {
-  [data-mode="advanced"] .op-layout,
-  [data-mode="advanced"] .eng-layout,
-  [data-mode="advanced"] .adm-layout {
-    display: flex;
-    flex-direction: column;
-  }
-}
-
-/* ── Short screens: compact advanced KPI sidebar ─────────── */
-/* On monitors ≤700px tall the 5-tile sidebar eats too much of the matrix height */
-@media (max-height: 700px) {
-  [data-mode="advanced"] .op-kpis .kpi     { padding: 3px 8px; }
-  [data-mode="advanced"] .op-kpis .kpi-num { font-size: 17px; }
-  [data-mode="advanced"] .op-kpis .kpis    { gap: 2px; }
-}
 
 /* ═══════════════════════════════════════════════════════════
    SIMULATE TAB — Sub-tabs, sim panels, output panel
