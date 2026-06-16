@@ -197,12 +197,6 @@ if ($_ok) {
     Write-Host "`r    !  Smoke test (non-fatal)" -ForegroundColor Yellow
 }
 
-# Show CI status reminder
-Write-Host ""
-Write-Host "  $([char]0x00B7)  GitHub CI Status" -ForegroundColor DarkGray
-Write-Host "    Check test results at: https://github.com/bhadkamkar9snehil/ACM/actions" -ForegroundColor DarkGray
-Write-Host "    Run locally: python -m pytest tests/ -v" -ForegroundColor DarkGray
-
 # Fault datasets — non-fatal: CSVs are pre-committed in git; regeneration is a bonus.
 Write-Host "    $([char]0x00B7)  Fault datasets"
 $faultOut = python -u scripts\generate_fault_dataset.py 2>&1 | ForEach-Object {

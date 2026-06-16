@@ -128,12 +128,6 @@ warn_step "Smoke test (ACM starts)" bash -c '
   [ $_ok -eq 1 ]
 ' - "$PYTHON"
 
-# Show CI status reminder
-echo ""
-printf "  ${DIM}GitHub CI Status${RST}\n"
-printf "    Check test results at: https://github.com/bhadkamkar9snehil/ACM/actions\n"
-printf "    Run locally: python -m pytest tests/ -v\n"
-
 warn_step "Fault datasets" "$PYTHON" scripts/generate_fault_dataset.py
 
 # ── Optional: Simulator ───────────────────────────────────────────────────────
