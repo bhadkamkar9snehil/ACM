@@ -168,6 +168,9 @@ async def register_file_as_acm_asset(filename: str, source: str, body: dict):
         raise HTTPException(422, "'asset_key' is required")
 
     grp = body.get("grp") or "sim"
+    # Strip grp prefix if the caller already included it (prevents sim/sim/ double-prefix)
+    if asset_key.startswith(grp + "/"):
+        asset_key = asset_key[len(grp) + 1:]
     fast_track = bool(body.get("fast_track", True))
 
     existing = _store.fetch(
