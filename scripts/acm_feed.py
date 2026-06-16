@@ -159,11 +159,15 @@ def _load_sqlite_buffer_increment(
         con.close()
 
     records = []
+    corrupt = 0
     for (json_str,) in rows:
         try:
             records.append(_json.loads(json_str))
         except Exception:
-            pass
+            corrupt += 1
+    if corrupt:
+        import warnings
+        warnings.warn(f"acm_feed: {corrupt}/{len(rows)} rows dropped — corrupt JSON in {table!r}")
 
     if not records:
         return pd.DataFrame()

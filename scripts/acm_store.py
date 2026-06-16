@@ -65,7 +65,8 @@ CREATE TABLE IF NOT EXISTS summary (
     farm TEXT, ingested_at TEXT, metrics_json TEXT);
 CREATE TABLE IF NOT EXISTS runs (
     asset_key TEXT, run_id TEXT, started_at TEXT, duration_s REAL,
-    status TEXT, alert_z REAL, persist INTEGER, rules_fired TEXT, notes TEXT);
+    status TEXT, alert_z REAL, persist INTEGER, rules_fired TEXT, notes TEXT,
+    rules_diagnostic_json TEXT, calibration_json TEXT, data_quality_json TEXT);
 CREATE TABLE IF NOT EXISTS run_log (
     asset_key TEXT, ts TEXT, level TEXT, stage TEXT, message TEXT);
 CREATE INDEX IF NOT EXISTS ix_runlog_asset     ON run_log(asset_key, ts);
@@ -156,7 +157,9 @@ IF OBJECT_ID('dbo.acm_summary') IS NULL CREATE TABLE dbo.acm_summary (
 IF OBJECT_ID('dbo.acm_runs') IS NULL CREATE TABLE dbo.acm_runs (
     asset_key NVARCHAR(64), run_id NVARCHAR(64), started_at DATETIME2,
     duration_s FLOAT, status NVARCHAR(16), alert_z FLOAT, persist INT,
-    rules_fired NVARCHAR(256), notes NVARCHAR(MAX));
+    rules_fired NVARCHAR(256), notes NVARCHAR(MAX),
+    rules_diagnostic_json NVARCHAR(MAX), calibration_json NVARCHAR(MAX),
+    data_quality_json NVARCHAR(MAX));
 IF OBJECT_ID('dbo.acm_run_log') IS NULL CREATE TABLE dbo.acm_run_log (
     asset_key NVARCHAR(64), ts DATETIME2, level NVARCHAR(8),
     stage NVARCHAR(32), message NVARCHAR(MAX),
@@ -267,6 +270,12 @@ class Store:
                 for col in ("ack_by TEXT", "ack_at TEXT", "ack_note TEXT"):
                     self.con.execute(f"ALTER TABLE alarms ADD COLUMN {col}")
                 self.con.commit()
+        if "runs" in tables:
+            cols = {r[1] for r in self.con.execute("PRAGMA table_info(runs)")}
+            for col in ("rules_diagnostic_json TEXT", "calibration_json TEXT", "data_quality_json TEXT"):
+                if col.split()[0] not in cols:
+                    self.con.execute(f"ALTER TABLE runs ADD COLUMN {col}")
+            self.con.commit()
 
     def t(self, name: str) -> str:
         return f"{self.prefix}{name}" if self.backend == "mssql" else name
@@ -363,11 +372,11 @@ def ingest(results_dir: Path, farm: str, store: Store) -> None:
         # Observability: every processing run is itself a record.
         store.execute(f"DELETE FROM {store.t('runs')} WHERE asset_key = ?", (key,))
         store.execute(
-            f"INSERT INTO {store.t('runs')} VALUES (?,?,?,?,?,?,?,?,?)",
+            f"INSERT INTO {store.t('runs')} VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
             (key, f"{key}@ingest", datetime.now(timezone.utc).isoformat(sep=' ', timespec='seconds'),
              _none(r.get("runtime_s")), "OK", _none(r.get("alert_z_eff")),
              int(r.get("persist_eff", 0)) if pd.notna(r.get("persist_eff")) else None,
-             r.get("rule_fired", ""), ""))
+             r.get("rule_fired", ""), "", None, None, None))
         log_path = results_dir / f"event_{eid}_runlog.csv"
         store.execute(f"DELETE FROM {store.t('run_log')} WHERE asset_key = ?", (key,))
         if log_path.exists():
@@ -446,10 +455,17 @@ def ingest_result(store: "Store", group: str, asset_key: str, res,
     if not keep_history:
         store.execute(f"DELETE FROM {store.t('runs')} WHERE asset_key = ?", (key,))
         store.execute(f"DELETE FROM {store.t('run_log')} WHERE asset_key = ?", (key,))
+    import json as _json_mod
     notes = ("culprits: " + ", ".join(res.culprits)) if getattr(res, "culprits", None) else ""
-    store.execute(f"INSERT INTO {store.t('runs')} VALUES (?,?,?,?,?,?,?,?,?)",
-                  (key, f"{key}@{now}", now, float(res.runtime_s), "OK",
-                   round(float(d.alert_z), 2), int(d.persist), d.rule_fired, notes))
+    rules_diag_json = _json_mod.dumps(d.rules_diagnostic, default=str) \
+        if getattr(d, "rules_diagnostic", None) else None
+    store.execute(
+        f"INSERT INTO {store.t('runs')} VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        (key, f"{key}@{now}", now, float(res.runtime_s), "OK",
+         round(float(d.alert_z), 2), int(d.persist), d.rule_fired, notes,
+         rules_diag_json,
+         getattr(res, "calibration_json", None),
+         getattr(res, "data_quality_json", None)))
     if res.runlog:
         store.executemany(f"INSERT INTO {store.t('run_log')} VALUES (?,?,?,?,?)",
                           [(key, r["ts"], r["level"], r["stage"], r["message"])
@@ -460,8 +476,9 @@ def ingest_result(store: "Store", group: str, asset_key: str, res,
 def record_run_error(store: "Store", key: str, message: str) -> None:
     """A failed run is itself a record — visible in the runs/run_log tables."""
     now = datetime.now(timezone.utc).isoformat(sep=" ", timespec="seconds")
-    store.execute(f"INSERT INTO {store.t('runs')} VALUES (?,?,?,?,?,?,?,?,?)",
-                  (key, f"{key}@{now}", now, None, "ERROR", None, None, "", message[:500]))
+    store.execute(f"INSERT INTO {store.t('runs')} VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                  (key, f"{key}@{now}", now, None, "ERROR", None, None, "", message[:500],
+                   None, None, None))
     store.execute(f"INSERT INTO {store.t('run_log')} VALUES (?,?,?,?,?)",
                   (key, now, "ERROR", "service", message[:2000]))
     store.commit()

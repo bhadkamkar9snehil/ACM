@@ -115,6 +115,7 @@ class AlarmDecision:
     avail_run_thr: Optional[int] = None
     heads_fired: List[str] = field(default_factory=list)
     distrusted: List[str] = field(default_factory=list)
+    rules_diagnostic: Dict = field(default_factory=dict)
 
     @property
     def rule_fired(self) -> str:
@@ -162,7 +163,10 @@ def apply_alarm_rules(
     # Only the RATE threshold self-tunes.
     rate_thr, z0 = float("nan"), alert_z_floor
     alarm_rate = np.zeros(n, dtype=bool)
-    if train_fused is not None and np.isfinite(train_fused).sum() > 500:
+    rate_n = int(np.isfinite(train_fused).sum()) if train_fused is not None else 0
+    diag: Dict = {"rate": {"active": rate_n > 500, "train_n": rate_n},
+                  "per_head": {}}
+    if rate_n > 500:
         tf = np.asarray(train_fused, dtype=np.float64)
         tf = tf[np.isfinite(tf)]
         base = float(np.nanmax(rolling_rate(tf, z0, window=rate_window)))
@@ -172,6 +176,7 @@ def apply_alarm_rules(
         rate_thr = float(np.clip(base * SAFETY + 0.05, 0.05, 0.9))
         score_rate = np.nan_to_num(rolling_rate(fused, z0, window=rate_window), nan=0.0)
         alarm_rate = sustained_alarm_mask(score_rate, rate_thr, persist_floor)
+        diag["rate"]["thr"] = rate_thr
 
     avail_run_thr = None
     alarm_avail = np.zeros(n, dtype=bool)
@@ -206,6 +211,7 @@ def apply_alarm_rules(
             ztr = np.asarray(z_tr, dtype=np.float64)
             ztr = ztr[np.isfinite(ztr)]
             if ztr.size < 500:
+                diag["per_head"][name] = {"active": False, "train_n": int(ztr.size)}
                 continue
             z0_h = alert_z_floor
             base_h = float(np.nanmax(rolling_rate(ztr, z0_h, window=head_window)))
@@ -213,6 +219,7 @@ def apply_alarm_rules(
             r_sc = np.nan_to_num(rolling_rate(np.asarray(z_sc, dtype=np.float64), z0_h,
                                               window=head_window), nan=0.0)
             mask_h = sustained_alarm_mask(r_sc, thr_h, persist_floor)
+            diag["per_head"][name] = {"active": True, "train_n": int(ztr.size), "thr": thr_h}
             if mask_h.any():
                 heads_fired.append(name)
                 alarm_heads |= mask_h
@@ -244,4 +251,5 @@ def apply_alarm_rules(
         alarm_avail=alarm_avail, alarm_heads=alarm_heads,
         alert_z=alert_z, persist=persist, rate_z0=z0, rate_thr=rate_thr,
         avail_run_thr=avail_run_thr, heads_fired=heads_fired, distrusted=distrusted,
+        rules_diagnostic=diag,
     )

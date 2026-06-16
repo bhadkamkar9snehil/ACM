@@ -246,6 +246,12 @@ class CalibrationContaminationFilter:
         3. Recompute median/MAD on retained data
         4. Repeat until median converges or max_iterations reached
         """
+        if len(x) == 0:
+            return self._apply_exclusion_with_guards(
+                x, np.zeros(0, dtype=bool), method='iterative_mad',
+                threshold_used=self.z_threshold, iterations=0, converged=False,
+                diagnostics={'final_median': 0.0, 'final_mad': 0.0,
+                             'final_sigma_mad': 0.0, 'iterations': 0, 'converged': False})
         current_data = x.copy()
         current_mask = np.ones(len(x), dtype=bool)  # True = included
         prev_median = np.inf
@@ -947,8 +953,8 @@ def tune_detector_weights(
             # (every subsequent tune exceeded the threshold too), so the
             # system could never adapt. Clamping keeps each batch's change
             # bounded while still converging over multiple batches.
-            if old_weight > 0.01:  # Only check if old_weight is meaningful
-                drift = abs(blended - old_weight) / old_weight
+            if True:  # always check; use floored denominator so near-zero weights are also clamped
+                drift = abs(blended - old_weight) / max(old_weight, 0.01)
                 if drift > max_drift_threshold:
                     clamped = old_weight * (1.0 + np.sign(blended - old_weight) * max_drift_threshold)
                     Console.info(

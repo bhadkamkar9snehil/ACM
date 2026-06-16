@@ -21,6 +21,7 @@ Stages (all self-contained, no SQL, no services):
 """
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional
@@ -60,6 +61,8 @@ class PipelineResult:
     cadence_s: float = 600.0
     runlog: List[Dict] = field(default_factory=list)
     runtime_s: float = 0.0
+    calibration_json: Optional[str] = None   # detector weights + tuning diagnostics (#65)
+    data_quality_json: Optional[str] = None  # NaN density, duplicates, skew (#66)
 
 
 def score_asset(
@@ -165,6 +168,12 @@ def score_asset(
     head_z_score = {z: score_frame[z].to_numpy() for _, z in Z_MAP if z in score_frame.columns}
     head_z_train = {z: calib_frame[z].to_numpy() for _, z in Z_MAP if z in calib_frame.columns}
 
+    calibration_json = json.dumps({
+        "weights_used": {k: round(v, 4) for k, v in fusion.weights_used.items()},
+        "auto_tuned": fusion.auto_tuned,
+        "tuning": fusion.tuning_diagnostics or {},
+    }, default=str)
+
     # 7. alarm rules (self-tuned, label-free). Horizons are time-defined and
     # converted with the cadence inferred from the data's own timestamps —
     # sample-count rules silently broke off the 10-minute cadence.
@@ -198,12 +207,30 @@ def score_asset(
                   f"fired={decision.rule_fired or '-'}")
     if decision.distrusted:
         _log("rules", f"self-distrust gate discarded: {decision.distrusted}", level="WARN")
+    rd = decision.rules_diagnostic
+    if not rd.get("rate", {}).get("active"):
+        _log("rules", f"rate rule DISARMED: train_n={rd.get('rate', {}).get('train_n', 0)} < 500", level="WARN")
+    disarmed_heads = [h for h, v in rd.get("per_head", {}).items() if not v.get("active")]
+    if disarmed_heads:
+        _log("rules", f"per-head rule DISARMED for: {disarmed_heads} (train_n < 500)", level="WARN")
 
     scores = pd.DataFrame({z: head_z_score.get(z, np.full(len(fused), np.nan))
                            for z in Z_COLS}, index=score_frame.index)
+
+    nan_density = float(score_raw.isna().mean().mean()) if not score_raw.empty else 0.0
+    n_dups = int(score_raw.index.duplicated().sum())
+    data_quality_json = json.dumps({
+        "train_rows": len(train_raw), "score_rows": len(score_raw),
+        "channels": score_raw.shape[1],
+        "nan_density": round(nan_density, 4),
+        "duplicate_ts": n_dups,
+        "cadence_s": round(cadence_s, 1),
+    })
+
     return PipelineResult(
         ts=pd.DatetimeIndex(score_frame.index), fused=fused, scores=scores,
         train_fused=train_fused, head_z_train=head_z_train, decision=decision,
         score_status=score_status, culprits=culprits, cadence_s=cadence_s,
         runlog=runlog, runtime_s=round(time.time() - t0, 1),
+        calibration_json=calibration_json, data_quality_json=data_quality_json,
     )
