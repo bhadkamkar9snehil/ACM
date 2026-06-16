@@ -1538,10 +1538,10 @@ async function refreshEngineer(useCache = false) {
 
     const DAY_LABELS = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
     const dpr = window.devicePixelRatio || 1;
-    const containerW = patBody.parentElement?.clientWidth || 320;
+    const containerW = patBody.clientWidth || 320;
     const LABEL_W = 42, LABEL_H = 20, GAP = 1;
-    const CELL_W = Math.max(10, Math.floor((containerW - LABEL_W - 12) / 24));
-    const CELL_H = 26;
+    const CELL_W = Math.max(10, Math.floor((containerW - LABEL_W - 25) / 24));
+    const CELL_H = 30;
     const W = LABEL_W + 24 * (CELL_W + GAP) - GAP;
     const H = LABEL_H + 7 * (CELL_H + GAP) - GAP;
 
@@ -1554,11 +1554,11 @@ async function refreshEngineer(useCache = false) {
 
     // Hour axis labels: 0 3 6 9 12 15 18 21
     ctx2.fillStyle = getCss("--muted");
-    ctx2.font = `11px "Barlow Condensed", sans-serif`;
+    ctx2.font = `13px "Barlow Condensed", sans-serif`;
     ctx2.textAlign = "center";
     for (let h = 0; h < 24; h += 3) {
       const x = LABEL_W + h * (CELL_W + GAP) + CELL_W / 2;
-      ctx2.fillText(h, x, LABEL_H - 2);
+      ctx2.fillText(h, x, LABEL_H - 4);
     }
 
     // Rows: days
@@ -1566,8 +1566,8 @@ async function refreshEngineer(useCache = false) {
       const y = LABEL_H + r * (CELL_H + GAP);
       ctx2.fillStyle = getCss("--muted");
       ctx2.textAlign = "right";
-      ctx2.font = `11px "Barlow Condensed", sans-serif`;
-      ctx2.fillText(lbl, LABEL_W - 4, y + CELL_H / 2 + 3);
+      ctx2.font = `13px "Barlow Condensed", sans-serif`;
+      ctx2.fillText(lbl, LABEL_W - 6, y + CELL_H / 2 + 4);
 
       for (let h = 0; h < 24; h++) {
         const tot = totalCnt[r][h];
@@ -1578,9 +1578,9 @@ async function refreshEngineer(useCache = false) {
         ctx2.fillRect(x, y, CELL_W, CELL_H);
         if (al > 0 && CELL_W >= 10) {
           ctx2.fillStyle = frac > 0.5 ? getCss("--bg") : getCss("--ink2");
-          ctx2.font = `10px "Share Tech Mono", monospace`;
+          ctx2.font = `12px "Share Tech Mono", monospace`;
           ctx2.textAlign = "center";
-          ctx2.fillText(al, x + CELL_W / 2, y + CELL_H / 2 + 3);
+          ctx2.fillText(al, x + CELL_W / 2, y + CELL_H / 2 + 4);
         }
       }
     });
@@ -2556,3 +2556,9 @@ if (document.readyState === 'loading') {
     init();
   }
 }());
+
+window.addEventListener("resize", () => {
+  if (activeTab === "operator") refreshOperator(true);
+  else if (activeTab === "engineer") refreshEngineer(true);
+  else if (activeTab === "admin") refreshAdmin(true);
+});
