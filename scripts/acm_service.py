@@ -148,6 +148,7 @@ class Service:
         st.sync_config(self.store, CONFIG_CSV)
         self.run_now_event = asyncio.Event()
         self.run_now_assets: Optional[List[str]] = None
+        self.run_now_pending: bool = False  # explicit request — fires even when paused
         self.tick_lock = asyncio.Lock()
         self.tick_in_progress = False
         # API response cache: avoids hitting v_asset_now on every 5-second browser poll.
@@ -161,6 +162,7 @@ class Service:
             _svc = self
             def _run_now_cb(asset_key: str) -> None:
                 _svc.run_now_assets = [asset_key]
+                _svc.run_now_pending = True
                 _svc.run_now_event.set()
             _set_sim_store(self.store, _run_now_cb)
         except Exception as _sim_err:
@@ -327,7 +329,9 @@ class Service:
         from the store every cycle so panel changes apply immediately."""
         while True:
             state = st.get_service_state(self.store)
-            if not state["paused"]:
+            # run_now_pending bypasses pause — explicit user command always fires
+            if not state["paused"] or self.run_now_pending:
+                self.run_now_pending = False
                 keys, self.run_now_assets = self.run_now_assets, None
                 try:
                     counts = await self.tick_once(keys)
@@ -669,6 +673,7 @@ def create_app(backend: str = "sqlite", db: Optional[str] = "acm_results.db",
             if bad:
                 raise HTTPException(404, f"unknown assets: {bad}")
         svc.run_now_assets = keys
+        svc.run_now_pending = True
         svc.run_now_event.set()
         return {"triggered": keys or "all"}
 
