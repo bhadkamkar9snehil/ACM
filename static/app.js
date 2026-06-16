@@ -1879,8 +1879,6 @@ const SIM = (() => {
     outputLines.push({ ts, text, src, level, time: Date.now() });
     if (outputLines.length > 2000) outputLines.shift();
     renderOutputLog();
-    const el = document.getElementById('output-line-count');
-    if (el) el.textContent = outputLines.length + ' lines';
   }
 
   function renderOutputLog() {
@@ -1922,6 +1920,10 @@ const SIM = (() => {
       const msg = String(e.text).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
       return `<tr><td class="log-ts">${e.ts}</td><td>${lvlBadge}</td><td>${srcBadge}</td><td class="log-msg">${msg}</td></tr>`;
     }).join('');
+    
+    const el = document.getElementById('output-line-count');
+    if (el) el.textContent = visible.length + ' lines';
+
     if (autoScroll) {
       const wrap = document.getElementById('output-log-wrap');
       if (wrap) wrap.scrollTop = wrap.scrollHeight;
@@ -2150,8 +2152,6 @@ const SIM = (() => {
             outputLines.push({ ts: parsed.ts, text: parsed.text, src: 'acm', level: parsed.level, time: Date.now() });
             if (outputLines.length > 2000) outputLines = outputLines.slice(-2000);
             renderOutputLog();
-            const el = document.getElementById('output-line-count');
-            if (el) el.textContent = outputLines.length + ' lines';
           }
         } catch (_) {}
       };
@@ -2184,8 +2184,6 @@ const SIM = (() => {
             });
             if (outputLines.length > 2000) outputLines = outputLines.slice(-2000);
             renderOutputLog();
-            const el = document.getElementById('output-line-count');
-            if (el) el.textContent = outputLines.length + ' lines';
           }
         }
       } catch (err) {
