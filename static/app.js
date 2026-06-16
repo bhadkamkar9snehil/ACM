@@ -855,7 +855,7 @@ async function refreshEngineer(useCache = false) {
         : `No score data yet — trigger a score run from the Operator tab.`;
       const chartEl = $("#eng-chart");
       if (chartEl) chartEl.innerHTML =
-        `<div style="display:flex;align-items:center;justify-content:center;height:220px;
+        `<div style="display:flex;align-items:center;justify-content:center;height:80px;
                      color:${isErr ? 'var(--bad)' : 'var(--muted)'};font-size:15px;
                      padding:24px;text-align:center;">${msg}</div>`;
       return;
@@ -868,8 +868,8 @@ async function refreshEngineer(useCache = false) {
   if (!s.rows || s.rows.length === 0) {
     const chartEl = $("#eng-chart");
     if (chartEl) chartEl.innerHTML =
-      `<div style="display:flex;align-items:center;justify-content:center;height:220px;
-                   color:var(--muted);font-size:15px;padding:24px;text-align:center;">
+      `<div style="display:flex;align-items:center;justify-content:center;height:80px;
+                   color:var(--muted);font-size:15px;padding:16px;text-align:center;">
          No score data in the selected window — try a wider range.
        </div>`;
     return;
@@ -1006,7 +1006,7 @@ async function refreshEngineer(useCache = false) {
   ];
 
   plot = new uPlot({
-    width, height: 200,
+    width, height: 420,
     cursor: { y: false },
     series: [
       {},
@@ -1333,7 +1333,7 @@ async function refreshEngineer(useCache = false) {
   // MTTD / MTTR tiles (B5)
   const mttdBody = $("#eng-mttd-body");
   if (eps.length === 0) {
-    mttdBody.innerHTML = `<div style="color:var(--muted);font-size:11px;">No alarm episodes.</div>`;
+    mttdBody.innerHTML = `<div style="color:var(--muted);font-size:15px;">No alarm episodes.</div>`;
   } else {
     const durations = eps.map(e => e.duration_h).filter(d => d != null);
     const mttr = durations.length > 0 ? durations.reduce((a, b) => a + b, 0) / durations.length : 0;
@@ -1369,7 +1369,7 @@ async function refreshEngineer(useCache = false) {
 
     const durations = eps.map(e => e.duration_h).filter(d => d != null && d > 0);
     if (durations.length === 0) {
-      histBody.innerHTML = `<span style="color:var(--muted);font-size:11px;">No alarm episodes.</span>`;
+      histBody.innerHTML = `<span style="color:var(--muted);font-size:15px;">No alarm episodes.</span>`;
     } else {
       // Bin into buckets: 0-2h, 2-4h, 4-8h, 8-16h, 16-32h, 32h+
       const BINS = [0, 2, 4, 8, 16, 32, Infinity];
