@@ -45,9 +45,52 @@ import io
 import re
 import threading
 import asyncio
+import socket
+import os
 
 main_loop = None
 manager = None
+
+class UDPLogServer:
+    def __init__(self, shared_lines, shared_lock, counter_ref, manager, loop):
+        self.shared_lines = shared_lines
+        self.shared_lock = shared_lock
+        self.counter_ref = counter_ref
+        self.manager = manager
+        self.loop = loop
+        
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.sock.bind(("127.0.0.1", 0))
+        self.port = self.sock.getsockname()[1]
+        
+        self.thread = threading.Thread(target=self._run, daemon=True)
+        self.thread.start()
+
+    def _run(self):
+        while True:
+            try:
+                data, _ = self.sock.recvfrom(65535)
+                if not data:
+                    break
+                text = data.decode("utf-8", errors="replace")
+                with self.shared_lock:
+                    self.counter_ref[0] += 1
+                    log_item = {"id": self.counter_ref[0], "text": text}
+                    self.shared_lines.append(log_item)
+                
+                if self.loop and self.loop.is_running() and self.manager:
+                    asyncio.run_coroutine_threadsafe(
+                        self.manager.broadcast(log_item),
+                        self.loop
+                    )
+            except Exception:
+                break
+
+    def close(self):
+        try:
+            self.sock.close()
+        except Exception:
+            pass
 
 class LineLogBuffer(io.TextIOBase):
     def __init__(self, original_stream, shared_lines, shared_lock, counter_ref, ansi_escape):
@@ -57,6 +100,7 @@ class LineLogBuffer(io.TextIOBase):
         self.counter_ref = counter_ref
         self.ansi_escape = ansi_escape
         self.current_line = []
+        self.udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
     def write(self, s):
         self.original_stream.write(s)
@@ -68,27 +112,31 @@ class LineLogBuffer(io.TextIOBase):
                     full_line = "".join(self.current_line)
                     clean_line = self.ansi_escape.sub('', full_line)
                     if clean_line.strip():
-                        self.counter_ref[0] += 1
-                        log_item = {"id": self.counter_ref[0], "text": clean_line}
-                        self.lines.append(log_item)
-                        if main_loop and main_loop.is_running() and manager:
-                            asyncio.run_coroutine_threadsafe(manager.broadcast(log_item), main_loop)
+                        self._send_log(clean_line)
                     self.current_line = []
                     
                     for part in parts[1:-1]:
                         clean_part = self.ansi_escape.sub('', part)
                         if clean_part.strip():
-                            self.counter_ref[0] += 1
-                            log_item = {"id": self.counter_ref[0], "text": clean_part}
-                            self.lines.append(log_item)
-                            if main_loop and main_loop.is_running() and manager:
-                                asyncio.run_coroutine_threadsafe(manager.broadcast(log_item), main_loop)
+                            self._send_log(clean_part)
                     
                     if parts[-1]:
                         self.current_line.append(parts[-1])
                 else:
                     self.current_line.append(s)
         return len(s)
+
+    def _send_log(self, text):
+        port_str = os.environ.get("ACM_LOG_PORT")
+        if port_str:
+            try:
+                port = int(port_str)
+                self.udp_sock.sendto(text.encode("utf-8", errors="replace"), ("127.0.0.1", port))
+            except Exception:
+                pass
+        else:
+            self.counter_ref[0] += 1
+            self.lines.append({"id": self.counter_ref[0], "text": text})
 
     def flush(self):
         self.original_stream.flush()
@@ -461,6 +509,11 @@ def create_app(backend: str = "sqlite", db: Optional[str] = "acm_results.db",
     async def lifespan(app: FastAPI):
         global main_loop
         main_loop = asyncio.get_running_loop()
+        
+        # Start UDP Log Server to aggregate child process logs
+        udp_server = UDPLogServer(shared_lines, shared_lock, counter_ref, manager, main_loop)
+        os.environ["ACM_LOG_PORT"] = str(udp_server.port)
+        
         if svc.sim:
             await svc.sim.start()
         task = asyncio.create_task(svc.loop()) if run_scheduler else None
@@ -471,6 +524,11 @@ def create_app(backend: str = "sqlite", db: Optional[str] = "acm_results.db",
             await svc.sim.stop()
         svc._pool.shutdown(wait=False)
         svc.store.close()
+        
+        # Clean up UDP Log Server
+        udp_server.close()
+        os.environ.pop("ACM_LOG_PORT", None)
+        
         main_loop = None
 
     app = FastAPI(title="ACM — Asset Condition Monitor", lifespan=lifespan)
