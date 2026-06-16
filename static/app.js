@@ -624,7 +624,11 @@ async function fillAssetSelectors() {
   const allKeys = fleet.map((a) => a.asset_key).sort();
   for (const sel of [$("#eng-asset"), $("#adm-runs-asset")]) {
     const cur = sel.value;
-    const useKeys = sel.id === "eng-asset" ? keys : allKeys;
+    let useKeys = sel.id === "eng-asset" ? keys : allKeys;
+    // Always include selectedAsset in engineer dropdown even if not yet scored (MATURING state)
+    if (sel.id === "eng-asset" && selectedAsset && !useKeys.includes(selectedAsset)) {
+      useKeys = [...useKeys, selectedAsset].sort();
+    }
     sel.replaceChildren(...useKeys.map((k) => new Option(k, k)));
     sel.value = useKeys.includes(selectedAsset) ? selectedAsset
               : useKeys.includes(cur) ? cur : useKeys[0] || "";
