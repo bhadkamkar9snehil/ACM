@@ -49,30 +49,41 @@
   </div>
 
   <div class="hdr-right">
-    <button type="button" class="btn btn-hdr" id="btn-mode">⊕ Advanced</button>
-    <button type="button" class="btn btn-hdr btn-ok hidden" id="btn-resume">▶ Resume</button>
-    <button type="button" class="btn btn-hdr btn-bad"  id="btn-pause">⏸ Pause</button>
-    <button type="button" class="btn btn-hdr btn-ok"   id="btn-runnow">⟳ Run now</button>
-    <button type="button" class="btn btn-hdr btn-ok hidden" id="btn-sim-start">▶ Replay</button>
-    <button type="button" class="btn btn-hdr btn-bad hidden" id="btn-sim-stop">■ Stop</button>
-    <button type="button" class="btn btn-hdr btn-warn" id="btn-update-acm-hdr" title="Pull latest code from git and refresh asset registrations">↑ Update</button>
-    <select class="btn btn-hdr" id="sel-theme" aria-label="Switch theme" title="Switch theme" style="cursor:pointer; padding-right:6px;">
-      <optgroup label="─── Dark ───">
-        <option value="dark-forge" selected>Forge Dark</option>
-        <option value="dark-petrol">Petrol Dark</option>
-      </optgroup>
-      <optgroup label="─── Light ───">
-        <option value="light-solarised">Solarised</option>
-        <option value="light-polar">Polar White</option>
-        <option value="light-nordic">Nordic Fog</option>
-        <option value="light-cloud">Cloud Atlas</option>
-        <option value="light-concrete">Warm Concrete</option>
-        <option value="light-linen">Linen &amp; Navy</option>
-        <option value="light-sage">Sage &amp; Stone</option>
-        <option value="light-cobalt">Chalk &amp; Cobalt</option>
-        <option value="light-ivory">Ivory &amp; Cinnabar</option>
-      </optgroup>
-    </select>
+    <!-- ACM Control Group -->
+    <div class="btn-group">
+      <button type="button" class="btn btn-hdr btn-ok"   id="btn-runnow" title="Run scoring immediately">⟳ Run now</button>
+      <button type="button" class="btn btn-hdr btn-bad"  id="btn-pause" title="Pause scoring ticks">⏸ Pause</button>
+    </div>
+
+    <!-- SIM Control Group -->
+    <div class="btn-group">
+      <button type="button" class="btn btn-hdr btn-ok hidden" id="btn-sim-start" title="Start replay">▶ Replay</button>
+      <button type="button" class="btn btn-hdr btn-bad hidden" id="btn-sim-stop" title="Stop replay">■ Stop</button>
+      <button type="button" class="btn btn-hdr btn-ok hidden" id="btn-resume" title="Resume paused replay">▶ Resume</button>
+    </div>
+
+    <!-- General Control Group -->
+    <div class="btn-group">
+      <button type="button" class="btn btn-hdr btn-warn" id="btn-update-acm-hdr" title="Pull latest code from git and refresh asset registrations">↑ Update</button>
+      <button type="button" class="btn btn-hdr" id="btn-mode" title="Toggle advanced mode">⊕ Advanced</button>
+      <select class="btn btn-hdr" id="sel-theme" aria-label="Switch theme" title="Switch theme" style="cursor:pointer; padding-right:6px;">
+        <optgroup label="─── Dark ───">
+          <option value="dark-forge" selected>Forge Dark</option>
+          <option value="dark-petrol">Petrol Dark</option>
+        </optgroup>
+        <optgroup label="─── Light ───">
+          <option value="light-solarised">Solarised</option>
+          <option value="light-polar">Polar White</option>
+          <option value="light-nordic">Nordic Fog</option>
+          <option value="light-cloud">Cloud Atlas</option>
+          <option value="light-concrete">Warm Concrete</option>
+          <option value="light-linen">Linen &amp; Navy</option>
+          <option value="light-sage">Sage &amp; Stone</option>
+          <option value="light-cobalt">Chalk &amp; Cobalt</option>
+          <option value="light-ivory">Ivory &amp; Cinnabar</option>
+        </optgroup>
+      </select>
+    </div>
   </div>
 </header>
 

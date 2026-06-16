@@ -718,6 +718,8 @@ body {
 
 /* Header right */
 .hdr-right { display: flex; align-items: center; gap: 6px; }
+.btn-group { display: flex; align-items: center; gap: 3px; padding: 0 6px; border-right: 1px solid rgba(255,255,255,.15); }
+.btn-group:last-child { border-right: none; }
 
 /* ── 3-D Buttons ────────────────────────────────────────── */
 .btn {
