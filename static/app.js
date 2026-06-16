@@ -469,11 +469,16 @@ async function refreshOperator(useCache = false) {
       : a.state_detail
         ? `<span style="color:var(--muted);font-style:italic;">${a.state_detail}</span>`
         : `<span style="color:var(--muted);">—</span>`;
+    const ageColor = a.state === 'STALE' ? 'var(--warn)' : 'var(--muted)';
+    const ageText = a.last_run_at ? fmtRelTime(a.last_run_at) : 'not yet scored';
     aRow.innerHTML = `
-      <div style="font-weight:bold; color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${a.asset_key}">
-        <span class="chevron" style="display:inline-block;width:14px;color:var(--muted);">${assetAlarms.length ? '►' : ' '}</span>
-        ${a.asset_key}
-        ${lastAlarmBadge(assetAlarms)}
+      <div style="overflow:hidden; text-overflow:ellipsis;" title="${a.asset_key}">
+        <div style="font-weight:bold; color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+          <span class="chevron" style="display:inline-block;width:14px;color:var(--muted);">${assetAlarms.length ? '►' : ' '}</span>
+          ${a.asset_key}
+          ${lastAlarmBadge(assetAlarms)}
+        </div>
+        <div style="font-size:12px; color:${ageColor}; padding-left:18px; white-space:nowrap;">${ageText}</div>
       </div>
       <div data-cell="state"></div>
       <div data-cell="spark"></div>
@@ -505,7 +510,8 @@ async function refreshOperator(useCache = false) {
       scoreBtn.addEventListener("click", async (e) => {
         e.stopPropagation();  // Don't trigger row expand/collapse or dblclick engineer
         scoreBtn.disabled = true;
-        scoreBtn.textContent = "⟳";
+        scoreBtn.textContent = "⟳ Scoring…";
+        scoreBtn.className = "btn btn-sm btn-warn";
         try {
           await api("/api/service/run-now", { method: "POST", body: { assets: [a.asset_key] } });
           toast(`Scoring ${a.asset_key}…`, "ok", 3000);
@@ -2377,26 +2383,24 @@ const SIM = (() => {
   }
 
   async function onboardFile(filename, source) {
-    const defaultKey = 'sim/' + filename.replace(/\.(csv|xlsx)$/i, '').replace(/[^A-Za-z0-9_\-\/]/g, '_');
-    openModal(`Register in ACM — ${filename}`, [
-      { name: 'asset_key', label: 'Asset Key', required: true, value: defaultKey },
-      { name: 'grp', label: 'Group', value: 'sim' },
-    ], 'Register', async (body) => {
+    const assetKey = 'sim/' + filename.replace(/\.(csv|xlsx)$/i, '').replace(/[^A-Za-z0-9_\-\/]/g, '_');
+    try {
       try {
-        const r = await simPost(
-          `/files/${encodeURIComponent(filename)}/register?source=${source}`,
-          { asset_key: body.asset_key, grp: body.grp || 'sim', fast_track: true }
-        );
-        toast(`${r.asset_key} registered (ts: ${r.timestamp_col}) — go to Operator tab to score`, 'ok', 6000);
-        log(`Registered ${r.asset_key} from ${filename} (timestamp_col=${r.timestamp_col})`, 'sim', 'info');
+        await simPost(`/files/${encodeURIComponent(filename)}/register?source=${source}`,
+          { asset_key: assetKey, grp: 'sim', fast_track: true });
+        log(`Registered ${assetKey} from ${filename}`, 'sim', 'info');
       } catch (err) {
-        if (err.message?.includes('409') || err.message?.toLowerCase().includes('already exists')) {
-          toast(`Asset key already registered — use a different key`, 'warn', 5000);
-        } else {
-          toast(err.message, 'err');
-        }
+        if (!err.message?.includes('409')) throw err;
+        // 409 = already registered — fine, just score it
       }
-    });
+      await api('/api/service/run-now', { method: 'POST', body: { assets: [assetKey] } });
+      toast(`${assetKey} — scoring now`, 'ok', 4000);
+      document.querySelector('.tab[data-tab="operator"]').click();
+      cachedOperatorHash = null; cachedOperatorData = null;
+      await refreshOperator();
+    } catch (err) {
+      toast(err.message, 'err');
+    }
   }
 
   return { init, previewFile, deleteFile, sendToReplay, onboardFile, log };
