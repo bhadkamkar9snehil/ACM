@@ -2403,8 +2403,8 @@ const SIM = (() => {
           { asset_key: assetKey, grp: 'sim', fast_track: true });
         log(`Registered ${assetKey} from ${filename}`, 'sim', 'info');
       } catch (err) {
-        if (!err.message?.includes('409')) throw err;
-        // 409 = already registered — fine, just score it
+        if (!err.message?.includes('already exists')) throw err;
+        // already registered — fine, just score it
       }
       // Snapshot last_run_at so we can detect when scoring completes
       const fleetSnap = await api('/api/fleet');
