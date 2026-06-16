@@ -73,7 +73,7 @@ class OpcUaTagServer:
         self.server.set_endpoint(self.endpoint)
         self.server.set_server_name("Industrial Dual Protocol Tag Simulator")
         if hasattr(self.server, "set_application_uri"):
-            self.server.set_application_uri(self.application_uri)
+            await self._maybe_await(self.server.set_application_uri(self.application_uri))
 
         # UaExpert expects the server to return an application instance
         # certificate during CreateSession, even when the selected endpoint is
