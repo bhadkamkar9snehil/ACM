@@ -1362,6 +1362,27 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
 
 .output-panel.collapsed { height: 30px; overflow: hidden; }
 
+.output-panel.resizing {
+  transition: none !important;
+}
+
+.output-resizer {
+  position: absolute;
+  top: -4px;
+  left: 0;
+  right: 0;
+  height: 8px;
+  cursor: ns-resize;
+  z-index: 100;
+  background: transparent;
+  transition: background 0.15s ease;
+}
+
+.output-resizer:hover,
+.output-panel.resizing .output-resizer {
+  background: var(--brand);
+}
+
 .output-toolbar {
   display: flex;
   align-items: center;

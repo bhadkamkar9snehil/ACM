@@ -1932,12 +1932,105 @@ const SIM = (() => {
     const levelSel = document.getElementById('sel-output-level');
     const autoScrollChk = document.getElementById('chk-autoscroll');
 
+    // Restore persistent panel height
+    const savedHeight = localStorage.getItem('acm-log-panel-height');
+    let defaultH = window.innerWidth <= 900 ? 160 : 200;
+    let currentHeight = savedHeight ? parseInt(savedHeight, 10) : defaultH;
+    if (isNaN(currentHeight) || currentHeight < 60) currentHeight = defaultH;
+
+    // Apply initial height
+    if (!outputCollapsed && panel) {
+      panel.style.height = currentHeight + 'px';
+      const mainEl = document.querySelector('.main');
+      if (mainEl) mainEl.style.paddingBottom = (currentHeight + 10) + 'px';
+    }
+
+    // Collapse toggle logic
     toggleBtn?.addEventListener('click', () => {
       outputCollapsed = !outputCollapsed;
       panel.classList.toggle('collapsed', outputCollapsed);
       toggleBtn.textContent = outputCollapsed ? '∨' : '∧';
-      document.querySelector('.main').style.paddingBottom = outputCollapsed ? '40px' : '210px';
+      const mainEl = document.querySelector('.main');
+      if (outputCollapsed) {
+        panel.style.height = '';
+        if (mainEl) mainEl.style.paddingBottom = '40px';
+      } else {
+        panel.style.height = currentHeight + 'px';
+        if (mainEl) mainEl.style.paddingBottom = (currentHeight + 10) + 'px';
+      }
+      // Redraw charts since the available vertical height changed
+      window.dispatchEvent(new Event('resize'));
     });
+
+    // Resize dragging logic
+    const resizer = document.getElementById('output-resizer');
+    if (resizer && panel) {
+      resizer.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        const startY = e.clientY;
+        const startHeight = currentHeight;
+        
+        // Add a cover overlay to prevent iframe hover stealing mouse moves
+        const overlay = document.createElement('div');
+        overlay.style.position = 'fixed';
+        overlay.style.top = '0';
+        overlay.style.left = '0';
+        overlay.style.right = '0';
+        overlay.style.bottom = '0';
+        overlay.style.zIndex = '99999';
+        overlay.style.cursor = 'ns-resize';
+        document.body.appendChild(overlay);
+        
+        panel.classList.add('resizing');
+
+        function onMouseMove(moveEvent) {
+          const deltaY = startY - moveEvent.clientY;
+          let newHeight = startHeight + deltaY;
+          
+          // Max height boundary: up to the bottom of the tab-rail
+          const tabsEl = document.getElementById('tabs');
+          const tabsBottom = tabsEl ? tabsEl.getBoundingClientRect().bottom : 150;
+          const maxHeight = window.innerHeight - tabsBottom - 10; // 10px safety gap
+          
+          if (newHeight < 60) newHeight = 60;
+          if (newHeight > maxHeight) newHeight = maxHeight;
+
+          currentHeight = newHeight;
+          panel.style.height = newHeight + 'px';
+          
+          const mainEl = document.querySelector('.main');
+          if (mainEl) mainEl.style.paddingBottom = (newHeight + 10) + 'px';
+          
+          // If panel was collapsed, uncollapse it automatically upon dragging up
+          if (outputCollapsed) {
+            outputCollapsed = false;
+            panel.classList.remove('collapsed');
+            if (toggleBtn) toggleBtn.textContent = '∧';
+          }
+          
+          // Trigger a window resize event to redraw charts dynamically as the user drags
+          window.dispatchEvent(new Event('resize'));
+        }
+
+        function onMouseUp() {
+          panel.classList.remove('resizing');
+          document.body.removeChild(overlay);
+          
+          window.removeEventListener('mousemove', onMouseMove);
+          window.removeEventListener('mouseup', onMouseUp);
+          
+          // Save the height persistently
+          localStorage.setItem('acm-log-panel-height', currentHeight);
+          
+          // Final layout resize trigger
+          window.dispatchEvent(new Event('resize'));
+        }
+
+        window.addEventListener('mousemove', onMouseMove);
+        window.addEventListener('mouseup', onMouseUp);
+      });
+    }
+
     clearBtn?.addEventListener('click', () => { outputLines = []; renderOutputLog(); });
     levelSel?.addEventListener('change', () => { outputLevel = levelSel.value; renderOutputLog(); });
     autoScrollChk?.addEventListener('change', () => { autoScroll = autoScrollChk.checked; });
