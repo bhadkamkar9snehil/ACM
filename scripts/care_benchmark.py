@@ -31,7 +31,18 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from core.alarm_rules import NORMAL_STATUS, apply_alarm_rules  # noqa: E402
+from core.ml_defaults import ML_DEFAULTS                       # noqa: E402
 from core.pipeline import Z_COLS, score_asset                  # noqa: E402
+
+
+def _deep_merge(base: dict, patch: dict) -> dict:
+    result = dict(base)
+    for k, v in patch.items():
+        if k in result and isinstance(result[k], dict) and isinstance(v, dict):
+            result[k] = _deep_merge(result[k], v)
+        else:
+            result[k] = v
+    return result
 
 META_COLS = {"time_stamp", "asset_id", "id", "train_test", "status_type_id"}
 
@@ -93,7 +104,8 @@ def evaluate(
 
 
 # --------------------------------------------------------------- per-event --
-def run_event(farm_dir: Path, event: pd.Series, out_dir: Optional[Path]) -> Dict:
+def run_event(farm_dir: Path, event: pd.Series, out_dir: Optional[Path],
+              cfg: Optional[dict] = None) -> Dict:
     eid = int(event["event_id"])
     df = pd.read_csv(farm_dir / "datasets" / f"{eid}.csv", sep=";")
     df["time_stamp"] = pd.to_datetime(df["time_stamp"])
@@ -103,6 +115,7 @@ def run_event(farm_dir: Path, event: pd.Series, out_dir: Optional[Path]) -> Dict
         train_raw=sensor_frame(tr), score_raw=sensor_frame(sc),
         train_status=tr["status_type_id"].to_numpy(),
         score_status=sc["status_type_id"].to_numpy(),
+        cfg=cfg,
     )
 
     if out_dir is not None:
@@ -195,9 +208,10 @@ def _print_event_line(r: Dict) -> None:
     print(f"--- event {r['event_id']}: {tag}{lead} rule={r.get('rule_fired') or '-'}{src}", flush=True)
 
 
-def _worker(farm_dir: Path, event_dict: Dict, out_dir: Optional[Path]) -> Dict:
+def _worker(farm_dir: Path, event_dict: Dict, out_dir: Optional[Path],
+            cfg: Optional[dict] = None) -> Dict:
     try:
-        return run_event(farm_dir, pd.Series(event_dict), out_dir)
+        return run_event(farm_dir, pd.Series(event_dict), out_dir, cfg=cfg)
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -212,7 +226,24 @@ def main() -> int:
     ap.add_argument("--out", default=None)
     ap.add_argument("--workers", type=int, default=1)
     ap.add_argument("--force", action="store_true")
+    ap.add_argument(
+        "--override", default=None, metavar="JSON",
+        help="JSON string deep-merged onto ML_DEFAULTS for ablation experiments. "
+             "Implies --force (cached scores from a different config are invalid). "
+             "Example: '{\"thresholds\": {\"contamination_filter\": {\"enabled\": false}}}'",
+    )
     args = ap.parse_args()
+
+    cfg: Optional[dict] = None
+    if args.override:
+        try:
+            patch = json.loads(args.override)
+        except json.JSONDecodeError as exc:
+            print(f"ERROR: --override is not valid JSON: {exc}", file=sys.stderr)
+            return 1
+        cfg = _deep_merge(dict(ML_DEFAULTS), patch)
+        args.force = True
+        print(f"[ablation] ML_DEFAULTS patched with: {args.override}")
 
     farm_dir, out_dir = Path(args.data_dir), Path(args.out) if args.out else None
     info = load_event_info(farm_dir)
@@ -236,12 +267,12 @@ def main() -> int:
     if pending and args.workers > 1:
         import concurrent.futures as cf
         with cf.ProcessPoolExecutor(max_workers=args.workers) as pool:
-            futs = [pool.submit(_worker, farm_dir, ev.to_dict(), out_dir) for ev in pending]
+            futs = [pool.submit(_worker, farm_dir, ev.to_dict(), out_dir, cfg) for ev in pending]
             for fut in cf.as_completed(futs):
                 results.append(fut.result()); _print_event_line(results[-1]); _flush()
     else:
         for ev in pending:
-            results.append(_worker(farm_dir, ev.to_dict(), out_dir))
+            results.append(_worker(farm_dir, ev.to_dict(), out_dir, cfg))
             _print_event_line(results[-1]); _flush()
 
     summary = summarize(results)
