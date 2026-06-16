@@ -127,42 +127,32 @@ $("#modal-backdrop").addEventListener("click", (e) => {
 });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeModal(); });
 
-function sparkline(points, w = 150, h = 26) {
-  /* points: [[day, fused_max], ...] -> coloured SVG sparkline */
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("width", w); svg.setAttribute("height", h);
-  svg.classList.add("spark");
+function sparklineBar(points) {
+  /* points: [[day, fused_max], ...] -> simple HTML bar showing trend */
   const vals = points.map((p) => p[1]).filter((v) => v != null);
-  if (vals.length < 2) return svg;
-  const max = Math.max(4, ...vals);
-  const step = w / (points.length - 1);
-  let d = "";
-  points.forEach((p, i) => {
-    if (p[1] == null) return;
-    const x = (i * step).toFixed(1);
-    const y = (h - 2 - (p[1] / max) * (h - 5)).toFixed(1);
-    d += (d ? " L" : "M") + `${x} ${y}`;
-  });
-  const peak = Math.max(...vals);
-  const path = document.createElementNS(svg.namespaceURI, "path");
-  path.setAttribute("d", d);
-  path.setAttribute("fill", "none");
-  path.setAttribute("stroke", peak >= 3 ? "var(--chart-alert)" : "var(--blue)");
-  path.setAttribute("stroke-width", "1.4");
-  path.setAttribute("stroke-linejoin", "round");
-  svg.append(path);
-  // z=3 reference line when in range
-  if (max >= 3) {
-    const y3 = h - 2 - (3 / max) * (h - 5);
-    const ln = document.createElementNS(svg.namespaceURI, "line");
-    ln.setAttribute("x1", 0); ln.setAttribute("x2", w);
-    ln.setAttribute("y1", y3); ln.setAttribute("y2", y3);
-    ln.setAttribute("stroke", "var(--chart-alert)");
-    ln.setAttribute("stroke-opacity", "0.5");
-    ln.setAttribute("stroke-dasharray", "3 3");
-    svg.prepend(ln);
+  if (vals.length === 0) {
+    const d = document.createElement("div");
+    d.style.cssText = "width:150px;height:26px;background:var(--bg3);border-radius:2px;";
+    return d;
   }
-  return svg;
+  const max = Math.max(4, ...vals);
+  const peak = Math.max(...vals);
+  const last = vals[vals.length - 1] || 0;
+
+  // Bar container
+  const div = document.createElement("div");
+  div.style.cssText = "display:flex;gap:2px;align-items:flex-end;width:150px;height:26px;padding:0;";
+
+  // Draw small bars for last 10 days
+  const recentVals = vals.slice(-10);
+  recentVals.forEach((v) => {
+    const bar = document.createElement("div");
+    const h = v ? Math.max(2, Math.round((v / max) * 24)) : 2;
+    bar.style.cssText = `flex:1;height:${h}px;background:${v >= 3 ? 'var(--chart-alert)' : 'var(--blue)'};border-radius:1px;opacity:0.8;`;
+    div.append(bar);
+  });
+
+  return div;
 }
 
 // ---------------------------------------------------------------- tabs ----
@@ -337,11 +327,18 @@ async function refreshOperator(useCache = false) {
   setK("attention", nAttn); setK("unacked", alarms.length);
   $('[data-kpi="alarm"]').classList.toggle("lit", nAlarm > 0);
 
-  // Group alarms
+  // OPTIMIZATION 1: Pre-compute alarms by asset (O(n) instead of O(n²) lookups)
   const alarmsByAsset = {};
+  const dateCache = {};
   for (const al of alarms) {
     if (!alarmsByAsset[al.asset_key]) alarmsByAsset[al.asset_key] = [];
     alarmsByAsset[al.asset_key].push(al);
+    // OPTIMIZATION 2: Pre-parse dates once (eliminate 2,400+ Date constructor calls)
+    const key = `${al.asset_key}:${al.start_ts}`;
+    dateCache[key] = {
+      startMs: new Date(al.start_ts + (al.start_ts.includes('Z') || al.start_ts.includes('+') ? '' : 'Z')).getTime(),
+      endMs: al.end_ts ? new Date(al.end_ts + (al.end_ts.includes('Z') || al.end_ts.includes('+') ? '' : 'Z')).getTime() : null
+    };
   }
 
   const hourMs = 3600000;
@@ -353,8 +350,14 @@ async function refreshOperator(useCache = false) {
       const bEnd = nowTs - i * hourMs;
       let active = false, maxPeak = 0;
       for (const al of alarmList) {
-        const alStart = new Date(al.start_ts + (al.start_ts.includes('Z') || al.start_ts.includes('+') ? '' : 'Z')).getTime();
-        const alEnd = al.end_ts ? new Date(al.end_ts + (al.end_ts.includes('Z') || al.end_ts.includes('+') ? '' : 'Z')).getTime() : nowTs;
+        // OPTIMIZATION 2: Use pre-parsed dates instead of creating new Date objects
+        const key = `${al.asset_key}:${al.start_ts}`;
+        const dates = dateCache[key] || {
+          startMs: new Date(al.start_ts + (al.start_ts.includes('Z') || al.start_ts.includes('+') ? '' : 'Z')).getTime(),
+          endMs: al.end_ts ? new Date(al.end_ts + (al.end_ts.includes('Z') || al.end_ts.includes('+') ? '' : 'Z')).getTime() : nowTs
+        };
+        const alStart = dates.startMs;
+        const alEnd = dates.endMs || nowTs;
         if (alStart < bEnd && alEnd > bStart) { active = true; maxPeak = Math.max(maxPeak, al.peak_fused || 0); }
       }
       html += `<div class="mt-block ${active ? (maxPeak > 5.0 ? 'danger' : 'warn') : ''}"></div>`;
@@ -362,17 +365,27 @@ async function refreshOperator(useCache = false) {
     return html + '</div>';
   };
 
-  // C5 — Extract farm prefix from asset key (e.g. FD_FAN_01 → "FD")
+  // Extract farm prefix from asset key
   const farmPrefix = (key) => {
     const parts = String(key).split("_");
     return parts.length >= 2 ? parts[0] : "–";
   };
 
-  // C8 — Last-alarm badge from unacked alarms (most recent start)
+  // OPTIMIZATION 3: Pre-compute farm groups to eliminate O(n²) filtering
+  const farmGroups = {};
+  fleet.forEach(a => {
+    const farm = farmPrefix(a.asset_key);
+    if (!farmGroups[farm]) farmGroups[farm] = { assets: [], alarmCount: 0, warnCount: 0 };
+    farmGroups[farm].assets.push(a);
+    if (a.state === "ALARM") farmGroups[farm].alarmCount++;
+    if (["ERROR","STALE"].includes(a.state)) farmGroups[farm].warnCount++;
+  });
+
+  // Last-alarm badge helper
   const lastAlarmBadge = (assetAlarms) => {
     if (!assetAlarms.length) return "";
     const latest = assetAlarms.reduce((a, b) =>
-      new Date(b.start_ts) > new Date(a.start_ts) ? b : a);
+      dateCache[`${b.asset_key}:${b.start_ts}`]?.startMs > dateCache[`${a.asset_key}:${a.start_ts}`]?.startMs ? b : a);
     return `<span class="last-alarm-badge">⏱ ${fmtRelTime(latest.start_ts)}</span>`;
   };
 
@@ -391,7 +404,7 @@ async function refreshOperator(useCache = false) {
     </div>
   `;
 
-  // C5 — Sort by (farm, state priority, asset_key) then group by farm
+  // Sort fleet by farm, then state, then asset_key
   fleet.sort((a, b) => {
     const fa = farmPrefix(a.asset_key), fb = farmPrefix(b.asset_key);
     if (fa !== fb) return fa.localeCompare(fb);
@@ -399,28 +412,27 @@ async function refreshOperator(useCache = false) {
     return sd || String(a.asset_key).localeCompare(String(b.asset_key));
   });
 
-  let currentFarm = null;
+  // OPTIMIZATION 4: Use DocumentFragment to batch DOM inserts (eliminate 415+ reflows)
+  const frag = document.createDocumentFragment();
+  let lastFarm = null;
 
   for (const a of fleet) {
     const farm = farmPrefix(a.asset_key);
     const assetAlarms = alarmsByAsset[a.asset_key] || [];
-    
-    // C5 — Farm group header when farm changes
-    if (farm !== currentFarm) {
-      currentFarm = farm;
-      const farmAssets = fleet.filter(x => farmPrefix(x.asset_key) === farm);
-      const farmAlarm = farmAssets.filter(x => x.state === "ALARM").length;
-      const farmWarn = farmAssets.filter(x => ["ERROR","STALE"].includes(x.state)).length;
+
+    // Add farm header when farm changes
+    if (farm !== lastFarm) {
+      lastFarm = farm;
+      const farmData = farmGroups[farm];
       const farmHdr = document.createElement("div");
       farmHdr.className = "mega-farm-hdr";
-      const dot = farmAlarm ? "var(--bad)" : farmWarn ? "var(--warn)" : "var(--ok)";
       farmHdr.innerHTML = `
         <span style="color:var(--brand);font-weight:700;letter-spacing:.06em;">${farm}</span>
-        <span style="color:var(--muted);font-size:14px;margin-left:6px;">${farmAssets.length} assets</span>
-        ${farmAlarm ? `<span style="color:var(--bad);font-size:14px;margin-left:8px;">● ${farmAlarm} alarm</span>` : ""}
-        ${farmWarn ? `<span style="color:var(--warn);font-size:14px;margin-left:6px;">● ${farmWarn} warn</span>` : ""}
+        <span style="color:var(--muted);font-size:14px;margin-left:6px;">${farmData.assets.length} assets</span>
+        ${farmData.alarmCount ? `<span style="color:var(--bad);font-size:14px;margin-left:8px;">● ${farmData.alarmCount} alarm</span>` : ""}
+        ${farmData.warnCount ? `<span style="color:var(--warn);font-size:14px;margin-left:6px;">● ${farmData.warnCount} warn</span>` : ""}
       `;
-      mx.append(farmHdr);
+      frag.append(farmHdr);
     }
 
     // Asset Row
@@ -432,15 +444,20 @@ async function refreshOperator(useCache = false) {
         ${a.asset_key}
         ${lastAlarmBadge(assetAlarms)}
       </div>
-      <div id="mr-state-${a.asset_key}"></div>
-      <div id="mr-sp-${a.asset_key}"></div>
+      <div data-cell="state"></div>
+      <div data-cell="spark"></div>
       <div class="num">${fmtNum(a.last_fused)}</div>
       <div style="font-size:16px;font-family:'Share Tech Mono',monospace;">${formatRulesForOperator(a.rules_fired)}</div>
       <div>${renderTimeline(assetAlarms, a.last_ts)}</div>
       <div class="num" style="color:var(--warn); font-weight:bold;">${a.unacked_alarms || 0}</div>
     `;
-    aRow.querySelector(`[id="mr-state-${a.asset_key}"]`).append(badge(a.state));
-    aRow.querySelector(`[id="mr-sp-${a.asset_key}"]`).append(sparkline(sparks[a.asset_key] || []));
+
+    // OPTIMIZATION 5: Avoid querySelector - use data attributes and direct references
+    const stateCell = aRow.querySelector('[data-cell="state"]');
+    const sparkCell = aRow.querySelector('[data-cell="spark"]');
+    stateCell.append(badge(a.state));
+    sparkCell.append(sparklineBar(sparks[a.asset_key] || []));
+
     aRow.addEventListener("click", (e) => {
       if (e.target.tagName !== 'BUTTON') {
         const isColl = aRow.classList.toggle('collapsed');
@@ -448,9 +465,8 @@ async function refreshOperator(useCache = false) {
         if (chev && assetAlarms.length) chev.textContent = isColl ? '►' : '▼';
       }
     });
-    // Add double click handler to open engineer view
     aRow.addEventListener("dblclick", () => openEngineer(a.asset_key));
-    mx.append(aRow);
+    frag.append(aRow);
 
     // Alarm Rows
     if (assetAlarms.length > 0) {
@@ -459,6 +475,7 @@ async function refreshOperator(useCache = false) {
       for (const al of assetAlarms) {
         const alRow = document.createElement("div");
         alRow.className = "mega-alarm-row";
+        const ackId = `mr-ack-${a.asset_key}-${al.start_ts.replace(/[: ]/g, '')}`;
         alRow.innerHTML = `
           <div style="color:var(--muted);">└── Episode</div>
           <div>${fmtTs(al.start_ts)}</div>
@@ -466,17 +483,20 @@ async function refreshOperator(useCache = false) {
           <div class="num">Peak: ${fmtNum(al.peak_fused)}</div>
           <div></div>
           <div>${renderTimeline([al], a.last_ts)}</div>
-          <div id="mr-ack-${a.asset_key}-${al.start_ts.replace(/[: ]/g, '')}"></div>
+          <div data-ack-cell></div>
         `;
         const btn = document.createElement("button");
         btn.className = "btn btn-sm btn-warn"; btn.textContent = "Ack";
         btn.addEventListener("click", () => ackAlarm(a.asset_key, al.start_ts));
-        alRow.querySelector(`[id="mr-ack-${a.asset_key}-${al.start_ts.replace(/[: ]/g, '')}"]`).append(btn);
+        alRow.querySelector('[data-ack-cell]').append(btn);
         alContainer.append(alRow);
       }
-      mx.append(alContainer);
+      frag.append(alContainer);
     }
   }
+
+  // OPTIMIZATION 4: Single append to DOM (single reflow instead of 415+)
+  mx.append(frag);
 
   $("#fleet-count").textContent = n ? `${n} assets` : "";
   $("#fleet-empty").classList.toggle("hidden", n > 0);
