@@ -2425,7 +2425,9 @@ const SIM = (() => {
   }
 
   async function onboardFile(filename, source) {
-    const assetKey = 'sim/' + filename.replace(/\.(csv|xlsx)$/i, '').replace(/[^A-Za-z0-9_\-\/]/g, '_');
+    const stem = filename.replace(/\.(csv|xlsx)$/i, '').replace(/[^A-Za-z0-9_\-\/]/g, '_');
+    const assetKey = 'sim/' + stem;   // full fleet key (grp/key) — used for fleet lookup & UI
+    const storedKey = stem;            // bare key stored in monitored_assets — used for run-now
     try {
       try {
         await simPost(`/files/${encodeURIComponent(filename)}/register?source=${source}`,
@@ -2441,7 +2443,7 @@ const SIM = (() => {
       const prevRunAt = snapRow?.last_run_at ?? null;
 
       _scoringNow.add(assetKey);
-      await api('/api/service/run-now', { method: 'POST', body: { assets: [assetKey] } });
+      await api('/api/service/run-now', { method: 'POST', body: { assets: [storedKey] } });
       toast(`${assetKey} — scoring now`, 'ok', 4000);
 
       // Set as selected so it appears in engineer dropdown immediately
