@@ -1,7 +1,7 @@
 # ACM — Codebase Knowledge Base
 
 > Maintained for future agents. Update this file whenever you learn something new about the codebase.
-> Last updated: session 01UuCboiW9MAKb9AKYYoVt1J (2026-06-16)
+> Last updated: session 01UuCboiW9MAKb9AKYYoVt1J (2026-06-16) + user UI sprint (2026-06-16 afternoon)
 
 ---
 
@@ -33,8 +33,10 @@
 24. [Git Workflow](#git-workflow)
 25. [UI Font Sizes](#ui-font-sizes-canonical-after-2026-06-15-upsize)
 26. [Fleet Operations Matrix Performance Optimization](#fleet-operations-matrix-performance-optimization-2026-06-16)
-27. [Per-Asset Scoring & SIM→ACM Flow (2026-06-16)](#per-asset-scoring--simacm-flow-2026-06-16) ← **Latest work session**
-28. [User Working Style](#user-working-style)
+27. [Per-Asset Scoring & SIM→ACM Flow (2026-06-16)](#per-asset-scoring--simacm-flow-2026-06-16)
+28. [Real-Time Log Streaming & Output Panel (2026-06-16)](#real-time-log-streaming--output-panel-2026-06-16) ← **Latest work session**
+29. [Known Issues (Track as GitHub Issues)](#known-issues-track-as-github-issues)
+30. [User Working Style](#user-working-style)
 
 ---
 
@@ -452,8 +454,7 @@ Generator produces data with timestamps shifted so the last row ≈ now.
 
 **Engineer Chart** (`refreshEngineer`, ~line 830):
 - uPlot instance. Series: `[x, fused_z, alert_z, AR1, PCA-SPE, PCA-T2, IForest, GMM, OMR]`
-- Series indices 3-8 (detectors) have `show: false` by default — toggled by `.det-toggle` buttons
-- `.det-toggle` buttons get `btn.classList.remove("active")` on every render reset
+- As of 2026-06-16: all series always visible (detector toggle buttons removed from HTML). Previously series 3-8 defaulted to `show: false`.
 
 **Co-firing Matrix** (`refreshEngineer`, ~line 1270):
 - Canvas. `CELL=44, GAP=2, LABEL=44`, font `bold 11px "Barlow Condensed"`
@@ -1045,6 +1046,119 @@ Added `state_detail` to the allowed set (`acm_service.py:~534`). This enables th
 
 ### ACM Service Startup — PAUSED by default
 `acm_store.py:get_service_state()` seeds `paused=1` on first run. Service starts idle; user must click "Score All" or per-asset "▶ Score" to begin scoring.
+
+---
+
+## Real-Time Log Streaming & Output Panel (2026-06-16)
+> *Added: 2026-06-16 afternoon user sprint*
+
+### Architecture
+
+Real-time log delivery has two layers:
+
+```
+Parent process stdout/stderr
+  → LineLogBuffer (wraps sys.stdout / sys.stderr)
+      → writes to shared_lines deque (in-process)
+      → sends UDP datagram to UDPLogServer (for child process workers)
+
+Child scoring workers (ProcessPoolExecutor)
+  → LineLogBuffer in worker subprocess
+      → sends UDP datagrams to ACM_LOG_PORT (env var set by parent)
+
+UDPLogServer (daemon thread in parent)
+  → receives datagrams from workers
+  → appends to shared_lines deque
+  → broadcasts to all WebSocket clients via asyncio.run_coroutine_threadsafe()
+```
+
+### New API Endpoints
+
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/api/service/logs` | GET | Poll last N lines; `?limit=500&after=<id>` for incremental fetch |
+| `/api/service/logs/ws` | WebSocket | Push new log lines in real-time to connected browser clients |
+| `/api/service/logs/export` | POST | Body: list of log dicts → returns `acm_logs.xlsx` download |
+
+### Key Classes (in `acm_service.py`)
+
+**`UDPLogServer`** (starts in `lifespan`):
+- Binds to random UDP port, sets `ACM_LOG_PORT` env var
+- Daemon thread calls `sock.recvfrom(65535)` in a loop
+- On each message: appends to `shared_lines`, broadcasts via `asyncio.run_coroutine_threadsafe(manager.broadcast(log_item), main_loop)`
+- Port env var is the mechanism by which child processes know where to send logs
+
+**`LineLogBuffer`** (replaces `sys.stdout` and `sys.stderr` at module load):
+- Accumulates chars until `\n`, then strips ANSI escape codes and dispatches
+- In parent process: writes directly to `shared_lines`
+- In worker subprocess: sends UDP datagram to `ACM_LOG_PORT`
+
+**`ConnectionManager`**: holds `list[WebSocket]`, broadcasts JSON `{id, text}` to all
+
+### Frontend (app.js)
+
+**WebSocket connection** (`connectWS()`):
+- `ws = new WebSocket(proto + '//' + location.host + '/api/service/logs/ws')`
+- On message: calls `parseBackendLogLine(text)` to extract ts/level/stage from structured log lines, pushes to `outputLines`, calls `renderOutputLog()`
+- Reconnects with exponential backoff on close/error
+
+**`parseBackendLogLine(text)`**:
+- Strips ANSI codes, matches log patterns like `[INFO] stage: message` or `HH:MM:SS message`
+- Returns `{ts, text, level}` for structured display in the table
+
+**`loadInitialLogs()`**: calls `GET /api/service/logs` on startup to backfill logs from before WebSocket was opened
+
+### Output Panel UI
+
+**New controls** (index.html `#output-panel`):
+- `#sel-output-source` — All Sources / Simulator / ACM (replaces old tab buttons)
+- `#sel-output-level` — All Levels / DEBUG / INFO / WARN / ERROR
+- `#sel-output-time` — All Time / Last 1m / Last 5m / Last 15m / Last 1h / Last 24h
+- `#btn-output-export` — triggers POST to `/api/service/logs/export`, downloads `.xlsx`
+- `#output-resizer` — drag handle at top of panel for vertical resize
+
+**Resizable panel** (`initOutputPanel`):
+- `mousedown` on `#output-resizer` → tracks drag → sets `panel.style.height`
+- Min height ~80px, max height = bottom of tab rail (clamped so tabs stay visible)
+- Dispatches `window.resize` on drag (triggers uPlot and canvas redraws)
+- Persists height in `localStorage` key `acm_log_panel_height`
+
+### UI Removals (2026-06-16)
+
+- **Detector toggle buttons** removed from Engineer tab — the `.det-toggles` div and all 6 `<button class="det-toggle">` buttons are gone from `index.html`. Detectors are always shown in the heatmap; individual series toggling via buttons was removed.
+- **Admin tab Run Log card** removed (`adm-log` div, `#adm-runlog` pre, `#adm-log-level` select). The output panel now serves this purpose.
+- **Advanced Mode layout change**: in Advanced mode, Engineer tab cards stack vertically (one below another) instead of the 2-column grid.
+
+### Important: det-toggle references in app.js
+
+Since the `.det-toggle` buttons no longer exist in HTML, any code in `refreshEngineer()` that did `document.querySelectorAll('.det-toggle')` will silently no-op (empty NodeList). This is safe — the uPlot series are still defined, just always visible. Do NOT re-add the toggle buttons without also re-adding the JS wiring.
+
+---
+
+## Known Issues (Track as GitHub Issues)
+> *Added: 2026-06-16*
+
+These are known deficiencies to be filed as GitHub issues. Use `gh issue create` to create them if not already tracked:
+
+1. **Asset selection not restored after page refresh** — `#eng-asset` dropdown resets to first item on every page load. Should persist selected asset in `localStorage`.
+
+2. **WebSocket reconnect spams the log** — each reconnect attempt logs "Connecting…" which pollutes the log panel with noise during brief network hiccups. Add debounce / silent retry for first N attempts.
+
+3. **Output panel height not restored on cold start** — `localStorage` persistence for panel height exists but may not survive service restarts if the browser reloads the page from scratch. Verify the key name and restore logic.
+
+4. **Detector series always visible** — toggle buttons removed (see above) but all 6 detector series now always render on the Engineer chart. For assets with many detectors this can make the chart noisy. A future approach: legend-click toggle via uPlot's native API.
+
+5. **Admin tab Run Log removed but `/api/assets/{key}/runlog` API still exists** — the endpoint returns per-asset run logs (with `stage`, `level`, `message` columns) that are no longer surfaced anywhere in the UI. Either surface them in the output panel (filter by asset) or deprecate the endpoint.
+
+6. **Excel export sends client-side `outputLines` to server** — the export POSTs the current filtered log array to `/api/service/logs/export`. This means: (a) only what the client has buffered (≤2000 lines) is exported, (b) network cost scales with log size. Alternative: server-side export directly from `shared_lines` deque without client involvement.
+
+**How to file issues from CLI:**
+```bash
+gh issue create --title "Title" --body "Description" --label "bug"
+gh issue create --title "Title" --body "Description" --label "enhancement"
+gh issue list --state open
+gh issue view 50
+```
 
 ---
 
