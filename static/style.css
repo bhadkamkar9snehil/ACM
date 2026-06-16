@@ -1213,6 +1213,7 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
 [data-mode="advanced"] table.data:not(.output-log-table) td { padding: 4px 7px; font-size: 15px; }
 [data-mode="advanced"] .card-title { font-size: 15px; padding-bottom: 4px; margin-bottom: 6px; }
 [data-mode="advanced"] table.data:not(.output-log-table) th { font-size: 13px; }
+[data-mode="advanced"] #output-line-count { font-size: 15px; }
 
 /* ── Operator tab — op-layout ────────────────────────────── */
 .op-layout { display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 0; }
@@ -1397,7 +1398,11 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
   font-size: 13px;
 }
 #output-line-count {
-  font-size: 13px;
+  font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif-condensed, sans-serif;
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: .10em;
+  text-transform: uppercase;
 }
 
 .output-src-tab {
