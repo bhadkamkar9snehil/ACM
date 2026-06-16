@@ -39,6 +39,7 @@
 ---
 
 ## Architecture Overview
+> *Added: 2026-06-14*
 
 ACM is a stateless, self-tuning anomaly scoring service for industrial assets. Three layers:
 
@@ -55,6 +56,7 @@ Data sources  →  SQLite buffer / parquet cache  →  Pipeline workers  →  SQ
 ---
 
 ## Key Files
+> *Added: 2026-06-14 · Last updated: 2026-06-16*
 
 | File | Role |
 |---|---|
@@ -80,11 +82,12 @@ Data sources  →  SQLite buffer / parquet cache  →  Pipeline workers  →  SQ
 | `static/app.js` | Client-side polling, chart rendering, API commands; SIM IIFE module appended |
 | `static/style.css` | 14 themes (5 dark, 9 light); sim/output panel rules appended |
 | `sim/` | Vendored simulator package — generators, replay engine, BufferPublisher, SimAdapter |
-| `scripts/acm_sim_routes.py` | FastAPI router `prefix="/api/sim"` — 14 routes for generators, files, replay, onboard |
+| `scripts/acm_sim_routes.py` | FastAPI router `prefix="/api/sim"` — **15 routes** for generators, files, replay, onboard, register |
 
 ---
 
 ## Data Source Kinds (`source_kind` per asset)
+> *Added: 2026-06-14*
 
 Each row in `monitored_assets` has its own `source_kind`. `acm_feed.load_increment()` dispatches:
 
@@ -101,6 +104,7 @@ Each row in `monitored_assets` has its own `source_kind`. `acm_feed.load_increme
 ---
 
 ## Simulator ↔ ACM Integration
+> *Added: 2026-06-14*
 
 **Hard constraint: Simulator has ZERO knowledge of ACM.** All integration code lives in ACM only. This was an early mistake (MQTT-first integration added ACM references to Simulator) that was fully reverted. Never repeat it.
 
@@ -121,6 +125,7 @@ python scripts/acm_seed_demo.py --opcua opc.tcp://localhost:4840/simulator --db 
 ---
 
 ## SQLite Buffer Pattern (core decoupling mechanism)
+> *Added: 2026-06-14*
 
 Used by both OPC UA and MQTT bridges to decouple async/threaded network I/O from ProcessPoolExecutor workers:
 
@@ -138,6 +143,7 @@ Bridges have a `prune(keep_hours=200)` method to bound file size.
 ---
 
 ## OPC UA Bridge Details (`scripts/acm_opcua_bridge.py`)
+> *Added: 2026-06-14*
 
 ```python
 async def get_or_start(
@@ -164,6 +170,7 @@ if opcua_specs:
 ---
 
 ## Store: `scripts/acm_store.py`
+> *Added: 2026-06-14*
 
 ```python
 store = Store("sqlite", db="acm_results.db")   # or Store("mssql", conn_str="...")
@@ -180,7 +187,8 @@ asset_key TEXT PRIMARY KEY, grp TEXT DEFAULT 'fleet', enabled INTEGER DEFAULT 1,
 source_kind TEXT, source_ref TEXT, conn_ref TEXT,
 timestamp_col TEXT, status_col TEXT, added_at TEXT, retired_at TEXT,
 state TEXT DEFAULT 'NEW', state_detail TEXT,
-last_run_at TEXT, last_score_ts TEXT, last_runtime_s REAL
+last_run_at TEXT, last_score_ts TEXT, last_runtime_s REAL,
+fast_track INTEGER DEFAULT 0
 ```
 
 **INSERT pattern (used in `acm_service.py` onboard handler and `acm_seed_demo.py`):**
@@ -198,6 +206,7 @@ last_run_at TEXT, last_score_ts TEXT, last_runtime_s REAL
 ---
 
 ## Test Suite
+> *Added: 2026-06-14*
 
 68 tests across 4 files. Run with `python -m pytest tests/`.
 
@@ -219,6 +228,7 @@ last_run_at TEXT, last_score_ts TEXT, last_runtime_s REAL
 ---
 
 ## Setup Scripts
+> *Added: 2026-06-14 · Last updated: 2026-06-15*
 
 ### `setup_acm.ps1` (Windows)
 Single command: `irm https://raw.githubusercontent.com/bhadkamkar9snehil/ACM/main/setup_acm.ps1 | iex`
@@ -251,7 +261,7 @@ Mirror of the PowerShell script for Linux/macOS:
 9. **[2/2] Optional: CARE demo** — download 10 Farm A events (`--farms A --count 10`, defaults dest to `sim_data/sample`), seed as `care_demo` assets
 10. Summary: start command + URLs
 
-**download_care_dataset.py**: `--dest` optional (defaults to `sim_data/sample`); `--farms A --count 10` is all you need.
+**download_care_dataset.py**: `--dest` optional (defaults to `sim_data/sample`); `--farms A --count 10` is all you need. There is **no** `--sim-dir` flag — the `--dest` flag is the only path argument.
 
 **`step` helper** — prints `·  name`, runs command, overwrites with `✓` (green) or `✗` (red) + exits.
 **`warn_step` helper** — same but prints `!` (yellow) + continues on failure.
@@ -259,22 +269,26 @@ Mirror of the PowerShell script for Linux/macOS:
 ---
 
 ## CARE-to-Compare Dataset
+> *Added: 2026-06-14 · Last updated: 2026-06-15*
 
 - Zenodo URL: `https://zenodo.org/records/15846963/files/CARE_To_Compare.zip?download=1`
 - Farm A: 22 events × ~36 MB (~800 MB total), 86 sensor features per event, CSV per event
 - Farm B: 37 events, 257 features; Farm C: 36 events, 957 features
 - CSV columns: `time_stamp`, `status_type_id`, sensor columns, `train_test`
-- Download: `python scripts/download_care_dataset.py --dest care_data --farms A --count 10 --sim-dir sim_data/sample`
+- Download: `python scripts/download_care_dataset.py --dest sim_data/sample --farms A --count 10`
   - `--count N` applies to CSV files only (keeps README); N=10 ≈ 360 MB
-  - `--sim-dir` copies downloaded CSVs to that directory as `wind_turbine_farm{X}_{i:02d}.csv`
+  - `--dest sim_data/sample` puts files directly in the SIM sample dir (default; omit flag to use it)
+  - **There is NO `--sim-dir` flag** — `--dest` is the only path argument
 - Seed: `python scripts/acm_seed_demo.py --care-dir care_data --db acm_results.db`
 - Asset key pattern: `care/{farm_letter}/{csv_stem}` e.g. `care/A/40`
 - Group: `care_demo`
 - CARE CSVs in `sim_data/sample/` appear in ACM's Simulate → Files tab for replay
+- **CARE is not a separate flow** — it uses the same SIM Files tab as any other sample CSV
 
 ---
 
 ## Simulator Integration — `sim/` Package
+> *Added: 2026-06-14 · Last updated: 2026-06-16*
 
 The `sim/` package is a vendored copy of the Simulator's generator + replay engine, adapted to live inside ACM. It enables in-process CSV generation and data replay without any external services.
 
@@ -328,16 +342,18 @@ Singleton held by `acm_service.Service`, exposes clean async API to routes:
 - `get_current_values()` → `CurrentValuesResponse.model_dump()`
 - `list_files()` → CSV files from all `sim_data/` subdirs
 
-Publisher modes: `buffer` (default, writes to mqtt_buffer.db), `mqtt`, `opcua`, `both`
+Publisher modes: `buffer` (SDK-level default, writes to mqtt_buffer.db), `mqtt`, `opcua`, `both`
+**Note:** The UI defaults `#sim-replay-publisher` to `opcua` — the SDK default `buffer` is never the effective default in practice.
 
 ### `/api/sim/*` Routes (`scripts/acm_sim_routes.py`)
-14 routes under `APIRouter(prefix="/api/sim")`:
+**15 routes** under `APIRouter(prefix="/api/sim")`:
 - `GET /generators` — list all 11 domains (id, label, description)
 - `GET /generators/{id}/spec` — scenarios, parameters, default_output_filename
 - `POST /generators/{id}/generate` — generate CSV; body: GenerateRequest
 - `GET /files` — list files in sim_data/ (name, size, rows, columns, source)
 - `GET /files/{filename}/metadata?source=generated` — column info, type inference, preview
 - `DELETE /files/{filename}?source=generated`
+- `POST /files/{filename}/register?source=generated` — register file as ACM monitored asset (auto-detects timestamp col) *(added 2026-06-16)*
 - `POST /files/upload` — multipart upload
 - `GET /status` — SimAdapter.get_status()
 - `POST /replay/configure` — body: ReplayConfig
@@ -375,7 +391,7 @@ Generator produces data with timestamps shifted so the last row ≈ now.
 - All sim UI uses ACM's existing CSS classes (`.card`, `.btn`, `.data`, `.term`, `.kpi`, `.badge`)
 - SIM JavaScript IIFE appended to `app.js` — handles all `/api/sim/*` calls, sub-tab switching, output panel, live values polling at 1s
 - 2 new header stat-cells: `#sim-pill` (Replay state), `#sim-file-pill` (Active File)
-- 2 new header buttons: `▶ Replay` / `■ Stop` (toggle based on replay state)
+- 2 new SIM-specific header buttons: `▶ Replay` / `■ Stop` (toggle based on replay state)
 - Output panel: fixed bottom strip (180px, collapsible) with All/Sim/ACM filter tabs and `<pre class="term">` log stream
 
 ### UI implementation rules (do not break)
@@ -388,30 +404,31 @@ Generator produces data with timestamps shifted so the last row ≈ now.
 ---
 
 ## UI Codebase Map — `static/` (app.js / index.html / style.css)
+> *Added: 2026-06-14 · Last updated: 2026-06-16*
 
-### app.js — Function Locations (approximate line numbers)
+### app.js — Function Locations (approximate line numbers as of 2026-06-16)
 
 | Function | ~Line | Purpose |
 |---|---|---|
-| `api(url, opts)` | 140 | Fetch wrapper — throws on non-2xx, returns JSON |
-| `toast(msg, kind)` | 155 | Show bottom-right toast: `ok`/`warn`/`err` |
-| `badge(state)` | 162 | Returns coloured `<span class="badge">` for asset state |
-| `sparkline(data)` | 170 | Mini SVG trend line from sparkline array |
-| `refreshService()` | 220 | Fetches `/api/service`, updates header stat-cells |
-| `updateCountdown()` | 247 | Updates next-tick countdown every second |
-| `refreshOperator()` | 321 | Renders Operator tab: KPIs, fleet matrix, health history, alarm causes |
-| `renderTimeline()` | 348 | 24-hr alarm timeline blocks inside `refreshOperator` |
-| `ackAlarm()` | 598 | Opens modal to acknowledge alarm via `POST /api/alarms/ack` |
-| `openEngineer(key)` | 614 | Sets `selectedAsset` and switches to Engineer tab |
-| `fillAssetSelectors()` | 619 | Fetches fleet, populates `#eng-asset` (scored only) and `#adm-runs-asset` (all) |
-| `refreshEngineer()` | 696 | Renders Engineer tab — chart, culprits, heatmap, cofiring, daily, mttd |
-| `refreshAdmin()` | 1443 | Renders Admin tab — health, assets table, run history, config, audit |
-| `refresh()` | 1669 | Main poll loop called every 20s — calls per-tab refresh |
-| SIM IIFE starts | ~1700 | `(function(){ ... })()` — all `/api/sim/*` UI code |
-| `refreshFiles()` | 1949 | Renders Files sub-tab table with Preview/→Replay/Delete buttons |
-| `populateReplayFileList()` | 2008 | Fills `#sim-replay-file` select with files from `/api/sim/files` |
-| `sendToReplay(fn, src)` | ~2222 | Navigates to Replay sub-tab and pre-selects file |
-| Update ACM handler | ~2277 | `doUpdate()` — calls `POST /api/service/update`, streams output to log panel |
+| `api(path, opts)` | 9 | Fetch wrapper — throws on non-2xx, returns JSON |
+| `badge(state)` | 40 | Returns coloured `<span class="badge">` for asset state |
+| `toast(msg, kind)` | 70 | Show bottom-right toast: `ok`/`warn`/`err` |
+| `sparklineBar(points)` | 130 | HTML bar trend (div flex, last 10 days) — replaced SVG sparkline for performance |
+| `updateCountdown()` | 237 | Updates next-tick countdown every second |
+| `refreshOperator()` | 319 | Renders Operator tab: KPIs, fleet matrix, health history, alarm causes |
+| `renderTimeline()` | inside refreshOperator | 24-hr alarm timeline blocks (lazy-loaded on expand) |
+| `ackAlarm()` | 697 | Opens modal to acknowledge alarm via `POST /api/alarms/ack` |
+| `openEngineer(key)` | 713 | Sets `selectedAsset` and switches to Engineer tab |
+| `fillAssetSelectors()` | 718 | Fetches fleet, populates `#eng-asset` (scored only) and `#adm-runs-asset` (all) |
+| `refreshEngineer()` | 799 | Renders Engineer tab — chart, culprits, heatmap, cofiring, daily, mttd |
+| `refreshAdmin()` | 1552 | Renders Admin tab — health, assets table, run history, config, audit |
+| `refresh()` | 1779 | Main poll loop called every 20s — calls per-tab refresh |
+| SIM IIFE starts | ~2060 | `(function(){ ... })()` — all `/api/sim/*` UI code |
+| `refreshFiles()` | 2064 | Renders Files sub-tab table with Preview/→Replay/→ACM/Delete buttons |
+| `populateReplayFileList()` | 2124 | Fills `#sim-replay-file` select with files from `/api/sim/files` |
+| `sendToReplay(fn, src)` | 2349 | Navigates to Replay sub-tab and pre-selects file |
+| `onboardFile(fn, src)` | 2371 | Opens modal to register a SIM file as ACM monitored asset |
+| `doUpdate()` | 2430 | Calls `POST /api/service/update`, streams output to log panel |
 
 ### app.js — Key Rendering Details
 
@@ -429,8 +446,9 @@ Generator produces data with timestamps shifted so the last row ≈ now.
 **Fleet Operations Matrix** (`refreshOperator`, ~line 379):
 - `#mega-matrix` div populated with `<div class="mega-hdr">` + per-asset `<div class="mega-asset-row collapsed">`
 - Asset rows grouped by farm prefix (everything before first `_` in asset key)
-- Double-click → `openEngineer(asset_key)`. Single click toggles alarm episode rows
+- Double-click → `openEngineer(asset_key)`. Single click toggles alarm episode rows (lazy-loaded)
 - Timeline: 24 one-hour blocks, `danger` if `peak_fused > 5.0`, else `warn`
+- 8 columns: Asset Name · Status · Trend · Fused · Diagnosis · Timeline · State · Score
 
 **Engineer Chart** (`refreshEngineer`, ~line 830):
 - uPlot instance. Series: `[x, fused_z, alert_z, AR1, PCA-SPE, PCA-T2, IForest, GMM, OMR]`
@@ -440,10 +458,12 @@ Generator produces data with timestamps shifted so the last row ≈ now.
 **Co-firing Matrix** (`refreshEngineer`, ~line 1270):
 - Canvas. `CELL=44, GAP=2, LABEL=44`, font `bold 11px "Barlow Condensed"`
 - Only renders for alarm samples; `freq[r][c] = pct of r-active rows where c also active`
+- Uses stored `alarm[i]` column (the rule engine's decision, including self-distrust gate)
 
 **Alarm Pattern Heatmap** (`refreshEngineer`, ~line 1361):
 - Canvas. `LABEL_W=42, LABEL_H=20, GAP=1, CELL_H=26`, `CELL_W = max(10, floor((containerW-LABEL_W-12)/24))`
 - Day-of-week × hour grid, color = alarm fraction
+- Uses stored `alarm[i]` column (same as co-firing matrix)
 
 ### index.html — Key Element IDs
 
@@ -461,7 +481,7 @@ Generator produces data with timestamps shifted so the last row ≈ now.
 | `#adm-assets tbody` | Admin tab | Monitored assets table rows |
 | `#adm-runs-asset` | Admin tab | Asset filter for run history |
 | `#btn-update-acm-hdr` | Header `.hdr-right` | **Primary Update button** — always visible, `btn-hdr btn-warn` |
-| `#btn-runnow` | Header `.hdr-right` | Run Now — `btn-hdr btn-ok` |
+| `#btn-runnow` | Header `.hdr-right` | **Score All** — `btn-hdr btn-ok` — triggers scoring on all assets |
 | `#btn-sim-start` | Header `.hdr-right` | Replay Start — hidden unless replay configured |
 | `#sim-pill` | Header stat strip | Replay state badge |
 | `#sim-file-pill` | Header stat strip | Active replay file name |
@@ -513,7 +533,7 @@ areas:   "health  health"
 | `.btn` | Base 3-D button, `--brand` accent | General actions |
 | `.btn-sm` | `font-size:14px, padding:3px 8px` | Small inline buttons in tables/cards |
 | `.btn-hdr` | Semi-transparent, white text, `15px` | Header row buttons |
-| `.btn-hdr.btn-ok` | Green, `--ok` | Positive header actions (Run Now, Replay Start) |
+| `.btn-hdr.btn-ok` | Green, `--ok` | Positive header actions (Score All, Replay Start) |
 | `.btn-hdr.btn-bad` | Red, `--bad` | Destructive header actions (Pause, Stop) |
 | `.btn-hdr.btn-warn` | Amber, `--warn` | Notable header actions (Update) |
 | `.btn-brand` | `--brand` fill | Primary CTA inside cards |
@@ -523,6 +543,7 @@ areas:   "health  health"
 ---
 
 ## API Endpoints — Key Responses
+> *Added: 2026-06-14 · Last updated: 2026-06-16*
 
 ### `GET /api/fleet`
 Returns `list[dict]` — one entry per `monitored_assets` row that is enabled:
@@ -531,15 +552,17 @@ Returns `list[dict]` — one entry per `monitored_assets` row that is enabled:
   "asset_key": "care/A/40",
   "grp": "care_demo",
   "state": "ALARM",            // NEW|MATURING|READY|OK|WARN|ALARM|ERROR|STALE
+  "state_detail": null,        // e.g. "Replaying: fault_power_condenser_fouling.csv"
   "last_fused": 3.82,          // null if no score yet
   "last_ts": "2025-10-28T12:48:00Z",
+  "last_run_at": "2026-06-16T10:30:00Z",   // null if never scored; used for per-asset poll
   "rules_fired": "sustained deviation",
   "unacked_alarms": 98,
   "source_kind": "csv",
   "source_ref": "/path/to/file.csv"
 }
 ```
-`last_fused === null` means asset has never been scored (MATURING/NEW). `fillAssetSelectors()` filters to `last_fused !== null` for the Engineer dropdown.
+`last_fused === null` means asset has never been scored (MATURING/NEW). `fillAssetSelectors()` filters to `last_fused !== null` for the Engineer dropdown. `last_run_at` is used by the per-asset Score button to detect when scoring of a specific asset completes.
 
 ### `GET /api/fleet/sparklines`
 Returns `{asset_key: [[dayStr, fusedMax], ...]}` — 30-day daily max fused scores per asset.
@@ -568,9 +591,13 @@ Output streamed to `#output-log` via `SIM.log()`. Service must be restarted for 
 ### `GET /api/asset/{key}`
 Full scored result for engineer view. Key fields: `rows` (list of score dicts), `columns` (list of column names), `idx` (column name → index map), `alert_z` (threshold line value).
 
+### `POST /api/service/run-now`
+Triggers immediate scoring. Body: `{}` (all assets) or `{"assets": ["key1", "key2"]}` (targeted). The per-asset Score button in the Fleet Matrix uses the targeted form.
+
 ---
 
 ## Config Split (enforced by test)
+> *Added: 2026-06-14*
 
 - **Human config** (`configs/config_table.csv`, synced to `config` table): categories `data`, `sql`, `runtime` only
 - **ML params** (`core/ml_defaults.py`): categories `models`, `thresholds`, `fusion`, `regimes` — NEVER in config_table.csv
@@ -579,6 +606,7 @@ Full scored result for engineer view. Key fields: `rows` (list of score dicts), 
 ---
 
 ## Windows Compatibility
+> *Added: 2026-06-14*
 
 - **Asyncio in tests:** Always `asyncio.run(coro)` — NEVER `asyncio.get_event_loop().run_until_complete(coro)`. On Windows Python 3.8+, `ProactorEventLoop` is stricter; `get_event_loop()` can return a closed loop after `TestClient` consumes it. This caused the one test failure on a fresh Windows install (`test_tick_clears_all_caches` in `test_performance.py`). Fixed by replacing with `asyncio.run()`.
 - **Paths:** Always `pathlib.Path` or `os.path.join` — never hardcode `/`.
@@ -587,6 +615,7 @@ Full scored result for engineer view. Key fields: `rows` (list of score dicts), 
 ---
 
 ## Key Implementation Patterns
+> *Added: 2026-06-14*
 
 - **Atomic parquet write:** `df.to_parquet(tmp)` then `os.replace(tmp, path)` — crash-safe, file is never half-written
 - **Column-pruning for `since`:** `_read_ts_column()` reads only the timestamp column via PyArrow — avoids loading all 600+ sensor columns just to find the max timestamp
@@ -598,45 +627,50 @@ Full scored result for engineer view. Key fields: `rows` (list of score dicts), 
 ---
 
 ## Mistakes Made in Earlier Sessions (Never Repeat)
+> *Added: 2026-06-14 · Last updated: 2026-06-16*
 
-1. **Added ACM references to Simulator** — `ACM_DIR` variable in `suite_runtime.py`, ACM chip in portal HTML, ACM port in launchPorts. All reverted. The constraint is absolute: zero ACM knowledge in Simulator.
-2. **Built MQTT-first integration** — wrong priority order. OPC UA is priority 1 because it's already implemented in the Simulator. MQTT is secondary.
-3. **Called OPC UA "ACM's preferred source"** — wrong framing. OPC UA is just the wire between Simulator and ACM. ACM has equal support for all source kinds.
-4. **Self-test aborting the install** — a test failure ≠ broken install. Packages installed + imports verified = working install. Self-test must be non-fatal.
-5. **`asyncio.get_event_loop().run_until_complete()` in tests** — fails on Windows. Always `asyncio.run()`.
-6. **Omitting `asyncua`/`paho-mqtt` from pip install** — bridges silently fail with ImportError. Always include them.
-7. **`Select-Object -Last 1` inside a scriptblock already redirected to log** — redundant, and the pipe can confuse PowerShell's `$LASTEXITCODE` tracking.
-8. **Launching agents with `isolation: "worktree"`** — fails because `/home/user` is not a git repo. Always omit isolation parameter; work directly in `/home/user/ACM/` or `/home/user/Simulator/`.
-9. **Agents launching research sub-agents instead of doing the work** — wastes context. If the task is clear, do the implementation directly; only spawn agents for genuinely parallel independent work.
-10. **`pd.to_datetime` without `format='ISO8601'`** — generators write timestamps with fractional seconds (`2026-01-01T00:00:00.100000Z`). Without `format="ISO8601", utc=True`, pandas raises a parse error. Always use `pd.to_datetime(df[col], format="ISO8601", utc=True)` in `acm_feed.py` for CSV timestamps.
-11. **Replay pill not updating immediately** — `refreshSimStatus()` polls every 3 seconds. After `doStartReplay()` / `doStopReplay()` succeeds, call `refreshSimStatus()` immediately so the header stat-cell reflects the new state without a 3-second lag. Fixed in `app.js`.
-12. **Playwright `wait_for_function` picks up stale DOM** — after a sub-tab switch, `wait_for_function("length > 0")` may fire on cached content before the async API fetch completes. Use `wait_for_function(f"length > {previous_count}")` when you expect the count to change, or `wait_for_selector` for a specific element.
-13. **`Step "Fault datasets"` was fatal in `setup_acm.ps1`** — caused the whole installer to abort if `generate_fault_dataset.py` exited non-zero on Windows. Fixed by switching to the non-fatal warn pattern (same as self-test). The fault CSVs are pre-committed in `sim_data/sample/` so the step is "nice to regenerate" only.
-14. **UI base font-size 13px is too small on standard Windows displays** — increased to 15px. All component pixel sizes scaled up proportionally (+2 to +3px). See "UI Font Sizes" section below for the canonical values.
-15. **`--sim-dir` flag does not exist in `download_care_dataset.py`** — the script only has `--dest`, `--farms`, `--count`. The default `--dest` already points to `sim_data/sample` so no extra flag is needed. CLAUDE.md had the wrong flag; setup scripts now corrected.
-16. **`setup.sh` had three bugs**: (a) duplicate pip install block (pyodbc optional then same packages again mandatory), (b) `warn_step "Self-test" ... | tail -3` pipe was applying to warn_step's own printf output, not pytest, (c) `step "Fault datasets"` was fatal. All fixed: single install block, pipe removed, fault step changed to `warn_step`.
-17. **`setup_acm.ps1` missing packages**: `python-multipart`, `openpyxl`, `pydantic` were absent from the pip install list but required by FastAPI multipart upload and sim routes. Also missing `structlog`, `matplotlib`, `pytest`, `httpx` (were present but needed to stay). All added.
-18. **OPC UA is now the default replay transport** — `sim-replay-publisher` dropdown defaults to `opcua`. `BufferPublisher` (mqtt_buffer.db) is no longer the default; it's only used if explicitly chosen. `_register_opcua_in_acm()` in `acm_sim_routes.py` auto-registers `simulator/opc_ua` asset and triggers run-now when replay starts in opcua/both mode.
-19. **`fillAssetSelectors()` race condition** — calling it inside every `refreshEngineer()` caused concurrent poll calls to overwrite the dropdown during an async await, showing the wrong asset's chart. Fix: `fillAssetSelectors()` only in the `refresh()` poll loop, never inside `refreshEngineer()`. `cachedEngineerData = null` in the change handler forces fresh fetch.
-20. **Files tab + Preview were slow** — `pd.read_csv` with `sep=None, engine='python'` scanned the entire file to detect delimiter. Fixed by replacing with `csv.Sniffer` reading only the first 8KB for dialect detection, then `csv.DictReader` for row reading. No pandas import for column count / preview in `sim/csv_manager.py`.
-21. **Detector series hidden by default** — added `show: false` to all 6 detector series in uPlot config. `btn.classList.remove("active")` on every chart render resets toggle button states. Only fused z + alert_z are shown by default.
-22. **Engineer tab grid layout** — `mttd` (Reliability Metrics) moved from last row to row 4 (beside cofiring), so it appears near the top-right after the chart. Layout: topbar → culprits → chart/pattern → mttd/cofiring → episodes/histogram → daily/daily.
-23. **Co-firing matrix and alarm heatmap readability** — CELL increased to 44 (from 28), LABEL to 44 (from 32), font to 11px (from 7px). Alarm pattern CELL_H to 26 (from 20), LABEL_W to 42 (from 30), LABEL_H to 20 (from 16), fonts to 11px/10px.
-24. **Files tab → Replay navigation** — `sendToReplay(filename, source)` added to SIM IIFE. Calls `populateReplayFileList()` then sets the replay file select to the target file. "→ Replay" button added in Files table Actions column.
-25. **Operator tab layout overhaul** — "Top Alarm Causes" moved to right column directly below Fleet Health History (causes now in row 2 beside kpis, matrix takes full-width row 3 with `1fr` height). Fleet Health History bars increased 90→130px, legend font 9→11px. Alarm Causes bars 5→10px, label 11→13px bold, count 9→11px. Grid: `auto auto 1fr` rows with `kpis` spanning rows 1-2 via grid-template-areas.
-26. **Update ACM button — made prominent** — moved to header as `#btn-update-acm-hdr` with class `btn-hdr btn-warn` (amber, always visible in header-right alongside Pause/Run Now). The old Admin card button (`#btn-update-acm`) was removed. Both call the same `doUpdate()` helper. `POST /api/service/update` runs `git pull --ff-only` + re-seeds assets (line 674 in `acm_service.py`). Requires service restart to apply code changes.
-27. **Alarm shading / pattern / co-firing use `fused > alertZ`** — NOT the stored `alarm` boolean column from the DB. The per-row `alarm` column can be 0 even when `fused > alert_z` due to the self-distrust gate in the rule engine. Switching to `fused[i] > alertZ` makes all three visualisations consistent and always show exceedances: chart shading, alarm pattern heatmap, co-firing matrix. `alertZ` comes from `meta.asset.alert_z`.
-28. **Alarm shading opacity doubled** — all `--chart-alarm-fill` CSS vars increased from ~0.20-0.25 to ~0.40-0.50 across all 11 themes.
-29. **Reliability Metrics whitespace fixed** — `align-self: start` added to `.eng-mttd`. Without this the grid item stretches to fill the co-firing matrix's tall cell, creating empty space below the 4 KPI tiles.
-30. **sendToReplay race condition fixed** — clicking `[data-sim-pane="replay"]` triggered `populateReplayFileList()` concurrently with our explicit `await populateReplayFileList()` call, causing the auto-selected first file to overwrite our target. Fix: switch pane directly via DOM classList manipulation (no `.click()`), then `await populateReplayFileList()`, then set `sel.value` and call `loadTagPlan()`.
-31. **Setup script Next Steps made unmissable** — both `setup_acm.ps1` and `setup.sh` now show a yellow double-line box (╔═╗ style) with START THE SERVICE, python command, URL, and RUN NOW instruction. Was previously easy to miss in the wall of install output.
-32. **CLAUDE.md got a Table of Contents** — added at the top. Jump targets: "Start here for UI work" → UI Codebase Map; "Read before starting any task" → Mistakes Made.
-33. **NEVER change alarm logic when asked for visual prominence** — when user says "make the shading more prominent", that means increase CSS opacity / color intensity ONLY. It does NOT mean change the data logic from `alarm[i]` (stored DB boolean) to `fused[i] > alertZ`. The co-firing matrix, alarm pattern heatmap, and chart shading all intentionally use the stored `alarm` column which reflects the rule engine's decision (including self-distrust gate). Changing the source data breaks the semantics of all three visualisations. Only touch CSS (`--chart-alarm-fill` opacity) for prominence requests.
-34. **Fleet Operations Matrix fonts were inherited and undersized** — the mega-matrix asset rows, headers, and episode details were using inherited `body` font-size (15px) instead of explicit larger sizes. This made dense table text difficult to read at standard monitor distance. Also, column widths (90px for Status, 130px for Trend, etc.) were too tight, causing header text like "STATUS /" to wrap awkwardly. Fixed by: (a) explicit font-size: 17px on .mega-hdr, .mega-asset-row, .mega-alarm-row, (b) expanding column widths by 20–30px, (c) increasing timeline block height from 16→20px, (d) padding rows more generously. The grid template should never have columns < 100px for text content — always reserve space for unwrapped labels.
+1. *(2026-06-14)* **Added ACM references to Simulator** — `ACM_DIR` variable in `suite_runtime.py`, ACM chip in portal HTML, ACM port in launchPorts. All reverted. The constraint is absolute: zero ACM knowledge in Simulator.
+2. *(2026-06-14)* **Built MQTT-first integration** — wrong priority order. OPC UA is priority 1 because it's already implemented in the Simulator. MQTT is secondary.
+3. *(2026-06-14)* **Called OPC UA "ACM's preferred source"** — wrong framing. OPC UA is just the wire between Simulator and ACM. ACM has equal support for all source kinds.
+4. *(2026-06-14)* **Self-test aborting the install** — a test failure ≠ broken install. Packages installed + imports verified = working install. Self-test must be non-fatal.
+5. *(2026-06-14)* **`asyncio.get_event_loop().run_until_complete()` in tests** — fails on Windows. Always `asyncio.run()`.
+6. *(2026-06-14)* **Omitting `asyncua`/`paho-mqtt` from pip install** — bridges silently fail with ImportError. Always include them.
+7. *(2026-06-14)* **`Select-Object -Last 1` inside a scriptblock already redirected to log** — redundant, and the pipe can confuse PowerShell's `$LASTEXITCODE` tracking.
+8. *(2026-06-14)* **Launching agents with `isolation: "worktree"`** — fails because `/home/user` is not a git repo. Always omit isolation parameter; work directly in `/home/user/ACM/` or `/home/user/Simulator/`.
+9. *(2026-06-14)* **Agents launching research sub-agents instead of doing the work** — wastes context. If the task is clear, do the implementation directly; only spawn agents for genuinely parallel independent work.
+10. *(2026-06-14)* **`pd.to_datetime` without `format='ISO8601'`** — generators write timestamps with fractional seconds (`2026-01-01T00:00:00.100000Z`). Without `format="ISO8601", utc=True`, pandas raises a parse error. Always use `pd.to_datetime(df[col], format="ISO8601", utc=True)` in `acm_feed.py` for CSV timestamps.
+11. *(2026-06-14)* **Replay pill not updating immediately** — `refreshSimStatus()` polls every 3 seconds. After `doStartReplay()` / `doStopReplay()` succeeds, call `refreshSimStatus()` immediately so the header stat-cell reflects the new state without a 3-second lag. Fixed in `app.js`.
+12. *(2026-06-14)* **Playwright `wait_for_function` picks up stale DOM** — after a sub-tab switch, `wait_for_function("length > 0")` may fire on cached content before the async API fetch completes. Use `wait_for_function(f"length > {previous_count}")` when you expect the count to change, or `wait_for_selector` for a specific element.
+13. *(2026-06-15)* **`Step "Fault datasets"` was fatal in `setup_acm.ps1`** — caused the whole installer to abort if `generate_fault_dataset.py` exited non-zero on Windows. Fixed by switching to the non-fatal warn pattern (same as self-test). The fault CSVs are pre-committed in `sim_data/sample/` so the step is "nice to regenerate" only.
+14. *(2026-06-15)* **UI base font-size 13px is too small on standard Windows displays** — increased to 15px. All component pixel sizes scaled up proportionally (+2 to +3px). See "UI Font Sizes" section below for the canonical values.
+15. *(2026-06-15)* **`--sim-dir` flag does not exist in `download_care_dataset.py`** — the script only has `--dest`, `--farms`, `--count`. The default `--dest` already points to `sim_data/sample` so no extra flag is needed. CLAUDE.md had the wrong flag; setup scripts now corrected. The CARE Dataset section has also been corrected.
+16. *(2026-06-15)* **`setup.sh` had three bugs**: (a) duplicate pip install block (pyodbc optional then same packages again mandatory), (b) `warn_step "Self-test" ... | tail -3` pipe was applying to warn_step's own printf output, not pytest, (c) `step "Fault datasets"` was fatal. All fixed: single install block, pipe removed, fault step changed to `warn_step`.
+17. *(2026-06-15)* **`setup_acm.ps1` missing packages**: `python-multipart`, `openpyxl`, `pydantic` were absent from the pip install list but required by FastAPI multipart upload and sim routes. Also missing `structlog`, `matplotlib`, `pytest`, `httpx` (were present but needed to stay). All added.
+18. *(2026-06-15)* **OPC UA is now the default replay transport in the UI** — `#sim-replay-publisher` dropdown defaults to `opcua`. `BufferPublisher` (mqtt_buffer.db) is the SDK-level default but is never the effective default in practice. `_register_opcua_in_acm()` in `acm_sim_routes.py` auto-registers `simulator/opc_ua` asset and triggers run-now when replay starts in opcua/both mode.
+19. *(2026-06-15)* **`fillAssetSelectors()` race condition** — calling it inside every `refreshEngineer()` caused concurrent poll calls to overwrite the dropdown during an async await, showing the wrong asset's chart. Fix: `fillAssetSelectors()` only in the `refresh()` poll loop, never inside `refreshEngineer()`. `cachedEngineerData = null` in the change handler forces fresh fetch.
+20. *(2026-06-15)* **Files tab + Preview were slow** — `pd.read_csv` with `sep=None, engine='python'` scanned the entire file to detect delimiter. Fixed by replacing with `csv.Sniffer` reading only the first 8KB for dialect detection, then `csv.DictReader` for row reading. No pandas import for column count / preview in `sim/csv_manager.py`.
+21. *(2026-06-15)* **Detector series hidden by default** — added `show: false` to all 6 detector series in uPlot config. `btn.classList.remove("active")` on every chart render resets toggle button states. Only fused z + alert_z are shown by default.
+22. *(2026-06-15)* **Engineer tab grid layout** — `mttd` (Reliability Metrics) moved from last row to row 4 (beside cofiring), so it appears near the top-right after the chart. Layout: topbar → culprits → chart/pattern → mttd/cofiring → episodes/histogram → daily/daily.
+23. *(2026-06-15)* **Co-firing matrix and alarm heatmap readability** — CELL increased to 44 (from 28), LABEL to 44 (from 32), font to 11px (from 7px). Alarm pattern CELL_H to 26 (from 20), LABEL_W to 42 (from 30), LABEL_H to 20 (from 16), fonts to 11px/10px.
+24. *(2026-06-15)* **Files tab → Replay navigation** — `sendToReplay(filename, source)` added to SIM IIFE. Calls `populateReplayFileList()` then sets the replay file select to the target file. "→ Replay" button added in Files table Actions column.
+25. *(2026-06-15)* **Operator tab layout overhaul** — "Top Alarm Causes" moved to right column directly below Fleet Health History (causes now in row 2 beside kpis, matrix takes full-width row 3 with `1fr` height). Fleet Health History bars increased 90→130px, legend font 9→11px. Alarm Causes bars 5→10px, label 11→13px bold, count 9→11px. Grid: `auto auto 1fr` rows with `kpis` spanning rows 1-2 via grid-template-areas.
+26. *(2026-06-15)* **Update ACM button — made prominent** — moved to header as `#btn-update-acm-hdr` with class `btn-hdr btn-warn` (amber, always visible in header-right alongside Pause/Score All). The old Admin card button (`#btn-update-acm`) was removed. Both call the same `doUpdate()` helper. `POST /api/service/update` runs `git pull --ff-only` + re-seeds assets (line 674 in `acm_service.py`). Requires service restart to apply code changes.
+27. *(2026-06-15 — SUPERSEDED by mistake #33)* **Alarm shading was temporarily switched to `fused > alertZ`** — this was done and then immediately reverted (`f85f293`). The stored `alarm[i]` column is the correct source. See mistake #33 for the definitive rule. Do not re-implement `fused > alertZ` for visual requests.
+28. *(2026-06-15)* **Alarm shading opacity doubled** — all `--chart-alarm-fill` CSS vars increased from ~0.20-0.25 to ~0.40-0.50 across all 11 themes.
+29. *(2026-06-15)* **Reliability Metrics whitespace fixed** — `align-self: start` added to `.eng-mttd`. Without this the grid item stretches to fill the co-firing matrix's tall cell, creating empty space below the 4 KPI tiles.
+30. *(2026-06-15)* **sendToReplay race condition fixed** — clicking `[data-sim-pane="replay"]` triggered `populateReplayFileList()` concurrently with our explicit `await populateReplayFileList()` call, causing the auto-selected first file to overwrite our target. Fix: switch pane directly via DOM classList manipulation (no `.click()`), then `await populateReplayFileList()`, then set `sel.value` and call `loadTagPlan()`.
+31. *(2026-06-15)* **Setup script Next Steps made unmissable** — both `setup_acm.ps1` and `setup.sh` now show a yellow double-line box (╔═╗ style) with START THE SERVICE, python command, URL, and RUN NOW instruction. Was previously easy to miss in the wall of install output.
+32. *(2026-06-15)* **CLAUDE.md got a Table of Contents** — added at the top. Jump targets: "Start here for UI work" → UI Codebase Map; "Read before starting any task" → Mistakes Made.
+33. *(2026-06-15)* **NEVER change alarm logic when asked for visual prominence** — when user says "make the shading more prominent", that means increase CSS opacity / color intensity ONLY. It does NOT mean change the data logic. The co-firing matrix, alarm pattern heatmap, and chart shading all intentionally use the stored `alarm[i]` column which reflects the rule engine's decision (including self-distrust gate). Changing the source data breaks the semantics. Only touch CSS (`--chart-alarm-fill` opacity) for prominence requests. The brief switch to `fused > alertZ` (see mistake #27) was reverted — `alarm[i]` is the permanent correct choice.
+34. *(2026-06-16)* **Fleet Operations Matrix fonts were inherited and undersized** — the mega-matrix asset rows, headers, and episode details were using inherited `body` font-size (15px) instead of explicit larger sizes. This made dense table text difficult to read at standard monitor distance. Also, column widths (90px for Status, 130px for Trend, etc.) were too tight, causing header text like "STATUS /" to wrap awkwardly. Fixed by: (a) explicit font-size: 17px on .mega-hdr, .mega-asset-row, .mega-alarm-row, (b) expanding column widths by 20–30px, (c) increasing timeline block height from 16→20px, (d) padding rows more generously. The grid template should never have columns < 100px for text content — always reserve space for unwrapped labels.
+35. *(2026-06-16)* **Polling `tick_in_progress` for per-asset completion** — this is a global flag; if any other asset finishes first, the poll terminates early. Always poll `last_run_at` for the SPECIFIC asset from `/api/fleet`.
+36. *(2026-06-16)* **Constructing `source_ref` in the frontend** — `sim_data/sample/file.csv` is a relative path that works only if CWD = ACM root. Use the backend `/api/sim/files/{fn}/register` endpoint which calls `csv_manager.resolve_csv_path()` for the absolute path.
+37. *(2026-06-16)* **Not adding `state_detail` to PATCH allowed fields** — silent 422 was swallowed by `catch (_) {}`. Always check PATCH endpoints have the fields you need before writing frontend code that PATCHes them.
 
 ---
 
 ## Detailed Data Flow (per source kind)
+> *Added: 2026-06-14*
 
 ### CSV
 ```
@@ -680,6 +714,7 @@ load_increment → update_cache (concat + trim to 180d, atomic parquet write)
 ---
 
 ## Debugging Asset Scoring Issues
+> *Added: 2026-06-14*
 
 - **No score being produced:** check `readiness()` — likely MATURING (< 14 days) or STALE (> 24h gap)
 - **OPC UA data not arriving:** check `data_cache/opcua_buffer.db` for recent rows; if empty the bridge disconnected — check `acm_service` logs for `last_error`
@@ -691,6 +726,7 @@ load_increment → update_cache (concat + trim to 180d, atomic parquet write)
 ---
 
 ## Future-Agent Guidance
+> *Added: 2026-06-14*
 
 ### If modifying Simulator:
 - Keep ALL code ACM-agnostic — no ACM imports, no references to ACM directories or ports
@@ -738,6 +774,7 @@ if ($code -eq 0) {
 ---
 
 ## Service Start Command
+> *Added: 2026-06-14*
 
 ```bash
 cd ~/ACM
@@ -747,7 +784,7 @@ python scripts/acm_service.py
 
 **What this starts:**
 - FastAPI service on port 8765
-- Async tick scheduler (default 60-second interval)
+- Async tick scheduler (default 60-second interval) — **starts PAUSED** (user must click Score All or per-asset ▶ Score)
 - SimAdapter (in-process: Generate + Replay + BufferPublisher)
 - OPC UA bridge (lazy — only when an `opcua` asset is registered)
 - MQTT bridge (lazy — only when an `mqtt` asset is registered)
@@ -760,6 +797,7 @@ Optional flags: `--port 8766`, `--backend mssql --conn "..."`, `--db custom.db`
 ---
 
 ## UI Testing
+> *Added: 2026-06-14 · Last updated: 2026-06-15*
 
 Playwright end-to-end tests live in `tests/ui/test_ui.py`. Run with:
 
@@ -772,7 +810,7 @@ python tests/ui/test_ui.py
 Requires: `pip install playwright && playwright install chromium`
 
 **What the test covers (26 checks):**
-1. Page loads, header stat-cells present (REPLAY pill, RUN NOW button)
+1. Page loads, header stat-cells present (REPLAY pill, **Score All** button)
 2. All 4 tabs switch correctly
 3. Simulate → Generate: 11-domain dropdown populated, CSV generation produces preview
 4. Files tab: 12 pre-seeded files listed (10 fault CSVs + any generated), count increases after generate
@@ -795,6 +833,7 @@ Requires: `pip install playwright && playwright install chromium`
 ---
 
 ## Fault Datasets (`sim_data/sample/`)
+> *Added: 2026-06-15*
 
 10 pre-generated CSV files with known fault signatures, committed to git:
 
@@ -823,9 +862,13 @@ Requires: `pip install playwright && playwright install chromium`
 ---
 
 ## Git Workflow
+> *Added: 2026-06-14 · Last updated: 2026-06-16*
 
-- Development branch for session 01Dkd7AbjS8Sd5ChfYiNa1yR: `claude/focused-albattani-t9876j` → merged to `main`
-- Previous sessions: 013M57Jr3CpacwDMxVebD5r6 pushed directly to `main`; earlier used `claude/upbeat-hopper-m39epw`, `claude/epic-archimedes-7dkrwf` (both merged to main)
+- Session 013M57Jr3CpacwDMxVebD5r6 — pushed directly to `main`
+- Session using `claude/upbeat-hopper-m39epw` — merged to main
+- Session using `claude/epic-archimedes-7dkrwf` — merged to main
+- Session 01Dkd7AbjS8Sd5ChfYiNa1yR: branch `claude/focused-albattani-t9876j` → merged to `main`
+- Session 01UuCboiW9MAKb9AKYYoVt1J (2026-06-16): pushed directly to `main` (per-asset scoring, SIM→ACM flow, perf sprints)
 - Pattern: commit to dev branch → push dev → `git checkout main` → `git merge dev --no-edit` → `git push origin main`
 - If push fails due to diverged remote: `git pull origin main --rebase` then push again
 - Never force-push, never `--no-verify`
@@ -833,6 +876,7 @@ Requires: `pip install playwright && playwright install chromium`
 ---
 
 ## UI Font Sizes (canonical after 2026-06-15 upsize)
+> *Added: 2026-06-15*
 
 All sizes live in `static/style.css`. Changed from the original small-screen values to be readable on standard Windows displays.
 
@@ -873,6 +917,7 @@ All sizes live in `static/style.css`. Changed from the original small-screen val
 ---
 
 ## Fleet Operations Matrix (Operator Tab) — Styling Learnings (2026-06-16)
+> *Added: 2026-06-16*
 
 **Issue:** Text was "way too small" — asset names, status, diagnosis, episode details all difficult to read.
 
@@ -891,15 +936,23 @@ All sizes live in `static/style.css`. Changed from the original small-screen val
    - Fused: 70→90px
    - Diagnosis: 220→240px
    - Timeline: 60→70px
+   - Score: 80px (new 8th column added 2026-06-16)
 3. **Row heights:** Header 33→38px, asset rows padding 10→12px vertical
 4. **Timeline blocks:** 16px→20px height for better visibility
 5. **Farm group header:** 12px→17px font, padding 6→8px
+
+**Current grid template (8 columns):**
+```css
+grid-template-columns: minmax(200px, 280px) 110px 150px 90px 1fr 240px 70px 80px;
+```
+Applied to `.mega-hdr`, `.mega-asset-row`, `.mega-alarm-row`.
 
 **Result:** Headers display cleanly without wrapping, all text readable at standard monitor distance, better visual hierarchy.
 
 ---
 
 ## Fleet Operations Matrix Performance Optimization (2026-06-16)
+> *Added: 2026-06-16*
 
 **Problem:** Matrix was taking 800-1200ms to render for 100-asset fleets (user reported "too slow for my liking")
 
@@ -949,11 +1002,12 @@ All sizes live in `static/style.css`. Changed from the original small-screen val
 - All optimizations are backward-compatible — no API changes
 - Lazy-load uses closure to capture alarm state per asset
 - Hash function is simple (length + character-sum), not cryptographic, sufficient for equality check
-- sprinklineBar() uses last 10 days of data (vs full 30-day trend in old SVG)
+- `sparklineBar()` uses last 10 days of data (vs full 30-day trend in old SVG)
 
 ---
 
 ## Per-Asset Scoring & SIM→ACM Flow (2026-06-16)
+> *Added: 2026-06-16*
 
 ### Two User Flows (architecture decision)
 Only two valid flows for getting data into ACM:
@@ -990,14 +1044,10 @@ Added `state_detail` to the allowed set (`acm_service.py:~534`). This enables th
 ### ACM Service Startup — PAUSED by default
 `acm_store.py:get_service_state()` seeds `paused=1` on first run. Service starts idle; user must click "Score All" or per-asset "▶ Score" to begin scoring.
 
-### Mistakes to Never Repeat (added this session)
-35. **Polling `tick_in_progress` for per-asset completion** — this is a global flag; if any other asset finishes first, the poll terminates early. Always poll `last_run_at` for the SPECIFIC asset from `/api/fleet`.
-36. **Constructing `source_ref` in the frontend** — `sim_data/sample/file.csv` is a relative path that works only if CWD = ACM root. Use the backend `/api/sim/files/{fn}/register` endpoint which calls `csv_manager.resolve_csv_path()` for the absolute path.
-37. **Not adding `state_detail` to PATCH allowed fields** — silent 422 was swallowed by `catch (_) {}`. Always check PATCH endpoints have the fields you need before writing frontend code that PATCHes them.
-
 ---
 
 ## User Working Style
+> *Added: 2026-06-14*
 
 - Expects things to work end-to-end after one command — not "technically correct but incomplete"
 - Direct and blunt when something is wrong — correct course immediately, don't justify
