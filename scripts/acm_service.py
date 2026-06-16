@@ -142,12 +142,9 @@ class Service:
         self.retention_days = float(cfg_get(cfg, "runtime.retention_days", 90.0))
         self.score_days = float(cfg_get(cfg, "data.score_days", 30.0))
         default_tick = int(cfg_get(cfg, "runtime.tick_minutes", 15))
-        state = st.get_service_state(self.store, default_tick_minutes=default_tick)
-        # Migrate old databases (paused=0 from before the paused-by-default change):
-        # reset to paused=1 unless there's recent activity indicating an intentional resume.
-        if state["paused"] == 0 and not state["last_tick_at"]:
-            state["paused"] = 1
-        st.set_service_state(self.store, paused=state["paused"], started_at=_now())
+        st.get_service_state(self.store, default_tick_minutes=default_tick)
+        # Always start paused — user must explicitly click Score All or Resume.
+        st.set_service_state(self.store, paused=1, started_at=_now())
         st.sync_config(self.store, CONFIG_CSV)
         self.run_now_event = asyncio.Event()
         self.run_now_assets: Optional[List[str]] = None
