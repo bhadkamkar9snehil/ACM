@@ -471,7 +471,7 @@ class Service:
                 (_now(), str(res.ts[-1]), float(res.runtime_s), key))
             self.store.commit()
             counts["scored"] += 1
-            alarm_flag = " ⚠ ALARM" if alarm else ""
+            alarm_flag = " ALARM" if alarm else ""
             print(f"  [scored] {store_key}: fused={float(res.fused.mean()):.2f}  "
                   f"rows={len(res.ts)}  {float(res.runtime_s):.1f}s{alarm_flag}", flush=True)
 
