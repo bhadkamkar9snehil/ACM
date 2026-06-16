@@ -1897,11 +1897,11 @@ const SIM = (() => {
     });
     tbody.innerHTML = visible.map(e => {
       const lvlCls = e.level === 'error' ? 'ERROR' : e.level === 'warn' ? 'WARN' : '';
-      const lvlBadge = lvlCls ? `<span class="badge ${lvlCls}" style="font-size:10px;padding:1px 5px;">${lvlCls}</span>`
-                               : `<span style="font-size:10px;color:var(--muted);">INFO</span>`;
-      const srcBadge = `<span style="font-size:10px;color:var(--muted);">${e.src === 'sim' ? 'SIM' : 'ACM'}</span>`;
+      const lvlBadge = lvlCls ? `<span class="badge ${lvlCls}">${lvlCls}</span>`
+                               : `<span class="log-info-label">INFO</span>`;
+      const srcBadge = `<span class="log-src-label">${e.src === 'sim' ? 'SIM' : 'ACM'}</span>`;
       const msg = String(e.text).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-      return `<tr><td style="font-family:'Share Tech Mono',monospace;font-size:11px;white-space:nowrap;">${e.ts}</td><td>${lvlBadge}</td><td>${srcBadge}</td><td style="font-family:'Share Tech Mono',monospace;font-size:11px;">${msg}</td></tr>`;
+      return `<tr><td class="log-ts">${e.ts}</td><td>${lvlBadge}</td><td>${srcBadge}</td><td class="log-msg">${msg}</td></tr>`;
     }).join('');
     if (autoScroll) {
       const wrap = document.getElementById('output-log-wrap');

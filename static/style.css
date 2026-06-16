@@ -1457,6 +1457,12 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
   flex-shrink: 0;
   font-size: 15px;
 }
+.output-toolbar label {
+  font-size: 13px;
+}
+#output-line-count {
+  font-size: 13px;
+}
 
 .output-src-tab {
   font-family: 'Barlow Condensed', sans-serif;
@@ -1482,15 +1488,42 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
   position: sticky; top: 0;
   background: var(--bg3);
   font-family: 'Barlow Condensed', sans-serif;
-  font-size: 10px; font-weight: 700;
+  font-size: 13px; font-weight: 700;
   text-transform: uppercase; letter-spacing: 0.08em;
   color: var(--muted);
-  padding: 3px 8px;
+  padding: 4px 8px;
   border-bottom: 1px solid var(--line);
   text-align: left;
 }
 .output-log-table tbody tr:hover { background: var(--bg2); }
-.output-log-table tbody td { padding: 2px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.output-log-table tbody td { padding: 4px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.output-log-table tbody td.log-ts {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 13px;
+  white-space: nowrap;
+}
+.output-log-table tbody td.log-msg {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 13px;
+}
+.output-log-table .log-info-label {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 13px;
+  color: var(--muted);
+}
+.output-log-table .log-src-label {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 13px;
+  color: var(--muted);
+}
+.output-log-table .badge {
+  font-size: 12px;
+  padding: 1px 6px;
+}
+.output-log-table .badge::before {
+  width: 4px;
+  height: 4px;
+}
 
 .main { padding-bottom: 210px; }
 
