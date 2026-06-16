@@ -218,14 +218,20 @@ async function refreshService(useCache = false) {
   if (!useCache || !cachedServiceData) cachedServiceData = await api("/api/service");
   const svc = cachedServiceData;
   const pill = $("#svc-pill");
+  // IDLE = never ticked this session (no last_tick_at, or it predates started_at)
+  // PAUSED = was running this session, user explicitly paused it
+  const neverTicked = !svc.last_tick_at || (svc.started_at && svc.last_tick_at < svc.started_at);
+  const isIdle   = svc.paused && neverTicked;
+  const isPaused = svc.paused && !neverTicked;
   pill.className = "stat-cell " + (svc.tick_in_progress ? "warn" : svc.paused ? "bad" : "ok");
-  $("#svc-pill-text").textContent = svc.tick_in_progress ? "TICKING" : svc.paused ? "PAUSED" : "WATCHING";
+  $("#svc-pill-text").textContent = svc.tick_in_progress ? "TICKING" : isIdle ? "IDLE" : isPaused ? "PAUSED" : "WATCHING";
   const dur = svc.last_tick_duration_s != null ? ` · ${svc.last_tick_duration_s}s` : "";
   const tickEl = $("#svc-tick-info");
   tickEl.textContent = fmtRelTime(svc.last_tick_at) + dur;
   tickEl.title = svc.last_tick_at ? fmtTs(svc.last_tick_at) : "";
   $("#btn-pause").classList.toggle("hidden", !!svc.paused);
-  $("#btn-resume").classList.toggle("hidden", !svc.paused);
+  $("#btn-start-sched").classList.toggle("hidden", !isIdle);
+  $("#btn-resume").classList.toggle("hidden", !isPaused);
   if (document.activeElement !== $("#inp-tick")) $("#inp-tick").value = svc.tick_minutes;
   window.lastTickAt = svc.last_tick_at;
   window.tickMinutes = svc.tick_minutes;
@@ -269,11 +275,13 @@ $("#btn-pause").addEventListener("click", async () => {
   toast("Scheduler paused — no ticks until resumed", "info");
   refreshService();
 });
-$("#btn-resume").addEventListener("click", async () => {
+async function doResumeScheduler() {
   await api("/api/service/resume", { method: "POST" });
-  toast("Scheduler resumed", "ok");
+  toast("Scheduler started", "ok");
   refreshService();
-});
+}
+$("#btn-start-sched").addEventListener("click", doResumeScheduler);
+$("#btn-resume").addEventListener("click", doResumeScheduler);
 $("#btn-runnow").addEventListener("click", async () => {
   await api("/api/service/run-now", { method: "POST", body: {} });
   toast("Scoring all assets…", "ok");
