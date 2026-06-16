@@ -1961,7 +1961,6 @@ const SIM = (() => {
       const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
       tbody.innerHTML = files.map(f => `<tr>
         <td>${esc(f.filename)}</td><td>${esc(f.source)}</td>
-        <td class="num">${f.row_count}</td><td class="num">${f.column_count}</td>
         <td>${esc(f.modified_at?.slice(0,16)||'—')}</td>
         <td style="white-space:nowrap;">
           <button class="btn btn-sm" onclick="SIM.previewFile('${esc(f.filename)}','${esc(f.source)}')">Preview</button>
@@ -1969,7 +1968,7 @@ const SIM = (() => {
           <button class="btn btn-sm btn-bad" onclick="SIM.deleteFile('${esc(f.filename)}','${esc(f.source)}')">Delete</button>
         </td></tr>`).join('');
     } catch (e) {
-      tbody.innerHTML = '<tr><td colspan="6" style="color:var(--muted);">— error loading files —</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="5" style="color:var(--muted);">— error loading files —</td></tr>';
       log('Files load failed: ' + e.message, 'sim', 'error');
     }
   }
