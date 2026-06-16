@@ -947,7 +947,7 @@ table.data tr.is-alarm td { background: var(--bad-lo); }
 @keyframes alarmpulse { 50% { box-shadow: 0 0 10px var(--bad-lo); } }
 
 /* ── Inline Gauges & Deltas ─────────────────────────────── */
-.h-gauge-wrap { display: grid; grid-template-columns: 1fr 48px 40px; align-items: center; gap: 8px; text-align: right; }
+.h-gauge-wrap { display: grid; grid-template-columns: 48px 56px 40px; align-items: center; gap: 8px; text-align: right; }
 .h-gauge-val { font-weight: bold; color: var(--ink); font-variant-numeric: tabular-nums; }
 .h-gauge-delta { display: flex; align-items: center; justify-content: flex-end; }
 .h-gauge { width: 40px; height: 6px; background: var(--bg4); border-radius: 3px; overflow: hidden; display: flex; }
@@ -955,7 +955,6 @@ table.data tr.is-alarm td { background: var(--bad-lo); }
 
 .delta-up { background: var(--bad-lo); color: var(--bad); font-size: 13px; font-variant-numeric: tabular-nums; padding: 2px 6px; border-radius: 10px; }
 .delta-down { background: var(--ok-lo); color: var(--ok); font-size: 13px; font-variant-numeric: tabular-nums; padding: 2px 6px; border-radius: 10px; }
-th.num-gauge { padding-right: 96px !important; }
 
 table.data tr.row-alarm td { background: var(--bad-lo) !important; }
 table.data tr.row-warn td { background: var(--warn-lo) !important; }
@@ -1099,9 +1098,10 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
 /* ── Operator tab — left col fixed height ────────────────── */
 /* ── Mega Operations Matrix ───────────────────────────────── */
 .mega-list { display: flex; flex-direction: column; width: 100%; min-width: 900px; }
+.mega-hdr > div, .mega-asset-row > div, .mega-alarm-row > div { min-width: 0; overflow: hidden; }
 .mega-hdr {
   display: grid;
-  grid-template-columns: 220px 90px 150px 80px 200px 1fr 60px;
+  grid-template-columns: minmax(180px, 260px) 90px 130px 70px 1fr 220px 60px;
   gap: 10px; padding: 8px 12px;
   font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif-condensed, sans-serif; font-weight: 700;
   color: var(--muted); text-transform: uppercase;
@@ -1111,7 +1111,7 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
 }
 .mega-asset-row {
   display: grid;
-  grid-template-columns: 220px 90px 150px 80px 200px 1fr 60px;
+  grid-template-columns: minmax(180px, 260px) 90px 130px 70px 1fr 220px 60px;
   gap: 10px; padding: 10px 12px; align-items: center;
   position: sticky; top: var(--mega-hdr-h, 33px); z-index: 10;
   background: var(--bg); border-bottom: 1px solid var(--line);
@@ -1121,7 +1121,7 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
 .mega-alarms { display: flex; flex-direction: column; }
 .mega-alarm-row {
   display: grid;
-  grid-template-columns: 220px 90px 150px 80px 200px 1fr 60px;
+  grid-template-columns: minmax(180px, 260px) 90px 130px 70px 1fr 220px 60px;
   gap: 10px; padding: 8px 12px 8px 30px; align-items: center;
   border-bottom: 1px dashed rgba(255,255,255,0.05);
   font-family: 'Share Tech Mono', monospace; font-size: 17px;
@@ -1141,6 +1141,7 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
    flex:1 on tbl-wrap only grows into space when the card has an explicit height — without this
    the card intrinsic height = card-title only (~36px) and the table is invisible. */
 .eng-episodes, .eng-daily { min-height: 220px; }
+#eng-daily { table-layout: fixed; }
 
 /* ── Admin tab — adm-layout fills panel-scroll ──────────── */
 #tab-admin > .panel-scroll { overflow-y: auto; display: block; }
