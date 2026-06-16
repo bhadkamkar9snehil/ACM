@@ -1460,6 +1460,26 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
   width: 4px;
   height: 4px;
 }
+.output-log-table .badge.DEBUG {
+  color: var(--muted);
+  border-color: color-mix(in srgb, var(--muted) 40%, transparent 60%);
+  background: rgba(165, 150, 139, 0.1);
+}
+.output-log-table .badge.INFO {
+  color: var(--blue);
+  border-color: color-mix(in srgb, var(--blue) 40%, transparent 60%);
+  background: var(--blue-lo);
+}
+.output-log-table .badge.WARN {
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 40%, transparent 60%);
+  background: var(--warn-lo);
+}
+.output-log-table .badge.ERROR {
+  color: var(--bad);
+  border-color: color-mix(in srgb, var(--bad) 40%, transparent 60%);
+  background: var(--bad-lo);
+}
 
 .main { padding-bottom: 210px; }
 

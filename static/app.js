@@ -1867,8 +1867,15 @@ const SIM = (() => {
     });
   }
 
+  function format24h(date) {
+    const h = String(date.getHours()).padStart(2, '0');
+    const m = String(date.getMinutes()).padStart(2, '0');
+    const s = String(date.getSeconds()).padStart(2, '0');
+    return `${h}:${m}:${s}`;
+  }
+
   function log(text, src = 'sim', level = 'info') {
-    const ts = new Date().toLocaleTimeString();
+    const ts = format24h(new Date());
     outputLines.push({ ts, text, src, level, time: Date.now() });
     if (outputLines.length > 2000) outputLines.shift();
     renderOutputLog();
@@ -1909,9 +1916,8 @@ const SIM = (() => {
       return true;
     });
     tbody.innerHTML = visible.map(e => {
-      const lvlCls = e.level === 'error' ? 'ERROR' : e.level === 'warn' ? 'WARN' : '';
-      const lvlBadge = lvlCls ? `<span class="badge ${lvlCls}">${lvlCls}</span>`
-                               : `<span class="log-info-label">INFO</span>`;
+      const lvl = e.level.toUpperCase();
+      const lvlBadge = `<span class="badge ${lvl}">${lvl}</span>`;
       const srcBadge = `<span class="log-src-label">${e.src === 'sim' ? 'SIM' : 'ACM'}</span>`;
       const msg = String(e.text).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
       return `<tr><td class="log-ts">${e.ts}</td><td>${lvlBadge}</td><td>${srcBadge}</td><td class="log-msg">${msg}</td></tr>`;
@@ -1923,7 +1929,7 @@ const SIM = (() => {
   }
 
   function parseBackendLogLine(text) {
-    let ts = new Date().toLocaleTimeString();
+    let ts = format24h(new Date());
     let level = 'info';
     let cleanText = text;
 
@@ -2106,7 +2112,10 @@ const SIM = (() => {
           body: JSON.stringify(payload)
         });
         
-        if (!response.ok) throw new Error('Export API returned error');
+        if (!response.ok) {
+          const errMsg = await response.text().catch(() => '');
+          throw new Error(`Server returned status ${response.status}: ${errMsg || response.statusText}`);
+        }
         
         const blob = await response.blob();
         const url = window.URL.createObjectURL(blob);
@@ -2153,7 +2162,38 @@ const SIM = (() => {
         ws.close();
       };
     }
-    connectWS();
+
+    async function loadInitialLogs() {
+      try {
+        const response = await fetch('/api/service/logs?limit=1000');
+        if (response.ok) {
+          const data = await response.json();
+          if (data && data.length) {
+            data.forEach(ln => {
+              if (ln.id > lastLogId) {
+                lastLogId = ln.id;
+              }
+              const parsed = parseBackendLogLine(ln.text);
+              outputLines.push({
+                ts: parsed.ts,
+                text: parsed.text,
+                src: 'acm',
+                level: parsed.level,
+                time: Date.now()
+              });
+            });
+            if (outputLines.length > 2000) outputLines = outputLines.slice(-2000);
+            renderOutputLog();
+            const el = document.getElementById('output-line-count');
+            if (el) el.textContent = outputLines.length + ' lines';
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load initial logs:', err);
+      }
+      connectWS();
+    }
+    loadInitialLogs();
   }
 
   async function simGet(path) {

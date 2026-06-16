@@ -814,14 +814,6 @@ def create_app(backend: str = "sqlite", db: Optional[str] = "acm_results.db",
     @app.websocket("/api/service/logs/ws")
     async def websocket_endpoint(websocket: WebSocket):
         await manager.connect(websocket)
-        with shared_lock:
-            history = list(shared_lines)
-        for line in history:
-            try:
-                await websocket.send_json(line)
-            except Exception:
-                manager.disconnect(websocket)
-                return
         try:
             while True:
                 await websocket.receive_text()
