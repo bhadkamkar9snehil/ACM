@@ -40,6 +40,57 @@ warnings.filterwarnings("ignore", category=Warning, module="urllib3")
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
+import collections
+import io
+import re
+import threading
+
+class LineLogBuffer(io.TextIOBase):
+    def __init__(self, original_stream, shared_lines, shared_lock, counter_ref, ansi_escape):
+        self.original_stream = original_stream
+        self.lines = shared_lines
+        self.lock = shared_lock
+        self.counter_ref = counter_ref
+        self.ansi_escape = ansi_escape
+        self.current_line = []
+
+    def write(self, s):
+        self.original_stream.write(s)
+        if s:
+            with self.lock:
+                parts = s.split('\n')
+                if len(parts) > 1:
+                    self.current_line.append(parts[0])
+                    full_line = "".join(self.current_line)
+                    clean_line = self.ansi_escape.sub('', full_line)
+                    if clean_line.strip():
+                        self.counter_ref[0] += 1
+                        self.lines.append({"id": self.counter_ref[0], "text": clean_line})
+                    self.current_line = []
+                    
+                    for part in parts[1:-1]:
+                        clean_part = self.ansi_escape.sub('', part)
+                        if clean_part.strip():
+                            self.counter_ref[0] += 1
+                            self.lines.append({"id": self.counter_ref[0], "text": clean_part})
+                    
+                    if parts[-1]:
+                        self.current_line.append(parts[-1])
+                else:
+                    self.current_line.append(s)
+        return len(s)
+
+    def flush(self):
+        self.original_stream.flush()
+
+shared_lines = collections.deque(maxlen=2000)
+shared_lock = threading.Lock()
+counter_ref = [0]
+ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+
+sys.stdout = LineLogBuffer(sys.stdout, shared_lines, shared_lock, counter_ref, ansi_escape)
+sys.stderr = LineLogBuffer(sys.stderr, shared_lines, shared_lock, counter_ref, ansi_escape)
+
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -657,6 +708,11 @@ def create_app(backend: str = "sqlite", db: Optional[str] = "acm_results.db",
         if not svc.tick_in_progress:
             svc.api_cache.put("service", result)
         return result
+
+    @app.get("/api/service/logs")
+    async def get_service_logs(limit: int = 500, after: int = 0):
+        with shared_lock:
+            return [line for line in shared_lines if line["id"] > after][-limit:]
 
     @app.post("/api/service/pause")
     async def pause():

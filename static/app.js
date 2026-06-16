@@ -1900,6 +1900,31 @@ const SIM = (() => {
     }
   }
 
+  function parseBackendLogLine(text) {
+    let ts = new Date().toLocaleTimeString();
+    let level = 'info';
+    let cleanText = text;
+
+    const pattern1 = /^\[([\d\-:\s]+)\]\s+\[(DEBUG|INFO|WARN|ERROR)\]\s+(.*)$/i;
+    const match1 = text.match(pattern1);
+    if (match1) {
+      const timePart = match1[1].split(' ')[1] || match1[1];
+      ts = timePart;
+      level = match1[2].toLowerCase();
+      cleanText = match1[3];
+    } else {
+      const pattern2 = /^(DEBUG|INFO|WARNING|WARN|ERROR|CRITICAL):\s+(.*)$/i;
+      const match2 = text.match(pattern2);
+      if (match2) {
+        level = match2[1].toLowerCase();
+        if (level === 'warning') level = 'warn';
+        if (level === 'critical') level = 'error';
+        cleanText = match2[2];
+      }
+    }
+    return { ts, text: cleanText, level };
+  }
+
   function initOutputPanel() {
     const toggleBtn = document.getElementById('btn-output-toggle');
     const panel = document.getElementById('output-panel');
@@ -1924,6 +1949,34 @@ const SIM = (() => {
         renderOutputLog();
       });
     });
+
+    let lastLogId = 0;
+    async function fetchBackendLogs() {
+      try {
+        const res = await fetch(`/api/service/logs?after=${lastLogId}`);
+        if (!res.ok) return;
+        const newLines = await res.json();
+        if (newLines && newLines.length > 0) {
+          let updated = false;
+          newLines.forEach(ln => {
+            if (ln.id > lastLogId) {
+              lastLogId = ln.id;
+              const parsed = parseBackendLogLine(ln.text);
+              outputLines.push({ ts: parsed.ts, text: parsed.text, src: 'acm', level: parsed.level });
+              updated = true;
+            }
+          });
+          if (updated) {
+            if (outputLines.length > 2000) outputLines = outputLines.slice(-2000);
+            renderOutputLog();
+            const el = document.getElementById('output-line-count');
+            if (el) el.textContent = outputLines.length + ' lines';
+          }
+        }
+      } catch (_) {}
+    }
+    setInterval(fetchBackendLogs, 1000);
+    fetchBackendLogs();
   }
 
   async function simGet(path) {
