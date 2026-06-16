@@ -864,17 +864,90 @@ Requires: `pip install playwright && playwright install chromium`
 
 ---
 
-## Git Workflow
+## Git & GitHub Workflow
 > *Added: 2026-06-14 · Last updated: 2026-06-16*
 
+### MANDATORY: Issue-First Rule
+**Every piece of work — bug fix, feature, refactor, infra — MUST have a GitHub issue before any code is written.**
+
+Steps for any new task:
+1. `gh issue create --title "..." --label "..." --milestone "..."` → note the issue number
+2. Work on the fix/feature, referencing the issue in commits: `Fix #54 — debounce WS reconnect`
+3. `gh issue close <N> --comment "Fixed in commit <sha>"` on completion
+4. If the fix also belongs in a release, tag + `gh release create` after merge
+
+**Never commit without a linked issue unless it's a docs-only or trivial whitespace change.**
+
+### Labels (use these, not ad-hoc)
+| Label | Colour | When to use |
+|---|---|---|
+| `bug` | red `#d73a4a` | Something is broken or produces wrong output |
+| `enhancement` | cyan `#a2eeef` | New capability or improvement to existing feature |
+| `performance` | orange `#FFA500` | Speed, memory, throughput |
+| `ux` | pink `#E8A0BF` | UI polish, layout, usability |
+| `infra` | purple `#5319E7` | CI, setup scripts, deployment |
+| `refactor` | light blue `#BFD4F2` | Code cleanup, no behaviour change |
+| `test` | green `#C2E0C6` | Test coverage additions |
+| `ml` | blue `#1D76DB` | ML pipeline, detectors, alarm rules |
+| `data` | teal `#006B75` | Data ingestion, feeds, source kinds |
+| `security` | dark red `#B60205` | Security vulnerabilities or hardening |
+| `documentation` | blue `#0075ca` | Docs, CLAUDE.md, README |
+
+### Milestones & Versioning
+Current milestones:
+- **v0.1 — Core Scoring** (closed) — baseline ML pipeline, Fleet/Engineer/Admin UI
+- **v0.2 — Simulator Integration** (closed) — SIM tab, SIM→ACM flow, per-asset scoring
+- **v0.3 — Real-time Logs & UX Polish** (open, due 2026-06-30) — WebSocket logs, output panel, CI
+- **v0.4 — CI/CD & Issue Workflow** (open, due 2026-07-15) — branch protection, README badge
+
+When opening an issue, always assign it to the most appropriate open milestone. When closing a milestone:
+```bash
+gh api repos/bhadkamkar9snehil/ACM/milestones/<N> -X PATCH -f state=closed
+gh release create v0.X.0-acm --title "v0.X — Title" --notes "..."
+```
+
+### Releases & Tags
+Tag format: `v<major>.<minor>.<patch>-acm` (e.g. `v0.3.0-acm`)
+- Patch bump (`v0.3.1-acm`): bug fixes only within a milestone
+- Minor bump (`v0.4.0-acm`): milestone completed
+- Major bump (`v1.0.0-acm`): production-ready, full feature set
+
+```bash
+git tag -a v0.X.0-acm <commit-sha> -m "Short description"
+git push origin v0.X.0-acm
+gh release create v0.X.0-acm --title "v0.X — Title" --notes "..."
+```
+
+### GitHub Actions CI
+Workflow: `.github/workflows/ci.yml`
+- **Fast tests** (`-m "not slow"`): runs on every push + every PR
+- **Slow tests** (`-m slow`): runs only on push to `main`
+- Public repo → unlimited free minutes
+
+Check CI status: `gh run list` or `gh run watch`
+
+### Useful gh CLI Commands
+```bash
+gh issue list --state open                        # see all open issues
+gh issue create --title "" --label "" --milestone ""
+gh issue close <N> --comment "Fixed in <sha>"
+gh issue edit <N> --milestone "v0.4 — ..."        # reassign milestone
+gh pr create --title "" --body ""                 # open a PR
+gh run list                                        # CI run history
+gh run watch                                       # watch active CI run
+gh release list                                    # all releases
+gh browse                                          # open repo in browser
+```
+
+### Commit History (sessions)
 - Session 013M57Jr3CpacwDMxVebD5r6 — pushed directly to `main`
-- Session using `claude/upbeat-hopper-m39epw` — merged to main
-- Session using `claude/epic-archimedes-7dkrwf` — merged to main
+- Session `claude/upbeat-hopper-m39epw` — merged to main
+- Session `claude/epic-archimedes-7dkrwf` — merged to main
 - Session 01Dkd7AbjS8Sd5ChfYiNa1yR: branch `claude/focused-albattani-t9876j` → merged to `main`
-- Session 01UuCboiW9MAKb9AKYYoVt1J (2026-06-16): pushed directly to `main` (per-asset scoring, SIM→ACM flow, perf sprints)
-- Pattern: commit to dev branch → push dev → `git checkout main` → `git merge dev --no-edit` → `git push origin main`
-- If push fails due to diverged remote: `git pull origin main --rebase` then push again
-- Never force-push, never `--no-verify`
+- Session 01UuCboiW9MAKb9AKYYoVt1J (2026-06-16): per-asset scoring, SIM→ACM flow, perf sprints
+- 2026-06-16 afternoon: WebSocket logs, output panel redesign, CI/issue workflow setup
+
+If push fails due to diverged remote: `git pull origin main --rebase` then push again. Never force-push, never `--no-verify`.
 
 ---
 
