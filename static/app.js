@@ -836,16 +836,45 @@ async function refreshEngineer(useCache = false) {
   const days = +$("#eng-days").value;
   
   if (!useCache || !cachedEngineerData || cachedEngineerData.key !== key || cachedEngineerData.days !== days) {
-    const [s, meta, eps, daily, runs] = await Promise.all([
-      api(`/api/assets/${key}/series?days=${days}`),
-      api(`/api/assets/${key}`),
-      api(`/api/assets/${key}/alarms`),
-      api(`/api/assets/${key}/daily`),
-      api(`/api/assets/${key}/runs?limit=1`),
-    ]);
+    let s, meta, eps, daily, runs;
+    try {
+      [s, meta, eps, daily, runs] = await Promise.all([
+        api(`/api/assets/${key}/series?days=${days}`),
+        api(`/api/assets/${key}`),
+        api(`/api/assets/${key}/alarms`),
+        api(`/api/assets/${key}/daily`),
+        api(`/api/assets/${key}/runs?limit=1`),
+      ]);
+    } catch (_) {
+      // Asset not yet scored (not in assets view) — fetch monitored state for message
+      let monitored = null;
+      try { const fl = await api('/api/fleet'); monitored = fl.find(r => r.asset_key === key); } catch (_2) {}
+      const isErr = monitored?.state === 'ERROR';
+      const msg = isErr
+        ? `⚠ Scoring error: ${monitored.state_detail || 'unknown error'}`
+        : `No score data yet — trigger a score run from the Operator tab.`;
+      const chartEl = $("#eng-chart");
+      if (chartEl) chartEl.innerHTML =
+        `<div style="display:flex;align-items:center;justify-content:center;height:220px;
+                     color:${isErr ? 'var(--bad)' : 'var(--muted)'};font-size:15px;
+                     padding:24px;text-align:center;">${msg}</div>`;
+      return;
+    }
     cachedEngineerData = { key, days, s, meta, eps, daily, runs };
   }
   const { s, meta, eps, daily, runs } = cachedEngineerData;
+
+  // Empty rows (scored but window has no data) — show message instead of blank chart
+  if (!s.rows || s.rows.length === 0) {
+    const chartEl = $("#eng-chart");
+    if (chartEl) chartEl.innerHTML =
+      `<div style="display:flex;align-items:center;justify-content:center;height:220px;
+                   color:var(--muted);font-size:15px;padding:24px;text-align:center;">
+         No score data in the selected window — try a wider range.
+       </div>`;
+    return;
+  }
+
   const idx = Object.fromEntries(s.columns.map((c, i) => [c, i]));
   const ts = s.rows.map((r) => new Date(String(r[idx.ts]).replace(" ", "T")).getTime() / 1000);
   const fused = s.rows.map((r) => r[idx.fused]);
@@ -2435,13 +2464,15 @@ const SIM = (() => {
           if ((row && row.last_run_at !== prevRunAt) || tries > 30) {
             clearInterval(poll);
             _scoringNow.delete(assetKey);
-            if (activeTab === 'operator') {
-              // Auto-navigate to Engineer tab to show the fresh results
+            cachedOperatorHash = null; cachedOperatorData = null;
+            if (row?.state === 'ERROR') {
+              toast(`⚠ Scoring error: ${row.state_detail || 'unknown error'}`, 'err', 10000);
+              await refreshOperator();
+            } else if (activeTab === 'operator') {
               selectedAsset = assetKey;
               document.querySelector('.tab[data-tab="engineer"]').click();
             } else {
               toast(`${assetKey} — scored. Open Engineer tab to view results.`, 'ok', 6000);
-              cachedOperatorHash = null; cachedOperatorData = null;
             }
           }
         } catch (_) { if (tries > 30) { clearInterval(poll); _scoringNow.delete(assetKey); } }

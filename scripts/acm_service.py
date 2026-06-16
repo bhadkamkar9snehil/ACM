@@ -312,6 +312,12 @@ class Service:
             if "error" in o:
                 self.set_asset_state(key, "ERROR", o["error"])
                 st.record_run_error(self.store, store_key, o["error"])
+                # Update last_run_at even on error so the UI poll can detect completion
+                self.store.execute(
+                    f"UPDATE {self.store.t('monitored_assets')} "
+                    f"SET last_run_at = ? WHERE asset_key = ?",
+                    (_now(), key))
+                self.store.commit()
                 counts["errors"] += 1
                 continue
             res = o["result"]
