@@ -177,6 +177,7 @@ def score_asset(
         score_status=score_status, train_status=train_status,
         head_z_score=head_z_score, head_z_train=head_z_train,
         cadence_s=cadence_s,
+        distrust_coverage=cfg.get("alarm_rules", {}).get("distrust_coverage", 0.5),
     )
 
     # Culprit attribution: which CHANNELS drove the alarms (OMR per-feature
