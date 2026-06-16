@@ -171,14 +171,14 @@ print(f'{len(list_generators())} generators, {len(router.routes)} sim routes —
 "
 }
 # Smoke test — verify ACM can start and respond to HTTP (instead of slow pytest)
-$_smokeDb  = "$env:TEMP\acm_smoke_$PID.db"
-$_smokeOut = "$env:TEMP\acm_smoke_$PID.out"
-$_smokeErr = "$env:TEMP\acm_smoke_$PID.err"
+# No output redirect: WindowStyle Hidden keeps subprocess output in its own hidden window.
+# NEVER use "$PID.ext" in PS string interpolation — PS parses .ext as member access on $PID,
+# evaluates to null, and both paths become identical. Use $($PID) or avoid redirects entirely.
+$_smokeDb = Join-Path $env:TEMP ("acm_smoke_" + $PID + ".db")
 Write-Host "    $([char]0x00B7)  Smoke test (ACM starts)" -NoNewline
 $_proc = Start-Process python `
     -ArgumentList "scripts\acm_service.py","--port","8766","--db","$_smokeDb" `
-    -WorkingDirectory $InstallDir -PassThru -WindowStyle Hidden `
-    -RedirectStandardOutput "$_smokeOut" -RedirectStandardError "$_smokeErr"
+    -WorkingDirectory $InstallDir -PassThru -WindowStyle Hidden
 $_ok = $false
 for ($_i = 0; $_i -lt 6; $_i++) {
     Start-Sleep 2
@@ -190,7 +190,7 @@ for ($_i = 0; $_i -lt 6; $_i++) {
 }
 try { $_proc.Kill() } catch {}
 try { Wait-Process -Id $_proc.Id -ErrorAction SilentlyContinue } catch {}
-Remove-Item "$_smokeDb","$_smokeOut","$_smokeErr" -ErrorAction SilentlyContinue
+Remove-Item "$_smokeDb" -ErrorAction SilentlyContinue
 if ($_ok) {
     Write-Host "`r    $([char]0x2713)  Smoke test (ACM starts)" -ForegroundColor Green
 } else {
