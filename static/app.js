@@ -1951,32 +1951,33 @@ const SIM = (() => {
     });
 
     let lastLogId = 0;
-    async function fetchBackendLogs() {
-      try {
-        const res = await fetch(`/api/service/logs?after=${lastLogId}`);
-        if (!res.ok) return;
-        const newLines = await res.json();
-        if (newLines && newLines.length > 0) {
-          let updated = false;
-          newLines.forEach(ln => {
-            if (ln.id > lastLogId) {
-              lastLogId = ln.id;
-              const parsed = parseBackendLogLine(ln.text);
-              outputLines.push({ ts: parsed.ts, text: parsed.text, src: 'acm', level: parsed.level });
-              updated = true;
-            }
-          });
-          if (updated) {
+    let ws = null;
+
+    function connectWS() {
+      const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      ws = new WebSocket(`${proto}//${location.host}/api/service/logs/ws`);
+      ws.onmessage = (event) => {
+        try {
+          const ln = JSON.parse(event.data);
+          if (ln.id > lastLogId) {
+            lastLogId = ln.id;
+            const parsed = parseBackendLogLine(ln.text);
+            outputLines.push({ ts: parsed.ts, text: parsed.text, src: 'acm', level: parsed.level });
             if (outputLines.length > 2000) outputLines = outputLines.slice(-2000);
             renderOutputLog();
             const el = document.getElementById('output-line-count');
             if (el) el.textContent = outputLines.length + ' lines';
           }
-        }
-      } catch (_) {}
+        } catch (_) {}
+      };
+      ws.onclose = () => {
+        setTimeout(connectWS, 3000);
+      };
+      ws.onerror = () => {
+        ws.close();
+      };
     }
-    setInterval(fetchBackendLogs, 1000);
-    fetchBackendLogs();
+    connectWS();
   }
 
   async function simGet(path) {

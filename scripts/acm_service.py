@@ -44,6 +44,10 @@ import collections
 import io
 import re
 import threading
+import asyncio
+
+main_loop = None
+manager = None
 
 class LineLogBuffer(io.TextIOBase):
     def __init__(self, original_stream, shared_lines, shared_lock, counter_ref, ansi_escape):
@@ -65,14 +69,20 @@ class LineLogBuffer(io.TextIOBase):
                     clean_line = self.ansi_escape.sub('', full_line)
                     if clean_line.strip():
                         self.counter_ref[0] += 1
-                        self.lines.append({"id": self.counter_ref[0], "text": clean_line})
+                        log_item = {"id": self.counter_ref[0], "text": clean_line}
+                        self.lines.append(log_item)
+                        if main_loop and main_loop.is_running() and manager:
+                            asyncio.run_coroutine_threadsafe(manager.broadcast(log_item), main_loop)
                     self.current_line = []
                     
                     for part in parts[1:-1]:
                         clean_part = self.ansi_escape.sub('', part)
                         if clean_part.strip():
                             self.counter_ref[0] += 1
-                            self.lines.append({"id": self.counter_ref[0], "text": clean_part})
+                            log_item = {"id": self.counter_ref[0], "text": clean_part}
+                            self.lines.append(log_item)
+                            if main_loop and main_loop.is_running() and manager:
+                                asyncio.run_coroutine_threadsafe(manager.broadcast(log_item), main_loop)
                     
                     if parts[-1]:
                         self.current_line.append(parts[-1])
@@ -120,9 +130,35 @@ def _startup_banner(host: str, port: int, backend: str, db: Optional[str]) -> No
     print(f"{_DIM}  Scheduler active  {_DOT}  Ctrl-C to stop{_RST}", flush=True)
     print(flush=True)
 
-from fastapi import FastAPI, HTTPException                    # noqa: E402
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect # noqa: E402
 from fastapi.responses import FileResponse                    # noqa: E402
 from fastapi.staticfiles import StaticFiles                   # noqa: E402
+
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: list[WebSocket] = []
+        self.lock = threading.Lock()
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        with self.lock:
+            self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        with self.lock:
+            if websocket in self.active_connections:
+                self.active_connections.remove(websocket)
+
+    async def broadcast(self, message: dict):
+        with self.lock:
+            connections = list(self.active_connections)
+        for connection in connections:
+            try:
+                await connection.send_json(message)
+            except Exception:
+                self.disconnect(connection)
+
+manager = ConnectionManager()
 
 from scripts import acm_store as st                           # noqa: E402
 from scripts.acm_feed import (                                # noqa: E402
@@ -423,6 +459,8 @@ def create_app(backend: str = "sqlite", db: Optional[str] = "acm_results.db",
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        global main_loop
+        main_loop = asyncio.get_running_loop()
         if svc.sim:
             await svc.sim.start()
         task = asyncio.create_task(svc.loop()) if run_scheduler else None
@@ -433,6 +471,7 @@ def create_app(backend: str = "sqlite", db: Optional[str] = "acm_results.db",
             await svc.sim.stop()
         svc._pool.shutdown(wait=False)
         svc.store.close()
+        main_loop = None
 
     app = FastAPI(title="ACM — Asset Condition Monitor", lifespan=lifespan)
     app.state.service = svc
@@ -713,6 +752,23 @@ def create_app(backend: str = "sqlite", db: Optional[str] = "acm_results.db",
     async def get_service_logs(limit: int = 500, after: int = 0):
         with shared_lock:
             return [line for line in shared_lines if line["id"] > after][-limit:]
+
+    @app.websocket("/api/service/logs/ws")
+    async def websocket_endpoint(websocket: WebSocket):
+        await manager.connect(websocket)
+        with shared_lock:
+            history = list(shared_lines)
+        for line in history:
+            try:
+                await websocket.send_json(line)
+            except Exception:
+                manager.disconnect(websocket)
+                return
+        try:
+            while True:
+                await websocket.receive_text()
+        except WebSocketDisconnect:
+            manager.disconnect(websocket)
 
     @app.post("/api/service/pause")
     async def pause():
