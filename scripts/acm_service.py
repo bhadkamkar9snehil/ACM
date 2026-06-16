@@ -399,10 +399,12 @@ class Service:
         ready: List[str] = []
         now = pd.Timestamp.now(tz="UTC")
         for key, info in zip(keys_list, infos):
+            fleet_key = f"{groups[key]}/{key}"
             if isinstance(info, BaseException):
                 msg = f"ingest: {type(info).__name__}: {info}"
                 self.set_asset_state(key, "ERROR", msg)
-                st.record_run_error(self.store, f"{groups[key]}/{key}", msg)
+                st.record_run_error(self.store, fleet_key, msg)
+                print(f"  [ingest-error] {fleet_key}: {msg}", flush=True)
                 counts["errors"] += 1
                 continue
             counts["ingested"] += 1
@@ -421,6 +423,7 @@ class Service:
                           f"{self.min_train_days:.0f} d" if state == "MATURING"
                           else f"no data since {info.last_ts}")
                 self.set_asset_state(key, state, detail)
+                print(f"  [skip] {fleet_key}: {state} — {detail}", flush=True)
                 counts["skipped"] += 1
 
         # Phase C: parallel stateless re-learn + score via the persistent pool.
@@ -454,7 +457,7 @@ class Service:
                     (_now(), key))
                 self.store.commit()
                 counts["errors"] += 1
-                print(f"  [error] {key}: {o['error']}", flush=True)
+                print(f"  [score-error] {store_key}: {o['error']}", flush=True)
                 continue
             res = o["result"]
             st.ingest_result(self.store, groups[key], key, res, keep_history=True)
@@ -468,7 +471,9 @@ class Service:
                 (_now(), str(res.ts[-1]), float(res.runtime_s), key))
             self.store.commit()
             counts["scored"] += 1
-            print(f"  [scored] {key}: fused={float(res.fused.mean()):.2f}", flush=True)
+            alarm_flag = " ⚠ ALARM" if alarm else ""
+            print(f"  [scored] {store_key}: fused={float(res.fused.mean()):.2f}  "
+                  f"rows={len(res.ts)}  {float(res.runtime_s):.1f}s{alarm_flag}", flush=True)
 
         st.set_service_state(self.store, last_tick_at=_now(),
                              last_tick_duration_s=round(time.time() - t0, 1))
