@@ -1,7 +1,7 @@
 # ACM — Codebase Knowledge Base
 
 > Maintained for future agents. Update this file whenever you learn something new about the codebase.
-> Last updated: session 01UuCboiW9MAKb9AKYYoVt1J (2026-06-16) + user UI sprint (2026-06-16 afternoon)
+> Last updated: 2026-06-17 — ML pipeline bug fixes (#61-#67)
 
 ---
 
@@ -34,9 +34,10 @@
 25. [UI Font Sizes](#ui-font-sizes-canonical-after-2026-06-15-upsize)
 26. [Fleet Operations Matrix Performance Optimization](#fleet-operations-matrix-performance-optimization-2026-06-16)
 27. [Per-Asset Scoring & SIM→ACM Flow (2026-06-16)](#per-asset-scoring--simacm-flow-2026-06-16)
-28. [Real-Time Log Streaming & Output Panel (2026-06-16)](#real-time-log-streaming--output-panel-2026-06-16) ← **Latest work session**
-29. [Known Issues (Track as GitHub Issues)](#known-issues-track-as-github-issues)
-30. [User Working Style](#user-working-style)
+28. [Real-Time Log Streaming & Output Panel (2026-06-16)](#real-time-log-streaming--output-panel-2026-06-16)
+29. [ML Pipeline Diagnostics (2026-06-17)](#ml-pipeline-diagnostics-2026-06-17) ← **Latest work session**
+30. [Known Issues (Track as GitHub Issues)](#known-issues-track-as-github-issues)
+31. [User Working Style](#user-working-style)
 
 ---
 
@@ -1208,8 +1209,46 @@ Since the `.det-toggle` buttons no longer exist in HTML, any code in `refreshEng
 
 ---
 
+## ML Pipeline Diagnostics (2026-06-17)
+> *Added: 2026-06-17 — fixes for issues #61–#67 (commit ea35fd4)*
+
+### AlarmDecision.rules_diagnostic (fixes #61)
+`AlarmDecision` now carries a `rules_diagnostic: Dict` populated by `apply_alarm_rules()`:
+```python
+{
+  "rate": {"active": bool, "train_n": int, "thr": float},  # thr only when active
+  "per_head": {
+    "ar1_z": {"active": bool, "train_n": int, "thr": float},
+    ...
+  }
+}
+```
+When a rule is disarmed (train_n < 500), `pipeline.py` logs a WARN via `_log()`. This appears in the output panel as `[rules] rate rule DISARMED: train_n=300 < 500`.
+
+### PipelineResult new fields (fixes #65, #66)
+`PipelineResult` has two new optional string fields:
+- `calibration_json`: `{"weights_used": {...}, "auto_tuned": bool, "tuning": {...}}` from `fusion.weights_used`
+- `data_quality_json`: `{"train_rows": N, "score_rows": N, "channels": N, "nan_density": 0.xxxx, "duplicate_ts": N, "cadence_s": N}`
+
+### runs table new columns (fixes #64, #65, #66)
+`acm_store.py` DDL adds to the `runs` table:
+- `rules_diagnostic_json TEXT` — serialised `AlarmDecision.rules_diagnostic`
+- `calibration_json TEXT` — detector weights + auto-tuning info
+- `data_quality_json TEXT` — NaN density, duplicates, channel count, cadence
+
+`_migrate_sqlite()` auto-adds these columns to existing DBs on startup — no manual migration needed.
+
+### fuse.py fixes
+- **#63** (`_filter_iterative_mad`): guard added at function entry — if `len(x) == 0`, returns immediately via `_apply_exclusion_with_guards` with empty arrays. Previously `np.median([])` crashed on first iteration.
+- **#67** (weight drift clamping): `if old_weight > 0.01` condition removed; denominator is now `max(old_weight, 0.01)` so detectors bootstrapping from zero are clamped the same as established ones.
+
+### acm_feed.py corrupt row logging (fixes #62)
+MQTT/OPC-UA rows that fail JSON parsing are now counted and emitted as `warnings.warn("acm_feed: N/M rows dropped — corrupt JSON in 'table_name'")` instead of silent `pass`.
+
+---
+
 ## Known Issues (Track as GitHub Issues)
-> *Added: 2026-06-16*
+> *Added: 2026-06-16 · Updated: 2026-06-17 (ML issues #61-#67 all fixed)*
 
 These are known deficiencies to be filed as GitHub issues. Use `gh issue create` to create them if not already tracked:
 
@@ -1224,6 +1263,8 @@ These are known deficiencies to be filed as GitHub issues. Use `gh issue create`
 5. **Admin tab Run Log removed but `/api/assets/{key}/runlog` API still exists** — the endpoint returns per-asset run logs (with `stage`, `level`, `message` columns) that are no longer surfaced anywhere in the UI. Either surface them in the output panel (filter by asset) or deprecate the endpoint.
 
 6. **Excel export sends client-side `outputLines` to server** — the export POSTs the current filtered log array to `/api/service/logs/export`. This means: (a) only what the client has buffered (≤2000 lines) is exported, (b) network cost scales with log size. Alternative: server-side export directly from `shared_lines` deque without client involvement.
+
+7. **`runs` diagnostic JSON not yet surfaced in Engineer tab** — `rules_diagnostic_json`, `calibration_json`, `data_quality_json` are stored in the `runs` table but not yet fetched or displayed in the UI. Future work: add a "Run Details" expandable row in the Engineer tab showing which rules were active, detector weights, and data quality.
 
 **How to file issues from CLI:**
 ```bash
