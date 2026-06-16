@@ -901,6 +901,43 @@ def create_app(backend: str = "sqlite", db: Optional[str] = "acm_results.db",
         lines.append("── Done — restart the service to apply code changes ──")
         return {"lines": lines, "restart_required": True}
 
+    @app.post("/api/service/logs/export")
+    async def export_logs_excel(body: list[dict]):
+        import io
+        import pandas as pd
+        from fastapi.responses import StreamingResponse
+
+        if not body:
+            df = pd.DataFrame(columns=["When", "Level", "Source", "Message"])
+        else:
+            df = pd.DataFrame(body)
+            # Rename columns
+            df = df.rename(columns={
+                "ts": "When",
+                "level": "Level",
+                "src": "Source",
+                "text": "Message"
+            })
+            # Standardize column presence
+            for col in ["When", "Level", "Source", "Message"]:
+                if col not in df.columns:
+                    df[col] = ""
+            df = df[["When", "Level", "Source", "Message"]]
+
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine="openpyxl") as writer:
+            df.to_excel(writer, index=False, sheet_name="Logs")
+        output.seek(0)
+
+        headers = {
+            'Content-Disposition': 'attachment; filename="acm_logs.xlsx"'
+        }
+        return StreamingResponse(
+            output,
+            headers=headers,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
     return app
 
 

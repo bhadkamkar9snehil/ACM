@@ -1846,8 +1846,9 @@ const SIM = (() => {
   let replayRunning = false;
   let liveValPrev = {};
   let outputLines = [];
-  let outputFilter = 'all';
+  let outputSource = 'all';
   let outputLevel = 'all';
+  let outputTime = 'all';
   let outputCollapsed = false;
   let autoScroll = true;
 
@@ -1868,7 +1869,7 @@ const SIM = (() => {
 
   function log(text, src = 'sim', level = 'info') {
     const ts = new Date().toLocaleTimeString();
-    outputLines.push({ ts, text, src, level });
+    outputLines.push({ ts, text, src, level, time: Date.now() });
     if (outputLines.length > 2000) outputLines.shift();
     renderOutputLog();
     const el = document.getElementById('output-line-count');
@@ -1881,9 +1882,30 @@ const SIM = (() => {
     const tbody = tbl.querySelector('tbody');
     if (!tbody) return;
     const visible = outputLines.filter(e => {
-      if (outputFilter !== 'all' && e.src !== outputFilter) return false;
-      if (outputLevel === 'warn' && !['warn','error'].includes(e.level)) return false;
-      if (outputLevel === 'error' && e.level !== 'error') return false;
+      // Source filter
+      if (outputSource !== 'all' && e.src !== outputSource) return false;
+      
+      // Level filter
+      if (outputLevel !== 'all') {
+        if (outputLevel === 'warn' && !['warn','error'].includes(e.level)) return false;
+        else if (outputLevel === 'error' && e.level !== 'error') return false;
+        else if (outputLevel === 'info' && e.level !== 'info') return false;
+        else if (outputLevel === 'debug' && e.level !== 'debug') return false;
+      }
+      
+      // Time filter
+      if (outputTime !== 'all') {
+        const now = Date.now();
+        const diffMs = now - (e.time || now);
+        let maxMs = 0;
+        if (outputTime === '1m') maxMs = 60 * 1000;
+        else if (outputTime === '5m') maxMs = 5 * 60 * 1000;
+        else if (outputTime === '15m') maxMs = 15 * 60 * 1000;
+        else if (outputTime === '1h') maxMs = 60 * 60 * 1000;
+        else if (outputTime === '24h') maxMs = 24 * 60 * 60 * 1000;
+        
+        if (diffMs > maxMs) return false;
+      }
       return true;
     });
     tbody.innerHTML = visible.map(e => {
@@ -2031,16 +2053,77 @@ const SIM = (() => {
       });
     }
 
+    const sourceSel = document.getElementById('sel-output-source');
+    const timeSel = document.getElementById('sel-output-time');
+    const exportBtn = document.getElementById('btn-output-export');
+
     clearBtn?.addEventListener('click', () => { outputLines = []; renderOutputLog(); });
+    sourceSel?.addEventListener('change', () => { outputSource = sourceSel.value; renderOutputLog(); });
     levelSel?.addEventListener('change', () => { outputLevel = levelSel.value; renderOutputLog(); });
+    timeSel?.addEventListener('change', () => { outputTime = timeSel.value; renderOutputLog(); });
     autoScrollChk?.addEventListener('change', () => { autoScroll = autoScrollChk.checked; });
-    document.querySelectorAll('.output-src-tab').forEach(btn => {
-      btn.addEventListener('click', () => {
-        outputFilter = btn.dataset.src;
-        document.querySelectorAll('.output-src-tab').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        renderOutputLog();
+
+    exportBtn?.addEventListener('click', async () => {
+      // Get the currently filtered logs
+      const visibleLogs = outputLines.filter(e => {
+        if (outputSource !== 'all' && e.src !== outputSource) return false;
+        if (outputLevel !== 'all') {
+          if (outputLevel === 'warn' && !['warn','error'].includes(e.level)) return false;
+          else if (outputLevel === 'error' && e.level !== 'error') return false;
+          else if (outputLevel === 'info' && e.level !== 'info') return false;
+          else if (outputLevel === 'debug' && e.level !== 'debug') return false;
+        }
+        if (outputTime !== 'all') {
+          const now = Date.now();
+          const diffMs = now - (e.time || now);
+          let maxMs = 0;
+          if (outputTime === '1m') maxMs = 60 * 1000;
+          else if (outputTime === '5m') maxMs = 5 * 60 * 1000;
+          else if (outputTime === '15m') maxMs = 15 * 60 * 1000;
+          else if (outputTime === '1h') maxMs = 60 * 60 * 1000;
+          else if (outputTime === '24h') maxMs = 24 * 60 * 60 * 1000;
+          
+          if (diffMs > maxMs) return false;
+        }
+        return true;
       });
+
+      // Prepare payload (select columns)
+      const payload = visibleLogs.map(e => ({
+        ts: e.ts,
+        level: e.level.toUpperCase(),
+        src: e.src.toUpperCase(),
+        text: e.text
+      }));
+
+      try {
+        exportBtn.disabled = true;
+        exportBtn.textContent = 'Exporting...';
+        
+        const response = await fetch('/api/service/logs/export', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        
+        if (!response.ok) throw new Error('Export API returned error');
+        
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        const timeStr = new Date().toISOString().slice(0, 19).replace(/T|:/g, '_');
+        a.download = `acm_logs_${timeStr}.xlsx`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+      } catch (err) {
+        alert('Failed to export Excel file: ' + err.message);
+      } finally {
+        exportBtn.disabled = false;
+        exportBtn.textContent = 'Export Excel';
+      }
     });
 
     let lastLogId = 0;
@@ -2055,7 +2138,7 @@ const SIM = (() => {
           if (ln.id > lastLogId) {
             lastLogId = ln.id;
             const parsed = parseBackendLogLine(ln.text);
-            outputLines.push({ ts: parsed.ts, text: parsed.text, src: 'acm', level: parsed.level });
+            outputLines.push({ ts: parsed.ts, text: parsed.text, src: 'acm', level: parsed.level, time: Date.now() });
             if (outputLines.length > 2000) outputLines = outputLines.slice(-2000);
             renderOutputLog();
             const el = document.getElementById('output-line-count');
