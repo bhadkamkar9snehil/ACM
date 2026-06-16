@@ -242,13 +242,14 @@ def list_files() -> list[CsvFileRecord]:
     for source, directory in SOURCE_DIRS.items():
         for path in sorted(list(directory.glob("*.csv")) + list(directory.glob("*.xlsx"))):
             try:
-                col_count, row_count = _fast_count(path)
+                # Don't count rows here — lazy load them when previewing
+                # Just use file metadata for quick listing
                 records.append(CsvFileRecord(
                     filename=path.name,
                     source=source,  # type: ignore[arg-type]
                     path=str(path.relative_to(ROOT)),
-                    row_count=row_count,
-                    column_count=col_count,
+                    row_count=0,  # lazy; actual count on preview
+                    column_count=0,  # lazy; actual count on preview
                     modified_at=_mtime(path),
                 ))
             except Exception:
