@@ -1641,7 +1641,8 @@ async function refreshAdmin(useCache = false) {
     const tr = document.createElement("tr");
     tr.append(td(m.asset_key));
     const st = td(""); st.append(badge(m.enabled ? m.state : "PAUSED")); tr.append(st);
-    const src = td(`${m.source_kind}: ${String(m.source_ref).slice(0, 36)}`);
+    const src = td(`${m.source_kind}: ${m.source_ref}`);
+    src.className = "src-ref";
     src.title = m.source_ref; tr.append(src);
     tr.append(td(fmtTs(m.last_run_at)));
     tr.append(tdNum(m.last_runtime_s == null ? "—" : m.last_runtime_s));
@@ -1692,14 +1693,6 @@ async function refreshAdmin(useCache = false) {
                 td(r.notes || "—"), tdNum(r.duration_s ?? "—"));
       rb.append(tr);
     }
-    const lvl = $("#adm-log-level").value;
-    if (!useCache || !cachedAdminData[key][lvl]) {
-      cachedAdminData[key][lvl] = { logs: await api(`/api/assets/${key}/runlog${lvl ? `?level=${lvl}` : ""}`) };
-    }
-    const logs = cachedAdminData[key][lvl].logs;
-    $("#adm-runlog").innerHTML = logs.slice(0, 200).map((l) =>
-      `<span class="${l.level}">${fmtTs(l.ts)} [${l.level}] ${l.stage}: ` +
-      `${String(l.message).replace(/</g, "&lt;")}</span>`).join("\n");
   }
 
   // C6 — Run duration history sparkline (Advanced mode only)
@@ -1813,7 +1806,6 @@ function renderConfig() {
 }
 $("#cfg-filter").addEventListener("input", renderConfig);
 $("#adm-runs-asset").addEventListener("change", refreshAdmin);
-$("#adm-log-level").addEventListener("change", refreshAdmin);
 
 $("#btn-onboard").addEventListener("click", () =>
   openModal("Onboard new asset", [
@@ -1893,20 +1885,28 @@ const SIM = (() => {
   }
 
   function renderOutputLog() {
-    const el = document.getElementById('output-log');
-    if (!el) return;
+    const tbl = document.getElementById('output-log');
+    if (!tbl) return;
+    const tbody = tbl.querySelector('tbody');
+    if (!tbody) return;
     const visible = outputLines.filter(e => {
       if (outputFilter !== 'all' && e.src !== outputFilter) return false;
       if (outputLevel === 'warn' && !['warn','error'].includes(e.level)) return false;
       if (outputLevel === 'error' && e.level !== 'error') return false;
       return true;
     });
-    el.innerHTML = visible.map(e => {
-      const cls = `log-${e.level === 'info' ? (e.src === 'sim' ? 'sim' : 'acm') : e.level}`;
-      const pfx = e.src === 'sim' ? '[SIM]' : '[ACM]';
-      return `<span class="${cls}">${e.ts} ${pfx} ${String(e.text).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</span>`;
-    }).join('\n');
-    if (autoScroll) el.scrollTop = el.scrollHeight;
+    tbody.innerHTML = visible.map(e => {
+      const lvlCls = e.level === 'error' ? 'ERROR' : e.level === 'warn' ? 'WARN' : '';
+      const lvlBadge = lvlCls ? `<span class="badge ${lvlCls}" style="font-size:10px;padding:1px 5px;">${lvlCls}</span>`
+                               : `<span style="font-size:10px;color:var(--muted);">INFO</span>`;
+      const srcBadge = `<span style="font-size:10px;color:var(--muted);">${e.src === 'sim' ? 'SIM' : 'ACM'}</span>`;
+      const msg = String(e.text).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      return `<tr><td style="font-family:'Share Tech Mono',monospace;font-size:11px;white-space:nowrap;">${e.ts}</td><td>${lvlBadge}</td><td>${srcBadge}</td><td style="font-family:'Share Tech Mono',monospace;font-size:11px;">${msg}</td></tr>`;
+    }).join('');
+    if (autoScroll) {
+      const wrap = document.getElementById('output-log-wrap');
+      if (wrap) wrap.scrollTop = wrap.scrollHeight;
+    }
   }
 
   function initOutputPanel() {

@@ -901,6 +901,12 @@ table.data tr:last-child td { border-bottom: none; }
 table.data tr.click { cursor: pointer; transition: background .12s; }
 table.data tr.click:hover td { background: var(--brand-lo); }
 table.data tr.is-alarm td { background: var(--bad-lo); }
+table.data td.src-ref {
+  max-width: 40vw;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 /* ── KPI strip ──────────────────────────────────────────── */
 .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin-bottom: 10px; flex-shrink: 0; max-width: 1400px; margin-inline: auto; }
@@ -1471,11 +1477,20 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
   background: var(--brand-lo);
 }
 
-#output-log .log-sim   { color: var(--blue); }
-#output-log .log-acm   { color: var(--brand); }
-#output-log .log-warn  { color: var(--term-warn); }
-#output-log .log-error { color: var(--bad); }
-#output-log .log-info  { color: var(--term-ink); }
+.output-log-table { width: 100%; border-collapse: collapse; }
+.output-log-table thead th {
+  position: sticky; top: 0;
+  background: var(--bg3);
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--muted);
+  padding: 3px 8px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+}
+.output-log-table tbody tr:hover { background: var(--bg2); }
+.output-log-table tbody td { padding: 2px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
 
 .main { padding-bottom: 210px; }
 
