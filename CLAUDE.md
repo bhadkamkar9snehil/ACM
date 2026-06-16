@@ -630,6 +630,7 @@ Full scored result for engineer view. Key fields: `rows` (list of score dicts), 
 31. **Setup script Next Steps made unmissable** — both `setup_acm.ps1` and `setup.sh` now show a yellow double-line box (╔═╗ style) with START THE SERVICE, python command, URL, and RUN NOW instruction. Was previously easy to miss in the wall of install output.
 32. **CLAUDE.md got a Table of Contents** — added at the top. Jump targets: "Start here for UI work" → UI Codebase Map; "Read before starting any task" → Mistakes Made.
 33. **NEVER change alarm logic when asked for visual prominence** — when user says "make the shading more prominent", that means increase CSS opacity / color intensity ONLY. It does NOT mean change the data logic from `alarm[i]` (stored DB boolean) to `fused[i] > alertZ`. The co-firing matrix, alarm pattern heatmap, and chart shading all intentionally use the stored `alarm` column which reflects the rule engine's decision (including self-distrust gate). Changing the source data breaks the semantics of all three visualisations. Only touch CSS (`--chart-alarm-fill` opacity) for prominence requests.
+34. **Fleet Operations Matrix fonts were inherited and undersized** — the mega-matrix asset rows, headers, and episode details were using inherited `body` font-size (15px) instead of explicit larger sizes. This made dense table text difficult to read at standard monitor distance. Also, column widths (90px for Status, 130px for Trend, etc.) were too tight, causing header text like "STATUS /" to wrap awkwardly. Fixed by: (a) explicit font-size: 17px on .mega-hdr, .mega-asset-row, .mega-alarm-row, (b) expanding column widths by 20–30px, (c) increasing timeline block height from 16→20px, (d) padding rows more generously. The grid template should never have columns < 100px for text content — always reserve space for unwrapped labels.
 
 ---
 
@@ -861,8 +862,38 @@ All sizes live in `static/style.css`. Changed from the original small-screen val
 | `.health-cell .k` | 10px | 11px |
 | `.msgbar` | 11px | 12px |
 | `.attn div` | 11px | 12px |
-| `.mega-farm-hdr` | 11px | 12px |
-| `.mega-alarm-row` | 13px | 14px |
+| `.mega-farm-hdr` | 12px | 17px |
+| `.mega-hdr` | 15px (inherited) | 17px |
+| `.mega-asset-row` | 15px (inherited) | 17px |
+| `.mega-alarm-row` | 14px | 17px |
+| `table.data` (general) | 12–14px | 16–18px |
+
+---
+
+## Fleet Operations Matrix (Operator Tab) — Styling Learnings (2026-06-16)
+
+**Issue:** Text was "way too small" — asset names, status, diagnosis, episode details all difficult to read.
+
+**Root causes:**
+1. Font sizes inherited from body (15px) — too small for a dense data table
+2. Column widths were too tight, causing header text to wrap awkwardly (e.g., "STATUS /" split across lines)
+3. Episode expansion rows had no explicit font-size styling
+4. Timeline blocks were 16px height — narrow and hard to click
+
+**Fixes applied:**
+1. **Font sizes:** All mega-matrix elements now 16–17px (headers 17px, data rows 17px, episodes 16–17px)
+2. **Column widths (expanded by 20–30px total):**
+   - Asset name: 180→200px min, 260→280px max
+   - Status: 90→110px
+   - Trend: 130→150px
+   - Fused: 70→90px
+   - Diagnosis: 220→240px
+   - Timeline: 60→70px
+3. **Row heights:** Header 33→38px, asset rows padding 10→12px vertical
+4. **Timeline blocks:** 16px→20px height for better visibility
+5. **Farm group header:** 12px→17px font, padding 6→8px
+
+**Result:** Headers display cleanly without wrapping, all text readable at standard monitor distance, better visual hierarchy.
 
 ---
 
