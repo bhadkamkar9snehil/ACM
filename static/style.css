@@ -1210,9 +1210,9 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
 
 /* ── Card density in Advanced mode ──────────────────────── */
 [data-mode="advanced"] .card { padding: 8px 10px; }
-[data-mode="advanced"] table.data td { padding: 4px 7px; font-size: 15px; }
+[data-mode="advanced"] table.data:not(.output-log-table) td { padding: 4px 7px; font-size: 15px; }
 [data-mode="advanced"] .card-title { font-size: 15px; padding-bottom: 4px; margin-bottom: 6px; }
-[data-mode="advanced"] table.data th { font-size: 13px; }
+[data-mode="advanced"] table.data:not(.output-log-table) th { font-size: 13px; }
 
 /* ── Operator tab — op-layout ────────────────────────────── */
 .op-layout { display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 0; }
