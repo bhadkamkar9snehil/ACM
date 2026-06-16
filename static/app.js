@@ -416,9 +416,9 @@ async function refreshOperator(useCache = false) {
       const dot = farmAlarm ? "var(--bad)" : farmWarn ? "var(--warn)" : "var(--ok)";
       farmHdr.innerHTML = `
         <span style="color:var(--brand);font-weight:700;letter-spacing:.06em;">${farm}</span>
-        <span style="color:var(--muted);font-size:10px;margin-left:6px;">${farmAssets.length} assets</span>
-        ${farmAlarm ? `<span style="color:var(--bad);font-size:10px;margin-left:8px;">● ${farmAlarm} alarm</span>` : ""}
-        ${farmWarn ? `<span style="color:var(--warn);font-size:10px;margin-left:6px;">● ${farmWarn} warn</span>` : ""}
+        <span style="color:var(--muted);font-size:14px;margin-left:6px;">${farmAssets.length} assets</span>
+        ${farmAlarm ? `<span style="color:var(--bad);font-size:14px;margin-left:8px;">● ${farmAlarm} alarm</span>` : ""}
+        ${farmWarn ? `<span style="color:var(--warn);font-size:14px;margin-left:6px;">● ${farmWarn} warn</span>` : ""}
       `;
       mx.append(farmHdr);
     }
@@ -435,7 +435,7 @@ async function refreshOperator(useCache = false) {
       <div id="mr-state-${a.asset_key}"></div>
       <div id="mr-sp-${a.asset_key}"></div>
       <div class="num">${fmtNum(a.last_fused)}</div>
-      <div style="font-size:12px;font-family:'Share Tech Mono',monospace;">${formatRulesForOperator(a.rules_fired)}</div>
+      <div style="font-size:16px;font-family:'Share Tech Mono',monospace;">${formatRulesForOperator(a.rules_fired)}</div>
       <div>${renderTimeline(assetAlarms, a.last_ts)}</div>
       <div class="num" style="color:var(--warn); font-weight:bold;">${a.unacked_alarms || 0}</div>
     `;
