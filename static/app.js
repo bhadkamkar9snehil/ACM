@@ -1075,16 +1075,7 @@ async function refreshEngineer(useCache = false) {
     s.rows.map(r => r[idx["omr_z"]]),
   ], $("#eng-chart"));
 
-  // Detector toggle buttons (Advanced mode only) — hidden by default, active class cleared
-  document.querySelectorAll(".det-toggle").forEach((btn, i) => {
-    btn.classList.remove("active");
-    const seriesIdx = 3 + i; // Series 0=x, 1=fused, 2=alertZ, 3-8=detectors
-    btn.onclick = () => {
-      btn.classList.toggle("active");
-      const show = btn.classList.contains("active");
-      plot.setSeries(seriesIdx, { show });
-    };
-  });
+
 
   // detector heat strip, aligned to the chart's plotted area
   const labels = $("#eng-heatlabels");
@@ -1589,7 +1580,7 @@ async function refreshEngineer(useCache = false) {
     patBody.append(cvs);
     const totalAlarmPts = alarm.reduce((acc, v) => acc + (v ? 1 : 0), 0);
     const patNote = document.createElement("div");
-    patNote.style.cssText = "font-size:9px;color:var(--muted);margin-top:6px;font-family:'Share Tech Mono',monospace;";
+    patNote.style.cssText = "font-size:13px;color:var(--muted);margin-top:10px;font-family:'Share Tech Mono',monospace;";
     patNote.textContent = `${totalAlarmPts} alarm pts · ${ts.length} total · color = alarm fraction`;
     patBody.append(patNote);
   }

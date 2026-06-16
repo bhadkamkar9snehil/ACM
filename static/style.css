@@ -1219,6 +1219,12 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
 
 /* ── Engineer tab — eng-layout ───────────────────────────── */
 .eng-layout { display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 0; }
+.eng-topbar {
+  position: sticky;
+  top: -12px;
+  z-index: 100;
+  background: var(--card);
+}
 
 /* Score chart: scales with viewport height so it isn't tiny on tall/4K monitors */
 [data-mode="basic"]    #eng-chart uplot { height: max(220px, 20vh); }
@@ -1276,18 +1282,7 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
   vertical-align: middle;
 }
 
-/* ── Detector toggle buttons ────────────────────────────── */
-.det-toggle {
-  opacity: 0.6;
-  transition: opacity 150ms ease;
-}
-.det-toggle:hover {
-  opacity: 0.9;
-}
-.det-toggle.active {
-  opacity: 1;
-  box-shadow: 0 0 6px currentColor;
-}
+
 
 
 /* ═══════════════════════════════════════════════════════════

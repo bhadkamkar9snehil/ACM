@@ -58,11 +58,11 @@ async def main():
         else:
             fail("Replay stat-cell missing")
 
-        run_btn = page.locator("#btn-run-now, button:has-text('RUN NOW')").first
+        run_btn = page.locator("#btn-runnow, #btn-run-now, button:has-text('Score All'), button:has-text('RUN NOW')").first
         if await run_btn.count() > 0:
-            ok("RUN NOW button present")
+            ok("RUN NOW / Score All button present")
         else:
-            fail("RUN NOW button missing")
+            fail("RUN NOW / Score All button missing")
 
         # ── 3. Tab navigation ──────────────────────────────────────────────────
         print("\n  Tab navigation")
@@ -317,7 +317,7 @@ async def main():
 
         # ── 11. RUN NOW ────────────────────────────────────────────────────────
         print("\n  RUN NOW → Operator")
-        run_btn2 = page.locator("button:has-text('RUN NOW'), #btn-run-now").first
+        run_btn2 = page.locator("#btn-runnow, #btn-run-now, button:has-text('Score All'), button:has-text('RUN NOW')").first
         if await run_btn2.count() > 0:
             await run_btn2.click()
             await page.wait_for_timeout(5000)
@@ -327,7 +327,7 @@ async def main():
             await shot(page, "12_operator_after_run")
             ok("RUN NOW triggered; Operator tab shown")
         else:
-            fail("RUN NOW button not found")
+            fail("RUN NOW / Score All button not found")
 
         # ── 12. Output panel ───────────────────────────────────────────────────
         print("\n  Output panel")
