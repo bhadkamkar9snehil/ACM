@@ -1,7 +1,7 @@
 # ACM — Codebase Knowledge Base
 
 > Maintained for future agents. Update this file whenever you learn something new about the codebase.
-> Last updated: session 01WdhcTS2X6Za1NZGfnAkPFQ (2026-06-15)
+> Last updated: session 01UuCboiW9MAKb9AKYYoVt1J (2026-06-16)
 
 ---
 
@@ -32,8 +32,9 @@
 23. [Fault Datasets](#fault-datasets-sim_datasample)
 24. [Git Workflow](#git-workflow)
 25. [UI Font Sizes](#ui-font-sizes-canonical-after-2026-06-15-upsize)
-26. [Fleet Operations Matrix Performance Optimization](#fleet-operations-matrix-performance-optimization-2026-06-16) ← **Latest work session**
-27. [User Working Style](#user-working-style)
+26. [Fleet Operations Matrix Performance Optimization](#fleet-operations-matrix-performance-optimization-2026-06-16)
+27. [Per-Asset Scoring & SIM→ACM Flow (2026-06-16)](#per-asset-scoring--simacm-flow-2026-06-16) ← **Latest work session**
+28. [User Working Style](#user-working-style)
 
 ---
 
@@ -949,6 +950,50 @@ All sizes live in `static/style.css`. Changed from the original small-screen val
 - Lazy-load uses closure to capture alarm state per asset
 - Hash function is simple (length + character-sum), not cryptographic, sufficient for equality check
 - sprinklineBar() uses last 10 days of data (vs full 30-day trend in old SVG)
+
+---
+
+## Per-Asset Scoring & SIM→ACM Flow (2026-06-16)
+
+### Two User Flows (architecture decision)
+Only two valid flows for getting data into ACM:
+1. **Admin Onboard tab** — register any source (SQL table, OPC UA endpoint, arbitrary CSV path) directly. Technical/raw, no guardrails. For power users.
+2. **SIM flow** — pick/generate a CSV in Simulate tab → either stream via OPC UA or register as CSV asset → score from Operator tab.
+
+CARE CSVs live in `sim_data/sample/` → they appear in SIM Files tab → they go through Flow 2 like any other file. CARE is not a separate flow.
+
+### Per-Asset Score Button (Fleet Operations Matrix)
+- Fleet Matrix now has 8 columns (was 7). 8th col: `Score` (80px)
+- Each asset row has a `▶ Score` button that calls `POST /api/service/run-now {assets: [key]}`
+- MATURING assets show disabled "Maturing" button with tooltip — don't hide the button
+- **Completion detection**: polls `/api/fleet` for the specific asset's `last_run_at` to change (NOT global `tick_in_progress` — that's a false positive if other assets score simultaneously)
+- CSS: `grid-template-columns: minmax(200px, 280px) 110px 150px 90px 1fr 240px 70px 80px` on all three selectors: `.mega-hdr`, `.mega-asset-row`, `.mega-alarm-row`
+
+### Diagnosis Column — state_detail fallback
+Matrix Diagnosis column shows (in order of priority):
+1. `formatRulesForOperator(rules_fired)` — when asset has been scored
+2. `state_detail` (italicised, muted) — when not yet scored (e.g., "Replaying: condenser_fouling.csv")
+3. `—` — nothing to show
+
+### PATCH /api/monitored-assets allows state_detail
+Added `state_detail` to the allowed set (`acm_service.py:~534`). This enables the replay start/stop code to update what file is replaying on the `simulator/opc_ua` row. **Previously this silently returned 422.**
+
+### SIM Files tab — "→ ACM" button
+- New button `→ ACM` in Files tab per-row calls `POST /api/sim/files/{filename}/register?source={source}`
+- **Why backend endpoint, not frontend path construction**: `source_ref` must be an absolute path — `csv_manager.resolve_csv_path()` does this server-side. Frontend cannot safely construct it.
+- **Timestamp column auto-detection** in `_detect_timestamp_col()`: priority `timestamp → time_stamp → ts → first col with 'time'/'date'`
+  - CARE CSVs: `time_stamp` (detected correctly)
+  - SIM-generated CSVs: `timestamp` (detected correctly)
+- **Conflict handling**: returns 409 if asset_key already exists → frontend shows "use a different key" warning
+- `fast_track=True` is the default for Files → ACM onboard (bypasses 14-day gate so scoring works immediately)
+
+### ACM Service Startup — PAUSED by default
+`acm_store.py:get_service_state()` seeds `paused=1` on first run. Service starts idle; user must click "Score All" or per-asset "▶ Score" to begin scoring.
+
+### Mistakes to Never Repeat (added this session)
+35. **Polling `tick_in_progress` for per-asset completion** — this is a global flag; if any other asset finishes first, the poll terminates early. Always poll `last_run_at` for the SPECIFIC asset from `/api/fleet`.
+36. **Constructing `source_ref` in the frontend** — `sim_data/sample/file.csv` is a relative path that works only if CWD = ACM root. Use the backend `/api/sim/files/{fn}/register` endpoint which calls `csv_manager.resolve_csv_path()` for the absolute path.
+37. **Not adding `state_detail` to PATCH allowed fields** — silent 422 was swallowed by `catch (_) {}`. Always check PATCH endpoints have the fields you need before writing frontend code that PATCHes them.
 
 ---
 
