@@ -171,13 +171,14 @@ print(f'{len(list_generators())} generators, {len(router.routes)} sim routes —
 "
 }
 # Smoke test — verify ACM can start and respond to HTTP (instead of slow pytest)
-$_smokeDb = "$env:TEMP\acm_smoke_$PID.db"
-$_smokeLog = "$env:TEMP\acm_smoke_$PID.log"
+$_smokeDb  = "$env:TEMP\acm_smoke_$PID.db"
+$_smokeOut = "$env:TEMP\acm_smoke_$PID.out"
+$_smokeErr = "$env:TEMP\acm_smoke_$PID.err"
 Write-Host "    $([char]0x00B7)  Smoke test (ACM starts)" -NoNewline
 $_proc = Start-Process python `
     -ArgumentList "scripts\acm_service.py","--port","8766","--db","$_smokeDb" `
     -WorkingDirectory $InstallDir -PassThru -WindowStyle Hidden `
-    -RedirectStandardOutput "$_smokeLog" -RedirectStandardError "$_smokeLog"
+    -RedirectStandardOutput "$_smokeOut" -RedirectStandardError "$_smokeErr"
 $_ok = $false
 for ($_i = 0; $_i -lt 6; $_i++) {
     Start-Sleep 2
@@ -189,7 +190,7 @@ for ($_i = 0; $_i -lt 6; $_i++) {
 }
 try { $_proc.Kill() } catch {}
 try { Wait-Process -Id $_proc.Id -ErrorAction SilentlyContinue } catch {}
-Remove-Item "$_smokeDb","$_smokeLog" -ErrorAction SilentlyContinue
+Remove-Item "$_smokeDb","$_smokeOut","$_smokeErr" -ErrorAction SilentlyContinue
 if ($_ok) {
     Write-Host "`r    $([char]0x2713)  Smoke test (ACM starts)" -ForegroundColor Green
 } else {
