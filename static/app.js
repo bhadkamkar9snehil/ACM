@@ -1872,11 +1872,11 @@ const SIM = (() => {
     document.querySelectorAll('.sub-tab').forEach(btn => {
       btn.addEventListener('click', () => {
         const pane = btn.dataset.simTab;
-        document.querySelectorAll('.sub-tab').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('#sim-tabs .sub-tab').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
-        document.querySelectorAll('.sim-pane').forEach(p => p.classList.add('hidden'));
+        document.querySelectorAll('.sim-pane').forEach(p => p.style.display = 'none');
         const el = document.getElementById('sim-pane-' + pane);
-        if (el) el.classList.remove('hidden');
+        if (el) el.style.display = 'block';
         if (pane === 'files') refreshFiles();
         if (pane === 'replay') populateReplayFileList();
       });
@@ -2405,12 +2405,12 @@ const SIM = (() => {
   async function sendToReplay(filename, source) {
     // Switch the Simulate tab's active pane to Replay directly (avoids race with
     // the pane button's click listener which calls populateReplayFileList concurrently)
-    document.querySelectorAll('[data-sim-tab]').forEach(b => b.classList.remove('active'));
-    document.querySelectorAll('.sim-pane').forEach(p => p.classList.add('hidden'));
+    document.querySelectorAll('#sim-tabs .sub-tab').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.sim-pane').forEach(p => p.style.display = 'none');
     const replayBtn = document.querySelector('[data-sim-tab="replay"]');
     if (replayBtn) replayBtn.classList.add('active');
     const replayPane = document.getElementById('sim-pane-replay');
-    if (replayPane) replayPane.classList.remove('hidden');
+    if (replayPane) replayPane.style.display = 'block';
 
     // Populate the file list, then override the auto-selected first file
     await populateReplayFileList();

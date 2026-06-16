@@ -379,7 +379,6 @@
 
   <!-- ══════════════ 04 SIMULATE ═══════════════════════════════ -->
   <section id="tab-simulate" class="tabpane">
-    <div class="panel-scroll">
 
       <!-- Inner sub-tab rail -->
       <div class="sub-tab-rail" id="sim-tabs">
@@ -389,7 +388,7 @@
       </div>
 
       <!-- ── Generate ────────────────────────────────────── -->
-      <div id="sim-pane-generate" class="sim-pane">
+      <div id="sim-pane-generate" class="sim-pane panel-scroll">
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
           <div class="card">
             <div class="card-title">Domain &amp; Scenario</div>
@@ -461,7 +460,7 @@
       </div>
 
       <!-- ── Files ───────────────────────────────────────── -->
-      <div id="sim-pane-files" class="sim-pane hidden">
+      <div id="sim-pane-files" class="sim-pane panel-scroll" style="display:none">
         <div style="display:flex;gap:8px;margin-bottom:10px;align-items:center;">
           <button class="btn btn-brand" id="btn-sim-upload-open">⬆ Upload CSV / XLSX</button>
           <button class="btn" id="btn-sim-files-refresh">⟳ Refresh</button>
@@ -483,7 +482,7 @@
       </div>
 
       <!-- ── Replay ──────────────────────────────────────── -->
-      <div id="sim-pane-replay" class="sim-pane hidden">
+      <div id="sim-pane-replay" class="sim-pane panel-scroll" style="display:none">
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
           <div class="card">
             <div class="card-title">Replay Settings</div>
@@ -540,15 +539,14 @@
         </div>
       </div>
 
-    </div>
   </section>
 
   <!-- 🟨🟨🟨🟨🟨🟨🟨🟨🟨🟨🟨🟨🟨🟨 05 HELP 🟨🟨🟨🟨🟨🟨🟨🟨🟨🟨🟨🟨🟨🟨🟨🟨🟨🟨🟨🟨🟨🟨🟨 -->
   <section id="tab-help" class="tabpane">
     <!-- Inner sub-tab rail -->
     <div class="sub-tab-rail" id="help-tabs">
-      <button type="button" class="sub-tab active" data-help-tab="guide">Guide</button>
-      <button type="button" class="sub-tab" data-help-tab="book">ML Reference Book</button>
+      <button type="button" class="sub-tab active" data-help-tab="guide">Quick</button>
+      <button type="button" class="sub-tab" data-help-tab="book">Detailed</button>
     </div>
 
     <!-- ── Guide pane ─────────────────────────────────── -->
