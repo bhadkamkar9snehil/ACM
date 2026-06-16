@@ -531,7 +531,7 @@ def create_app(backend: str = "sqlite", db: Optional[str] = "acm_results.db",
     @app.patch("/api/monitored-assets/{key:path}")
     async def edit_asset(key: str, body: dict):
         allowed = {"enabled", "source_kind", "source_ref", "conn_ref",
-                   "timestamp_col", "status_col", "grp"}
+                   "timestamp_col", "status_col", "grp", "state_detail"}
         fields = {k: v for k, v in body.items() if k in allowed}
         if not fields:
             raise HTTPException(422, f"nothing to update (allowed: {sorted(allowed)})")

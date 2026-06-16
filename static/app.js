@@ -276,7 +276,7 @@ $("#btn-resume").addEventListener("click", async () => {
 });
 $("#btn-runnow").addEventListener("click", async () => {
   await api("/api/service/run-now", { method: "POST", body: {} });
-  toast("Fleet analysis triggered", "ok");
+  toast("Scoring all assets…", "ok");
   refreshService();
 });
 $("#inp-tick").addEventListener("change", async (e) => {
@@ -416,6 +416,7 @@ async function refreshOperator(useCache = false) {
         <span class="mt-empty">-24h</span><span class="mt-empty">Timeline Matrix</span><span class="mt-empty">Now</span>
       </div>
       <div>Unack</div>
+      <div>Score</div>
     </div>
   `;
 
@@ -451,8 +452,15 @@ async function refreshOperator(useCache = false) {
     }
 
     // Asset Row
+    const prevRunAt = a.last_run_at;  // Capture before triggering for completion detection
     const aRow = document.createElement("div");
     aRow.className = "mega-asset-row collapsed";
+    // Diagnosis: show rules_fired if scored, else state_detail, else —
+    const diagnosisHtml = a.rules_fired
+      ? `<span style="font-size:16px;font-family:'Share Tech Mono',monospace;">${formatRulesForOperator(a.rules_fired)}</span>`
+      : a.state_detail
+        ? `<span style="color:var(--muted);font-style:italic;">${a.state_detail}</span>`
+        : `<span style="color:var(--muted);">—</span>`;
     aRow.innerHTML = `
       <div style="font-weight:bold; color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${a.asset_key}">
         <span class="chevron" style="display:inline-block;width:14px;color:var(--muted);">${assetAlarms.length ? '►' : ' '}</span>
@@ -462,16 +470,60 @@ async function refreshOperator(useCache = false) {
       <div data-cell="state"></div>
       <div data-cell="spark"></div>
       <div class="num">${fmtNum(a.last_fused)}</div>
-      <div style="font-size:16px;font-family:'Share Tech Mono',monospace;">${formatRulesForOperator(a.rules_fired)}</div>
+      <div>${diagnosisHtml}</div>
       <div>${renderTimeline(assetAlarms, a.last_ts)}</div>
       <div class="num" style="color:var(--warn); font-weight:bold;">${a.unacked_alarms || 0}</div>
+      <div data-cell="score"></div>
     `;
 
     // OPTIMIZATION 5: Avoid querySelector - use data attributes and direct references
     const stateCell = aRow.querySelector('[data-cell="state"]');
     const sparkCell = aRow.querySelector('[data-cell="spark"]');
+    const scoreCell = aRow.querySelector('[data-cell="score"]');
     stateCell.append(badge(a.state));
     sparkCell.append(sparklineBar(sparks[a.asset_key] || []));
+
+    // Per-asset Score button — state-aware
+    const scoreBtn = document.createElement("button");
+    if (a.state === "MATURING") {
+      scoreBtn.className = "btn btn-sm";
+      scoreBtn.textContent = "Maturing";
+      scoreBtn.disabled = true;
+      scoreBtn.title = "Not enough history yet — wait or use fast-track onboard";
+      scoreBtn.style.cssText = "opacity:0.5;cursor:default;";
+    } else {
+      scoreBtn.className = "btn btn-sm btn-ok";
+      scoreBtn.textContent = "▶ Score";
+      scoreBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();  // Don't trigger row expand/collapse or dblclick engineer
+        scoreBtn.disabled = true;
+        scoreBtn.textContent = "⟳";
+        try {
+          await api("/api/service/run-now", { method: "POST", body: { assets: [a.asset_key] } });
+          toast(`Scoring ${a.asset_key}…`, "ok", 3000);
+          // Poll /api/fleet watching THIS asset's last_run_at — not global tick_in_progress
+          let tries = 0;
+          const poll = setInterval(async () => {
+            tries++;
+            try {
+              const fleetData = await api("/api/fleet");
+              const updated = fleetData.find(r => r.asset_key === a.asset_key);
+              if ((updated && updated.last_run_at !== prevRunAt) || tries > 30) {
+                clearInterval(poll);
+                cachedOperatorHash = null;   // Force debounce bypass
+                cachedOperatorData = null;   // Force fresh API fetch
+                await refreshOperator();
+              }
+            } catch (_) { if (tries > 30) clearInterval(poll); }
+          }, 2000);
+        } catch (err) {
+          toast(err.message, "err");
+          scoreBtn.disabled = false;
+          scoreBtn.textContent = "▶ Score";
+        }
+      });
+    }
+    scoreCell.append(scoreBtn);
 
     // OPTIMIZATION 3.2: Lazy-load alarm episodes (don't render on initial load)
     let alContainer = null;
@@ -498,6 +550,7 @@ async function refreshOperator(useCache = false) {
           <div></div>
           <div>${renderTimeline([al], a.last_ts)}</div>
           <div data-ack-cell></div>
+          <div></div>
         `;
         const btn = document.createElement("button");
         btn.className = "btn btn-sm btn-warn"; btn.textContent = "Ack";
@@ -2020,6 +2073,7 @@ const SIM = (() => {
         <td style="white-space:nowrap;">
           <button class="btn btn-sm" onclick="SIM.previewFile('${esc(f.filename)}','${esc(f.source)}')">Preview</button>
           <button class="btn btn-sm" onclick="SIM.sendToReplay('${esc(f.filename)}','${esc(f.source)}')">→ Replay</button>
+          <button class="btn btn-sm btn-brand" onclick="SIM.onboardFile('${esc(f.filename)}','${esc(f.source)}')">→ ACM</button>
           <button class="btn btn-sm btn-bad" onclick="SIM.deleteFile('${esc(f.filename)}','${esc(f.source)}')">Delete</button>
         </td></tr>`).join('');
     } catch (e) {
@@ -2314,7 +2368,30 @@ const SIM = (() => {
     }
   }
 
-  return { init, previewFile, deleteFile, sendToReplay, log };
+  async function onboardFile(filename, source) {
+    const defaultKey = 'sim/' + filename.replace(/\.(csv|xlsx)$/i, '').replace(/[^A-Za-z0-9_\-\/]/g, '_');
+    openModal(`Register in ACM — ${filename}`, [
+      { name: 'asset_key', label: 'Asset Key', required: true, value: defaultKey },
+      { name: 'grp', label: 'Group', value: 'sim' },
+    ], 'Register', async (body) => {
+      try {
+        const r = await simPost(
+          `/files/${encodeURIComponent(filename)}/register?source=${source}`,
+          { asset_key: body.asset_key, grp: body.grp || 'sim', fast_track: true }
+        );
+        toast(`${r.asset_key} registered (ts: ${r.timestamp_col}) — go to Operator tab to score`, 'ok', 6000);
+        log(`Registered ${r.asset_key} from ${filename} (timestamp_col=${r.timestamp_col})`, 'sim', 'info');
+      } catch (err) {
+        if (err.message?.includes('409') || err.message?.toLowerCase().includes('already exists')) {
+          toast(`Asset key already registered — use a different key`, 'warn', 5000);
+        } else {
+          toast(err.message, 'err');
+        }
+      }
+    });
+  }
+
+  return { init, previewFile, deleteFile, sendToReplay, onboardFile, log };
 })();
 
 if (document.readyState === 'loading') {

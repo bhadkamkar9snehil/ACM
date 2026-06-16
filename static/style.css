@@ -1103,7 +1103,7 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
 .mega-hdr > div, .mega-asset-row > div, .mega-alarm-row > div { min-width: 0; overflow: hidden; }
 .mega-hdr {
   display: grid;
-  grid-template-columns: minmax(200px, 280px) 110px 150px 90px 1fr 240px 70px;
+  grid-template-columns: minmax(200px, 280px) 110px 150px 90px 1fr 240px 70px 80px;
   gap: 10px; padding: 10px 12px;
   font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif-condensed, sans-serif; font-weight: 700;
   font-size: 17px;
@@ -1114,7 +1114,7 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
 }
 .mega-asset-row {
   display: grid;
-  grid-template-columns: minmax(200px, 280px) 110px 150px 90px 1fr 240px 70px;
+  grid-template-columns: minmax(200px, 280px) 110px 150px 90px 1fr 240px 70px 80px;
   gap: 10px; padding: 12px 12px; align-items: center;
   position: sticky; top: var(--mega-hdr-h, 38px); z-index: 10;
   background: var(--bg); border-bottom: 1px solid var(--line);
@@ -1125,7 +1125,7 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
 .mega-alarms { display: flex; flex-direction: column; }
 .mega-alarm-row {
   display: grid;
-  grid-template-columns: minmax(200px, 280px) 110px 150px 90px 1fr 240px 70px;
+  grid-template-columns: minmax(200px, 280px) 110px 150px 90px 1fr 240px 70px 80px;
   gap: 10px; padding: 10px 12px 10px 30px; align-items: center;
   border-bottom: 1px dashed rgba(255,255,255,0.05);
   font-family: 'Share Tech Mono', monospace; font-size: 17px;

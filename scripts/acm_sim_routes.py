@@ -128,6 +128,74 @@ async def delete_file(filename: str, source: str = "generated"):
         raise HTTPException(404, f"File not found: {filename}")
 
 
+def _detect_timestamp_col(columns: list[str]) -> str:
+    """Pick the most likely timestamp column from a list of column names."""
+    for p in ("timestamp", "time_stamp", "ts"):
+        if p in columns:
+            return p
+    for c in columns:
+        if "time" in c.lower() or "date" in c.lower():
+            return c
+    return columns[0] if columns else "timestamp"
+
+
+@router.post("/files/{filename}/register")
+async def register_file_as_acm_asset(filename: str, source: str, body: dict):
+    """Register an existing SIM CSV/XLSX file as an ACM monitored asset.
+
+    The backend resolves the absolute path and auto-detects the timestamp
+    column so the frontend doesn't need to know either.
+    """
+    if _store is None:
+        raise HTTPException(503, "ACM store not initialised")
+
+    try:
+        path = csv_mgr.resolve_csv_path(filename, source)
+    except FileNotFoundError:
+        raise HTTPException(404, f"File not found: {filename}")
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+
+    try:
+        meta = csv_mgr.metadata(filename, source, preview_rows=1)
+    except Exception as e:
+        raise HTTPException(422, f"Could not read file metadata: {e}")
+
+    ts_col = _detect_timestamp_col(meta.columns)
+
+    asset_key = (body.get("asset_key") or "").strip()
+    if not asset_key:
+        raise HTTPException(422, "'asset_key' is required")
+
+    grp = body.get("grp") or "sim"
+    fast_track = bool(body.get("fast_track", True))
+
+    existing = _store.fetch(
+        "SELECT asset_key FROM monitored_assets WHERE asset_key = ?", (asset_key,)
+    )
+    if existing:
+        raise HTTPException(409, f"asset '{asset_key}' already exists")
+
+    source_ref = str(path)
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+    _store.execute(
+        "INSERT INTO monitored_assets "
+        "(asset_key, grp, enabled, source_kind, source_ref, conn_ref, "
+        "timestamp_col, status_col, added_at, state, fast_track) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        (asset_key, grp, 1, "csv", source_ref, None,
+         ts_col, None, now, "NEW", 1 if fast_track else 0),
+    )
+    _store.commit()
+    return {
+        "asset_key": asset_key,
+        "state": "NEW",
+        "source_ref": source_ref,
+        "timestamp_col": ts_col,
+    }
+
+
 @router.post("/files/upload")
 async def upload_file(file: UploadFile = File(...)):
     try:
