@@ -429,8 +429,11 @@ async function refreshOperator(useCache = false) {
     </div>
   `;
 
-  // Sort fleet by farm, then state, then asset_key
+  // Sort fleet: scoring-now → by farm → by state → by key
   fleet.sort((a, b) => {
+    const aScoring = _scoringNow.has(a.asset_key) ? 0 : 1;
+    const bScoring = _scoringNow.has(b.asset_key) ? 0 : 1;
+    if (aScoring !== bScoring) return aScoring - bScoring;
     const fa = farmPrefix(a.asset_key), fb = farmPrefix(b.asset_key);
     if (fa !== fb) return fa.localeCompare(fb);
     const sd = (STATE_ORDER[a.state] ?? 9) - (STATE_ORDER[b.state] ?? 9);
@@ -464,14 +467,19 @@ async function refreshOperator(useCache = false) {
     const prevRunAt = a.last_run_at;  // Capture before triggering for completion detection
     const aRow = document.createElement("div");
     aRow.className = "mega-asset-row collapsed";
+    aRow.dataset.assetKey = a.asset_key;
     // Diagnosis: show rules_fired if scored, else state_detail, else —
     const diagnosisHtml = a.rules_fired
       ? `<span style="font-size:16px;font-family:'Share Tech Mono',monospace;">${formatRulesForOperator(a.rules_fired)}</span>`
       : a.state_detail
         ? `<span style="color:var(--muted);font-style:italic;">${a.state_detail}</span>`
         : `<span style="color:var(--muted);">—</span>`;
-    const ageColor = a.state === 'STALE' ? 'var(--warn)' : 'var(--muted)';
-    const ageText = a.last_run_at ? fmtRelTime(a.last_run_at) : 'not yet scored';
+    const isStale = a.state === 'STALE';
+    const isScoring = _scoringNow.has(a.asset_key);
+    const ageColor = isStale ? 'var(--warn)' : isScoring ? 'var(--ok)' : 'var(--muted)';
+    const ageWeight = isStale ? 'bold' : 'normal';
+    const ageText = isScoring ? '⟳ scoring now…'
+      : a.last_run_at ? fmtRelTime(a.last_run_at) : 'not yet scored';
     aRow.innerHTML = `
       <div style="overflow:hidden; text-overflow:ellipsis;" title="${a.asset_key}">
         <div style="font-weight:bold; color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
@@ -479,7 +487,7 @@ async function refreshOperator(useCache = false) {
           ${a.asset_key}
           ${lastAlarmBadge(assetAlarms)}
         </div>
-        <div style="font-size:12px; color:${ageColor}; padding-left:18px; white-space:nowrap;">${ageText}</div>
+        <div style="font-size:13px; font-weight:${ageWeight}; color:${ageColor}; padding-left:18px; white-space:nowrap;">${ageText}</div>
       </div>
       <div data-cell="state"></div>
       <div data-cell="spark"></div>
@@ -2409,11 +2417,15 @@ const SIM = (() => {
 
       // Set as selected so it appears in engineer dropdown immediately
       selectedAsset = assetKey;
+      // Navigate to Operator tab to show scoring progress
       document.querySelector('.tab[data-tab="operator"]').click();
       cachedOperatorHash = null; cachedOperatorData = null;
       await refreshOperator();
+      // Scroll the scoring asset row into view
+      const scoringRow = document.querySelector(`.mega-asset-row[data-asset-key="${CSS.escape(assetKey)}"]`);
+      if (scoringRow) scoringRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
-      // Poll until scoring completes, then clear spinner and refresh
+      // Poll until scoring completes
       let tries = 0;
       const poll = setInterval(async () => {
         tries++;
@@ -2423,8 +2435,14 @@ const SIM = (() => {
           if ((row && row.last_run_at !== prevRunAt) || tries > 30) {
             clearInterval(poll);
             _scoringNow.delete(assetKey);
-            cachedOperatorHash = null; cachedOperatorData = null;
-            await refreshOperator();
+            if (activeTab === 'operator') {
+              // Auto-navigate to Engineer tab to show the fresh results
+              selectedAsset = assetKey;
+              document.querySelector('.tab[data-tab="engineer"]').click();
+            } else {
+              toast(`${assetKey} — scored. Open Engineer tab to view results.`, 'ok', 6000);
+              cachedOperatorHash = null; cachedOperatorData = null;
+            }
           }
         } catch (_) { if (tries > 30) { clearInterval(poll); _scoringNow.delete(assetKey); } }
       }, 2000);
