@@ -426,6 +426,7 @@ async function refreshOperator(useCache = false) {
     // Asset Row
     const aRow = document.createElement("div");
     aRow.className = "mega-asset-row collapsed";
+    aRow.title = "Double-click to open in Engineer tab";
     aRow.innerHTML = `
       <div style="font-weight:bold; color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${a.asset_key}">
         <span class="chevron" style="display:inline-block;width:14px;color:var(--muted);">${assetAlarms.length ? '►' : ' '}</span>
@@ -439,7 +440,14 @@ async function refreshOperator(useCache = false) {
       <div>${renderTimeline(assetAlarms, a.last_ts)}</div>
       <div class="num" style="color:var(--warn); font-weight:bold;">${a.unacked_alarms || 0}</div>
     `;
-    aRow.querySelector(`[id="mr-state-${a.asset_key}"]`).append(badge(a.state));
+    const stateCell = aRow.querySelector(`[id="mr-state-${a.asset_key}"]`);
+    stateCell.append(badge(a.state));
+    if (a.last_ts) {
+      const tsEl = document.createElement('div');
+      tsEl.style.cssText = 'font-size:13px;color:var(--muted);font-family:"Share Tech Mono",monospace;margin-top:2px;';
+      tsEl.textContent = fmtRelTime(a.last_ts);
+      stateCell.append(tsEl);
+    }
     aRow.querySelector(`[id="mr-sp-${a.asset_key}"]`).append(sparkline(sparks[a.asset_key] || []));
     aRow.addEventListener("click", (e) => {
       if (e.target.tagName !== 'BUTTON') {
@@ -710,7 +718,7 @@ async function refreshEngineer(useCache = false) {
       api(`/api/assets/${key}/series?days=${days}`),
       api(`/api/assets/${key}`),
       api(`/api/assets/${key}/alarms`),
-      api(`/api/assets/${key}/daily`),
+      api(`/api/assets/${key}/daily?days=${days}`),
       api(`/api/assets/${key}/runs?limit=1`),
     ]);
     cachedEngineerData = { key, days, s, meta, eps, daily, runs };
@@ -1068,7 +1076,7 @@ async function refreshEngineer(useCache = false) {
     return utcDate.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
   }
 
-  const sliced = daily.slice(0, 21);
+  const sliced = daily.slice(0, days);
   for (let i = 0; i < sliced.length; i++) {
     const d = sliced[i];
     const prev = daily[i + 1];
@@ -1517,7 +1525,9 @@ async function refreshAdmin(useCache = false) {
     const runs = cachedAdminData[key].runs;
     const rb = $("#adm-runs tbody");
     rb.replaceChildren();
-    for (const r of runs.slice(0, 15)) {
+    const statusFilter = ($("#adm-runs-status")?.value || "").toUpperCase();
+    const filteredRuns = statusFilter ? runs.filter(r => (r.status || "").toUpperCase() === statusFilter) : runs;
+    for (const r of filteredRuns.slice(0, 15)) {
       const tr = document.createElement("tr");
       const stc = td(""); stc.append(badge(r.status === "OK" ? "OK" : "ERROR"));
       tr.append(td(fmtTs(r.started_at)), stc, td(r.rules_fired || "—"),
@@ -1645,6 +1655,7 @@ function renderConfig() {
 }
 $("#cfg-filter").addEventListener("input", renderConfig);
 $("#adm-runs-asset").addEventListener("change", refreshAdmin);
+$("#adm-runs-status").addEventListener("change", refreshAdmin);
 $("#adm-log-level").addEventListener("change", refreshAdmin);
 
 $("#btn-onboard").addEventListener("click", () =>
@@ -1941,7 +1952,7 @@ const SIM = (() => {
       });
       if (!acmResp.ok) throw new Error(await acmResp.text());
       const acmData = await acmResp.json();
-      if(statusEl) statusEl.textContent = `✓ Onboarded (${acmData.state})`;
+      if(statusEl) statusEl.innerHTML = `✓ Onboarded (${acmData.state}) — <a href="#" onclick="document.querySelector('[data-tab=admin]').click();return false" style="color:var(--brand);">View in Admin →</a>`;
       log(`Asset ${assetKey} onboarded (state: ${acmData.state})`, 'sim', 'info');
     } catch (e) {
       if(statusEl) statusEl.textContent = 'Error: ' + e.message;
@@ -2107,6 +2118,12 @@ const SIM = (() => {
       replayRunning = true;
       if(statusEl) statusEl.textContent = '▶ Running';
       log('Replay started', 'sim', 'info');
+      const pub = document.getElementById('sim-replay-publisher')?.value || '';
+      if (pub === 'opcua' || pub === 'both') {
+        log('OPC UA replay active — asset simulator/opc_ua auto-registered. Click ⟳ Run now to score immediately.', 'acm', 'warn');
+      } else if (pub === 'mqtt' || pub === 'buffer') {
+        log('Replay writing to MQTT buffer — ACM will ingest on next tick. Click ⟳ Run now to score immediately.', 'acm', 'warn');
+      }
       document.getElementById('btn-replay-start')?.classList.add('hidden');
       document.getElementById('btn-replay-stop')?.classList.remove('hidden');
       document.getElementById('btn-replay-restart')?.classList.remove('hidden');

@@ -1,7 +1,7 @@
 # ACM — Codebase Knowledge Base
 
 > Maintained for future agents. Update this file whenever you learn something new about the codebase.
-> Last updated: session 01WdhcTS2X6Za1NZGfnAkPFQ (2026-06-15)
+> Last updated: session 0168vrVWFEf7duHxBcFHMkay (2026-06-16) — UI audit pass; font sizes corrected, element IDs expanded, Help tab documented, Simulate→ACM flow documented
 
 ---
 
@@ -31,8 +31,9 @@
 22. [UI Testing](#ui-testing)
 23. [Fault Datasets](#fault-datasets-sim_datasample)
 24. [Git Workflow](#git-workflow)
-25. [UI Font Sizes](#ui-font-sizes-canonical-after-2026-06-15-upsize)
-26. [User Working Style](#user-working-style)
+25. [UI Font Sizes](#ui-font-sizes-actual-as-of-2026-06-16)
+26. [Simulator → ACM UX Flow](#simulator--acm-ux-flow)
+27. [User Working Style](#user-working-style)
 
 ---
 
@@ -387,16 +388,24 @@ Generator produces data with timestamps shifted so the last row ≈ now.
 
 ## UI Codebase Map — `static/` (app.js / index.html / style.css)
 
-### app.js — Function Locations (approximate line numbers)
+### app.js — Constants & Module Structure
 
-| Function | ~Line | Purpose |
+- `POLL_MS = 20000` (line 7) — main tab refresh interval (20s)
+- `activeTab` (line 169) — tracks which main tab is active; updated on `.tab` click
+- Mode toggle: `applyMode(mode)` (line 202) — sets `document.documentElement.dataset.mode`, persists to `localStorage("acm-mode")`, re-renders active tab. Called by `#btn-mode` click.
+- `SIM` IIFE: `const SIM = (() => { ... })()` (line 1690) — encapsulates all simulator UI state. Public API: `{ init, previewFile, deleteFile, sendToReplay, log }`. Called as `SIM.init()` on DOMContentLoaded.
+
+### app.js — Function Locations (accurate line numbers)
+
+| Function | Line | Purpose |
 |---|---|---|
 | `api(url, opts)` | 140 | Fetch wrapper — throws on non-2xx, returns JSON |
 | `toast(msg, kind)` | 155 | Show bottom-right toast: `ok`/`warn`/`err` |
 | `badge(state)` | 162 | Returns coloured `<span class="badge">` for asset state |
 | `sparkline(data)` | 170 | Mini SVG trend line from sparkline array |
-| `refreshService()` | 220 | Fetches `/api/service`, updates header stat-cells |
+| `refreshService()` | 227 | Fetches `/api/service`, updates header stat-cells |
 | `updateCountdown()` | 247 | Updates next-tick countdown every second |
+| `applyMode(mode)` | 202 | Toggles basic/advanced, persists to localStorage, re-renders active tab |
 | `refreshOperator()` | 321 | Renders Operator tab: KPIs, fleet matrix, health history, alarm causes |
 | `renderTimeline()` | 348 | 24-hr alarm timeline blocks inside `refreshOperator` |
 | `ackAlarm()` | 598 | Opens modal to acknowledge alarm via `POST /api/alarms/ack` |
@@ -404,12 +413,20 @@ Generator produces data with timestamps shifted so the last row ≈ now.
 | `fillAssetSelectors()` | 619 | Fetches fleet, populates `#eng-asset` (scored only) and `#adm-runs-asset` (all) |
 | `refreshEngineer()` | 696 | Renders Engineer tab — chart, culprits, heatmap, cofiring, daily, mttd |
 | `refreshAdmin()` | 1443 | Renders Admin tab — health, assets table, run history, config, audit |
-| `refresh()` | 1669 | Main poll loop called every 20s — calls per-tab refresh |
-| SIM IIFE starts | ~1700 | `(function(){ ... })()` — all `/api/sim/*` UI code |
-| `refreshFiles()` | 1949 | Renders Files sub-tab table with Preview/→Replay/Delete buttons |
-| `populateReplayFileList()` | 2008 | Fills `#sim-replay-file` select with files from `/api/sim/files` |
-| `sendToReplay(fn, src)` | ~2222 | Navigates to Replay sub-tab and pre-selects file |
-| Update ACM handler | ~2277 | `doUpdate()` — calls `POST /api/service/update`, streams output to log panel |
+| `refresh()` | 1665 | Main poll loop: calls `refreshService()` + active-tab refresh every `POLL_MS` |
+| SIM IIFE starts | 1690 | `const SIM = (() => { ... })()` — all `/api/sim/*` UI code |
+| `doGenerate()` | 1876 | Calls `/api/sim/generators/{domain}/generate`, shows preview card |
+| `doOnboard()` | 1920 | Posts to `/api/sim/onboard` then `/api/monitored-assets` to register asset |
+| `refreshFiles()` | 1952 | Renders Files sub-tab table with Preview/→Replay/Delete buttons |
+| `handleUpload(file)` | 1998 | Uploads file via `/api/sim/files/upload` multipart |
+| `populateReplayFileList()` | 2012 | Fills `#sim-replay-file` select with files from `/api/sim/files` |
+| `doConfigure()` | 2073 | POSTs replay config to `/api/sim/replay/configure`, enables Start button |
+| `doStartReplay()` | 2103 | POSTs to `/api/sim/replay/start`, logs OPC UA/buffer flow note |
+| `doStopReplay()` | 2122 | POSTs to `/api/sim/replay/stop` |
+| `refreshLiveValues()` | 2138 | Polls `/api/sim/replay/current-values` every 1s when replay is running |
+| `refreshSimStatus()` | 2160 | Polls `/api/sim/status` every 3s, updates `#sim-pill` + `#sim-file-pill` |
+| `sendToReplay(fn, src)` | 2221 | Navigates to Replay sub-tab, sets file dropdown, calls `loadTagPlan()` |
+| `doUpdate()` | ~2285 | POSTs to `/api/service/update`, streams lines to output panel via `SIM.log()` |
 
 ### app.js — Key Rendering Details
 
@@ -427,7 +444,9 @@ Generator produces data with timestamps shifted so the last row ≈ now.
 **Fleet Operations Matrix** (`refreshOperator`, ~line 379):
 - `#mega-matrix` div populated with `<div class="mega-hdr">` + per-asset `<div class="mega-asset-row collapsed">`
 - Asset rows grouped by farm prefix (everything before first `_` in asset key)
-- Double-click → `openEngineer(asset_key)`. Single click toggles alarm episode rows
+- Each row has `title="Double-click to open in Engineer tab"` and `ondblclick → openEngineer(asset_key)`
+- Single click toggles alarm episode rows (chevron ► / ▼)
+- State cell shows badge + `fmtRelTime(a.last_ts)` below it (shows how long ago the asset was last scored)
 - Timeline: 24 one-hour blocks, `danger` if `peak_fused > 5.0`, else `warn`
 
 **Engineer Chart** (`refreshEngineer`, ~line 830):
@@ -445,30 +464,177 @@ Generator produces data with timestamps shifted so the last row ≈ now.
 
 ### index.html — Key Element IDs
 
-| ID | Location | Purpose |
-|---|---|---|
-| `#mega-matrix` | Operator tab | Fleet operations matrix container |
-| `#op-health-chart` | Operator tab | Fleet health history canvas parent |
-| `#op-causes-body` | Operator tab | Alarm causes bar chart container |
-| `#eng-asset` | Engineer tab | Asset selector dropdown (scored assets only) |
-| `#eng-days` | Engineer tab | Days selector (7/30/90) |
-| `#eng-chart` | Engineer tab | uPlot chart mount point |
-| `#eng-pattern-body` | Engineer tab | Alarm pattern heatmap canvas parent |
-| `#eng-cofiring-body` | Engineer tab (adv) | Co-firing matrix canvas parent |
-| `#adm-health` | Admin tab | Service health grid (workers, tick, backend) |
-| `#adm-assets tbody` | Admin tab | Monitored assets table rows |
-| `#adm-runs-asset` | Admin tab | Asset filter for run history |
-| `#btn-update-acm-hdr` | Header `.hdr-right` | **Primary Update button** — always visible, `btn-hdr btn-warn` |
-| `#btn-runnow` | Header `.hdr-right` | Run Now — `btn-hdr btn-ok` |
-| `#btn-sim-start` | Header `.hdr-right` | Replay Start — hidden unless replay configured |
-| `#sim-pill` | Header stat strip | Replay state badge |
-| `#sim-file-pill` | Header stat strip | Active replay file name |
-| `#output-panel` | Page bottom | Log strip (expandable, 180px default) |
-| `#output-log` | Inside output panel | `<pre class="term">` log content |
-| `#sim-files-body` | Simulate → Files | Files table tbody |
-| `#sim-replay-file` | Simulate → Replay | File selector for replay |
-| `#sim-replay-source` | Simulate → Replay | Source selector (generated/sample/uploaded) |
-| `#sim-replay-publisher` | Simulate → Replay | Publisher mode (opcua/mqtt/both) — defaults to `opcua` |
+**Header:**
+
+| ID | Purpose |
+|---|---|
+| `#svc-pill` | Engine status stat-cell (ok/warn/bad CSS class applied) |
+| `#svc-pill-text` | Engine state text: WATCHING / TICKING / PAUSED |
+| `#svc-tick-info` | Last run timestamp + duration |
+| `#svc-next-tick` | Countdown to next tick (monospace) |
+| `#inp-tick` | Tick interval number input (minutes) |
+| `#sim-pill` | Replay state stat-cell |
+| `#sim-pill-text` | Replay state: STOPPED / RUNNING |
+| `#sim-file-pill` | Active replay file stat-cell |
+| `#sim-file-text` | Active file name |
+| `#btn-mode` | Basic/Advanced toggle — updates `data-mode` on `<html>` |
+| `#btn-resume` | Resume service — hidden by default |
+| `#btn-pause` | Pause service — visible by default, `btn-bad` |
+| `#btn-runnow` | Run Now — `btn-hdr btn-ok` |
+| `#btn-sim-start` | Header Replay Start — hidden unless configured, `btn-ok` |
+| `#btn-sim-stop` | Header Replay Stop — hidden unless running, `btn-bad` |
+| `#btn-update-acm-hdr` | **Primary Update button** — always visible, `btn-hdr btn-warn` |
+| `#sel-theme` | Theme selector (11 options: 2 dark + 9 light) |
+
+**Operator tab:**
+
+| ID | Purpose |
+|---|---|
+| `#kpis` | KPI strip container (5 `.kpi` boxes: total/ok/alarm/attention/unacked) |
+| `#mega-matrix` | Fleet operations matrix container |
+| `#fleet-count` | Asset count label in matrix card title |
+| `#fleet-empty` | Empty state shown when no assets |
+| `#op-health-chart` | Fleet health history canvas parent (adv) |
+| `#op-causes-body` | Top alarm causes bar chart container (adv) |
+
+**Engineer tab:**
+
+| ID | Purpose |
+|---|---|
+| `#eng-asset` | Asset selector dropdown (scored assets only) |
+| `#eng-days` | Days selector (7/30/90/36500) |
+| `#eng-chips` | Status chip strip (state, alert_z, persist, rules_fired) |
+| `#eng-culprits` | Culprits message bar — hidden until notes contain "culprits: " |
+| `#eng-chart` | uPlot chart mount point |
+| `#eng-heatwrap` | Heatmap + labels wrapper |
+| `#eng-heatlabels` | Detector name labels for heatmap (6 rows) |
+| `#eng-heatmap` | 6-detector heatmap canvas |
+| `#eng-state-wrap` | State-change lane wrapper (adv) |
+| `#eng-statelabels` | Labels for state lane |
+| `#eng-statelane` | State lane canvas (height: 14px) |
+| `#eng-pattern-body` | Alarm pattern (day×hour) canvas parent (adv) |
+| `#eng-cofiring-body` | Co-firing matrix canvas parent (adv) |
+| `#eng-avail-chart` | Availability trend sparkline container (adv) |
+| `#eng-episodes` | Alarm episodes table |
+| `#eng-eps-empty` | Empty state for episodes table |
+| `#eng-daily` | Daily stats table |
+| `#eng-histogram-body` | Alarm duration histogram container (adv) |
+| `#eng-mttd-body` | Reliability metrics (MTTD/MTTR) container |
+
+**Admin tab:**
+
+| ID | Purpose |
+|---|---|
+| `#adm-health` | Service health grid (workers, tick, backend) |
+| `#btn-onboard` | "＋ Onboard asset" button — opens modal |
+| `#adm-assets` | Monitored assets table |
+| `#adm-assets-empty` | Empty state for assets table |
+| `#adm-runhist-body` | Run duration sparkline (adv) |
+| `#adm-runs-asset` | Asset filter for run history |
+| `#adm-runs-status` | Status filter for run history (All/OK/ERROR) |
+| `#adm-runs` | Run history table |
+| `#cfg-filter` | Config table search input |
+| `#adm-config` | Configuration table |
+| `#adm-audit` | Config audit trail table |
+| `#adm-audit-empty` | Empty state for audit table |
+| `#adm-log-level` | Run log level filter (all/INFO/WARN/ERROR) |
+| `#adm-runlog` | Run log terminal output |
+
+**Simulate tab — Generate sub-tab:**
+
+| ID | Purpose |
+|---|---|
+| `#sim-domain-sel` | Domain selector (11 generator domains) |
+| `#sim-scenario-sel` | Scenario selector (populated from domain spec) |
+| `#sim-domain-desc` | Domain description text |
+| `#sim-output-filename` | Output filename input |
+| `#sim-backdate` | Backdate checkbox (checked by default) |
+| `#sim-backdate-days` | Backdate days input (default 45) |
+| `#sim-params-card` | Parameters card container |
+| `#sim-params-grid` | Parameters input grid (auto-generated) |
+| `#btn-generate` | ⚡ Generate CSV button |
+| `#sim-gen-status` | Generator status message |
+| `#sim-preview-card` | Data preview card (hidden until generation) |
+| `#sim-preview-meta` | Preview metadata: "N rows · M columns · filename.csv" |
+| `#sim-preview-table` | Preview data table (first few rows) |
+| `#sim-onboard-key` | Asset key input (auto-populated from filename) |
+| `#sim-onboard-grp` | Group input (default: "sim") |
+| `#sim-fast-track` | Fast-track checkbox — skips 14-day maturation gate |
+| `#btn-sim-onboard` | ⊕ Onboard Asset button |
+| `#sim-onboard-status` | Onboard status — shows "View in Admin →" link on success |
+
+**Simulate tab — Files sub-tab:**
+
+| ID | Purpose |
+|---|---|
+| `#btn-sim-upload-open` | Upload trigger button |
+| `#sim-upload-input` | Hidden file input (accepts .csv, .xlsx) |
+| `#btn-sim-files-refresh` | Refresh files list |
+| `#sim-files-body` | Files table tbody |
+| `#sim-file-preview-card` | File preview card (hidden until preview) |
+| `#sim-file-preview-title` | Preview card title (set to filename) |
+| `#sim-file-preview-table` | Preview data table |
+
+**Simulate tab — Replay sub-tab:**
+
+| ID | Purpose |
+|---|---|
+| `#sim-replay-file` | File selector dropdown |
+| `#sim-replay-source` | Source display (generated/uploaded/sample) |
+| `#sim-replay-hz` | Replay frequency (Hz) |
+| `#sim-replay-loop` | Loop mode (loop_forever/once/hold_last/ping_pong) |
+| `#sim-replay-tsmode` | Timestamp mode (wall_clock/csv_timestamp_ignore_rate/relative_from_csv) |
+| `#sim-replay-publisher` | Publisher mode (opcua/mqtt/buffer/both) — defaults to `opcua` |
+| `#sim-mqtt-card` | MQTT settings card (shown only when publisher = mqtt/both) |
+| `#sim-mqtt-host` | MQTT broker host |
+| `#sim-mqtt-port` | MQTT broker port |
+| `#sim-mqtt-prefix` | MQTT topic prefix |
+| `#sim-mqtt-device` | MQTT device ID |
+| `#sim-tags-card` | Tag plan card |
+| `#sim-tags-table` | Tag plan table |
+| `#sim-tags-body` | Tag plan tbody (En checkbox, csv_column, tag_name, data_type) |
+| `#sim-tag-count` | "N / M enabled" count display |
+| `#btn-tags-all` | Enable all tags |
+| `#btn-tags-none` | Disable all tags |
+| `#btn-replay-configure` | ⚙ Configure button |
+| `#btn-replay-start` | ▶ Start button (hidden until configured) |
+| `#btn-replay-stop` | ■ Stop button (hidden until running) |
+| `#btn-replay-restart` | ⟳ Restart button (hidden until running) |
+| `#sim-replay-status-text` | Replay status text (▶ Running / ■ Stopped / Error…) |
+| `#sim-live-card` | Live tag values card |
+| `#sim-live-updated` | "Updated: HH:MM:SS" timestamp |
+| `#sim-live-table` | Live values table |
+| `#sim-live-body` | Live values tbody (tag, value, type, updated) |
+
+**Help tab:**
+
+| ID | Purpose |
+|---|---|
+| `#tab-help` | Help tab pane (5th tab) |
+| `#help-tabs` | Help sub-tab rail |
+| `#help-pane-guide` | Guide sub-tab — static prose cards for all 4 main tabs |
+| `#help-pane-book` | ML Reference Book sub-tab — iframe to `/docs/ml-book.html` |
+
+**Output panel (bottom):**
+
+| ID | Purpose |
+|---|---|
+| `#output-panel` | Fixed bottom strip (200px, collapsible to 30px) |
+| `#btn-output-toggle` | Collapse/expand toggle (∧/∨) |
+| `#sel-output-level` | Log level filter (all/warn/error) |
+| `#btn-output-clear` | Clear log |
+| `#chk-autoscroll` | Auto-scroll checkbox |
+| `#output-line-count` | "N lines" counter |
+| `#output-log` | `<pre class="term">` log content (all SIM + ACM messages) |
+
+**Modals:**
+
+| ID | Purpose |
+|---|---|
+| `#modal-backdrop` | Semi-transparent modal overlay |
+| `#modal` | Modal dialog (aria-modal="true") |
+| `#modal-title` | Modal `<h3>` title |
+| `#modal-form` | Modal form (dynamically populated) |
 
 ### style.css — Grid Layouts (advanced mode)
 
@@ -493,14 +659,15 @@ areas:   "topbar    topbar"
          "daily     daily"
 ```
 
-**Admin tab** (`.adm-layout`, ~line 1269):
+**Admin tab** (`.adm-layout`, ~line 1255):
 ```
 columns: 1fr 1fr
-rows:    auto auto auto auto
+rows:    auto auto auto auto auto auto
 areas:   "health  health"
-         "assets  runhist"
+         "assets  runhist"    ← runhist (.adm-runhist.adv) hidden in basic mode
          "runs    runs"
-         "config  audit"
+         "config  config"     ← config is FULL WIDTH (wide table needs the space)
+         "audit   audit"      ← audit is FULL WIDTH separately
          "log     log"
 ```
 
@@ -610,7 +777,7 @@ Full scored result for engineer view. Key fields: `rows` (list of score dicts), 
 11. **Replay pill not updating immediately** — `refreshSimStatus()` polls every 3 seconds. After `doStartReplay()` / `doStopReplay()` succeeds, call `refreshSimStatus()` immediately so the header stat-cell reflects the new state without a 3-second lag. Fixed in `app.js`.
 12. **Playwright `wait_for_function` picks up stale DOM** — after a sub-tab switch, `wait_for_function("length > 0")` may fire on cached content before the async API fetch completes. Use `wait_for_function(f"length > {previous_count}")` when you expect the count to change, or `wait_for_selector` for a specific element.
 13. **`Step "Fault datasets"` was fatal in `setup_acm.ps1`** — caused the whole installer to abort if `generate_fault_dataset.py` exited non-zero on Windows. Fixed by switching to the non-fatal warn pattern (same as self-test). The fault CSVs are pre-committed in `sim_data/sample/` so the step is "nice to regenerate" only.
-14. **UI base font-size 13px is too small on standard Windows displays** — increased to 15px. All component pixel sizes scaled up proportionally (+2 to +3px). See "UI Font Sizes" section below for the canonical values.
+14. **UI base font-size 13px is too small on standard Windows displays** — increased first to 15px, then to 18px in a later session. All component pixel sizes scaled up proportionally. See "UI Font Sizes" section below for the current actual values with CSS line numbers. (See also Mistake #35 for why this table drifted.)
 15. **`--sim-dir` flag does not exist in `download_care_dataset.py`** — the script only has `--dest`, `--farms`, `--count`. The default `--dest` already points to `sim_data/sample` so no extra flag is needed. CLAUDE.md had the wrong flag; setup scripts now corrected.
 16. **`setup.sh` had three bugs**: (a) duplicate pip install block (pyodbc optional then same packages again mandatory), (b) `warn_step "Self-test" ... | tail -3` pipe was applying to warn_step's own printf output, not pytest, (c) `step "Fault datasets"` was fatal. All fixed: single install block, pipe removed, fault step changed to `warn_step`.
 17. **`setup_acm.ps1` missing packages**: `python-multipart`, `openpyxl`, `pydantic` were absent from the pip install list but required by FastAPI multipart upload and sim routes. Also missing `structlog`, `matplotlib`, `pytest`, `httpx` (were present but needed to stay). All added.
@@ -630,6 +797,8 @@ Full scored result for engineer view. Key fields: `rows` (list of score dicts), 
 31. **Setup script Next Steps made unmissable** — both `setup_acm.ps1` and `setup.sh` now show a yellow double-line box (╔═╗ style) with START THE SERVICE, python command, URL, and RUN NOW instruction. Was previously easy to miss in the wall of install output.
 32. **CLAUDE.md got a Table of Contents** — added at the top. Jump targets: "Start here for UI work" → UI Codebase Map; "Read before starting any task" → Mistakes Made.
 33. **NEVER change alarm logic when asked for visual prominence** — when user says "make the shading more prominent", that means increase CSS opacity / color intensity ONLY. It does NOT mean change the data logic from `alarm[i]` (stored DB boolean) to `fused[i] > alertZ`. The co-firing matrix, alarm pattern heatmap, and chart shading all intentionally use the stored `alarm` column which reflects the rule engine's decision (including self-distrust gate). Changing the source data breaks the semantics of all three visualisations. Only touch CSS (`--chart-alarm-fill` opacity) for prominence requests.
+34. **Daily Stats table used to hardcode 21 days** — `daily.slice(0, 21)` in `refreshEngineer()` (line 1071 before 2026-06-16 fix). Fixed to `daily.slice(0, days)` and the daily API call now passes `?days=${days}`. If the backend `/api/assets/{key}/daily` endpoint doesn't accept `days`, the slice-only fix still limits the visible rows correctly.
+35. **CLAUDE.md font size canonical table drifted 3px from reality** — a session after 2026-06-15 upsized everything from 15px body to 18px body without updating this file. Always read `style.css` line 654 (`body { font-size: ... }`) to find the actual base before doing UI work. The "UI Font Sizes" table is now corrected to reflect actual CSS values with line numbers.
 
 ---
 
@@ -770,7 +939,7 @@ Requires: `pip install playwright && playwright install chromium`
 
 **What the test covers (26 checks):**
 1. Page loads, header stat-cells present (REPLAY pill, RUN NOW button)
-2. All 4 tabs switch correctly
+2. All 5 tabs switch correctly (Operator, Engineer, Admin, Simulate, Help)
 3. Simulate → Generate: 11-domain dropdown populated, CSV generation produces preview
 4. Files tab: 12 pre-seeded files listed (10 fault CSVs + any generated), count increases after generate
 5. Replay tab: file dropdown populated, configure → start → live tag values (9 tags) → stop
@@ -829,40 +998,101 @@ Requires: `pip install playwright && playwright install chromium`
 
 ---
 
-## UI Font Sizes (canonical after 2026-06-15 upsize)
+## UI Font Sizes (actual as of 2026-06-16)
 
-All sizes live in `static/style.css`. Changed from the original small-screen values to be readable on standard Windows displays.
+All sizes live in `static/style.css`. Read the file to confirm — do NOT trust this table blindly (see Mistake #35). The base was upsized twice: 13px → 15px (2026-06-15 session) → 18px (a later session that didn't update this file until 2026-06-16 audit).
 
-| Element | Before | After |
-|---|---|---|
-| `body` base | 13px | 15px |
-| `body` line-height | 1.45 | 1.50 |
-| `input/select/textarea` | 12px | 14px |
-| `.btn` | 12px | 13px |
-| `.btn-sm` | 10px | 11px |
-| `.btn-hdr` | 11px | 12px |
-| `.tab` | 12px | 13px |
-| `.tab-num` | 9px | 10px |
-| `.card-title` | 12px | 13px |
-| `table.data td` | 11.5px | 13px |
-| `table.data th` | 10px | 11px |
-| `[data-mode="advanced"] table.data td` | 11px | 12px |
-| `[data-mode="advanced"] table.data th` | 9px | 10px |
-| `.kpi-num` | 14px | 16px |
-| `.kpi-cap` | 10px | 11px |
-| `.stat-cell .lbl` | 8px | 9px |
-| `.stat-cell .val` | 11px | 13px |
-| `.badge` | 10px | 11px |
-| `.chip` | 11px | 12px |
-| `.hint` | 11px | 12px |
-| `.term` | 11px | 13px |
-| `.toast` | 12px | 13px |
-| `.health-cell .v` | 14px | 16px |
-| `.health-cell .k` | 10px | 11px |
-| `.msgbar` | 11px | 12px |
-| `.attn div` | 11px | 12px |
-| `.mega-farm-hdr` | 11px | 12px |
-| `.mega-alarm-row` | 13px | 14px |
+| Element | Original | Actual Now | style.css location |
+|---|---|---|---|
+| `body` base | 13px | 18px | line 654 |
+| `body` line-height | 1.45 | 1.50 | line 654 |
+| `input/select/textarea` | 12px | 17px | line 868 |
+| `.btn` | 12px | 16px | line 725 |
+| `.btn-sm` | 10px | 14px | line 761 |
+| `.btn-hdr` | 11px | 15px | line 762 |
+| `.tab` | 12px | 16px | line 784 |
+| `.tab-num` | 9px | 13px | line 824 |
+| `.card-title` | 12px | 16px | line 850 |
+| `table.data td` | 11.5px | 16px | line 894 |
+| `table.data th` | 10px | 14px | line 886 |
+| `[data-mode="advanced"] table.data td` | 11px | 15px | line 1195 |
+| `[data-mode="advanced"] table.data th` | 9px | 13px | line 1197 |
+| `.kpi-num` | 14px | 19px | line 918 |
+| `.kpi-cap` | 10px | 14px | line 922 |
+| `.stat-cell .lbl` | 8px | 13px | line 702 |
+| `.stat-cell .val` | 11px | 16px | line 707 |
+| `.badge` | 10px | 14px | line 934 |
+| `.chip` | 11px | 15px | line 968 |
+| `.hint` | 11px | 15px | line 973 |
+| `.term` | 11px | 16px | line 1010 |
+| `.toast` | 12px | 16px | line 1072 |
+| `.health-cell .v` | 14px | 19px | line 995 |
+| `.health-cell .k` | 10px | 14px | line 999 |
+| `.msgbar` | 11px | 15px | line 1170 |
+| `.attn div` | 11px | 15px | line 1003 |
+| `.mega-farm-hdr` | 11px | 15px | line 1298 |
+| `.mega-alarm-row` | 13px | 16px | line 1127 |
+
+---
+
+## Simulator → ACM UX Flow
+
+The Simulate tab (04) is a developer tool — no basic/advanced gating. Full end-to-end path from data generation to ACM anomaly scoring:
+
+### Path A: CSV → Immediate scoring
+
+```
+Simulate → Generate sub-tab
+  1. Select domain (e.g. rotary_equipment) + scenario (e.g. bearing_fault)
+  2. Set parameters + enable Backdate (45 days default)
+  3. Click ⚡ Generate CSV → preview appears in #sim-preview-card
+  4. Enter asset key in #sim-onboard-key (auto-populated from filename)
+  5. Optionally check Fast-track to skip 14-day maturation gate
+  6. Click ⊕ Onboard Asset → POSTs to /api/sim/onboard then /api/monitored-assets
+  7. Status shows "✓ Onboarded (READY)" + "View in Admin →" link
+  8. Click ⟳ Run now in header → ACM scores the asset immediately
+  9. Navigate to Operator tab → asset appears in Mega Matrix
+```
+
+### Path B: CSV Replay → Live OPC UA scoring
+
+```
+Simulate → Files sub-tab
+  1. Find the generated CSV (or a sample file) → click "→ Replay"
+    (switches to Replay sub-tab, pre-selects the file)
+
+Simulate → Replay sub-tab
+  2. Verify file + source are correct
+  3. Set publisher = opcua (default)
+  4. Configure tag plan (enable/disable columns)
+  5. Click ⚙ Configure → Start button appears
+  6. Click ▶ Start → output panel shows:
+     "OPC UA replay active — asset simulator/opc_ua auto-registered. Click ⟳ Run now to score immediately."
+  7. Click ⟳ Run now → ACM ingests from opcua_buffer.db, scores simulator/opc_ua
+  8. Watch Live Tag Values card update every 1s
+  9. Navigate to Operator → simulator/opc_ua asset appears in Mega Matrix
+  10. Navigate to Engineer → select simulator/opc_ua → see chart
+```
+
+### Path C: Manual asset onboarding (no Simulate tab)
+
+```
+Admin tab → "＋ Onboard asset" → fill modal:
+  - asset_key, group, source_kind (csv/opcua/mqtt/table/query)
+  - source_ref (file path or OPC UA endpoint or table name)
+  - timestamp_col (default: time_stamp for CSV, published_at for OPC UA/MQTT)
+  - conn_ref (only for table/query: pyodbc connection string)
+→ Asset appears in Monitored Assets table with state NEW
+→ Click ⟳ Run now → state transitions MATURING → READY → OK/ALARM
+```
+
+### Key integration details
+
+- **`/api/sim/onboard`** (acm_sim_routes.py) — generates CSV + returns `suggested_onboard` dict. The UI then posts that dict directly to `/api/monitored-assets`.
+- **`/api/monitored-assets` POST** — creates or updates a row in `monitored_assets` table. Returns `{asset_key, state}`.
+- **OPC UA auto-registration** — when replay starts with publisher=opcua, `acm_sim_routes.py` calls `_register_opcua_in_acm()` to INSERT OR IGNORE the `simulator/opc_ua` asset. No manual step needed.
+- **Fast-track** — sets `fast_track=1` in `monitored_assets`. `readiness()` in `acm_feed.py` returns READY immediately regardless of data span. Use when backdating is not possible or for quick demos. Expect higher false positive rates.
+- **Publisher modes**: `opcua` → writes to OPC UA server → acm_opcua_bridge → opcua_buffer.db → scoring; `mqtt`/`buffer` → writes to mqtt_buffer.db → scoring; `both` → both simultaneously.
 
 ---
 

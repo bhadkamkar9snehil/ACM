@@ -49,7 +49,7 @@
   </div>
 
   <div class="hdr-right">
-    <button type="button" class="btn btn-hdr" id="btn-mode">⊕ Advanced</button>
+    <button type="button" class="btn btn-hdr" id="btn-mode" title="Show advanced diagnostics: detector overlays, fleet health history, co-firing matrix, alarm pattern heatmap, run duration charts">⊕ Advanced</button>
     <button type="button" class="btn btn-hdr btn-ok hidden" id="btn-resume">▶ Resume</button>
     <button type="button" class="btn btn-hdr btn-bad"  id="btn-pause">⏸ Pause</button>
     <button type="button" class="btn btn-hdr btn-ok"   id="btn-runnow">⟳ Run now</button>
@@ -305,8 +305,13 @@
 
         <div class="adm-runs card">
           <div class="card-title">Run History
-            <div class="ct-right">
+            <div class="ct-right" style="display:flex;gap:6px;align-items:center;">
               <select id="adm-runs-asset" style="padding:2px;height:22px;font-size:11px;"></select>
+              <select id="adm-runs-status" style="padding:2px;height:22px;font-size:11px;">
+                <option value="">All</option>
+                <option value="OK">OK</option>
+                <option value="ERROR">ERROR</option>
+              </select>
             </div>
           </div>
           <div class="tbl-wrap">
@@ -436,8 +441,8 @@
                 <input id="sim-onboard-grp" style="width:100%;box-sizing:border-box;font-family:'Share Tech Mono',monospace;font-size:12px;background:var(--bg2);border:1px solid var(--line);color:var(--ink);padding:5px 8px;" type="text" value="sim">
               </div>
               <div style="display:flex;align-items:center;gap:6px;padding-top:18px;">
-                <input type="checkbox" id="sim-fast-track">
-                <label for="sim-fast-track" style="font-size:12px;">Fast-track (skip 14-day gate)</label>
+                <input type="checkbox" id="sim-fast-track" title="Skips the 14-day data maturation gate. Scores immediately with little training data — expect higher false-positive rates until ~24h of data accumulates.">
+                <label for="sim-fast-track" style="font-size:12px;" title="Skips the 14-day data maturation gate. Scores immediately with little training data — expect higher false-positive rates until ~24h of data accumulates.">Fast-track (skip 14-day gate)</label>
               </div>
             </div>
             <div style="margin-top:8px;display:flex;gap:8px;align-items:center;">
