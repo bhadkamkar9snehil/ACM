@@ -1917,8 +1917,11 @@ const SIM = (() => {
       const lvl = e.level.toUpperCase();
       const lvlBadge = `<span class="badge ${lvl}">${lvl}</span>`;
       const srcBadge = `<span class="log-src-label">${e.src === 'sim' ? 'SIM' : 'ACM'}</span>`;
+      const assetCell = e.asset
+        ? `<span class="log-asset">${e.asset}</span>`
+        : `<span style="color:var(--muted);font-size:10px;">—</span>`;
       const msg = String(e.text).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-      return `<tr><td class="log-ts">${e.ts}</td><td>${lvlBadge}</td><td>${srcBadge}</td><td class="log-msg">${msg}</td></tr>`;
+      return `<tr><td class="log-ts">${e.ts}</td><td>${lvlBadge}</td><td>${srcBadge}</td><td>${assetCell}</td><td class="log-msg">${msg}</td></tr>`;
     }).join('');
     
     const el = document.getElementById('output-line-count');
@@ -1934,6 +1937,7 @@ const SIM = (() => {
     let ts = format24h(new Date());
     let level = 'info';
     let cleanText = text;
+    let asset = null;
 
     const pattern1 = /^\[([\d\-:\s]+)\]\s+\[(DEBUG|INFO|WARN|ERROR)\]\s+(.*)$/i;
     const match1 = text.match(pattern1);
@@ -1952,7 +1956,16 @@ const SIM = (() => {
         cleanText = match2[2];
       }
     }
-    return { ts, text: cleanText, level };
+
+    // Extract asset from ACM pipeline lines: "  [stage] grp/asset_key: message"
+    const assetMatch = cleanText.match(/^\s*\[\S+\]\s+([\w\-]+\/[\w\-\/]+):/);
+    if (assetMatch) {
+      asset = assetMatch[1];
+      // Strip the "[stage] asset_key: " prefix from message so message col is clean
+      cleanText = cleanText.replace(/^\s*\[\S+\]\s+[\w\-]+\/[\w\-\/]+:\s*/, '');
+    }
+
+    return { ts, text: cleanText, level, asset };
   }
 
   function initOutputPanel() {
@@ -2149,7 +2162,7 @@ const SIM = (() => {
           if (ln.id > lastLogId) {
             lastLogId = ln.id;
             const parsed = parseBackendLogLine(ln.text);
-            outputLines.push({ ts: parsed.ts, text: parsed.text, src: 'acm', level: parsed.level, time: Date.now() });
+            outputLines.push({ ts: parsed.ts, text: parsed.text, src: 'acm', level: parsed.level, asset: parsed.asset || null, time: Date.now() });
             if (outputLines.length > 2000) outputLines = outputLines.slice(-2000);
             renderOutputLog();
           }
@@ -2179,6 +2192,7 @@ const SIM = (() => {
                 text: parsed.text,
                 src: 'acm',
                 level: parsed.level,
+                asset: parsed.asset || null,
                 time: Date.now()
               });
             });

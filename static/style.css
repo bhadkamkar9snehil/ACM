@@ -1457,6 +1457,12 @@ table.data tr.row-warn td { background: var(--warn-lo) !important; }
   font-size: 13px;
   color: var(--muted);
 }
+.output-log-table .log-asset {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 11px;
+  color: var(--brand);
+  word-break: break-all;
+}
 .output-log-table .badge {
   font-size: 12px;
   padding: 1px 6px;
