@@ -1,7 +1,7 @@
 # ACM — Codebase Knowledge Base
 
 > Maintained for future agents. Update this file whenever you learn something new about the codebase.
-> Last updated: 2026-06-17 — ML pipeline bug fixes (#61-#67) + research paper planning / CARE ablation session + GMM PCA pre-reduction fix (Farm C generality) + OMR in-sample-bias/premature-clip fix
+> Last updated: 2026-06-17 — ML pipeline bug fixes (#61-#67) + research paper planning / CARE ablation session + GMM PCA pre-reduction fix (Farm C generality) + OMR in-sample-bias/premature-clip fix + targeted Farm C re-validation
 
 ---
 
@@ -39,9 +39,10 @@
 30. [Research Paper Planning & CARE Ablation Experiments (2026-06-17)](#research-paper-planning--care-ablation-experiments-2026-06-17)
 31. [Cross-Dataset Generality Testing (2026-06-17)](#cross-dataset-generality-testing-2026-06-17--skab-rejected-rule-established)
 32. [GMM RobustScaler IQR-collapse fix (2026-06-17)](#gmm-robustscaler-iqr-collapse-fix--feature-z-clip-before-pca-2026-06-17)
-33. [OMR in-sample-bias + premature-clip fix (2026-06-17)](#omr-in-sample-bias--premature-clip-fix--out-of-sample-recalibration-2026-06-17) ← **Latest work session**
-34. [Known Issues (Track as GitHub Issues)](#known-issues-track-as-github-issues)
-35. [User Working Style](#user-working-style)
+33. [OMR in-sample-bias + premature-clip fix (2026-06-17)](#omr-in-sample-bias--premature-clip-fix--out-of-sample-recalibration-2026-06-17)
+34. [Farm C targeted re-validation after the OMR fix (2026-06-17)](#farm-c-targeted-re-validation-after-the-omr-fix-2026-06-17) ← **Latest work session**
+35. [Known Issues (Track as GitHub Issues)](#known-issues-track-as-github-issues)
+36. [User Working Style](#user-working-style)
 
 ---
 
@@ -1736,6 +1737,63 @@ was explicitly out of scope for this fix.
 **Files changed**: `core/omr.py` (`MAX_Z_SCORE` constant + `self.max_z_score` removed;
 new `recalibrate_residual_scale()` method), `core/pipeline.py` (calls
 `omr_det.recalibrate_residual_scale(calib_feat)` right after `fit_all_detectors()`).
+
+---
+
+## Farm C targeted re-validation after the OMR fix (2026-06-17)
+> *Added: 2026-06-17*
+
+After the OMR in-sample-bias fix above, Farm C's empty-`rule_fired` gap (documented in the GMM
+PCA pre-reduction section: 10 of 11 missed anomalies had no rule fire at all, pre-OMR-fix) needed
+re-checking. Rather than re-running the full 58-event farm (~75 min), only the 14 events known to
+be problematic from the most recent full run (`results/farm_c_gmm_pca/`) were re-run: the 11
+missed anomaly events (event_id 4, 9, 15, 35, 47, 55, 67, 70, 76, 78, 90) + the 3 false-alarm
+normal events (54, 88, 94). `--force` was required since `try_reuse_event()` would otherwise
+silently reuse pre-OMR-fix cached scores. Output: `results/farm_c_omr_fix/` (gitignored).
+
+**Per-event outcome change (pre- vs. post-OMR-fix), all 14 events:**
+
+| Event | Label | Before | After |
+|---|---|---|---|
+| 4 | anomaly | empty | empty (unchanged) |
+| 9 | anomaly | empty | `(distrusted:heads:omr_z)` — still missed |
+| 15 | anomaly | empty | empty (unchanged) |
+| 35 | anomaly | empty | empty (unchanged) |
+| 47 | anomaly | empty | `(distrusted:heads:omr_z)` — still missed |
+| 55 | anomaly | empty | `+heads:omr_z` — **newly detected** |
+| 67 | anomaly | empty | empty (unchanged) |
+| 70 | anomaly | `(distrusted:heads:iforest_z,gmm_z)` | `(distrusted:heads:iforest_z,omr_z)` — still missed, `gmm_z`→`omr_z` in distrust set |
+| 76 | anomaly | empty | empty (unchanged) |
+| 78 | anomaly | empty | empty (unchanged) |
+| 90 | anomaly | empty | `+rate` — **newly detected** |
+| 54 | normal | `+heads:pca_spe_z` (false alarm) | `+heads:pca_spe_z` (still false alarm, unchanged) |
+| 88 | normal | `sustained+rate` (false alarm) | `+rate` (still false alarm, unchanged) |
+| 94 | normal | `+heads:ar1_z,gmm_z` (false alarm) | `+heads:ar1_z` (still false alarm, unchanged) |
+
+**Net result on this 14-event subset:** anomaly recall 0/11 → 2/11. All 3 known false alarms
+persist unchanged (none cleared, none newly introduced). `alert_z_eff` (self-tuned threshold) rose
+on several events (e.g. event 35: 7.54→9.16, event 76: 8.25→8.91) — OMR now contributes real
+variance to the fused score, pushing the auto-tuned threshold up in lockstep, the same dynamic
+seen in the original Farm A ablation.
+
+**New failure mode surfaced, not yet investigated or fixed:** on 3 of the 11 missed anomalies
+(events 9, 47, 70), `omr_z` now appears in the self-distrust gate's discarded-heads list — OMR can
+finally fire (it structurally could not before this fix) but on these events it fires from window
+start and gets correctly discarded as a broken-baseline symptom. This is the same dynamic GMM
+showed on Farm C before its own PCA pre-reduction fix. Per the standing ML Improvement Loop
+methodology, this is documented here as an observation only — not yet planned or acted on. Do not
+chase this without first checking whether a fix would risk regressing the now-clean GMM behavior
+or the validated Farm A baseline.
+
+**Read on the targeted-batch approach**: re-running only the previously-known-problematic events
+(rather than the full farm) is a valid, faster way to check whether a fix changed an outcome
+*for those specific events*, but it does NOT substitute for a full-farm KPI re-validation — false
+alarms on previously-clean normal events, or new detections appearing only outside this 14-event
+set, would not be visible. Re-run the full 58-event Farm C benchmark before citing updated
+farm-wide recall/precision/F1 numbers in the paper.
+
+**Files**: no code changes in this entry — diagnostic re-run only. `results/farm_c_omr_fix/`
+(gitignored) holds the 14-event `results.csv`/`summary.json`.
 
 ---
 
