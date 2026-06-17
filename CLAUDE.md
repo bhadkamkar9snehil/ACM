@@ -1,7 +1,7 @@
 # ACM — Codebase Knowledge Base
 
 > Maintained for future agents. Update this file whenever you learn something new about the codebase.
-> Last updated: 2026-06-17 — ML pipeline bug fixes (#61-#67) + research paper planning / CARE ablation session + GMM PCA pre-reduction fix (Farm C generality)
+> Last updated: 2026-06-17 — ML pipeline bug fixes (#61-#67) + research paper planning / CARE ablation session + GMM PCA pre-reduction fix (Farm C generality) + OMR in-sample-bias/premature-clip fix
 
 ---
 
@@ -36,9 +36,12 @@
 27. [Per-Asset Scoring & SIM→ACM Flow (2026-06-16)](#per-asset-scoring--simacm-flow-2026-06-16)
 28. [Real-Time Log Streaming & Output Panel (2026-06-16)](#real-time-log-streaming--output-panel-2026-06-16)
 29. [ML Pipeline Diagnostics (2026-06-17)](#ml-pipeline-diagnostics-2026-06-17)
-30. [Research Paper Planning & CARE Ablation Experiments (2026-06-17)](#research-paper-planning--care-ablation-experiments-2026-06-17) ← **Latest work session**
-31. [Known Issues (Track as GitHub Issues)](#known-issues-track-as-github-issues)
-32. [User Working Style](#user-working-style)
+30. [Research Paper Planning & CARE Ablation Experiments (2026-06-17)](#research-paper-planning--care-ablation-experiments-2026-06-17)
+31. [Cross-Dataset Generality Testing (2026-06-17)](#cross-dataset-generality-testing-2026-06-17--skab-rejected-rule-established)
+32. [GMM RobustScaler IQR-collapse fix (2026-06-17)](#gmm-robustscaler-iqr-collapse-fix--feature-z-clip-before-pca-2026-06-17)
+33. [OMR in-sample-bias + premature-clip fix (2026-06-17)](#omr-in-sample-bias--premature-clip-fix--out-of-sample-recalibration-2026-06-17) ← **Latest work session**
+34. [Known Issues (Track as GitHub Issues)](#known-issues-track-as-github-issues)
+35. [User Working Style](#user-working-style)
 
 ---
 
@@ -1657,6 +1660,82 @@ updated Farm C numbers in the paper.
 PCA), `core/ml_defaults.py` (`models.gmm.feature_z_clip: 8.0`), `docs/ml-book.html` (GMM section —
 added "Per-feature z-clip before PCA" subsection alongside the existing PCA pre-reduction
 subsection).
+
+---
+
+## OMR in-sample-bias + premature-clip fix — out-of-sample recalibration (2026-06-17)
+> *Added: 2026-06-17*
+
+A direct investigation into Farm C's empty-`rule_fired` missed anomalies (a different gap than
+the GMM one above) led to discovering OMR (`omr_z`) was structurally incapable of producing a
+positive calibrated value on **either** farm — not just Farm C. Confirmed directly by reading
+`res.scores['omr_z']` / `res.head_z_train['omr_z']` from `score_asset()` output with no
+monkey-patching: `omr_z` was ≤0 almost everywhere on both the validated Farm A baseline and the
+failing Farm C set.
+
+**Root cause, two compounding bugs in `core/omr.py`:**
+1. `OMRDetector.fit()` computed `feature_resid_med`/`feature_resid_scale` (and
+   `train_residual_std`) from **in-sample** residuals — the same rows the model was just fit on.
+   A model is optimized to minimize exactly those residuals, so in-sample residual scale is
+   mechanically smaller than true/out-of-sample residual variance. Dividing later (genuinely
+   out-of-sample) residuals by that understated scale inflated every raw z-score, including on
+   healthy data.
+2. A class constant `MAX_Z_SCORE = 10.0` clipped OMR's raw aggregate score BEFORE the shared
+   `ScoreCalibrator` (`core/fuse.py`) ever saw it — the only one of the six detector heads
+   (`ar1_raw`, `pca_spe_raw`, `pca_t2_raw`, `iforest_raw`, `gmm_raw`, `omr_raw`) that pre-clipped
+   itself; every other head hands its raw score to the shared calibrator unclipped, and the
+   calibrator's own self-tuned `clip_z` + a final hard ±10.0 clip in `fuse.py` is meant to be the
+   sole place this bounding happens. Combined with bug #1, the inflated raw z saturated at exactly
+   10.0 for the *majority* of even healthy training rows; `ScoreCalibrator` then centered its
+   calibration at/near that saturated mode, so virtually every later calibrated `omr_z` came out
+   ≤0 — the detector was contributing nothing on either farm, not just Farm C.
+
+**Fix (`core/omr.py`):**
+- Removed `MAX_Z_SCORE`/`self.max_z_score` entirely — `omr_raw` now reaches `ScoreCalibrator`
+  unclipped, exactly like every other head.
+- Added `OMRDetector.recalibrate_residual_scale(X_holdout)` — recomputes
+  `feature_resid_med`/`feature_resid_scale`/`train_residual_std` from **out-of-sample** residuals,
+  duplicating (not refactoring, to avoid disturbing `score()`'s explicit in-place memory
+  optimizations — see its "Memory-optimized version v11.0.3" docstring) the same
+  align/impute/scale/reconstruct logic `score()` uses. Falls back to keeping the in-sample
+  estimates (never raises) if the holdout is smaller than `max(20, 2*n_features)` or columns don't
+  align.
+- `core/pipeline.py` calls `omr_det.recalibrate_residual_scale(calib_feat)` immediately after
+  `orch.fit_all_detectors()` returns, reusing the pipeline's existing interleaved calibration
+  holdout (`calib_feat` — the same out-of-sample block `ScoreCalibrator` itself uses downstream).
+  Placed after `fit_all_detectors()` so it runs unconditionally regardless of whether OMR was
+  freshly fit or restored from a cache — which also incidentally fixes a separate pre-existing gap
+  where `OMRModel.to_dict()`/`from_dict()` never serialized `feature_resid_med`/`feature_resid_scale`
+  at all (a cache-restored OMR model previously had no per-feature scale until first re-fit).
+
+**Validation:** `tests/test_ml.py` 16/16 pass unchanged. Direct `score_asset()` checks confirm
+`omr_z` is no longer pinned: Farm A event 40 score-side mean=4.21 (was ≤0, frac>0 now 0.74), Farm C
+event 4 score-side mean=0.65 (frac>0 now 0.52). A clean Farm A event (3) shows score-side mean
+≈ train-side mean (0.45 vs 0.46) — confirming the recalibrated z stays near baseline when an asset
+genuinely matches its training distribution, not just trending positive everywhere.
+
+**Full Farm A re-validation (22 events) — KPI still PASS, but precision/F1 regressed from the
+most recent checkpoint, and this is expected, not a flaw:**
+| Metric | Pre-OMR-fix checkpoint | After OMR fix |
+|---|---|---|
+| recall | 1.0 (12/12) | 1.0 (12/12, unchanged) |
+| precision | 0.923 | 0.857 |
+| F1 | 0.960 | 0.923 |
+| false alarms (of 10 normal) | 1 (event 71, `sustained`) | 2 (adds event 17, `+heads:omr_z`) |
+
+Event 17's score-window `omr_z` (mean 2.93, median 2.30, 43% of rows >3σ) is substantially elevated
+relative to its own training baseline (mean 0.57, median 0.09, 7.8% >3σ) — a genuine,
+previously-invisible signal, not noise from the new code: OMR was simply incapable of flagging
+*anything* via the per-head rule before this fix (every calibrated value was ≤0), so this is the
+first time OMR has ever been able to participate in that rule on Farm A. CARE labels event 17
+"normal," so the benchmark counts this as a false positive — but un-breaking a detector that
+previously contributed nothing is expected to surface signal exactly like this. This was not
+chased further (e.g. by re-tuning the per-head rule's sensitivity to absorb event 17) because that
+was explicitly out of scope for this fix.
+
+**Files changed**: `core/omr.py` (`MAX_Z_SCORE` constant + `self.max_z_score` removed;
+new `recalibrate_residual_scale()` method), `core/pipeline.py` (calls
+`omr_det.recalibrate_residual_scale(calib_feat)` right after `fit_all_detectors()`).
 
 ---
 

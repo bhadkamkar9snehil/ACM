@@ -131,6 +131,14 @@ def score_asset(
         gmm_enabled=True, omr_enabled=True,
     )
     _log("fit", f"detectors fitted in {time.time()-t_fit:.0f}s")
+    # OMR's in-sample fit residuals systematically understate true residual
+    # scale (the model was optimized to minimize exactly those residuals).
+    # Recalibrate on this run's out-of-sample holdout — same data the shared
+    # calibrator uses below — so omr_raw isn't biased before calibration ever
+    # sees it.
+    omr_det = det.get("omr_detector")
+    if omr_det is not None and getattr(omr_det, "_is_fitted", False):
+        omr_det.recalibrate_residual_scale(calib_feat)
     det_kwargs = dict(
         ar1_detector=det.get("ar1_detector"), pca_detector=det.get("pca_detector"),
         iforest_detector=det.get("iforest_detector"), gmm_detector=det.get("gmm_detector"),

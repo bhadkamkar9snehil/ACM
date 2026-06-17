@@ -109,7 +109,6 @@ class OMRDetector:
     
     # Constants
     MIN_RESIDUAL_STD = 1e-6  # Prevent division by zero
-    MAX_Z_SCORE = 10.0  # Clip extreme z-scores
     DEFAULT_N_COMPONENTS = 5
     DEFAULT_ALPHA = 1.0
     DEFAULT_MIN_SAMPLES = 100
@@ -135,8 +134,6 @@ class OMRDetector:
         # Minimum samples for training
         self.min_samples = int(omr_cfg.get("min_samples", self.DEFAULT_MIN_SAMPLES))
         
-        # Z-score clipping (configurable)
-        self.max_z_score = float(omr_cfg.get("max_z_score", self.MAX_Z_SCORE))
         self.variance_floor = float(omr_cfg.get("variance_floor", self.VARIANCE_FLOOR))
         self.missingness_drop = float(omr_cfg.get("missingness_drop", self.MISSINGNESS_DROP))
         self.healthy_regime_label = omr_cfg.get("healthy_regime", self.HEALTHY_REGIME_DEFAULT)
@@ -439,9 +436,86 @@ class OMRDetector:
             import traceback
             Console.error(traceback.format_exc(), component="OMR")
             return self
-        
+
         return self
-    
+
+    def recalibrate_residual_scale(self, X_holdout: pd.DataFrame) -> "OMRDetector":
+        """
+        Recompute feature_resid_med/feature_resid_scale/train_residual_std from
+        OUT-OF-SAMPLE residuals (the pipeline's interleaved calibration holdout),
+        replacing the in-sample estimates fit() necessarily produces.
+
+        fit() can only measure residuals on the rows it trained on; a model is
+        optimized to minimize exactly those residuals, so in-sample residual
+        scale is mechanically smaller than true residual variance. That bias
+        understates feature_resid_scale and inflates every later (genuinely
+        out-of-sample) per-feature z-score — including on healthy data. Calling
+        this once, after fit(), on a held-out block fixes that bias at its
+        source instead of compensating for it downstream.
+
+        Falls back to keeping the in-sample (fit-time) estimates — never raises
+        — if the holdout is too small, columns don't align, or reconstruction
+        fails for any reason.
+        """
+        from core.observability import Console
+
+        if not self._is_fitted or self.model is None:
+            return self
+        min_holdout = max(20, 2 * len(self.model.feature_names or []))
+        if X_holdout is None or len(X_holdout) < min_holdout:
+            return self
+
+        try:
+            feature_names = self.model.feature_names
+            X = X_holdout
+            if feature_names:
+                X = X.reindex(feature_names, axis=1)
+            if self.model.train_medians is not None:
+                X_arr = X.to_numpy(dtype=float, na_value=np.nan)
+                nan_mask = np.isnan(X_arr)
+                if nan_mask.any():
+                    medians_arr = self.model.train_medians
+                    X_arr = np.where(nan_mask, medians_arr[np.newaxis, :], X_arr)
+                var_mask = self.model.var_mask
+                if var_mask is not None and len(var_mask) == X_arr.shape[1]:
+                    X_arr = X_arr[:, var_mask]
+                X_clean = X_arr
+            else:
+                X_clean, _ = self._prepare_data(X, medians=None, var_mask=self.model.var_mask)
+
+            X_scaled = self.model.scaler.transform(X_clean)
+            X_recon = self._reconstruct_data(X_scaled)
+            residuals = X_scaled - X_recon
+
+            if residuals.shape[1] != len(self.model.feature_resid_med
+                                          if self.model.feature_resid_med is not None
+                                          else feature_names):
+                return self
+
+            residual_norm = np.linalg.norm(residuals, axis=1)
+            mad = float(np.median(np.abs(residual_norm - np.median(residual_norm)))) if residual_norm.size else 0.0
+            robust_scale = mad * 1.4826 if mad > 0 else np.std(residual_norm)
+            train_residual_std = max(float(robust_scale), self.MIN_RESIDUAL_STD)
+
+            feat_med = np.median(residuals, axis=0)
+            feat_mad = np.median(np.abs(residuals - feat_med), axis=0) * 1.4826
+            feat_spread = np.subtract(*np.percentile(X_scaled, [97.5, 2.5], axis=0)) * -1.0
+            feat_scale = np.maximum(feat_mad, np.maximum(0.01 * np.abs(feat_spread),
+                                                          self.MIN_RESIDUAL_STD))
+
+            self.model.train_residual_std = train_residual_std
+            self.model.feature_resid_med = feat_med
+            self.model.feature_resid_scale = feat_scale
+            Console.info(
+                f"Recalibrated residual scale from {len(X_holdout)} out-of-sample "
+                f"holdout rows, std={train_residual_std:.3f}", component="OMR"
+            )
+        except Exception as e:
+            Console.error(f"Out-of-sample recalibration failed, keeping in-sample "
+                          f"estimates: {e}", component="OMR")
+
+        return self
+
     def _reconstruct_data(self, X_scaled: np.ndarray) -> np.ndarray:
         """
         Reconstruct data using fitted model.
@@ -632,8 +706,6 @@ class OMRDetector:
             else:
                 del residuals, X_scaled
 
-            # Clip z-scores to prevent extreme values
-            np.clip(omr_z, -self.max_z_score, self.max_z_score, out=omr_z)
             omr_z = omr_z.astype(np.float32, copy=False)
             
             # Force garbage collection for large datasets
