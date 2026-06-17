@@ -136,6 +136,7 @@ def apply_alarm_rules(
     head_z_train: Optional[Dict[str, np.ndarray]] = None,
     alert_z_floor: float = ALERT_Z_FLOOR,
     cadence_s: float = DEFAULT_CADENCE_S,
+    distrust_coverage: float = DISTRUST_COVERAGE,
 ) -> AlarmDecision:
     """Run all self-tuned rules over one scored window. Fully unsupervised.
 
@@ -231,7 +232,7 @@ def apply_alarm_rules(
     # EVALUABLE sample (rolling statistics cannot fire before their window
     # fills). Availability exempt: a failed asset IS down most of the window.
     def _broken_baseline(mask: np.ndarray, eval_start: int) -> bool:
-        if mask.mean() <= DISTRUST_COVERAGE:
+        if mask.mean() <= distrust_coverage:
             return False
         first = int(np.argmax(mask))
         return first <= eval_start + max(1, int(0.05 * n))

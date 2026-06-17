@@ -10,7 +10,7 @@ ACM has three layers:
 
 1. **Source layer** — per-asset `source_kind` dispatch reads incremental data from CSV files, SQL tables, OPC UA servers, or MQTT brokers
 2. **Cache layer** — one Parquet file per asset, trailing 180-day window, atomically updated
-3. **Pipeline layer** — stateless re-fit on every tick: AR1, PCA-SPE, PCA-T2, IsolationForest, GMM, OMR → correlation-discounted fusion → self-tuned alarm rules
+3. **Pipeline layer** — stateless re-fit on every tick: AR1, PCA-SPE, PCA-T2, IsolationForest, GMM, OMR (Overall Model Residual — a multivariate reconstruction detector, see `core/omr.py`) → correlation-discounted fusion → self-tuned alarm rules
 
 ---
 
@@ -63,6 +63,18 @@ ingest_result()         ← write scores + alarms to SQLite
 | R3 Per-head 7d | Individual detector Z elevated over 7-day window |
 | R4 Availability | Data gaps > threshold |
 
+All four rule horizons are defined in seconds and converted to sample counts from the asset's own
+inferred cadence (median timestamp diff) — never hardcoded sample counts, so the same config works
+across 1-second, 10-minute, or 1-hour historians without retuning.
+
+**Self-distrust gate:** a fifth, cross-cutting check that discards R1/R2/R3's output (not R4 —
+availability is exempt, a failed asset legitimately IS down most of the window) if the rule claims
+alarm for more than `distrust_coverage` (default 50%) of the scored window AND the first alarm
+falls within the rule's first 5% of evaluable samples — i.e. no quiet prefix. A genuine fault has
+an onset; a drifted/corrupted baseline alarms from the start. `distrust_coverage` is configurable
+via `cfg["alarm_rules"]["distrust_coverage"]` (see `core/alarm_rules.py: apply_alarm_rules()`),
+primarily for ablation experiments.
+
 ---
 
 ## Worker pool
@@ -92,11 +104,15 @@ Simulator OPC UA → acm_opcua_bridge (asyncio, parent process)
 | File | Role |
 |---|---|
 | `core/pipeline.py` | `score_asset()` — entire ML pipeline |
-| `core/alarm_rules.py` | Alarm rule engine |
+| `core/omr.py` | OMR (Overall Model Residual) detector — multivariate reconstruction, top-3 residual scoring |
+| `core/alarm_rules.py` | Alarm rule engine + self-distrust gate |
+| `core/fuse.py` | Calibration (contamination filter) + correlation-discounted fusion |
 | `scripts/acm_service.py` | FastAPI + async scheduler + worker pool |
 | `scripts/acm_feed.py` | Per-source data loading + cache management |
 | `scripts/acm_store.py` | SQLite / SQL Server abstraction |
 | `scripts/acm_opcua_bridge.py` | OPC UA → SQLite bridge |
 | `scripts/acm_mqtt_bridge.py` | MQTT → SQLite bridge |
+| `scripts/care_benchmark.py` | CARE-to-Compare evaluation harness; `--override` JSON flag for ablation experiments |
+| `scripts/download_care_benchmark.py` | Downloads CARE dataset preserving `event_info.csv` + `datasets/` layout for `care_benchmark.py` |
 | `configs/config_table.csv` | Human-editable runtime config |
 | `core/ml_defaults.py` | All ML hyperparameters (never in config CSV) |

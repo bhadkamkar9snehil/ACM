@@ -1,7 +1,7 @@
 # ACM — Codebase Knowledge Base
 
 > Maintained for future agents. Update this file whenever you learn something new about the codebase.
-> Last updated: 2026-06-17 — ML pipeline bug fixes (#61-#67)
+> Last updated: 2026-06-17 — ML pipeline bug fixes (#61-#67) + research paper planning / CARE ablation session
 
 ---
 
@@ -35,9 +35,10 @@
 26. [Fleet Operations Matrix Performance Optimization](#fleet-operations-matrix-performance-optimization-2026-06-16)
 27. [Per-Asset Scoring & SIM→ACM Flow (2026-06-16)](#per-asset-scoring--simacm-flow-2026-06-16)
 28. [Real-Time Log Streaming & Output Panel (2026-06-16)](#real-time-log-streaming--output-panel-2026-06-16)
-29. [ML Pipeline Diagnostics (2026-06-17)](#ml-pipeline-diagnostics-2026-06-17) ← **Latest work session**
-30. [Known Issues (Track as GitHub Issues)](#known-issues-track-as-github-issues)
-31. [User Working Style](#user-working-style)
+29. [ML Pipeline Diagnostics (2026-06-17)](#ml-pipeline-diagnostics-2026-06-17)
+30. [Research Paper Planning & CARE Ablation Experiments (2026-06-17)](#research-paper-planning--care-ablation-experiments-2026-06-17) ← **Latest work session**
+31. [Known Issues (Track as GitHub Issues)](#known-issues-track-as-github-issues)
+32. [User Working Style](#user-working-style)
 
 ---
 
@@ -670,6 +671,10 @@ Triggers immediate scoring. Body: `{}` (all assets) or `{"assets": ["key1", "key
 37. *(2026-06-16)* **Not adding `state_detail` to PATCH allowed fields** — silent 422 was swallowed by `catch (_) {}`. Always check PATCH endpoints have the fields you need before writing frontend code that PATCHes them.
 38. *(2026-06-16)* **PowerShell `"$var.ext"` string interpolation parses `.ext` as member access, not a file extension** — `"$PID.out"` and `"$PID.err"` both evaluate `$PID.out` and `$PID.err` as property access on the `$PID` integer object. Since integers have no `.out` or `.err` property, both return null, making both strings **identical** — which then causes `Start-Process` to throw "RedirectStandardOutput and RedirectStandardError are same". Fix: use `Join-Path $env:TEMP ("prefix_" + $PID + ".out")` or `"prefix_$($PID).out"` to force variable-only expansion. Even better: drop `-RedirectStandard*` entirely when you don't need the output — with `-WindowStyle Hidden` the subprocess output goes to the hidden window's buffer.
 39. *(2026-06-16)* **Test all PowerShell before committing** — PowerShell has strict constraints that differ from bash. Key rules: (a) stdout/stderr must always go to separate files in `Start-Process`; (b) `-NoNewline` and `-ForegroundColor` cannot be combined with newline tricks on the same `Write-Host` call — split them; (c) backtick line continuation `` ` `` must be the very last character on the line with nothing after, not even a space; (d) `$LASTEXITCODE` resets after every cmdlet, not just external programs — capture it immediately; (e) `Select-Object -Last 1` inside a redirected scriptblock loses exit codes — never pipe inside a Step/Warn scriptblock.
+40. *(2026-06-17)* **Never describe OMR as "Orthogonal Moment Regression" or "per-sensor PCA"** — it's "Overall Model Residual": one multivariate model (PLS/Linear/PCA, auto-selected by data shape) reconstructs each sensor from the others; the score is the mean of the top-3 largest per-feature scaled residuals. Read `core/omr.py` before describing OMR in any doc or paper material — a prior planning draft got this wrong and it propagated into `docs/ml-book.html` Chapter 4 and `docs/architecture.md` until corrected this session.
+41. *(2026-06-17)* **"No GPU required" is not, and has never been, a paper/product claim** — it was the user evaluating (and rejecting) a GPU-acceleration path for the pipeline. Do not infer marketing claims from infrastructure decisions mentioned in passing.
+42. *(2026-06-17)* **Running N benchmark processes in parallel, each with its own `--workers` pool, multiplies total worker count** — 5 background `care_benchmark.py` runs × `--workers 4` = 20 processes on a 15GB container caused `BrokenProcessPool` from OOM (`free -h` showed 604MB available). Fix: `pkill -f care_benchmark.py`, then run sequentially (one `&&`-chained command) with `--workers 2` each. When running multiple independent benchmark/ablation configs, prefer sequential execution with a small worker count over parallel launches unless you've confirmed available memory.
+43. *(2026-06-17)* **`scripts/download_care_dataset.py` output is NOT compatible with `scripts/care_benchmark.py`** — the former flattens to `care_farmA_40.csv` with no `event_info.csv` (built for the Simulate tab's flat file list); the latter requires `<farm_dir>/event_info.csv` + `<farm_dir>/datasets/{event_id}.csv`. Use the new `scripts/download_care_benchmark.py` for benchmark/ablation work — it preserves the Zenodo zip's original directory structure. Both scripts are intentionally kept (different consumers), not a duplicate to clean up.
 
 ---
 
@@ -866,7 +871,7 @@ Requires: `pip install playwright && playwright install chromium`
 ---
 
 ## Git & GitHub Workflow
-> *Added: 2026-06-14 · Last updated: 2026-06-16*
+> *Added: 2026-06-14 · Last updated: 2026-06-17*
 
 ### MANDATORY: Issue-First Rule
 **Every piece of work — bug fix, feature, refactor, infra — MUST have a GitHub issue before any code is written.**
@@ -947,8 +952,12 @@ gh browse                                          # open repo in browser
 - Session 01Dkd7AbjS8Sd5ChfYiNa1yR: branch `claude/focused-albattani-t9876j` → merged to `main`
 - Session 01UuCboiW9MAKb9AKYYoVt1J (2026-06-16): per-asset scoring, SIM→ACM flow, perf sprints
 - 2026-06-16 afternoon: WebSocket logs, output panel redesign, CI/issue workflow setup
-
-If push fails due to diverged remote: `git pull origin main --rebase` then push again. Never force-push, never `--no-verify`.
+- 2026-06-17: ML pipeline bug fixes (#61-#67) — `rules_diagnostic`, `calibration_json`, `data_quality_json`
+- Branch `claude/research-paper-planning-ests5l` (2026-06-17): CARE ablation mechanism (`--override` flag,
+  configurable `distrust_coverage`), `scripts/download_care_benchmark.py`, corrected OMR docs → merged to `main`
+- Pattern: commit to dev branch → push dev → `git checkout main` → `git merge dev --no-edit` → `git push origin main`
+- If push fails due to diverged remote: `git pull origin main --rebase` then push again
+- Never force-push, never `--no-verify`
 
 ---
 
@@ -1244,6 +1253,134 @@ When a rule is disarmed (train_n < 500), `pipeline.py` logs a WARN via `_log()`.
 
 ### acm_feed.py corrupt row logging (fixes #62)
 MQTT/OPC-UA rows that fail JSON parsing are now counted and emitted as `warnings.warn("acm_feed: N/M rows dropped — corrupt JSON in 'table_name'")` instead of silent `pass`.
+
+---
+
+## Research Paper Planning & CARE Ablation Experiments (2026-06-17)
+> *Added: 2026-06-17*
+
+A research-paper planning session (target: arXiv preprint / workshop, ML-pipeline-design angle,
+CARE-to-Compare leaderboard as baseline) produced a corrected understanding of OMR, a reusable
+ablation mechanism, and real ablation results on CARE Farm A. This section is the durable record;
+the working paper plan itself lives outside the repo at `~/.claude/plans/` and does not need to be
+committed.
+
+### OMR is "Overall Model Residual" — NOT "Orthogonal Moment Regression"
+
+A prior planning draft misidentified OMR. The correct definition, read directly from `core/omr.py`:
+
+- OMR fits **one multivariate model** (not one model per sensor) on the healthy training baseline
+  to learn inter-sensor correlations. Model type is auto-selected by data shape
+  (`OMRDetector._select_model_type`): **PCA** if `n_features > n_samples`, **Linear/Ridge** if
+  `n_samples > 1000 and n_features < 20`, otherwise **PLS** (default — best for correlated sensor
+  data at moderate sample sizes).
+- At inference, each sensor is reconstructed from the others via the fitted model, producing a
+  per-feature residual vector.
+- The anomaly score is **the mean of the top-3 largest per-feature scaled residuals**
+  (`np.partition(scaled, -k, axis=1)[:, -k:].mean()`, k=min(3, n_features)) — deliberately NOT a
+  row-L2 norm and NOT a plain max:
+  - **L2 norm** dilutes a single faulty channel by `sqrt(n_features)` — invisible on Farm A's 86
+    sensors.
+  - **Max** is an extreme-value statistic whose *healthy* tail grows with feature count, crushing
+    calibration contrast on wide sensor sets.
+  - **Top-3** requires three simultaneously elevated features; noise rarely produces that, but one
+    physically faulty channel elevates ~11 of its engineered derivatives (median, MAD, mean, std,
+    slope, skew, kurtosis, spectral bands), so real faults reliably clear the bar.
+- Per-feature squared residuals (a separate, unrelated-to-scoring computation) feed the "culprit
+  sensor" attribution shown in the UI and `core/pipeline.py`'s `culprits` list — this is the part
+  that legitimately resembles "one number per sensor," but it is attribution, not the OMR score
+  itself.
+- `docs/ml-book.html` Chapter 4 and `docs/architecture.md` previously described OMR as "fits a
+  model per sensor" / "per-sensor PCA" — both corrected in this session (see below).
+
+### "No GPU required" was never a paper claim
+
+A prior planning draft included "no GPU required" as a contribution. This was a misunderstanding —
+the user was evaluating (and decided against) GPU-accelerating the pipeline; it has nothing to do
+with the paper's claims. Do not reintroduce any GPU-related claim into paper materials.
+
+### Ablation mechanism: `--override` flag on `care_benchmark.py`
+
+`score_asset(cfg=...)` already accepted an optional config override — no pipeline refactor needed.
+Added a CLI surface for it:
+
+```bash
+python scripts/care_benchmark.py --data-dir "care_data/Wind Farm A" --out results/full/ --workers 2
+python scripts/care_benchmark.py --data-dir "care_data/Wind Farm A" --out results/no_contam/ --workers 2 \
+  --override '{"thresholds": {"contamination_filter": {"enabled": false}}}'
+```
+
+`--override` JSON-deep-merges onto `dict(ML_DEFAULTS)` (`_deep_merge()` in `care_benchmark.py`) and
+forces `--force` (cached/reused scores from a different config are never valid). `run_event()` and
+the `_worker()` ProcessPoolExecutor entry point both thread `cfg` through to `score_asset()`.
+
+**New: `distrust_coverage` is now configurable.** It was a hardcoded module constant
+(`DISTRUST_COVERAGE = 0.5` in `core/alarm_rules.py`) with no way to disable the self-distrust gate
+for ablation. `apply_alarm_rules()` gained a `distrust_coverage: float = DISTRUST_COVERAGE`
+parameter; `core/pipeline.py` passes `cfg.get("alarm_rules", {}).get("distrust_coverage", 0.5)`.
+Setting it to an unreachable value (e.g. `2.0`) via `--override` disables the gate without code
+changes:
+```bash
+--override '{"alarm_rules": {"distrust_coverage": 2.0}}'
+```
+
+### New script: `scripts/download_care_benchmark.py`
+
+The existing `scripts/download_care_dataset.py` flattens files into `care_farmA_40.csv` naming
+with no `event_info.csv` — built for the Simulate tab's flat file list, NOT for
+`care_benchmark.py`, which requires `<farm_dir>/event_info.csv` + `<farm_dir>/datasets/{event_id}.csv`.
+`download_care_benchmark.py` preserves that directory structure:
+```bash
+python scripts/download_care_benchmark.py --dest care_data --farms A
+python scripts/care_benchmark.py --data-dir "care_data/Wind Farm A" --out results/A/ --workers 4
+```
+Both scripts coexist — they serve different consumers. `care_data/` and `results/` are gitignored
+(downloaded dataset + benchmark output, not source).
+
+### Ablation results on CARE Farm A (22 events: 12 anomaly, 10 normal)
+
+Five configs run: `full` (all defaults), `no_contam` (contamination filter disabled), `no_distrust`
+(self-distrust gate disabled), `equal_weights` (fusion auto-tune off, all 6 weights = 1/6),
+`no_omr` (OMR detector disabled). **Binary KPI is identical across all five**: recall=1.0,
+precision=0.857, F1=0.923, KPI PASS — Farm A's 22-event set is too small/easy for these components
+to change detection outcomes. The real signal is in score magnitude, calibration, and alarm
+quality, where every component justified its presence:
+
+- **Self-distrust gate** — on event 40, disabling it raised `alarm_frac` from 0.402 to 0.897 (a
+  55% alarm-burden reduction when the gate is ON) by letting the per-head rate rule fire across the
+  whole window instead of being discarded as a broken baseline. More tellingly: WITHOUT the gate,
+  the reported lead time for event 40 looks far better (first alarm 60.7h after event_start vs.
+  468.8h with the gate ON) — but that earlier "detection" is the broken-baseline symptom firing
+  from t=0, not genuine onset detection. The gate trades an illusory early detection for an honest
+  late one. Gate had zero effect on any normal event's false-alarm outcome on Farm A — its
+  measurable effect here was alarm quality, not binary classification.
+- **Contamination filter** — removing it lowered the self-tuned `alert_z` threshold by ~7% on
+  anomaly events (4.293→3.977) and ~6% on normal events (3.964→3.718), and raised the false-alarm
+  fraction on normal operation from 3.82% to 4.17%. Confirms the mechanism: a dirty calibration
+  holdout inflates apparent "normal" spread, which lowers (not raises) the self-tuned threshold —
+  the opposite of conservative.
+- **OMR** — removing it raised mean fused_max by ~+0.5z on BOTH anomaly (5.548→6.070) and normal
+  (5.275→5.779) events, with the self-tuned alert_z threshold rising in lockstep (so the binary KPI
+  doesn't move). OMR's measured Farm-A contribution is fusion-scale stabilization/discounting, not
+  raw separability — it compresses the whole ensemble's dynamic range rather than uniquely
+  flagging events the other 5 detectors miss.
+- **Equal vs. auto-tuned weights** — auto-tuning produced a modest systematic uplift in both fused
+  score and self-tuned threshold (~4%) but no consistent win/loss pattern in detection outcomes on
+  this event set. Honest finding: auto-tuning's value on Farm A is calibration sharpness, not
+  recall/precision, and that should not be oversold in the paper.
+- Runtime was flat across all 5 configs (45.5–47.2s mean per event) — none of these toggles
+  meaningfully change compute cost.
+
+**Framing for the paper:** Farm A alone (22 events) cannot demonstrate these components changing
+binary detection outcomes — say so plainly rather than overclaiming. Farms B/C (more
+events/sensors) are needed to test whether any ablation moves recall/F1; that analysis is
+deferred (see below).
+
+### Deferred: Farm B / Farm C analysis
+
+Per explicit user instruction, analysis with datasets beyond Farm A (Farm B: 37 events/257
+sensors, Farm C: 36 events/957 sensors) is deferred to a later session. Do not pre-emptively run
+those benchmarks without being asked.
 
 ---
 
