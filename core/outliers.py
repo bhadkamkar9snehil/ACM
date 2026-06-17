@@ -175,6 +175,18 @@ class GMMDetector:
 
             Xs = self.scaler.fit_transform(Xn).astype(np.float64, copy=False)
 
+            # Bound per-feature scaled magnitude before PCA. RobustScaler's
+            # IQR can collapse to near-zero for columns with heavy point-mass
+            # at the median (e.g. engineered slope/skew features during flat
+            # regimes), which explodes ordinary variation into z-magnitudes
+            # of 1e8+ and lets a handful of such columns dominate PCA's
+            # variance-based component selection. Clipping (not flooring the
+            # scale itself) preserves RobustScaler's outlier-robust semantics
+            # for well-behaved columns while bounding worst-case influence —
+            # same convention as AR1's z_cap and ScoreCalibrator's clip_z.
+            feat_z_clip = float(self.gmm_cfg.get("feature_z_clip", 8.0))
+            np.clip(Xs, -feat_z_clip, feat_z_clip, out=Xs)
+
             # Components: cap by samples; keep a small heuristic limit
             heuristic = int(max(2, np.sqrt(n_samples) / 2))
             safe_k = max(2, min(self._user_k, heuristic, n_samples - 1, 32))
@@ -312,6 +324,11 @@ class GMMDetector:
             # Scale in place (sklearn returns a new array anyway)
             Xs = self.scaler.transform(Xn).astype(np.float64, copy=False)
             del Xn
+
+            # Same bound applied at fit time — must match exactly for
+            # fit/score consistency (see comment in fit()).
+            feat_z_clip = float(self.gmm_cfg.get("feature_z_clip", 8.0))
+            np.clip(Xs, -feat_z_clip, feat_z_clip, out=Xs)
 
             # Apply the same PCA pre-reduction used at fit time, if any
             if self._pca_ is not None:

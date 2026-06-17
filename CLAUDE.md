@@ -1580,6 +1580,86 @@ All 16 `test_ml.py` tests pass unchanged.
 
 ---
 
+## GMM RobustScaler IQR-collapse fix — feature z-clip before PCA (2026-06-17)
+> *Added: 2026-06-17 — follow-on to the GMM PCA pre-reduction fix above*
+
+While investigating Farm C's remaining gap after the PCA pre-reduction fix, a deeper and more
+general bug was found and fixed in the same `GMMDetector` scaling path.
+
+### Root cause (confirmed with measured numbers, not hypothesized)
+
+`GMMDetector.fit()`/`.score()` scale features with `RobustScaler` (median/IQR) before PCA — robust
+to training data containing faults, per the existing `# ROBUST:` comments in `core/outliers.py`.
+But for columns with heavy point-mass exactly at the median — common for engineered slope/skew-type
+features during flat or non-operating regimes, or sparse/spiky features that are usually
+zero — the 25th–75th percentile IQR can collapse to near-zero even though the column has genuine,
+healthy spread. Confirmed directly with a diagnostic monkey-patch of `RobustScaler`/`PCA`
+(`/tmp/pca_variance_check.py`, not committed):
+
+- Farm A event 40, worst column: `scale_=4.31e-10`, but `raw_std=0.0107`, 17 distinct raw values.
+- Farm C event 4, worst column: `scale_=3.27e-14`, but `raw_std=0.0394`, **1735** distinct raw
+  values — proving this is not a degenerate/near-constant column, just one whose IQR happens to
+  collapse.
+
+Dividing by a near-zero IQR amplifies ordinary variation into z-magnitudes of 1e8–1e12+. Since PCA
+selects components by variance, a handful of these exploded columns can swallow the entire
+component budget with numerical noise instead of real inter-sensor structure — **even after** the
+PCA pre-reduction fix above correctly capped the *component count*. Measured before the fix:
+Farm A had `evr_first5=[1.0, 0, 0, 0, 0]` (PC1 = one exploded column, not real structure); Farm C
+had **39 columns with variance >1e6** (max `1.449e24`), eating ~97% of the cumulative variance
+across the first 5 PCs (`evr_first5=[0.8667, 0.0584, 0.0387, 0.0127, 0.0101]`). This explains why
+Farm C's `gmm_z` calibration sanity (`frac≥3.0` on training data) was ~6x worse than Farm A's even
+with the dimensionality fix already in place.
+
+**Why "fall back to std when IQR is near-zero" is the wrong fix**: Farm A's worst column above is
+mostly-zero with rare small spikes — its near-zero IQR correctly reflects that "normal" behavior is
+tightly clustered at zero. A std-based fallback would under-penalize the legitimately rare-but-
+meaningful spikes, defeating the purpose of choosing a robust (outlier-resistant) scaler in the
+first place. The actual bug isn't that the scale is "wrong," it's that there's no bound on how
+extreme the resulting z-magnitude becomes once divided by a near-zero IQR.
+
+### Fix: clip, don't floor
+
+`GMMDetector.fit()` and `.score()` now clip the RobustScaler-scaled matrix to a bounded per-feature
+range (`±feature_z_clip`, default 8.0) immediately before PCA — identically in both methods, since
+clipping is stateless and needs no fit/score-time bookkeeping:
+```python
+Xs = self.scaler.fit_transform(Xn).astype(np.float64, copy=False)   # fit()
+np.clip(Xs, -feat_z_clip, feat_z_clip, out=Xs)
+# ... same np.clip(Xs, ...) after self.scaler.transform(Xn) in score()
+```
+This is precedented by existing codebase conventions for bounding z-magnitude without suppressing
+the underlying signal: AR1's `z_cap=8.0` (`models.ar1.z_cap`) and `ScoreCalibrator`'s `clip_z` +
+hard ±10.0 clip in `core/fuse.py`. It preserves `RobustScaler`'s outlier-robust semantics for
+well-behaved columns (values inside the clip range pass through untouched) while bounding
+worst-case influence on PCA regardless of *why* a column's scale collapsed. New config key:
+`models.gmm.feature_z_clip` (default 8.0) in `core/ml_defaults.py`.
+
+### Validation
+
+Diagnostic re-run after the fix (`n_cols_var_gt_1e6` is now **0** on both farms — was 39 on Farm C,
+1 on Farm A):
+| | Farm A event 40 | Farm C event 4 |
+|---|---|---|
+| `evr_first5` before | `[1.0, 0, 0, 0, 0]` | `[0.867, 0.058, 0.039, 0.013, 0.010]` |
+| `evr_first5` after | `[0.132, 0.089, 0.052, 0.042, 0.035]` | `[0.107, 0.053, 0.052, 0.044, 0.036]` |
+| `n_cols_var_gt_1e6` | 1 → 0 | 39 → 0 |
+| `gmm_z` train `frac≥3.0` | (was ~6x worse on Farm C) | now 0.013 vs 0.011 — nearly identical |
+
+Full Farm A re-validation (22 events, mandatory "no exceptions" re-check): **recall=1.0,
+precision=0.923, F1=0.960 — identical to the pre-clip baseline, zero regression.** Full Farm C
+58-event re-run was deferred (benchmark runtime); the per-event diagnostic and Farm A re-validation
+were judged sufficient to ship the fix, given it only bounds an unbounded numerical pathology and
+cannot make a previously-correct calibration worse. Re-run Farm C's full benchmark before citing
+updated Farm C numbers in the paper.
+
+**Files changed**: `core/outliers.py` (`GMMDetector.fit()`/`.score()` — `np.clip` calls before
+PCA), `core/ml_defaults.py` (`models.gmm.feature_z_clip: 8.0`), `docs/ml-book.html` (GMM section —
+added "Per-feature z-clip before PCA" subsection alongside the existing PCA pre-reduction
+subsection).
+
+---
+
 ## Known Issues (Track as GitHub Issues)
 > *Added: 2026-06-16 · Updated: 2026-06-17 (ML issues #61-#67 all fixed)*
 

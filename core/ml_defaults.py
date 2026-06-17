@@ -124,6 +124,7 @@ ML_DEFAULTS = {
             "enable_bic_search": True,
             "enabled": True,
             "eps_jitter": 1e-06,
+            "feature_z_clip": 8.0,
             "k_max": 3,
             "k_min": 2,
             "max_iter": 100,
