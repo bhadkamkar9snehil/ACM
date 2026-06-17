@@ -1256,7 +1256,7 @@ These are known deficiencies to be filed as GitHub issues. Use `gh issue create`
 
 2. **WebSocket reconnect spams the log** — each reconnect attempt logs "Connecting…" which pollutes the log panel with noise during brief network hiccups. Add debounce / silent retry for first N attempts.
 
-3. **Output panel height not restored on cold start** — `localStorage` persistence for panel height exists but may not survive service restarts if the browser reloads the page from scratch. Verify the key name and restore logic.
+3. **Output panel height not restored on cold start** ([#68](https://github.com/bhadkamkar9snehil/ACM/issues/68)) — `localStorage` persistence for panel height exists but may not survive service restarts if the browser reloads the page from scratch. Verify the key name and restore logic.
 
 4. **Detector series always visible** — toggle buttons removed (see above) but all 6 detector series now always render on the Engineer chart. For assets with many detectors this can make the chart noisy. A future approach: legend-click toggle via uPlot's native API.
 
@@ -1264,7 +1264,7 @@ These are known deficiencies to be filed as GitHub issues. Use `gh issue create`
 
 6. **Excel export sends client-side `outputLines` to server** — the export POSTs the current filtered log array to `/api/service/logs/export`. This means: (a) only what the client has buffered (≤2000 lines) is exported, (b) network cost scales with log size. Alternative: server-side export directly from `shared_lines` deque without client involvement.
 
-7. **`runs` diagnostic JSON not yet surfaced in Engineer tab** — `rules_diagnostic_json`, `calibration_json`, `data_quality_json` are stored in the `runs` table but not yet fetched or displayed in the UI. Future work: add a "Run Details" expandable row in the Engineer tab showing which rules were active, detector weights, and data quality.
+7. **`runs` diagnostic JSON not yet surfaced in Engineer tab** ([#69](https://github.com/bhadkamkar9snehil/ACM/issues/69)) — `rules_diagnostic_json`, `calibration_json`, `data_quality_json` are stored in the `runs` table but not yet fetched or displayed in the UI. Future work: add a "Run Details" expandable row in the Engineer tab showing which rules were active, detector weights, and data quality.
 
 **How to file issues from CLI:**
 ```bash
