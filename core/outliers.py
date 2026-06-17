@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 from sklearn.ensemble import IsolationForest
 from sklearn.mixture import GaussianMixture
+from sklearn.decomposition import PCA
 from sklearn.preprocessing import RobustScaler  # ROBUST: Use RobustScaler instead of StandardScaler
 from core.observability import Console, Span
 from typing import Any, Dict, Optional, List
@@ -146,6 +147,7 @@ class GMMDetector:
         self._columns_: Optional[List[str]] = None
         self._score_mu_: Optional[float] = None
         self._score_sd_: Optional[float] = None
+        self._pca_: Optional[PCA] = None
 
     def fit(self, X: pd.DataFrame) -> "GMMDetector":
         """Fits the GMM on the training data."""
@@ -180,7 +182,48 @@ class GMMDetector:
             # Use config for trial parameters
             cov_type = self.gmm_cfg.get("covariance_type", "diag")
             reg_covar = float(self.gmm_cfg.get("reg_covar", 1e-2)) # Increased default for stability (1e-2)
-            
+
+            # PCA pre-reduction: a diagonal-covariance GMM estimates 2 params
+            # (mean, variance) per feature per component. Engineered feature
+            # counts scale with raw sensor count (~7-8 derived cols/channel),
+            # so wide-sensor assets can starve variance estimates of data
+            # (e.g. <1 sample/feature/component) producing unreliable
+            # likelihoods, while narrow assets are comfortably over-determined.
+            # Reducing to orthogonal PCA components caps the parameter count
+            # independent of raw feature count, and also better satisfies the
+            # per-feature independence assumption diag-covariance relies on
+            # (cf. Tipping & Bishop 1999, Mixtures of Probabilistic PCA).
+            self._pca_ = None
+            k_max_cfg = max(2, int(self.gmm_cfg.get("k_max", 3)))
+            k_for_budget = max(2, min(safe_k, k_max_cfg))
+            samples_per_param = float(self.gmm_cfg.get("min_samples_per_param", 10.0))
+            d_budget = max(2, int(n_samples / max(1.0, samples_per_param * k_for_budget * 2)))
+            max_components_cfg = int(self.gmm_cfg.get("max_pca_components", 25))
+            pca_dim = min(n_features, max_components_cfg, d_budget)
+            if pca_dim < n_features:
+                try:
+                    # whiten=True rescales each component to unit variance.
+                    # Without it, low-variance trailing components leave the
+                    # diag-covariance GMM with near-zero variance estimates on
+                    # some axes, which sklearn rejects as "ill-defined
+                    # empirical covariance" regardless of reg_covar.
+                    pca = PCA(
+                        n_components=pca_dim,
+                        whiten=True,
+                        svd_solver="auto",
+                        random_state=int(self.gmm_cfg.get("random_state", 42)),
+                    )
+                    Xs = pca.fit_transform(Xs).astype(np.float64, copy=False)
+                    self._pca_ = pca
+                    Console.info(
+                        f"PCA pre-reduction: {n_features} -> {pca_dim} components "
+                        f"(n_samples={n_samples}, k_budget={k_for_budget})",
+                        component="GMM",
+                    )
+                except Exception as e:
+                    Console.warn(f"PCA pre-reduction failed: {str(e)[:100]}", component="GMM")
+                    self._pca_ = None
+
             # If BIC search is enabled, find best k
             if self.gmm_cfg.get("enable_bic_search", True) and safe_k > 2:
                 bics = []
@@ -269,7 +312,11 @@ class GMMDetector:
             # Scale in place (sklearn returns a new array anyway)
             Xs = self.scaler.transform(Xn).astype(np.float64, copy=False)
             del Xn
-            
+
+            # Apply the same PCA pre-reduction used at fit time, if any
+            if self._pca_ is not None:
+                Xs = self._pca_.transform(Xs).astype(np.float64, copy=False)
+
             # Score samples (this is where sklearn allocates memory internally)
             scores = -self.model.score_samples(Xs)
             del Xs

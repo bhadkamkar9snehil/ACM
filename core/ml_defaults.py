@@ -127,6 +127,8 @@ ML_DEFAULTS = {
             "k_max": 3,
             "k_min": 2,
             "max_iter": 100,
+            "max_pca_components": 25,
+            "min_samples_per_param": 10.0,
             "n_init": 3,
             "random_state": 42,
             "reg_covar": 0.001,
