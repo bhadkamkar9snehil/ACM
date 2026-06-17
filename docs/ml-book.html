@@ -438,7 +438,7 @@ code { background: var(--bg3); color: var(--brand-hi); border-radius: 3px; paddi
     </div>
     <div class="det-card">
       <div class="det-name">OMR <span class="det-weight">w=0.10</span></div>
-      <div class="det-desc">Per-feature OMR residuals. Catches per-sensor anomalies; used to rank which channel is misbehaving.</div>
+      <div class="det-desc">Overall Model Residual. One multivariate model reconstructs every sensor from the others; score is the mean of the top-3 largest per-feature residuals. Catches correlation breakdown and ranks the culprit channel.</div>
     </div>
   </div>
 
@@ -521,13 +521,27 @@ code { background: var(--bg3); color: var(--brand-hi); border-radius: 3px; paddi
   </div>
 
   <!-- OMR -->
-  <h3 id="det-omr">OMR — Per-Feature Residuals</h3>
+  <h3 id="det-omr">OMR — Overall Model Residual</h3>
   <p><strong>Hyperparameters:</strong> n_components=5, model_type="auto", min_samples=100</p>
 
-  <p>OMR fits a dimensionality-reduction model (PCA or similar) per sensor, then scores each sensor's residual independently. Unlike PCA-SPE (which gives one score for the whole asset), OMR gives one score <em>per sensor</em>. This directly identifies <strong>which channel is misbehaving</strong>, powering ACM's "culprit sensor" ranking.</p>
+  <p>OMR is not a dimensionality-reduction technique reused per sensor — it fits <strong>one multivariate model</strong> on the healthy baseline that learns the inter-sensor correlation structure, then asks: "given every other sensor right now, what should this one read — and how far off is it?" Model type is auto-selected by data shape:</p>
+  <ul>
+    <li><strong>PCA</strong> when there are more features than samples (dimensionality reduction needed first)</li>
+    <li><strong>Linear/Ridge</strong> when samples are plentiful (&gt;1000) and features are few (&lt;20) — fast, one ridge regression per target sensor against all others</li>
+    <li><strong>PLS</strong> otherwise (the default) — handles correlated sensor data at moderate sample sizes better than OLS</li>
+  </ul>
 
-  <div class="callout warn">
-    OMR also feeds the per-head alarm rule (R3). If one sensor's OMR score fires repeatedly over 7 days while the fused score stays normal, it can still raise an R3 alarm — catching sensor-specific faults that the fused signal dilutes.
+  <p>Each sensor is reconstructed from the others, producing a per-feature residual vector. The anomaly score is the <strong>mean of the top-3 largest per-feature scaled residuals</strong> — not a row-L2 norm, not a plain max:</p>
+  <ul>
+    <li><strong>Row-L2 norm</strong> dilutes a single faulty channel by <code>√n_features</code> — on an 86-sensor asset, one bearing temperature running 8σ hot barely moves the row norm.</li>
+    <li><strong>Plain max</strong> is an extreme-value statistic whose <em>healthy</em> tail grows with feature count — more sensors means a higher "normal" max purely by chance, crushing calibration contrast on wide sensor sets.</li>
+    <li><strong>Top-3</strong> requires three simultaneously elevated features. Noise rarely produces that by chance, but one physically faulty channel typically elevates ~11 of its own engineered derivatives (median, MAD, mean, std, slope, skew, kurtosis, spectral bands) — real faults clear the bar reliably.</li>
+  </ul>
+
+  <p>OMR asks a different question than PCA-SPE/T²: not "has the overall operating point moved?" but "which sensors stopped following the correlations they had in the healthy baseline?" A separate per-feature squared-residual computation (unrelated to the score itself) powers ACM's "culprit sensor" attribution and the per-head alarm rule (R3) — if one sensor's contribution fires repeatedly over a 7-day window while the fused score stays moderate, R3 can still raise an alarm.</p>
+
+  <div class="callout">
+    On the CARE-to-Compare Farm A benchmark (22 events), removing OMR from the ensemble raised the mean fused score by roughly +0.5σ on both anomaly <em>and</em> normal events, with the self-tuned alarm threshold rising in lockstep — binary detection outcomes were unchanged. OMR's measured contribution there is stabilizing the fused score's dynamic range, not uniquely catching events the other five detectors miss. See the ablation results in <code>CLAUDE.md</code> for the full breakdown.
   </div>
 
   <h3>Detector comparison chart</h3>
@@ -605,6 +619,10 @@ q_thresh = np.quantile(x_clean, <span class="n">0.999</span>)  <span class="c">#
   </div>
   <p>With contamination rates up to 30% in real fault histories, MAD calibration prevents thresholds from being set too high to detect real faults.</p>
 
+  <div class="callout">
+    On the CARE-to-Compare Farm A benchmark, disabling the contamination filter <em>lowered</em> the self-tuned alert threshold by ~7% on anomaly events and ~6% on normal events, and raised the false-alarm fraction on normal operation from 3.8% to 4.2%. This is the mechanism working as designed: a dirty calibration holdout inflates the apparent spread of "normal," which pulls the self-tuned threshold down — the opposite of conservative, and directly the failure mode the filter exists to prevent.
+  </div>
+
   <h3>Z-score clipping</h3>
   <p>Calibrated Z-scores are hard-clipped to ±8.0 (adaptive) and ±10.0 (hard limit). This prevents one catastrophically-failed sensor from dominating the fused score and saturating the display. The adaptive clip is set at 1.5× the 99th percentile of training Z-scores.</p>
 </section>
@@ -650,6 +668,9 @@ weights = renormalize(weights)</pre>
   <pre>w_new = (1 - lr) × w_old + lr × w_episode
 <span class="c"># lr = 0.30 (learning rate)</span>
 <span class="c"># Per-detector drift is clamped to ±20% per tick</span></pre>
+
+  <h3>Circular-tuning guard</h3>
+  <p>Self-supervised weight tuning has a degenerate solution: if the current run's own scores define "anomalous" and the weights are tuned to detect it, you get a feedback loop — weights overfit to whichever detector spiked on <em>this</em> fault, and the next fault type, which spikes a different detector, goes undetected. <code>core/fuse.py: tune_detector_weights()</code> never tunes weights against the same run's outputs. When no external labels are available it falls back to a statistical diversity score per detector: 40% variance + 40% ensemble diversity (Kuncheva &amp; Whitaker 2003 — detectors that disagree contribute more than detectors that all fire together) + 20% tail sensitivity. The CARE Farm A ablation (equal weights vs. auto-tuned) showed a modest, consistent ~4% uplift in fused score and self-tuned threshold from auto-tuning, but no consistent improvement in recall/precision on that event set — auto-tuning's demonstrated value is calibration sharpness, not detection power.</p>
 
   <div class="chart-card">
     <div class="chart-title">Fusion demo: adjust detector weights</div>
@@ -745,6 +766,10 @@ avail_thr = max(48h_samples, p95_stop × 1.5 + 1)
     The distrust gate protects against stale baselines. If you haven't received data for 3 months and the asset's operating conditions changed completely, the first tick after reconnection would generate wall-to-wall alarms. The gate suppresses them and logs "distrusted: sustained" in the alarm record.
   </div>
 
+  <div class="callout warn">
+    On the CARE-to-Compare Farm A benchmark, disabling the gate on one genuine fault event (event 40) let the per-head rate rule claim alarm across 90% of the scored window instead of 40% — a 55% alarm-burden reduction when the gate is ON. Counterintuitively, the ungated run also reported a much earlier "detection" for that event (60.7h after the labelled fault start, vs. 468.8h with the gate ON). That earlier timestamp is the broken-baseline symptom firing from t=0, not genuine onset detection — the gate trades an illusory early detection for an honest late one. The gate had zero effect on any normal event's false-alarm outcome in this run; its measured effect is alarm quality, not binary recall.
+  </div>
+
   <div class="chart-card">
     <div class="chart-title">Alarm rules interactive demo</div>
     <div class="chart-controls">
@@ -798,7 +823,7 @@ avail_thr = max(48h_samples, p95_stop × 1.5 + 1)
       <tr><td>PCA-T²</td><td>Same 5-component PCA</td><td>T² array</td><td>Dataset moves to different region of PC space in fault zone — high T²</td></tr>
       <tr><td>IForest</td><td>100 trees, 2048 samples</td><td>Anomaly scores</td><td>Vibration spikes during bearing fault are easily isolated</td></tr>
       <tr><td>GMM</td><td>BIC picks k=2</td><td>NLL scores</td><td>Fault state is low-likelihood under either component</td></tr>
-      <tr><td>OMR</td><td>Per-sensor PCA</td><td>Per-sensor residuals</td><td>bearing_temp_1, bearing_temp_2 top the culprit ranking</td></tr>
+      <tr><td>OMR</td><td>One multivariate model (PLS/Ridge/PCA)</td><td>Top-3 per-feature residual mean</td><td>bearing_temp_1, bearing_temp_2 top the culprit ranking</td></tr>
       <tr><td>Calibration</td><td>Holdout raw scores</td><td>Z-scores (one per detector)</td><td>Contamination filter removes a few early fault events from holdout</td></tr>
       <tr><td>Fusion</td><td>6 Z-score arrays</td><td>Fused Z-score</td><td>Score builds from Z≈1 at normal to Z≈4–6 in fault zone</td></tr>
       <tr><td>Alarm rules</td><td>Fused Z, train fused</td><td>ALERT mask</td><td>R1 fires at row ~30,000 (≈1h after first sustained elevation)</td></tr>
@@ -825,8 +850,20 @@ avail_thr = max(48h_samples, p95_stop × 1.5 + 1)
   <h3>Scoring at CARE scale</h3>
   <p>The CARE-to-Compare dataset has 95 labelled wind-turbine fault events across three farms (86–957 sensors each). ACM runs unsupervised against this benchmark. The interleaved split, contamination filtering, and alarm rules are the same — only the sensor count and cadence differ (10-minute SCADA).</p>
 
+  <div class="table-wrap">
+    <table>
+      <tr><th>Metric</th><th>Farm A (22 events: 12 anomaly, 10 normal)</th></tr>
+      <tr><td>Event recall</td><td class="mono-cell">1.00</td></tr>
+      <tr><td>Event precision</td><td class="mono-cell">0.857</td></tr>
+      <tr><td>Event F1</td><td class="mono-cell">0.923</td></tr>
+      <tr><td>Median lead time (early detections)</td><td class="mono-cell">12.2h</td></tr>
+      <tr><td>KPI (recall ≥ 0.80 and F1 ≥ 0.75)</td><td class="mono-cell">PASS</td></tr>
+    </table>
+  </div>
+  <p>Zero runtime labels were used to produce this result — labels touch the pipeline only in the evaluator (<code>scripts/care_benchmark.py: evaluate()</code>). An ablation across five configurations (full system, no contamination filter, no self-distrust gate, equal fusion weights, no OMR) reproduced this exact KPI in all five — Farm A's 22 events are too small a set for any single component to flip a detection outcome. The components instead show up in score quality and alarm honesty: see the contamination-filter, self-distrust, and OMR callouts in Chapters 4, 5, and 7. Farms B (37 events / 257 sensors) and C (36 events / 957 sensors) are not yet analyzed.</p>
+
   <div class="callout ok">
-    You can reproduce this pipeline on any of the 10 pre-built fault CSVs in <code>sim_data/sample/</code>: <code>python scripts/acm_run.py --csv sim_data/sample/fault_rotary_bearing.csv --timestamp-col time_stamp --score-days 60 --report bearing.html</code>
+    You can reproduce this pipeline on any of the 10 pre-built fault CSVs in <code>sim_data/sample/</code>: <code>python scripts/acm_run.py --csv sim_data/sample/fault_rotary_bearing.csv --timestamp-col time_stamp --score-days 60 --report bearing.html</code>. To reproduce the CARE benchmark: <code>python scripts/download_care_benchmark.py --dest care_data --farms A</code> then <code>python scripts/care_benchmark.py --data-dir "care_data/Wind Farm A" --out results/A/ --workers 4</code>. Ablation runs use the <code>--override</code> JSON flag, e.g. <code>--override '{"thresholds": {"contamination_filter": {"enabled": false}}}'</code>.
   </div>
 
   <h3>Key numbers at a glance</h3>
