@@ -1,7 +1,7 @@
 # ACM — Codebase Knowledge Base
 
 > Maintained for future agents. Update this file whenever you learn something new about the codebase.
-> Last updated: 2026-06-17 — ML pipeline bug fixes (#61-#67) + research paper planning / CARE ablation session
+> Last updated: 2026-06-17 — ML pipeline bug fixes (#61-#67) + research paper planning / CARE ablation session + GMM PCA pre-reduction fix (Farm C generality)
 
 ---
 
@@ -1511,6 +1511,72 @@ were supposed to either confirm or complicate that result, and they complicate i
 C points at a specific, fixable-looking detector issue; SMD points at a broader calibration
 question. Per the ML Improvement Loop, the next step is investigation and planning, not an
 immediate code change.
+
+### GMM PCA pre-reduction fix — implemented and validated (2026-06-17)
+
+Per the ML Improvement Loop, the Farm C GMM root cause above was investigated, planned, implemented,
+and re-validated against Farm A before being considered done.
+
+**Root cause, confirmed with measured numbers** (not just hypothesized): Farm A and Farm C have
+nearly identical training row counts post-subsample (~10,000, from `models.max_train_samples`)
+but very different engineered feature counts — Farm A 616, Farm C 2,629 (4.3x more, driven by
+957 raw sensors vs 86). `GMMDetector` uses `covariance_type="diag"`, which estimates 2 parameters
+(mean, variance) per feature per component. At k=3 components this gives Farm A ~3.25
+samples/feature/component vs Farm C's ~0.76 (less than 1) — severe parameter starvation that
+produces unreliable likelihoods, confirmed as the dominant cause of Farm C's false alarms and
+self-distrust-gated missed detections (see Farm C analysis above).
+
+**Fix**: `GMMDetector.fit()` (`core/outliers.py`) now reduces the scaled feature matrix to a
+**whitened PCA subspace** before fitting the mixture model, sized adaptively from training sample
+count and the GMM's k budget (`d_budget = n_samples / (min_samples_per_param * k_for_budget * 2)`),
+capped by a hard ceiling (`max_pca_components`). This decouples GMM reliability from raw
+sensor/feature count entirely — a general fix, not a Farm-C-specific patch. Two independent
+justifications: (1) caps the parameter count regardless of how many engineered features exist;
+(2) PCA decorrelation makes the diagonal-covariance independence assumption more valid everywhere,
+not just on wide-sensor assets (precedented: Tipping & Bishop 1999, Mixtures of Probabilistic PCA).
+`score()` applies the same fitted PCA transform. New `ml_defaults.py` keys under `models.gmm`:
+`max_pca_components: 25`, `min_samples_per_param: 10.0`.
+
+**`whiten=True` is required, not optional** — discovered during validation, not anticipated in the
+design. Unwhitened `PCA` leaves trailing low-variance components (decreasing eigenvalues by
+construction); feeding those into a diag-covariance `GaussianMixture` caused outright fit failure
+("ill-defined empirical covariance") on Farm A during the first validation pass. Whitening rescales
+every component to unit variance before the GMM sees it, which is the standard, mathematically
+correct pairing for "PCA + diagonal-covariance density model" and fixed the failure completely.
+
+**Farm A re-validation (22 events) — improved, not just neutral:**
+| Metric | Before | After |
+|---|---|---|
+| recall | 1.0 | 1.0 (unchanged, 12/12) |
+| precision | 0.857 | 0.923 (false positives 2→1) |
+| F1 | 0.923 | 0.960 |
+
+**Farm C (58 events) — substantial improvement, KPI still FAIL:**
+| Metric | Before | After |
+|---|---|---|
+| recall | 0.556 (15/27) | 0.593 (16/27) |
+| precision | 0.625 | 0.842 |
+| F1 | 0.588 | 0.696 |
+| false alarms (of 31 normal) | 9 | 3 |
+| KPI | FAIL | FAIL (need recall≥0.80, F1≥0.75) |
+
+False alarms dropped 9→3 and the GMM-driven false-alarm/broken-baseline pattern that dominated the
+prior failure signature (`+heads:gmm_z` in 8/9 false alarms, GMM in 5/12 distrust-gated misses) is
+now almost entirely gone — only 1 of the 3 remaining false alarms involves `gmm_z`, and only 1 of
+the 11 remaining missed anomalies is distrust-gated (`asset 23`, `iforest_z,gmm_z`). The fix did
+exactly what it was designed to do.
+
+**New dominant remaining gap on Farm C (not yet investigated)**: 10 of the 11 missed anomalies now
+have an **empty `rule_fired`** — the fused score never crosses `alert_z_eff` at all. This is the
+same "separate, not-yet-diagnosed gap" flagged in the original Farm C analysis above (previously
+7 events, now the GMM fix has shifted several previously-distrusted events into this bucket
+instead — e.g. event 67 went from `(distrusted:heads:gmm_z)` to empty). This is now Farm C's
+primary blocker and the natural next ML Improvement Loop candidate, distinct from the GMM
+dimensionality issue just fixed.
+
+**Files changed**: `core/outliers.py` (`GMMDetector.__init__`/`.fit()`/`.score()`),
+`core/ml_defaults.py` (`models.gmm.max_pca_components`, `models.gmm.min_samples_per_param`).
+All 16 `test_ml.py` tests pass unchanged.
 
 ---
 
