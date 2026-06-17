@@ -17,6 +17,15 @@ Event-level KPI: PASS requires recall >= 0.80 and F1 >= 0.75.
 """
 from __future__ import annotations
 
+# Cap BLAS threads before numpy is imported anywhere in this process: forking
+# a ProcessPoolExecutor worker while OpenBLAS holds a thread-pool lock in the
+# parent can deadlock the child permanently. Must run before any numpy import.
+import os
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
+
 import argparse
 import json
 import sys
