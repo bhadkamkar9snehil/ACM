@@ -1396,6 +1396,30 @@ Tracked in GitHub issue #70. Goal: prove ACM generalizes beyond CARE-tuned wind-
 running the *same* `ML_DEFAULTS` (zero per-dataset hand-tuning) against other public, label-backed
 anomaly-detection benchmarks.
 
+### The ML Improvement Loop (standing methodology — apply to every dataset)
+> *Added: 2026-06-17*
+
+The point of multi-dataset testing is not to win each benchmark individually — it's to learn
+where ACM's *general* ML pipeline can genuinely be improved, irrespective of domain. Every
+dataset run follows this loop:
+
+1. **Run** ACM on the dataset with the SAME `ML_DEFAULTS` used everywhere else — zero
+   per-dataset tuning (per issue #70's non-goal).
+2. **If a result suggests a real pipeline gap, document it first.** Write down what was
+   observed and why it looks like a genuine general limitation rather than a dataset-protocol
+   mismatch (see the SKAB rule below for how to tell the difference — a dataset whose own
+   protocol conflicts with ACM's domain assumptions is a dataset-selection failure, not a
+   finding to act on).
+3. **Plan before touching code.** Think through the change's impact on the *general* pipeline:
+   does it help broadly across domains, or does it just patch this one dataset? Could it
+   degrade the validated Farm A / CARE baseline?
+4. **Only once satisfied it's a genuine general improvement, implement it.**
+5. **Re-validate Farm A/CARE after every change** — an improvement that breaks the validated
+   baseline is not acceptable, no exceptions.
+6. **Repeat across datasets.** This is a cumulative credibility-building process — keep adding
+   benchmarks until there's enough multi-dataset evidence to credibly claim ACM generalizes,
+   not a single pass/fail check.
+
 ### SKAB (Skoltech Anomaly Benchmark) — tried, rejected as a benchmark target
 
 Cloned `https://github.com/waico/SKAB.git` to `external_benchmarks/SKAB/`, built
