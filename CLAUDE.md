@@ -1,7 +1,7 @@
 # ACM — Codebase Knowledge Base
 
 > Maintained for future agents. Update this file whenever you learn something new about the codebase.
-> Last updated: 2026-06-17 — ML pipeline bug fixes (#61-#67) + research paper planning / CARE ablation session + GMM PCA pre-reduction fix (Farm C generality) + OMR in-sample-bias/premature-clip fix + targeted Farm C re-validation
+> Last updated: 2026-06-17 — ML pipeline bug fixes (#61-#67) + research paper planning / CARE ablation session + GMM PCA pre-reduction fix (Farm C generality) + OMR in-sample-bias/premature-clip fix + targeted Farm C re-validation + self-distrust gate magnitude-saturation fix
 
 ---
 
@@ -40,9 +40,10 @@
 31. [Cross-Dataset Generality Testing (2026-06-17)](#cross-dataset-generality-testing-2026-06-17--skab-rejected-rule-established)
 32. [GMM RobustScaler IQR-collapse fix (2026-06-17)](#gmm-robustscaler-iqr-collapse-fix--feature-z-clip-before-pca-2026-06-17)
 33. [OMR in-sample-bias + premature-clip fix (2026-06-17)](#omr-in-sample-bias--premature-clip-fix--out-of-sample-recalibration-2026-06-17)
-34. [Farm C targeted re-validation after the OMR fix (2026-06-17)](#farm-c-targeted-re-validation-after-the-omr-fix-2026-06-17) ← **Latest work session**
-35. [Known Issues (Track as GitHub Issues)](#known-issues-track-as-github-issues)
-36. [User Working Style](#user-working-style)
+34. [Farm C targeted re-validation after the OMR fix (2026-06-17)](#farm-c-targeted-re-validation-after-the-omr-fix-2026-06-17)
+35. [Self-distrust gate magnitude-saturation fix (2026-06-17)](#self-distrust-gate-magnitude-saturation-fix-2026-06-17) ← **Latest work session**
+36. [Known Issues (Track as GitHub Issues)](#known-issues-track-as-github-issues)
+37. [User Working Style](#user-working-style)
 
 ---
 
@@ -1794,6 +1795,176 @@ farm-wide recall/precision/F1 numbers in the paper.
 
 **Files**: no code changes in this entry — diagnostic re-run only. `results/farm_c_omr_fix/`
 (gitignored) holds the 14-event `results.csv`/`summary.json`.
+
+---
+
+## Self-distrust gate magnitude-saturation fix (2026-06-17)
+> *Added: 2026-06-17 — fixes the exact bug surfaced in the "Farm C targeted re-validation" section above*
+
+The previous section left a specific, named gap: on Farm C events 9, 47, and 70, OMR (and on
+event 70, IForest) could finally fire after the OMR in-sample-bias fix, but the self-distrust gate
+discarded all three as "broken baseline" symptoms — genuine anomalies suppressed as false
+positives. This section documents the root-cause analysis, the corrected fix, and full validation.
+
+### Why the gate's existing corroboration check was structurally wrong
+
+`_broken_baseline()`'s score-side signature (coverage > 50% of the window AND first alarm within
+5% of window start) is inherently ambiguous: it matches BOTH a broken/contaminated baseline AND a
+genuine fault that was already fully developed when scoring began (CARE event labels sometimes
+place `event_start` at the train/score boundary — zero observable lead time is possible by
+construction). An earlier attempt at this session tried to resolve the ambiguity with a "Phase I"
+check: would the rule's own training/calibration reference also have tripped the same derived
+threshold (`calib_frac`, the training-side worst rolling-rate)? Measured directly against real
+CARE events, this discriminated in the WRONG direction:
+
+| Event | Label | `calib_frac` |
+|---|---|---|
+| Farm A 92 | confirmed false alarm (broken baseline) | 0.198 |
+| Farm C 9 | confirmed genuine anomaly | 0.282 |
+| Farm C 47 | confirmed genuine anomaly | 0.444 |
+| Farm C 70 | confirmed genuine anomaly | 0.292 |
+
+The false alarm had the LOWEST `calib_frac`, not the highest — the opposite of what the gate
+needs to discard it correctly. It was also structurally tautological for the rate/per-head rules
+specifically: their thresholds (`thr_h = base_h * SAFETY + 0.05`) are built with a 1.5x safety
+margin above training's own observed maximum, so training can essentially never cross its own
+derived threshold regardless of fit quality (`calib_frac` measured ~0.0000 in that framing). This
+`calib_frac` approach was implemented, measured, and discarded entirely within this session — it
+never shipped.
+
+### The corrected discriminator: raw z-score saturation near the universal hard clip
+
+`core/fuse.py`'s `ScoreCalibrator` clips every calibrated z-score twice: a per-run self-tuned
+`clip_z` (observed values like 20.32, 33.46 — always well above 10 in practice), and then an
+unconditional, dataset-independent hard clip to exactly **±10.0** (`np.clip(z, -10.0, 10.0)`,
+appearing identically at multiple points in `core/fuse.py`). Because the self-tuned `clip_z` is
+always looser than 10.0 in practice, the ±10.0 hard clip is the actual binding ceiling for every
+detector on every asset — making "z >= 9.0" (90% of that ceiling) a principled, dataset-independent
+threshold rather than a per-dataset magic number.
+
+The intuition: a contaminated/mis-fit baseline drifts only moderately past its own derived
+threshold (it takes the 1.5x safety margin just to fire at all) — it never saturates the shared
+calibrated z-scale. A genuine catastrophic fault overwhelms the model's learned relationships
+entirely, pegging the z-score near the universal ceiling. This is magnitude evidence, independent
+of timing, so it doesn't inherit the "zero lead time is possible by construction" ambiguity that
+sank the timing-only check.
+
+Verified directly against the same 4 events (`/tmp/saturation_diag.py`, not committed) before
+writing any fix code:
+
+| Event | Label | `median_z_in_mask` | `frac_z>=9_in_mask` |
+|---|---|---|---|
+| Farm A 92 | false alarm | 4.17 | 0.051 |
+| Farm C 9 | genuine anomaly | 8.03 | 0.465 |
+| Farm C 47 | genuine anomaly | 10.00 | 1.000 |
+| Farm C 70 | genuine anomaly | 10.00 | 1.000 |
+
+A clean ~10x gap separates the false alarm from all three genuine faults, well clear of any
+reasonable threshold.
+
+### Fix (`core/alarm_rules.py`)
+
+Two new module constants:
+```python
+SATURATION_Z = 9.0
+SATURATION_FRAC_FLOOR = 0.2
+```
+`_broken_baseline()` signature changed from `(mask, eval_start, calib_frac)` to
+`(mask, eval_start, z_values)` — it now takes the actual score-side z-score array (not a single
+training-side scalar) and only discards when the timing signature is ambiguous AND the magnitude
+evidence inside the masked region is also mild:
+```python
+def _broken_baseline(mask, eval_start, z_values):
+    if mask.mean() <= distrust_coverage:
+        return False
+    first = int(np.argmax(mask))
+    if first > eval_start + max(1, int(0.05 * n)):
+        return False
+    zv = np.asarray(z_values, dtype=np.float64)
+    if zv.shape[0] != mask.shape[0]:
+        return True
+    z_in_mask = zv[mask]
+    if z_in_mask.size == 0:
+        return True
+    near_sat = float(np.mean(z_in_mask >= SATURATION_Z))
+    return near_sat < SATURATION_FRAC_FLOOR
+```
+Called with `fused` for the sustained/rate rules and with each head's own score-side z-array for
+the per-head rule (evaluated per-head, not aggregated — one head saturating keeps firing even if
+another head's signature looks like a broken baseline). The old `train_sustained_frac`/
+`calib_frac` computation block was removed entirely; diagnostic dict keys renamed to
+`train_max_rate` (was `calib_frac`) to reflect that it's purely informational now, not part of the
+distrust decision.
+
+### Validation
+
+**1. Isolated 4-event diagnostic** (`/tmp/verify_fix.py`, direct `score_asset()` calls, not the
+benchmark harness) — exact target behavior confirmed:
+```
+Wind Farm A event  92 (FALSE ALARM - must stay distrusted)        rule_fired='(distrusted:heads:omr_z)'
+Wind Farm C event   9 (genuine anomaly - must NOT be distrusted)   rule_fired='+heads:omr_z'
+Wind Farm C event  47 (genuine anomaly - must NOT be distrusted)   rule_fired='+heads:omr_z'
+Wind Farm C event  70 (genuine anomaly - must NOT be distrusted)   rule_fired='+heads:iforest_z,omr_z'
+```
+
+**2. `tests/test_ml.py`** — the old calib_frac-based distrust tests were replaced with
+`test_distrust_gate_discards_moderate_always_on` (moderate always-on head, median ~4, still
+discarded) and `test_distrust_gate_keeps_saturated_always_on` (near-saturation always-on head,
+median ~9.5, NOT discarded despite having zero quiet prefix). All 17 tests in the file pass.
+
+**3. Full Farm A 22-event re-validation (zero-regression requirement, "no exceptions")** —
+**exact match** to the pre-existing validated baseline:
+
+| Metric | Before this fix | After this fix |
+|---|---|---|
+| recall | 1.0 (12/12) | 1.0 (12/12) |
+| precision | 0.857 | 0.857 |
+| F1 | 0.923 | 0.923 |
+| false alarms | events 17, 71 | events 17, 71 (identical) |
+
+Event 92 (the false alarm used in the diagnostic) is on Farm A but outside the 22-event labelled
+benchmark set used for the KPI table — its `results.csv` row independently confirms
+`detected=False, rule_fired='(distrusted:heads:omr_z)'`, i.e. the fix did not let it through.
+
+**4. Farm C targeted 14-event re-validation** (`results/farm_c_satfix/`, the same event_id subset
+used in the prior "Farm C targeted re-validation after the OMR fix" section: 11 missed anomalies +
+3 known false alarms) — the target bug is fixed, with no new false alarms and no regressions on
+the other events:
+
+| Event | Label | Before this fix | After this fix |
+|---|---|---|---|
+| 4 | anomaly | empty | empty (unchanged) |
+| 9 | anomaly | `(distrusted:heads:omr_z)` | **`+heads:omr_z` — newly detected** |
+| 15 | anomaly | empty | empty (unchanged) |
+| 35 | anomaly | empty | empty (unchanged) |
+| 47 | anomaly | `(distrusted:heads:omr_z)` | **`+heads:omr_z` — newly detected** |
+| 55 | anomaly | `+heads:omr_z` (detected) | `+heads:omr_z` (unchanged) |
+| 67 | anomaly | empty | empty (unchanged) |
+| 70 | anomaly | `(distrusted:heads:iforest_z,omr_z)` | **`+heads:iforest_z,omr_z` — newly detected** |
+| 76 | anomaly | empty | empty (unchanged) |
+| 78 | anomaly | empty | empty (unchanged) |
+| 90 | anomaly | `+rate` (detected) | `+rate` (unchanged) |
+| 54 | normal | `+heads:pca_spe_z` (false alarm) | `+heads:pca_spe_z` (unchanged false alarm) |
+| 88 | normal | `+rate` (false alarm) | `+rate` (unchanged false alarm) |
+| 94 | normal | `+heads:ar1_z` (false alarm) | `+heads:ar1_z` (unchanged false alarm) |
+
+Subset recall: 2/11 → 5/11 (the exact +3 swing is events 9, 47, 70 — the events this fix targeted).
+All 3 known false alarms persist unchanged: none cleared, none newly introduced. 6 events (4, 15,
+35, 67, 76, 78) remain unchanged with an empty `rule_fired` — that is the separate, still-open
+"fused score never crosses `alert_z_eff`" gap noted in the GMM PCA pre-reduction section, not this
+fix's target, and was correctly left untouched.
+
+**Read on scope**: this fix corrects how the self-distrust gate corroborates an ambiguous timing
+signature. It does not and cannot fix events whose fused score never elevates in the first place
+(events 4, 15, 35, 67, 76, 78) — that is a different, not-yet-investigated gap. Per the standing ML
+Improvement Loop methodology, do not chase that gap by loosening this gate further; it needs its
+own root-cause investigation.
+
+**Files changed**: `core/alarm_rules.py` (`SATURATION_Z`/`SATURATION_FRAC_FLOOR` constants,
+`_broken_baseline()` rewritten to take a z-value array instead of a training-side scalar, removed
+`train_sustained_frac`/`calib_frac` computation, diagnostic key renamed to `train_max_rate`),
+`tests/test_ml.py` (`test_distrust_gate_discards_moderate_always_on`,
+`test_distrust_gate_keeps_saturated_always_on` replace the old calib_frac-based tests).
 
 ---
 

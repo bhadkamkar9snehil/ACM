@@ -31,6 +31,14 @@ ALERT_Z_FLOOR = 3.0
 SAFETY = 1.5
 DISTRUST_COVERAGE = 0.5
 
+# core/fuse.py's ScoreCalibrator hard-clips every calibrated z-score to
+# +/-10.0 as a universal, dataset-independent ceiling (the same code path
+# for every detector on every asset). SATURATION_Z sits at 90% of that
+# ceiling -- "pegged near the top of the calibrated scale" -- and is used
+# by the self-distrust gate's magnitude corroboration below.
+SATURATION_Z = 9.0
+SATURATION_FRAC_FLOOR = 0.2
+
 # Rule horizons are defined in TIME and converted to sample counts from the
 # asset's own cadence. Sample-count constants silently broke semantics off
 # the 10-minute SCADA cadence: at 1 Hz, a "24h" 144-sample window was 2.4
@@ -157,6 +165,51 @@ def apply_alarm_rules(
                                             max_persist=max_persist)
     alarm_sustained = sustained_alarm_mask(fused, alert_z, persist)
 
+    # SELF-DISTRUST evidentiary check: a score-side "fires from t=0, claims
+    # the majority of the window" signature is ambiguous on its own -- it's
+    # also exactly what a fault that was already fully developed when
+    # scoring began looks like (CARE event labels sometimes place
+    # event_start AT the train/score boundary, i.e. zero lead time is
+    # possible by construction, and CARE's own event descriptions
+    # occasionally note true onset likely precedes the labeled timestamp).
+    #
+    # An earlier version of this gate tried to resolve the ambiguity by
+    # checking whether the rule's OWN training/calibration reference would
+    # also trip it ("Phase I" exceedance fraction). That check was measured
+    # against real CARE events and found to discriminate in the WRONG
+    # direction: a confirmed broken-baseline false alarm (Farm A event 92)
+    # had a LOWER calibration-side exceedance than confirmed genuine,
+    # zero-lead-time anomalies (Farm C events 9/47/70) that must NOT be
+    # discarded. For the per-head/rate rules specifically it was also
+    # tautological -- their thresholds are the training data's own observed
+    # maximum plus a safety margin, so training can essentially never cross
+    # its own derived threshold regardless of fit quality.
+    #
+    # The signal that DOES separate these cases is magnitude, not timing or
+    # calibration exceedance: the broken-baseline false alarm's z stayed
+    # moderate (median ~4, near the 1.5x-safety-margin threshold it took to
+    # fire at all). The genuine catastrophic faults saturate the shared
+    # calibrated z-scale -- median 8-10, mostly pegged at the universal hard
+    # clip. A contaminated/mis-fit baseline drifts past its own rule by a
+    # little; a real severe fault overwhelms the model's learned
+    # relationships entirely. Only discard when the magnitude evidence ALSO
+    # looks mild -- never for a saturated signal, no matter how early/wide
+    # its onset.
+    def _broken_baseline(mask: np.ndarray, eval_start: int, z_values: np.ndarray) -> bool:
+        if mask.mean() <= distrust_coverage:
+            return False
+        first = int(np.argmax(mask))
+        if first > eval_start + max(1, int(0.05 * n)):
+            return False
+        zv = np.asarray(z_values, dtype=np.float64)
+        if zv.shape[0] != mask.shape[0]:
+            return True
+        z_in_mask = zv[mask]
+        if z_in_mask.size == 0:
+            return True
+        near_sat = float(np.mean(z_in_mask >= SATURATION_Z))
+        return near_sat < SATURATION_FRAC_FLOOR
+
     # z0 is the universal "clearly elevated" level on the CALIBRATED scale:
     # calibration already standardizes detectors, so re-deriving z0 from the
     # holdout's p99 (a 12th-largest-of-1200 statistic) was fragile double
@@ -167,6 +220,7 @@ def apply_alarm_rules(
     rate_n = int(np.isfinite(train_fused).sum()) if train_fused is not None else 0
     diag: Dict = {"rate": {"active": rate_n > 500, "train_n": rate_n},
                   "per_head": {}}
+    base = 0.0
     if rate_n > 500:
         tf = np.asarray(train_fused, dtype=np.float64)
         tf = tf[np.isfinite(tf)]
@@ -178,6 +232,7 @@ def apply_alarm_rules(
         score_rate = np.nan_to_num(rolling_rate(fused, z0, window=rate_window), nan=0.0)
         alarm_rate = sustained_alarm_mask(score_rate, rate_thr, persist_floor)
         diag["rate"]["thr"] = rate_thr
+        diag["rate"]["train_max_rate"] = base
 
     avail_run_thr = None
     alarm_avail = np.zeros(n, dtype=bool)
@@ -203,7 +258,9 @@ def apply_alarm_rules(
                 alarm_avail[i] = True
 
     heads_fired: List[str] = []
+    heads_distrusted: List[str] = []
     alarm_heads = np.zeros(n, dtype=bool)
+    head_eval_start = head_window // 2 + persist_floor
     if head_z_score and head_z_train:
         for name, z_tr in head_z_train.items():
             z_sc = head_z_score.get(name)
@@ -220,31 +277,27 @@ def apply_alarm_rules(
             r_sc = np.nan_to_num(rolling_rate(np.asarray(z_sc, dtype=np.float64), z0_h,
                                               window=head_window), nan=0.0)
             mask_h = sustained_alarm_mask(r_sc, thr_h, persist_floor)
-            diag["per_head"][name] = {"active": True, "train_n": int(ztr.size), "thr": thr_h}
-            if mask_h.any():
-                heads_fired.append(name)
-                alarm_heads |= mask_h
-
-    # SELF-DISTRUST: a drifted baseline alarms from the very START of the
-    # window; a genuine sustained fault has an ONSET (a quiet prefix).
-    # Distrust a behaviour rule only when it claims the majority of the
-    # window AND never left a quiet prefix. "Start" is each rule's first
-    # EVALUABLE sample (rolling statistics cannot fire before their window
-    # fills). Availability exempt: a failed asset IS down most of the window.
-    def _broken_baseline(mask: np.ndarray, eval_start: int) -> bool:
-        if mask.mean() <= distrust_coverage:
-            return False
-        first = int(np.argmax(mask))
-        return first <= eval_start + max(1, int(0.05 * n))
+            diag["per_head"][name] = {"active": True, "train_n": int(ztr.size), "thr": thr_h,
+                                       "train_max_rate": base_h}
+            if not mask_h.any():
+                continue
+            # Per-head, not aggregated: distrust is evaluated against each
+            # head's own score-side magnitude -- a head genuinely saturating
+            # the calibrated scale keeps firing even if another head's
+            # signature looks like a broken baseline.
+            if _broken_baseline(mask_h, head_eval_start, np.asarray(z_sc, dtype=np.float64)):
+                heads_distrusted.append(name)
+                continue
+            heads_fired.append(name)
+            alarm_heads |= mask_h
 
     distrusted: List[str] = []
-    if _broken_baseline(alarm_sustained, persist):
+    if _broken_baseline(alarm_sustained, persist, fused):
         distrusted.append("sustained"); alarm_sustained = np.zeros(n, dtype=bool)
-    if _broken_baseline(alarm_rate, rate_window // 2 + persist_floor):
+    if _broken_baseline(alarm_rate, rate_window // 2 + persist_floor, fused):
         distrusted.append("rate"); alarm_rate = np.zeros(n, dtype=bool)
-    if _broken_baseline(alarm_heads, head_window // 2 + persist_floor):
-        distrusted.append("heads:" + ",".join(heads_fired))
-        heads_fired, alarm_heads = [], np.zeros(n, dtype=bool)
+    if heads_distrusted:
+        distrusted.append("heads:" + ",".join(heads_distrusted))
 
     return AlarmDecision(
         alarm=alarm_sustained | alarm_rate | alarm_avail | alarm_heads,

@@ -200,15 +200,36 @@ class TestAlarmRules:
         assert d.alarm_avail.any(), "extended outage not flagged by availability rule"
         assert not d.alarm_avail[:500 + 287].any(), "availability fired before 48h of outage"
 
-    def test_distrust_gate_discards_always_on(self):
+    def test_distrust_gate_discards_moderate_always_on(self):
+        # Score-side coverage+early-onset alone is ambiguous: it also matches
+        # a real fault that was already fully developed when scoring began
+        # (zero observable lead time). The discriminator is MAGNITUDE: a
+        # broken/contaminated baseline drifts only moderately past the rule's
+        # own threshold (it takes a 1.5x safety margin to fire at all) --
+        # it never saturates the shared calibrated z-scale.
         n = 3000
-        head = np.full(n, 9.0)                            # head pegged the whole window
+        head = 4.0 + RNG.normal(0, 0.3, n)                 # moderate, sustained exceedance
         d = apply_alarm_rules(
             fused=np.zeros(n), train_fused=RNG.normal(0, 1, 5000),
             head_z_score={"omr_z": head},
             head_z_train={"omr_z": RNG.normal(0, 1, 5000)})
-        assert not d.alarm.any(), "always-on head not discarded"
+        assert not d.alarm.any(), "moderate-magnitude broken-baseline head not discarded"
         assert any("heads" in x for x in d.distrusted)
+
+    def test_distrust_gate_keeps_saturated_always_on(self):
+        # A genuine catastrophic fault overwhelms the model's learned
+        # relationships entirely, saturating the shared calibrated z-scale
+        # near its universal hard clip (+/-10.0 in core/fuse.py) -- unlike a
+        # mis-fit baseline, which only drifts past its own threshold. This
+        # must NOT be discarded just because it has no quiet prefix.
+        n = 3000
+        head = 9.5 + RNG.normal(0, 0.3, n)                 # near-saturation, realistically varying
+        d = apply_alarm_rules(
+            fused=np.zeros(n), train_fused=RNG.normal(0, 1, 5000),
+            head_z_score={"omr_z": head},
+            head_z_train={"omr_z": RNG.normal(0, 1, 5000)})
+        assert d.alarm.any(), "genuine saturated detection was discarded as a broken baseline"
+        assert not any("heads" in x for x in d.distrusted)
 
 
 if __name__ == "__main__":
