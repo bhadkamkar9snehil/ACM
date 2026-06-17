@@ -277,7 +277,8 @@ Mirror of the PowerShell script for Linux/macOS:
 
 - Zenodo URL: `https://zenodo.org/records/15846963/files/CARE_To_Compare.zip?download=1`
 - Farm A: 22 events × ~36 MB (~800 MB total), 86 sensor features per event, CSV per event
-- Farm B: 37 events, 257 features; Farm C: 36 events, 957 features
+- Farm B: 37 events, 257 features; Farm C: 58 events (31 normal / 27 anomaly), 957 features
+  (corrected 2026-06-17 — prior "36 events" was wrong, never verified against actual `event_info.csv`)
 - CSV columns: `time_stamp`, `status_type_id`, sensor columns, `train_test`
 - Download: `python scripts/download_care_dataset.py --dest sim_data/sample --farms A --count 10`
   - `--count N` applies to CSV files only (keeps README); N=10 ≈ 360 MB
@@ -1373,14 +1374,70 @@ quality, where every component justified its presence:
 
 **Framing for the paper:** Farm A alone (22 events) cannot demonstrate these components changing
 binary detection outcomes — say so plainly rather than overclaiming. Farms B/C (more
-events/sensors) are needed to test whether any ablation moves recall/F1; that analysis is
-deferred (see below).
+events/sensors) are needed to test whether any ablation moves recall/F1.
 
-### Deferred: Farm B / Farm C analysis
+### Farm C — corrected scale (58 events, not 36)
 
-Per explicit user instruction, analysis with datasets beyond Farm A (Farm B: 37 events/257
-sensors, Farm C: 36 events/957 sensors) is deferred to a later session. Do not pre-emptively run
-those benchmarks without being asked.
+CLAUDE.md previously said Farm C has "36 events, 957 features." Corrected after actually
+downloading the metadata: **58 events** (31 normal, 27 anomaly), 957 sensor columns, ~280-340MB
+per event CSV (~16-17GB total for the farm). Farm B remains unverified/untouched.
+
+**Resource profile (measured directly, single event, single worker):** ~157s wall-clock, ~4.5GB
+peak RSS per event. For a full-farm `care_benchmark.py` run, use `--workers 2` (2×4.5GB ≈ 9GB,
+safe on this 15GB container) — do not raise `--workers` without re-checking `free -h` first (see
+mistake #42).
+
+---
+
+## Cross-Dataset Generality Testing (2026-06-17 — SKAB rejected, rule established)
+> *Added: 2026-06-17*
+
+Tracked in GitHub issue #70. Goal: prove ACM generalizes beyond CARE-tuned wind-farm SCADA by
+running the *same* `ML_DEFAULTS` (zero per-dataset hand-tuning) against other public, label-backed
+anomaly-detection benchmarks.
+
+### SKAB (Skoltech Anomaly Benchmark) — tried, rejected as a benchmark target
+
+Cloned `https://github.com/waico/SKAB.git` to `external_benchmarks/SKAB/`, built
+`scripts/skab_benchmark.py` matching its own published train/test convention exactly (first 400
+rows of each of the 34 experiment files = train, remainder = score; metrics = F1/FAR/MAR pooled
+across files, matching SKAB's own README leaderboard table). Result: **zero alarms on all 34
+files** (`results/skab/summary.json`: tp=0, recall=0, F1=0).
+
+**Root cause (confirmed, not a bug):** two SCADA-domain design constants in
+`core/alarm_rules.py` are structurally incompatible with SKAB's protocol:
+1. `PERSIST_FLOOR_S = 3600.0` (1h) — the sustained-rule persistence floor is *never adaptively
+   capped* to the scored window length (unlike `rate_window`/`head_window`, which are). At SKAB's
+   1Hz cadence this is a hard 3600-sample requirement; SKAB's anomalies last minutes, not hours.
+   The code comment at L151 calls this "ACM's declared detection floor for DEVELOPING faults — is
+   never weakened" — i.e. intentional.
+2. Rate/per-head rules require `train_n >= 500` calibration samples to arm. SKAB's 400-row
+   training convention yields only ~64 post-split calibration samples — never arms.
+
+**The detectors themselves DO transfer**: fused z-scores on `valve1/0.csv` show real separation
+(mean 2.77 on true-anomaly rows vs 1.13 on normal rows). It is specifically the alarm-rule layer's
+SCADA-scale assumptions, not the detector ensemble, that don't fit SKAB.
+
+**User's explicit decision on this finding (standing rule — apply to all future dataset
+selection):**
+- **Do not change ACM's alarm-rule thresholds to fit a short-history/short-anomaly-duration
+  dataset.** ACM's intended deployment is industrial assets where sufficient history *will*
+  accumulate over time — the 1h persistence floor and 500-sample arming threshold are correct
+  design choices for that domain, not bugs to patch around.
+- **A dataset whose own canonical protocol (400-row training, sub-15-minute anomalies) conflicts
+  with that domain assumption is the wrong dataset for proving generality** — this is a dataset
+  *selection* failure, not an ACM limitation to fix.
+- Exception: if a genuinely general mechanism is found that resolves this *without degrading
+  Farm A/CARE performance*, it's worth considering — but do not chase one benchmark's protocol
+  with a special case.
+- SKAB is dropped. Do not revisit it or re-litigate the persistence-floor/arming-threshold design
+  for SKAB's sake. `external_benchmarks/SKAB/` and `scripts/skab_benchmark.py` are left in the repo
+  as-is (harmless, not deleted) but are not part of the paper's generality evidence.
+- When searching for replacement datasets, do it directly (WebSearch/WebFetch), not via a research
+  subagent — the user wants the candidate-vetting done first-hand.
+- **Generality criterion going forward:** the dataset must match ACM's actual target domain —
+  industrial/SCADA-style assets with enough accumulated history for hour-to-day-scale fault
+  development — not generic point-anomaly or short-transient benchmarks from unrelated domains.
 
 ---
 
