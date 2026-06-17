@@ -1464,6 +1464,54 @@ selection):**
   industrial/SCADA-style assets with enough accumulated history for hour-to-day-scale fault
   development — not generic point-anomaly or short-transient benchmarks from unrelated domains.
 
+### CARE Farm C — full 58-event results (2026-06-17)
+
+Same `ML_DEFAULTS` as Farm A, zero per-dataset tuning, `--workers 2`. Result:
+`recall=0.556, precision=0.625, F1=0.588, KPI FAIL` (need recall>=0.80, F1>=0.75) — a real
+regression from Farm A's `recall=1.0, F1=0.923`. 15/27 anomaly events detected; 22/31 normal
+events stayed clean (9 false alarms).
+
+**Root cause is concentrated in one detector, not the ensemble or the alarm-rule design**:
+`gmm_z` (the per-head GMM rule) appears in the `rule_fired` string of 35/58 events (60%) and
+is specifically implicated in:
+- **8 of 9 false alarms** on normal operation (`+heads:gmm_z` or `+heads:pca_spe_z,gmm_z`)
+- **5 of 12 missed anomalies** via the self-distrust gate (`(distrusted:heads:gmm_z)` etc. —
+  GMM fires from window start, gets correctly discarded as a broken-baseline symptom, but the
+  anomaly that triggered it goes uncredited)
+
+The other 7 missed anomalies have an empty `rule_fired` (fused score never crossed `alert_z_eff`
+at all — a separate, not-yet-diagnosed gap).
+
+**Working hypothesis (not yet validated, not yet acted on per the ML Improvement Loop above)**:
+GMM density estimation degrades with dimensionality — Farm C's feature matrix is ~3300+ engineered
+columns (957 raw sensors) vs. Farm A's ~600 (86 raw sensors). A diagonal-covariance GMM's
+log-likelihood estimate gets noisier as dimensionality grows (curse of dimensionality), which
+would produce exactly this signature: chronic low-grade false positives on normal data, and
+from-the-start firing that looks like a broken baseline. This has NOT been investigated or fixed
+yet — per the standing methodology, it needs to be documented (done, here), then a fix needs to be
+planned with explicit attention to whether it helps generally (not just Farm C) and whether it
+degrades the validated Farm A result, before any code changes are made.
+
+### SMD — full 28-machine results (2026-06-17)
+
+Same `ML_DEFAULTS`, `--workers 3`. Pointwise: `precision=0.066, recall=0.633, F1=0.119`.
+Point-adjusted (literature convention): `precision=0.074, recall=0.714, F1=0.133`. Segment
+recall: `166/327 (0.508)` anomaly segments caught at least partially.
+
+**Different failure signature than Farm C**: the dominant `rule_fired` string
+(`sustained+rate(distrusted:heads:ar1_z,pca_spe_z,pca_t2_z,iforest_z,gmm_z)`, 7/28 machines) shows
+nearly ALL detectors landing in the distrusted-heads list together, not one detector dominating
+as on Farm C. Mean false-positive rate on normal-labelled points is high (~39%: mean fp=9466 vs
+mean tn=14783 per machine) — this looks more like a threshold/calibration sensitivity issue than
+a single-detector defect. Not yet investigated further.
+
+**Framing for the paper**: both results are honest negative/mixed findings, not failures to hide.
+Farm A was the validation baseline; Farm C and SMD are exactly the generality stress-tests that
+were supposed to either confirm or complicate that result, and they complicate it usefully — Farm
+C points at a specific, fixable-looking detector issue; SMD points at a broader calibration
+question. Per the ML Improvement Loop, the next step is investigation and planning, not an
+immediate code change.
+
 ---
 
 ## Known Issues (Track as GitHub Issues)
