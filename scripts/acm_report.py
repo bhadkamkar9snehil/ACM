@@ -122,8 +122,8 @@ html {
 
 body {
     font-family: var(--font);
-    font-size: 18px;
-    line-height: 1.55;
+    font-size: 20px;
+    line-height: 1.6;
     color: var(--text);
     background: var(--bg);
     margin: 0;
@@ -143,8 +143,8 @@ body {
 }
 
 .header h1 {
-    margin: 0 0 10px 0;
-    font-size: 40px;
+    margin: 0 0 12px 0;
+    font-size: 56px;
     font-weight: 800;
     color: #faf7f3;
     letter-spacing: -0.02em;
@@ -155,7 +155,7 @@ body {
     flex-wrap: wrap;
     gap: 32px;
     margin-top: 16px;
-    font-size: 18px;
+    font-size: 22px;
     font-weight: 600;
     color: #ddd3c8;
 }
@@ -171,7 +171,7 @@ body {
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    font-size: 13.5px;
+    font-size: 15.5px;
     color: #9a8d7d;
 }
 
@@ -186,26 +186,26 @@ section {
 }
 
 h2 {
-    margin: 0 0 22px 0;
-    font-size: 22px;
+    margin: 0 0 24px 0;
+    font-size: 30px;
     font-weight: 800;
     color: var(--ink);
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    padding-bottom: 12px;
+    padding-bottom: 14px;
     border-bottom: 3px solid var(--dark);
 }
 
 h3 {
-    margin: 28px 0 16px 0;
-    font-size: 19px;
+    margin: 30px 0 18px 0;
+    font-size: 25px;
     font-weight: 800;
     color: var(--ink);
 }
 
 h4 {
-    margin: 0 0 4px 0;
-    font-size: 18px;
+    margin: 0 0 6px 0;
+    font-size: 23px;
     font-weight: 800;
     color: var(--ink);
     letter-spacing: -0.01em;
@@ -245,16 +245,16 @@ p {
 
 .kpi-label {
     font-family: var(--mono);
-    font-size: 14px;
+    font-size: 16px;
     color: var(--muted);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.07em;
-    margin-bottom: 12px;
+    margin-bottom: 14px;
 }
 
 .kpi-value {
-    font-size: 48px;
+    font-size: 64px;
     font-weight: 800;
     color: var(--ink);
     font-variant-numeric: tabular-nums;
@@ -267,10 +267,10 @@ p {
 .kpi-value.warn { color: var(--amber); }
 
 .kpi-desc {
-    font-size: 14.5px;
+    font-size: 17px;
     font-weight: 600;
     color: var(--muted);
-    margin-top: 8px;
+    margin-top: 10px;
 }
 
 /* ---- Tables: white inset surface, mono headers, dense industrial rows ---- */
@@ -278,12 +278,12 @@ table {
     border-collapse: collapse;
     width: 100%;
     margin: 0;
-    font-size: 17px;
+    font-size: 20px;
     background: var(--paper);
 }
 
 td, th {
-    padding: 14px 18px;
+    padding: 16px 20px;
     text-align: left;
     border-bottom: 1px solid var(--line);
     vertical-align: top;
@@ -295,7 +295,7 @@ th {
     font-weight: 700;
     color: var(--text);
     text-transform: uppercase;
-    font-size: 13px;
+    font-size: 15.5px;
     letter-spacing: 0.06em;
     border-bottom: 2px solid var(--line2);
 }
@@ -310,7 +310,7 @@ tbody tr:hover {
 
 .rules-text {
     display: block;
-    font-size: 16.5px;
+    font-size: 20px;
     font-weight: 600;
     color: var(--ink);
     line-height: 1.5;
@@ -319,9 +319,9 @@ tbody tr:hover {
 .diag-line {
     display: block;
     font-family: var(--mono);
-    font-size: 14.5px;
+    font-size: 17px;
     color: var(--muted);
-    margin-top: 6px;
+    margin-top: 8px;
     line-height: 1.5;
 }
 
@@ -346,35 +346,35 @@ tbody tr:hover {
     border: 1px solid var(--line);
     border-radius: 6px;
     box-shadow: var(--shadow-inset);
-    padding: 14px 18px;
-    margin-top: 14px;
-    font-size: 16px;
+    padding: 16px 20px;
+    margin-top: 16px;
+    font-size: 19px;
     font-weight: 600;
     color: var(--text);
     line-height: 1.5;
 }
 
 .diag-box + .diag-box {
-    margin-top: 10px;
+    margin-top: 12px;
 }
 
 .diag-label {
     display: block;
     font-family: var(--mono);
-    font-size: 12.5px;
+    font-size: 14.5px;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.08em;
     color: var(--soft);
-    margin-bottom: 6px;
+    margin-bottom: 8px;
 }
 
 /* ---- Status pills: tactile, filled, semantic ---- */
 .badge {
     display: inline-block;
-    padding: 6px 14px;
+    padding: 8px 16px;
     border-radius: 5px;
-    font-size: 14px;
+    font-size: 16px;
     font-weight: 800;
     text-transform: uppercase;
     letter-spacing: 0.05em;
@@ -451,8 +451,8 @@ tbody tr:hover {
 .logs-section summary {
     cursor: pointer;
     font-weight: 700;
-    font-size: 17px;
-    padding: 14px 18px;
+    font-size: 20px;
+    padding: 16px 20px;
     user-select: none;
     color: var(--ink);
     list-style: none;
@@ -468,7 +468,7 @@ tbody tr:hover {
 
 .log-summary {
     font-family: var(--mono);
-    font-size: 14px;
+    font-size: 17px;
     color: var(--muted);
     font-weight: 500;
     margin-left: 10px;
@@ -476,10 +476,10 @@ tbody tr:hover {
 
 .logs-section pre {
     margin: 0;
-    padding: 16px 18px 18px;
+    padding: 18px 20px 20px;
     background: var(--dark3);
     border-top: 1px solid var(--darkLine);
-    font-size: 14px;
+    font-size: 16.5px;
     line-height: 1.6;
     overflow-x: auto;
     font-family: var(--mono);
@@ -494,7 +494,7 @@ tbody tr:hover {
 
 .timestamp {
     font-family: var(--mono);
-    font-size: 15px;
+    font-size: 18px;
     color: var(--muted);
 }
 
@@ -523,7 +523,7 @@ a:hover {
 
 .footer p {
     margin: 0;
-    font-size: 14.5px;
+    font-size: 17px;
     font-weight: 600;
     color: var(--muted);
 }
@@ -552,19 +552,19 @@ a:hover {
     }
 
     h2 {
-        font-size: 19px;
+        font-size: 24px;
     }
 
     .kpi-value {
-        font-size: 32px;
+        font-size: 42px;
     }
 
     table {
-        font-size: 14px;
+        font-size: 17px;
     }
 
     td, th {
-        padding: 9px 11px;
+        padding: 11px 13px;
     }
 }
 
