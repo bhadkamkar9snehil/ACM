@@ -1,7 +1,7 @@
 # ACM — Codebase Knowledge Base
 
 > Maintained for future agents. Update this file whenever you learn something new about the codebase.
-> Last updated: 2026-06-18 — ML pipeline bug fixes (#61-#67) + research paper planning / CARE ablation session + GMM PCA pre-reduction fix (Farm C generality) + OMR in-sample-bias/premature-clip fix + targeted Farm C re-validation + self-distrust gate magnitude-saturation fix + paper draft (Markdown) + detector-enable ablation wiring fix + fusion auto-tuning wiring gap discovered + paper System Architecture section + full Farm C 58-event re-validation (omr_z over-sensitivity found) + OMR kurt/skew exclusion fix (#72) — Farm A exact-match, Farm C mixed result (precision/false-alarms up, recall down 2 events)
+> Last updated: 2026-06-18 — ML pipeline bug fixes (#61-#67) + research paper planning / CARE ablation session + GMM PCA pre-reduction fix (Farm C generality) + OMR in-sample-bias/premature-clip fix + targeted Farm C re-validation + self-distrust gate magnitude-saturation fix + paper draft (Markdown) + detector-enable ablation wiring fix + fusion auto-tuning wiring gap discovered + paper System Architecture section + full Farm C 58-event re-validation (omr_z over-sensitivity found) + OMR kurt/skew exclusion fix (#72) — Farm A exact-match, Farm C mixed result (precision/false-alarms up, recall down 2 events) + Farm B first full result (recall=0.333, worst of 3 farms) + TEP benchmark candidate feasibility confirmed + empty-rule_fired gap root-caused (two mechanisms, not yet fixed) + contamination-filter fix for rate/per-head threshold REJECTED (broke ACM's own false-alarm-resistance tests; cleanly reverted, zero net code change)
 
 ---
 
@@ -45,9 +45,13 @@
 36. [Paper draft + detector-enable ablation wiring fix + fusion auto-tuning wiring gap (2026-06-18)](#paper-draft--detector-enable-ablation-wiring-fix--fusion-auto-tuning-wiring-gap-2026-06-18)
 37. [Farm C full 58-event re-validation after the OMR + self-distrust saturation fixes (2026-06-18)](#farm-c-full-58-event-re-validation-after-the-omr--self-distrust-saturation-fixes-2026-06-18)
 38. [OMR kurt/skew exclusion fix (2026-06-18)](#omr-kurtskew-exclusion-fix--farm-a-exact-match-farm-c-mixed-result-2026-06-18)
-39. [Known Issues (Track as GitHub Issues)](#known-issues-track-as-github-issues)
-40. [Standing Rule: Flag Architecture-Violating Suggestions](#standing-rule-flag-architecture-violating-suggestions-dont-suppress-them) ← **Read before giving any suggestion**
-41. [User Working Style](#user-working-style)
+39. [CARE Farm B — first full result (2026-06-18)](#care-farm-b--first-full-result-2026-06-18)
+40. [New benchmark dataset research — TEP feasibility (2026-06-18)](#new-benchmark-dataset-research--tennessee-eastman-process-feasibility-confirmed-2026-06-18)
+41. [Empty-rule_fired gap root-caused (2026-06-18)](#empty-rule_fired-gap--root-caused-two-distinct-mechanisms-found-not-yet-fixed-open-decision-2026-06-18)
+42. [Contamination-filter fix attempt — rejected (2026-06-18)](#contamination-filter-fix-attempt-for-the-empty-rule_fired-gap--rejected-2026-06-18)
+43. [Known Issues (Track as GitHub Issues)](#known-issues-track-as-github-issues)
+44. [Standing Rule: Flag Architecture-Violating Suggestions](#standing-rule-flag-architecture-violating-suggestions-dont-suppress-them) ← **Read before giving any suggestion**
+45. [User Working Style](#user-working-style)
 
 ---
 
@@ -282,11 +286,15 @@ Mirror of the PowerShell script for Linux/macOS:
 ---
 
 ## CARE-to-Compare Dataset
-> *Added: 2026-06-14 · Last updated: 2026-06-15*
+> *Added: 2026-06-14 · Last updated: 2026-06-18*
 
 - Zenodo URL: `https://zenodo.org/records/15846963/files/CARE_To_Compare.zip?download=1`
 - Farm A: 22 events × ~36 MB (~800 MB total), 86 sensor features per event, CSV per event
-- Farm B: 37 events, 257 features; Farm C: 58 events (31 normal / 27 anomaly), 957 features
+- Farm B: **15 events (6 anomaly / 9 normal)**, 257 features, ~85-100 MB per event (~1.3 GB total)
+  (corrected 2026-06-18 — prior "37 events" was wrong, never verified against actual `event_info.csv`;
+  confirmed directly by downloading via `scripts/download_care_benchmark.py --dest care_data --farms B`
+  and reading `care_data/Wind Farm B/event_info.csv`, which has exactly 15 rows)
+- Farm C: 58 events (31 normal / 27 anomaly), 957 features
   (corrected 2026-06-17 — prior "36 events" was wrong, never verified against actual `event_info.csv`)
 - CSV columns: `time_stamp`, `status_type_id`, sensor columns, `train_test`
 - Download: `python scripts/download_care_dataset.py --dest sim_data/sample --farms A --count 10`
@@ -2220,6 +2228,313 @@ sign off on, not something to merge unilaterally because the headline F1 number 
 `np.partition`). Committed `d6b5cd0`, pushed to `claude/research-paper-planning-ests5l`. Per-event
 diff and summaries: `results/farm_a_kurtskew_fix/`, `results/farm_c_kurtskew_fix/` (both
 gitignored/local).
+
+---
+
+## CARE Farm B — first full result (2026-06-18)
+> *Added: 2026-06-18*
+
+Farm B (15 events: 6 anomaly / 9 normal, 257 features) was downloaded for the first time this
+session (`scripts/download_care_benchmark.py --dest care_data --farms B`) and benchmarked with the
+same `ML_DEFAULTS` used everywhere else, post-kurt/skew-fix, `--workers 2`. Confirms the corrected
+15-event count above (see CARE-to-Compare Dataset section).
+
+**Result:** `recall=0.333 (2/6), precision=0.5, F1=0.4` — **KPI FAIL, and the worst of the three CARE
+farms so far** (Farm A: recall 1.0/F1 0.960; Farm C: recall 0.704/F1 0.745).
+
+**Per-event breakdown** (`results/farm_b/results.csv`, gitignored/local):
+- **2 of 6 anomalies detected**, both bearing-damage faults: event 27 ("main bearing damage",
+  `+avail+heads:pca_spe_z,omr_z`) and event 53 ("Rotor Bearing 2 - Damage",
+  `+heads:ar1_z,pca_spe_z,iforest_z`).
+- **4 of 6 anomalies missed, all with completely empty `rule_fired`** (fused score never crosses
+  `alert_z_eff` at all) — events 7, 19, 34 (all "high temperature in transformer cell") and 77
+  ("Turbine in standstill ... due to rotorbearing damage"). This is the **same empty-`rule_fired`
+  failure signature already open and undiagnosed on Farm C** (6 events: 4, 15, 35, 67, 76, 78) —
+  Farm B's result is the first cross-farm confirmation that this gap is general, not Farm-C-specific.
+  Notably 3 of the 4 misses share one fault description ("high temperature in transformer cell"),
+  suggesting a possible thermal-drift signature that current detectors don't separate well from
+  normal variation — not yet investigated.
+- **2 of 9 normal events false-alarmed**, both via `+heads:pca_spe_z` (events 23, frac=0.154; and
+  87, frac=0.238) — `pca_spe_z` is implicated in both of Farm B's false alarms, same detector
+  flagged in some of Farm C's false alarms historically.
+
+**Not yet investigated or acted on** (per the standing ML Improvement Loop methodology — document
+first): why Farm B's empty-`rule_fired` rate (4/6 = 67%) is even higher than Farm C's post-fix rate
+(6/11 of originally-missed ≈ 35% of all 27 anomalies), and whether the thermal-fault pattern in 3 of
+4 misses points to a specific, fixable gap (e.g. a detector class that's better suited to slow
+thermal drift than the current ensemble) or is coincidental given the small (6-event) sample.
+
+**Files**: no code changes. `results/farm_b/` (gitignored/local) holds `results.csv`/`summary.json`.
+CARE-to-Compare Dataset section above corrected (37→15 events) in the same session.
+
+---
+
+## New benchmark dataset research — Tennessee Eastman Process feasibility confirmed (2026-06-18)
+> *Added: 2026-06-18*
+
+Per user request to find more benchmark datasets for validating ACM's accuracy (explicitly NOT a
+public-leaderboard requirement — accuracy validation only), researched candidates directly via
+WebSearch/WebFetch (no subagent, per explicit instruction) against the standing domain-fit
+criterion established by the SKAB rejection (see "Cross-Dataset Generality Testing" section above):
+industrial/SCADA-style assets, hour-to-day-scale fault persistence, sufficient pre-fault history.
+**The user also clarified the adoption bar this session: structural closeness to CARE's file layout
+is a loose requirement — any dataset that can be *transformed* into CARE's shape (`event_info.csv`
++ `datasets/{id}.csv`, train/prediction split, sensor columns) should be used, since the conversion
+is a one-time cost while `care_benchmark.py` itself then runs completely unmodified. Minimize new
+bespoke tooling; prefer reusable transforms over one-off harnesses.**
+
+### Candidates checked and their domain-fit verdict
+
+| Dataset | Verdict | Why |
+|---|---|---|
+| **CARE Farm B** | Done (see section above) | Same trusted dataset, zero new vetting |
+| **Tennessee Eastman Process (TEP)** | **Strong candidate, feasibility confirmed end-to-end** | See below |
+| **HAI (ICS security)** | **Rejected — same failure mode as SKAB** | Confirmed individual attacks last 2.5–48 minutes (not hours-to-days); the published "12/33/30/11/26 hour" figures are test-*file* spans containing many short attacks, not single attack durations |
+| **SWaT (ICS security)** | **Rejected — same failure mode as SKAB** | Confirmed most of the 36 attacks last 2–4 minutes; a few extend to 9 hours, but the modal case is short-transient |
+| **WADI (ICS security)** | **Rejected, same basis as SWaT** | Companion dataset to SWaT, same testbed design philosophy; also gated (iTrust request form, ~3 business days) — not pursued given the duration rejection on its sibling dataset |
+| **DAMADICS** | Lower priority | Real sugar-factory actuator faults (good duration fit, sustained from specific fault-injection dates), but no built-in per-event train/test split (would need fully custom windowing) and only ~1 day of pre-fault history — higher engineering cost for a dataset that doesn't reuse the CARE-shape transform cleanly |
+| **NASA SMAP/MSL** | Lower priority | Aerospace spacecraft telemetry, not SCADA/industrial; anomaly-duration fit vs. the criterion was not confirmed before TEP's feasibility check made it the clear next step |
+| **Zenodo 10958775** | Not a new dataset | Identical farm/feature structure to CARE-to-Compare (86/257/957 features, 95 events) — this is the same underlying dataset, not a diversification opportunity |
+
+**Standing-rule note**: HAI/SWaT/WADI all fail the exact same criterion that got SKAB rejected
+(short-transient anomalies, not hour-to-day-scale fault development). This is now a 4-for-4
+pattern across every ICS-*security* (cyberattack) benchmark checked — worth treating as a category
+signal: attack-style ICS datasets are structurally mismatched with ACM's slow-fault-development
+target domain, vs. process-simulation/SCADA-style datasets (CARE, TEP) which are not.
+
+### TEP feasibility — confirmed via direct hands-on verification, not just literature
+
+- **Source**: Harvard Dataverse `doi:10.7910/DVN/6C3JR1` (Rieth et al. 2017 deposit). Confirmed via
+  the Dataverse JSON API (`https://dataverse.harvard.edu/api/datasets/:persistentId/?persistentId=doi:10.7910/DVN/6C3JR1`)
+  to be genuinely open-access — direct `curl`/`wget` against
+  `https://dataverse.harvard.edu/api/access/datafile/{id}` works with **no auth, no API key, no
+  Kaggle credentials needed** (Kaggle's CSV mirrors of the same dataset were checked as a fallback
+  but would require credentials not present in this environment — the Dataverse RData files are the
+  better path). Four files: `TEP_FaultFree_Training/Testing.RData`,
+  `TEP_Faulty_Training/Testing.RData` (24 MB–837 MB).
+- **Structure, confirmed by actually parsing the data** (not just the paper): `faultNumber` (0 = none,
+  1–20 = fault type), `simulationRun` (1–500, independent simulations — directly analogous to a CARE
+  "event"), `sample` (1–500 for Training files, 1–960 for Testing files), then 52 numeric process
+  variables (`xmeas_1..41`, `xmv_1..11`) — clean, no missing-value markers, directly comparable in
+  shape to CARE's sensor columns.
+- **Fault timing, confirmed empirically (not assumed from literature)**: in `Faulty_Testing`, fault 1
+  / run 1, `xmeas_1` mean jumps from 0.249 (samples 1–160) to 0.760 (samples 161–960) — confirms the
+  fault is introduced at sample 161 and sustained through sample 960. At the dataset's documented
+  3-minute sampling interval that is **fault onset at hour 8, persisting ~40 hours to the end of the
+  48-hour test run** — squarely inside ACM's hour-to-day-scale domain-fit criterion, not a
+  short-transient case like the rejected ICS-security datasets above.
+- **A real engineering obstacle was found and resolved, not just a clean download**: `pyreadr`
+  (the standard Python RData reader) was killed by the OOM killer (exit 137) twice while parsing the
+  837 MB `Faulty_Testing.RData` on this 15 GB container — its cross-language conversion overhead is
+  apparently too memory-hungry for this file size in Python. **Fix**: installed `r-base-core` via
+  `apt-get install -y --no-install-recommends r-base-core` (plain `r-base-core` pulled in X11/Tk
+  dependencies that 404'd; the `--no-install-recommends` flag avoids that) and used R's own native
+  `load()` to parse the same file — this worked without incident, confirming the right production
+  path is a one-time R-side conversion (RData → per-run CSV/parquet) rather than a Python-side
+  `pyreadr` read of the full file. This is exactly the kind of one-time transform cost the user's
+  "transform once, reuse the harness forever" principle anticipates.
+
+### Recommended integration shape (not yet built — pending scope decision)
+
+A converter (R for the RData→flat step, Python for the CARE-shape emission) would produce, per
+selected `(faultNumber, simulationRun)` pair: a synthetic `time_stamp` (start + `sample * 3min`),
+`status_type_id`, `train_test` (`train` for samples 1–160, `prediction` for 161–960, matching the
+empirically-confirmed fault onset), and the 52 process variables as sensor columns — i.e. exactly
+CARE's `datasets/{id}.csv` shape, plus a generated `event_info.csv` with `event_label` derived from
+`faultNumber` (0 → normal, else anomaly) and `event_description` from the standard TEP fault-name
+table (e.g. fault 1 = "A/C feed ratio step"). Once those two files exist, `care_benchmark.py` should
+run completely unmodified — no new benchmark harness needed, per the user's stated preference.
+
+**Open scope question, not yet decided**: TEP has 500 simulation runs × 20 fault types — far more
+than CARE's 15–58 events per farm. A full cross-product benchmark (10,000 fault events + 500 normal
+runs) would be a massive, likely unnecessary compute cost; a representative subsample (e.g. one or a
+handful of runs per fault type, mirroring CARE's "tens of events" scale) is the obvious choice but
+the exact sampling scheme has not been decided.
+
+**Files**: no code changes yet — this section is feasibility research only, per the standing
+"document → plan → decide before acting" methodology. `r-base-core` is now installed in this
+container's apt state (not committed to the repo; irrelevant to the codebase itself, only to this
+sandbox).
+
+---
+
+## Empty-`rule_fired` gap — root-caused, two distinct mechanisms found, NOT yet fixed (open decision) (2026-06-18)
+> *Added: 2026-06-18 — investigation of the gap flagged since the GMM-fix checkpoint, now confirmed on both Farm C (6 events) and Farm B (4 events)*
+
+Per the standing ML Improvement Loop, this is the "document" step for the cross-farm gap where a
+labelled anomaly's fused score never crosses `alert_z_eff` at all (`rule_fired=""`, `alarm_frac=0`).
+Investigated directly by re-running `apply_alarm_rules()` against the saved `event_*_scores.csv` /
+`event_*_train_fused.csv` for all 6 Farm C misses (events 4, 15, 35, 67, 76, 78) and all 4 Farm B
+misses (events 7, 19, 34, 77), inspecting `rules_diagnostic` and the score-side z arrays directly —
+not guessed at. Two distinct, well-evidenced mechanisms were found, not one:
+
+### Mechanism 1 — rate/per-head threshold pinned at the hard 0.9 ceiling (pervasive, but not solely decisive)
+
+`apply_alarm_rules()`'s rate rule (and each per-head rule) anchors its threshold to `base` — the
+training data's own **worst** rolling-window rate of `fused >= 3.0` (`np.nanmax(rolling_rate(...))`,
+`core/alarm_rules.py` line ~227) — then sets `thr = clip(base * 1.5 + 0.05, 0.05, 0.9)`. Measured
+directly: `base` (`train_max_rate` in the diagnostic) is **0.58–1.0** for 9 of the 10 missed events
+across both farms (e.g. Farm C event 35: `base=1.0`; Farm B event 19: `base=0.938`), which pins
+`thr` at the 0.9 ceiling — meaning the rule needs ~90% of an entire 24h (rate) or 7d (per-head)
+rolling window to read `z>=3.0` before it can fire at all, on top of the already-required
+persistence floor.
+
+This is real and pervasive — but checking the contrast set (Farm C's *detected* anomalies and a
+sample of Farm A events) shows `rate_thr` pinned at 0.9 in MANY of those too (e.g. Farm C event 9,
+detected via `+heads:omr_z`, also has `rate_thr=0.900`). So ceiling-saturation alone does not
+explain misses; it explains why the **rate rule specifically** is largely dead weight on Farm B/C,
+while detection in practice comes down to whether some *other* rule (sustained, availability, or a
+per-head rule whose own threshold happens NOT to be saturated) clears its own bar.
+
+**Why a naive "switch max to a quantile" fix doesn't actually work** (checked before proposing
+anything): for event 35, even `quantile(rolling_rate, 0.99) == 1.0` — identical to the true max.
+The elevated rolling-rate excursions in training aren't single-point outliers; they're **4 separate
+contiguous blocks covering 7.4% of the entire rolling-rate trace** (measured directly). A simple
+percentile swap would need to go above the 99th percentile to escape this, defeating the point of
+using a quantile in the first place. For event 4, `base=0.583` and even `quantile(0.999)=0.569` —
+still clips to 0.9 either way (`SAFETY=1.5` means anything above `~0.567` saturates), so a quantile
+swap changes nothing there either. The contamination is too large a fraction of the calibration
+window for an order-statistic swap to help; it would need genuine contamination *detection* (e.g.
+routing this `base` computation through something resembling `core/fuse.py`'s existing
+`CalibrationContaminationFilter`, which currently protects detector-level z-calibration but is
+never applied to this alarm-rule-layer "worst healthy day" computation at all — a real
+defense-in-depth gap between the two layers).
+
+### Mechanism 2 — a distinct, more fundamental detection-power gap on the spikiest events
+
+For Farm C event 4 specifically (and likely others), the per-head thresholds are NOT saturated
+(0.10–0.37, comfortably room to fire) — yet still never fire. Checked the score-side z arrays
+directly: every head DOES spike to the calibrated ceiling at times (raw z hits 10.0, `frac(z>=3.0)`
+is 1–12% per head) — the signal is genuinely there — but those spikes are too **scattered** to
+ever sustain a 7-day rolling rate above ~24% for any head (`ar1_z`'s 7d-rolling max is 0.242,
+clearing only the lowest, not the typical, per-head threshold). Separately, the sustained rule's
+longest actual run above `alert_z` is only 16 samples against a required persist of 49. This event's
+real fault signature is "frequent brief spikes, never long-or-dense enough" — falling between the
+cracks of both existing rule shapes (`sustained` wants a long contiguous plateau; `rate`/`per-head`
+want a long-window-sustained elevated rate). Farm B event 34 shows the same shape: longest run 8
+vs. required persist 34, and no per-head rolling rate reaches even its own (unsaturated) threshold.
+
+### Why this is being documented, not fixed, this session
+
+Both mechanisms point toward real fixes (contamination-aware "worst healthy day" estimation for
+Mechanism 1; a shorter/adaptive rate window or a new "spike density" rule shape for Mechanism 2) —
+but both would touch the same core alarm-rule calibration machinery that just passed a hard-won,
+exact-match Farm A zero-regression validation (see "OMR kurt/skew exclusion fix" above), and
+neither fix is a clear, low-risk, single-line correction the way the detector-enable wiring fix
+was. Per the standing rule ("a behavior change to the production fusion/alarm-rule mechanism needs
+a deliberate decision before implementation, not a unilateral fix discovered mid-investigation" —
+the same posture already applied to the fusion auto-tuning wiring gap above), this is recorded as
+an open decision point, not implemented. Candidate directions for whoever picks this up:
+(a) route the rate/per-head `base` computation through a contamination-aware estimator instead of
+a raw max — addresses Mechanism 1; (b) add a shorter, denser-spike-sensitive rolling-rate rule
+alongside the existing 24h/7d windows — addresses Mechanism 2; both need their own
+plan-before-implement pass and a full Farm A + Farm B + Farm C re-validation, no exceptions.
+
+> **UPDATE 2026-06-18 (later same day) — candidate direction (a) above was tried and REJECTED.**
+> Do not re-attempt "swap the rate/per-head `base` computation's raw `nanmax` for
+> `CalibrationContaminationFilter`'s filtered max" without reading the full writeup below first —
+> it was implemented, validated, and conclusively falsified by ACM's own synthetic test suite
+> (`tests/test_ml.py`), not just a CARE-specific concern. See "Contamination-filter fix attempt for
+> the empty-`rule_fired` gap — rejected" below for the evidence and root cause.
+
+**Files**: no code changes — `core/alarm_rules.py` (`apply_alarm_rules()`, `rolling_rate()`,
+`self_tune_alarm_rule()`) was read and diagnosed via direct re-invocation against saved score CSVs,
+not edited.
+
+---
+
+## Contamination-filter fix attempt for the empty-`rule_fired` gap — rejected (2026-06-18)
+> *Added: 2026-06-18 — direct follow-on to "Empty-`rule_fired` gap" above, same session*
+
+Direct follow-on to Mechanism 1 above. The natural fix it points at — replace the rate/per-head
+`base`/`base_h` computation's raw `np.nanmax(rolling_rate(...))` with a contamination-filtered max,
+using the exact `CalibrationContaminationFilter` class `core/fuse.py` already has for detector
+z-calibration — was implemented, empirically validated against real CARE events and ACM's own
+synthetic test suite, and **rejected**. This section documents the full evidence trail and the
+decision so nobody re-tries the same naive version of this fix without reading it first.
+
+### What was implemented
+
+`core/alarm_rules.py` gained a `_contamination_filtered_max_rate(z, z0, window)` helper that runs
+`CalibrationContaminationFilter(method="hybrid")` over the raw z-series before computing
+`rolling_rate(...)` and taking the max — replacing the two `base = float(np.nanmax(...))` /
+`base_h = float(np.nanmax(...))` call sites in `apply_alarm_rules()`. `hybrid` (IQR pre-filter +
+iterative MAD refinement) was chosen over the more aggressive `iterative_mad` after a side-by-side
+comparison (below) showed `iterative_mad` recovers slightly more missed detections but at the cost
+of materially more new false alarms.
+
+### Validation steps run, in order, with results
+
+1. **Self-distrust gate corroboration** — does the gate (see "Self-distrust gate
+   magnitude-saturation fix" above) discard the newly-firing rules as broken-baseline symptoms?
+   Checked directly against Farm C event 4 across every method/channel combination that newly
+   fired: **no** — coverage never exceeded the gate's 50% threshold in any case, so the gate was
+   never even evaluated. The fix's wins on this event are not undermined by the gate.
+2. **Filter-method sensitivity** — re-ran the rate rule and all 6 per-head rules for Farm C event 4
+   across `iterative_mad`, `iqr`, `hybrid`, `z_trim`. Materially different thresholds and different
+   sets of per-head channels flip to firing depending on method (e.g. `pca_spe_z`/`iforest_z` flip
+   under `iterative_mad` but not under `hybrid`). There is no single "obviously correct" method
+   without an external validation signal to choose between them.
+3. **False-alarm safety check, Farm A** (8 known-clean normal events: 3, 13, 14, 24, 25, 38, 69,
+   92) — **zero regressions** under both `iterative_mad` and `hybrid`. All 8 stayed clean.
+4. **False-alarm safety check, Farm B** (7 known-clean normal events: 2, 21, 52, 74, 82, 83, 86) —
+   **regressions found.** Under `hybrid`: 1 new false alarm (event 83, `ar1_z`, alarm_frac=0.003 —
+   marginal but real). Under `iterative_mad`: 5 of 7 events got new false alarms (events 2, 21, 74,
+   82, 83) across `ar1_z`/`pca_t2_z`/`pca_spe_z`/`omr_z`. (One `omr_z` case on event 83 newly fired
+   but was correctly discarded by the self-distrust gate — the gate did useful work there, but the
+   other channels on the same and other events were not discarded and are genuine new false
+   alarms.) This was reported to the user as "an ordinary precision/recall trade-off, not a clean
+   bug fix" — ACM's farm-wide labelled benchmark alone made this trade-off visible before any
+   external advice was needed.
+5. **Decisive test — ACM's own synthetic test suite, `tests/test_ml.py`.** This is the step that
+   actually settled the decision, not the CARE diagnostics above. Running the full suite with the
+   fix in place produced 3 failures that were clean before the change:
+   - `TestFalseAlarmResistance::test_clean_continuation_quiet` — alarm fraction on data with NO
+     fault at all jumped to 5.3% (required: < 2%).
+   - `TestFalseAlarmResistance::test_seasonal_shift_tolerated` — alarm fraction on an explained,
+     non-faulty ambient shift jumped to 26.5% (required: < 10%).
+   - `TestFaultSensitivity::test_bearing_style_drift_detected` — the alarm now fires *before* the
+     injected fault begins (sample 193 vs. the required ≥ 375).
+   These are exactly the tests built to catch this class of regression, and they caught it
+   immediately — a faster and more conclusive signal than the farm-by-farm diagnostics above.
+
+### Root cause of the rejection
+
+`CalibrationContaminationFilter` does blanket statistical trimming of the upper tail of a value
+distribution — it has no way to distinguish "this tail is genuine contamination" (Farm C event 4:
+a real fault baked into the training window) from "this tail is legitimate, rare-but-normal
+operation" (the synthetic clean-continuation and seasonal-shift tests, where there is no fault in
+training at all). On a real contaminated asset, trimming the tail correctly de-poisons the
+threshold. On a genuinely clean asset, trimming the same tail just deletes real, healthy variance
+from the "worst healthy day" estimate — making the resulting threshold too sensitive and producing
+exactly the false-alarm-on-clean-data failure mode the tests caught. This is the same
+genuine-fault-vs-legitimate-rare-variation ambiguity the self-distrust gate and the OMR fixes both
+had to solve with a *corroborating signal* (z-saturation magnitude for the gate; kurt/skew
+exclusion for OMR) rather than a blanket statistical trim — this candidate fix had no corroborating
+signal, which is exactly why it failed.
+
+### Decision
+
+**Rejected, not deferred.** `core/alarm_rules.py` was reverted to its pre-fix state via
+`git checkout -- core/alarm_rules.py`. Confirmed clean: all 17 `tests/test_ml.py` tests pass
+post-revert. The empty-`rule_fired` gap (both mechanisms, documented above) remains open and
+unfixed — this session ruled out one specific candidate fix with hard evidence, it did not solve
+the underlying gap.
+
+**What a real fix needs, for whoever picks this up next**: a mechanism with its own corroborating
+signal — e.g. detecting a *contiguous* elevated block in the rolling-rate trace (consistent with a
+real fault baked into training) rather than trimming by value-distribution percentile (which can't
+tell a contiguous contamination block from scattered legitimate tail values) — not a different
+`CalibrationContaminationFilter` method or parameterization. Re-tuning this same filter's
+parameters (z_threshold, iqr_multiplier, min_retained_ratio) is very unlikely to fix the underlying
+issue, because the problem is the mechanism (percentile trimming) being applied to a question
+(genuine contamination vs. legitimate tail) that percentile trimming structurally cannot answer.
+This needs its own plan-before-implement pass, per the standing ML Improvement Loop methodology —
+do not opportunistically retry a parameter sweep on the same mechanism.
+
+**Files changed then reverted**: `core/alarm_rules.py` (`_contamination_filtered_max_rate()`
+helper + both `base`/`base_h` call sites — implemented, tested, reverted; net diff is zero).
+No files remain changed from this attempt.
 
 ---
 
