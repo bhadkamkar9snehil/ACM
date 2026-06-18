@@ -907,6 +907,47 @@ def parse_metrics_json(metrics_json: str) -> dict:
         return {}
 
 
+def format_data_quality_human(dq_json: Optional[str]) -> Optional[str]:
+    """Convert a run's data_quality_json into one human-readable line."""
+    if not dq_json or pd.isna(dq_json):
+        return None
+    try:
+        dq = json.loads(dq_json)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    parts = []
+    if dq.get("train_rows") is not None:
+        parts.append(f"{dq['train_rows']:,} training rows")
+    if dq.get("score_rows") is not None:
+        parts.append(f"{dq['score_rows']:,} scored rows")
+    if dq.get("channels") is not None:
+        parts.append(f"{dq['channels']} channels")
+    if dq.get("nan_density") is not None:
+        parts.append(f"{dq['nan_density'] * 100:.2f}% missing")
+    if dq.get("duplicate_ts"):
+        parts.append(f"{dq['duplicate_ts']} duplicate timestamps")
+    if dq.get("cadence_s"):
+        cadence = dq["cadence_s"]
+        parts.append(f"{cadence / 60:.0f}-min cadence" if cadence >= 60 else f"{cadence:.0f}s cadence")
+    return ", ".join(parts) if parts else None
+
+
+def format_calibration_human(calib_json: Optional[str]) -> Optional[str]:
+    """Convert a run's calibration_json (fusion weights) into one human-readable line."""
+    if not calib_json or pd.isna(calib_json):
+        return None
+    try:
+        calib = json.loads(calib_json)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    weights = calib.get("weights_used") or {}
+    if not weights:
+        return None
+    parts = [f"{detector_label(k)} {v:.2f}" for k, v in weights.items()]
+    tuned = "auto-tuned from this run's data" if calib.get("auto_tuned") else "fixed weights"
+    return f"Fusion weights ({tuned}): " + ", ".join(parts)
+
+
 def format_verdict_badge(verdict: Optional[str]) -> str:
     """Return HTML badge for verdict."""
     if pd.isna(verdict):
@@ -1007,6 +1048,10 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
     runs = read_sql(con, f"SELECT * FROM {prefix}runs ORDER BY started_at DESC")
     runs = runs[runs["asset_key"].isin(assets["asset_key"])]
 
+    # Latest run per asset (runs is already DESC by started_at) for diagnostic boxes
+    latest_runs = (runs.drop_duplicates(subset="asset_key", keep="first")
+                        .set_index("asset_key"))
+
     # Get logs
     logs = read_sql(con, f"SELECT * FROM {prefix}run_log ORDER BY asset_key, ts")
     logs = logs[logs["asset_key"].isin(assets["asset_key"])]
@@ -1039,12 +1084,22 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
             f"</tr>")
 
         # Asset timeline figure
-        fig_b64, data_quality = asset_figure(s, meta)
+        fig_b64, data_quality_fallback = asset_figure(s, meta)
+
+        run_row = latest_runs.loc[meta["asset_key"]] if meta["asset_key"] in latest_runs.index else None
+        data_quality = (format_data_quality_human(run_row.get("data_quality_json")) if run_row is not None else None) \
+            or data_quality_fallback
+        calibration = format_calibration_human(run_row.get("calibration_json")) if run_row is not None else None
+
+        diag_boxes = f"<div class='diagnostic-box'><strong>Data Quality:</strong> {html.escape(data_quality)}</div>"
+        if calibration:
+            diag_boxes += f"<div class='diagnostic-box'><strong>Calibration:</strong> {html.escape(calibration)}</div>"
+
         figs_html.append(
             f"<div class='card' id='{html.escape(meta['asset_key'])}'>"
             f"<h4>{html.escape(meta['asset_key'])}</h4>"
             f"<img src='data:image/png;base64,{fig_b64}' alt='Timeline for {html.escape(meta['asset_key'])}'/>"
-            f"<div class='diagnostic-box'><strong>Data Quality:</strong> {html.escape(data_quality)}</div>"
+            f"{diag_boxes}"
             f"</div>")
 
     # Build operations table
@@ -1072,6 +1127,13 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
                 diag_html += "</small>"
             except (json.JSONDecodeError, TypeError):
                 pass
+
+        data_quality_line = format_data_quality_human(getattr(r, "data_quality_json", None))
+        calibration_line = format_calibration_human(getattr(r, "calibration_json", None))
+        if data_quality_line:
+            diag_html += f"<small><div>Data: {html.escape(data_quality_line)}</div></small>"
+        if calibration_line:
+            diag_html += f"<small><div>{html.escape(calibration_line)}</div></small>"
 
         ops_rows.append(
             f"<tr>"
