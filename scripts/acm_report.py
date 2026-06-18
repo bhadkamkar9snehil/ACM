@@ -770,7 +770,7 @@ def format_data_quality_human(dq_json: Optional[str]) -> Optional[str]:
         parts.append(f"{dq['duplicate_ts']} duplicate timestamps")
     if dq.get("cadence_s"):
         cadence = dq["cadence_s"]
-        parts.append(f"{cadence / 60:.0f}-min cadence" if cadence >= 60 else f"{cadence:.0f}s cadence")
+        parts.append(f"{cadence / 60:.2f}-min cadence" if cadence >= 60 else f"{cadence:.2f}s cadence")
     return ", ".join(parts) if parts else None
 
 
@@ -893,7 +893,7 @@ def asset_figure(s: pd.DataFrame, meta: pd.Series) -> tuple[str, str]:
 
     b64 = fig_to_b64(fig)
 
-    data_quality = f"Data: {data_rows} rows, {len(Z_COLS)} detectors, {data_nans:.1f}% missing"
+    data_quality = f"Data: {data_rows} rows, {len(Z_COLS)} detectors, {data_nans:.2f}% missing"
 
     return b64, data_quality
 
@@ -904,7 +904,7 @@ def alarm_history_table(alarms_for_asset: Optional[pd.DataFrame]) -> str:
         return ""
     rows = []
     for a in alarms_for_asset.itertuples():
-        dur = f"{a.duration_h:.1f}h" if pd.notna(a.duration_h) else "—"
+        dur = f"{a.duration_h:.2f}h" if pd.notna(a.duration_h) else "—"
         peak = f"{a.peak_fused:.2f}" if pd.notna(a.peak_fused) else "—"
         if pd.notna(getattr(a, "ack_by", None)):
             ack = f"Acknowledged by {html.escape(str(a.ack_by))} at {html.escape(str(a.ack_at or ''))}"
@@ -999,7 +999,7 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
         # Asset table row
         # Use .get() for safe access in case lead_h column doesn't exist (e.g., in CARE data)
         lead_h = meta.get("lead_h")
-        lead = f"{lead_h:+.1f}h" if pd.notna(lead_h) else "—"
+        lead = f"{lead_h:+.2f}h" if pd.notna(lead_h) else "—"
         rules_display = format_rules_human(meta.get("rules_fired"),
                                           meta.get("alert_z"),
                                           s["fused"].max() if len(s) > 0 else None)
@@ -1047,7 +1047,7 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
     ops_rows = []
     for r in runs.itertuples():
         alert_z_str = f"{r.alert_z:.2f}" if pd.notna(r.alert_z) else "—"
-        duration_str = f"{r.duration_s:.0f}s" if pd.notna(r.duration_s) else "—"
+        duration_str = f"{r.duration_s:.2f}s" if pd.notna(r.duration_s) else "—"
         rules_exp = format_rules_human(r.rules_fired, r.alert_z, None)
 
         # Parse diagnostics if available
@@ -1259,7 +1259,7 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
 </html>"""
 
     out.write_text(html_content)
-    print(f"Report written: {out} ({len(figs_html)} assets, {out.stat().st_size/1e6:.1f} MB)")
+    print(f"Report written: {out} ({len(figs_html)} assets, {out.stat().st_size/1e6:.2f} MB)")
 
 
 def main() -> int:
