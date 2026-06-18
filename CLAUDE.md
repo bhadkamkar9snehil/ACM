@@ -1,7 +1,7 @@
 # ACM — Codebase Knowledge Base
 
 > Maintained for future agents. Update this file whenever you learn something new about the codebase.
-> Last updated: 2026-06-18 — ML pipeline bug fixes (#61-#67) + research paper planning / CARE ablation session + GMM PCA pre-reduction fix (Farm C generality) + OMR in-sample-bias/premature-clip fix + targeted Farm C re-validation + self-distrust gate magnitude-saturation fix + paper draft (Markdown) + detector-enable ablation wiring fix + fusion auto-tuning wiring gap discovered + paper System Architecture section + full Farm C 58-event re-validation (omr_z over-sensitivity found) + OMR kurt/skew exclusion fix (#72) — Farm A exact-match, Farm C mixed result (precision/false-alarms up, recall down 2 events) + Farm B first full result (recall=0.333, worst of 3 farms) + TEP benchmark candidate feasibility confirmed + empty-rule_fired gap root-caused (two mechanisms, not yet fixed)
+> Last updated: 2026-06-18 — ML pipeline bug fixes (#61-#67) + research paper planning / CARE ablation session + GMM PCA pre-reduction fix (Farm C generality) + OMR in-sample-bias/premature-clip fix + targeted Farm C re-validation + self-distrust gate magnitude-saturation fix + paper draft (Markdown) + detector-enable ablation wiring fix + fusion auto-tuning wiring gap discovered + paper System Architecture section + full Farm C 58-event re-validation (omr_z over-sensitivity found) + OMR kurt/skew exclusion fix (#72) — Farm A exact-match, Farm C mixed result (precision/false-alarms up, recall down 2 events) + Farm B first full result (recall=0.333, worst of 3 farms) + TEP benchmark candidate feasibility confirmed + empty-rule_fired gap root-caused (two mechanisms, not yet fixed) + contamination-filter fix for rate/per-head threshold REJECTED (broke ACM's own false-alarm-resistance tests; cleanly reverted, zero net code change)
 
 ---
 
@@ -48,9 +48,10 @@
 39. [CARE Farm B — first full result (2026-06-18)](#care-farm-b--first-full-result-2026-06-18)
 40. [New benchmark dataset research — TEP feasibility (2026-06-18)](#new-benchmark-dataset-research--tennessee-eastman-process-feasibility-confirmed-2026-06-18)
 41. [Empty-rule_fired gap root-caused (2026-06-18)](#empty-rule_fired-gap--root-caused-two-distinct-mechanisms-found-not-yet-fixed-open-decision-2026-06-18)
-42. [Known Issues (Track as GitHub Issues)](#known-issues-track-as-github-issues)
-43. [Standing Rule: Flag Architecture-Violating Suggestions](#standing-rule-flag-architecture-violating-suggestions-dont-suppress-them) ← **Read before giving any suggestion**
-44. [User Working Style](#user-working-style)
+42. [Contamination-filter fix attempt — rejected (2026-06-18)](#contamination-filter-fix-attempt-for-the-empty-rule_fired-gap--rejected-2026-06-18)
+43. [Known Issues (Track as GitHub Issues)](#known-issues-track-as-github-issues)
+44. [Standing Rule: Flag Architecture-Violating Suggestions](#standing-rule-flag-architecture-violating-suggestions-dont-suppress-them) ← **Read before giving any suggestion**
+45. [User Working Style](#user-working-style)
 
 ---
 
@@ -2429,9 +2430,111 @@ a raw max — addresses Mechanism 1; (b) add a shorter, denser-spike-sensitive r
 alongside the existing 24h/7d windows — addresses Mechanism 2; both need their own
 plan-before-implement pass and a full Farm A + Farm B + Farm C re-validation, no exceptions.
 
+> **UPDATE 2026-06-18 (later same day) — candidate direction (a) above was tried and REJECTED.**
+> Do not re-attempt "swap the rate/per-head `base` computation's raw `nanmax` for
+> `CalibrationContaminationFilter`'s filtered max" without reading the full writeup below first —
+> it was implemented, validated, and conclusively falsified by ACM's own synthetic test suite
+> (`tests/test_ml.py`), not just a CARE-specific concern. See "Contamination-filter fix attempt for
+> the empty-`rule_fired` gap — rejected" below for the evidence and root cause.
+
 **Files**: no code changes — `core/alarm_rules.py` (`apply_alarm_rules()`, `rolling_rate()`,
 `self_tune_alarm_rule()`) was read and diagnosed via direct re-invocation against saved score CSVs,
 not edited.
+
+---
+
+## Contamination-filter fix attempt for the empty-`rule_fired` gap — rejected (2026-06-18)
+> *Added: 2026-06-18 — direct follow-on to "Empty-`rule_fired` gap" above, same session*
+
+Direct follow-on to Mechanism 1 above. The natural fix it points at — replace the rate/per-head
+`base`/`base_h` computation's raw `np.nanmax(rolling_rate(...))` with a contamination-filtered max,
+using the exact `CalibrationContaminationFilter` class `core/fuse.py` already has for detector
+z-calibration — was implemented, empirically validated against real CARE events and ACM's own
+synthetic test suite, and **rejected**. This section documents the full evidence trail and the
+decision so nobody re-tries the same naive version of this fix without reading it first.
+
+### What was implemented
+
+`core/alarm_rules.py` gained a `_contamination_filtered_max_rate(z, z0, window)` helper that runs
+`CalibrationContaminationFilter(method="hybrid")` over the raw z-series before computing
+`rolling_rate(...)` and taking the max — replacing the two `base = float(np.nanmax(...))` /
+`base_h = float(np.nanmax(...))` call sites in `apply_alarm_rules()`. `hybrid` (IQR pre-filter +
+iterative MAD refinement) was chosen over the more aggressive `iterative_mad` after a side-by-side
+comparison (below) showed `iterative_mad` recovers slightly more missed detections but at the cost
+of materially more new false alarms.
+
+### Validation steps run, in order, with results
+
+1. **Self-distrust gate corroboration** — does the gate (see "Self-distrust gate
+   magnitude-saturation fix" above) discard the newly-firing rules as broken-baseline symptoms?
+   Checked directly against Farm C event 4 across every method/channel combination that newly
+   fired: **no** — coverage never exceeded the gate's 50% threshold in any case, so the gate was
+   never even evaluated. The fix's wins on this event are not undermined by the gate.
+2. **Filter-method sensitivity** — re-ran the rate rule and all 6 per-head rules for Farm C event 4
+   across `iterative_mad`, `iqr`, `hybrid`, `z_trim`. Materially different thresholds and different
+   sets of per-head channels flip to firing depending on method (e.g. `pca_spe_z`/`iforest_z` flip
+   under `iterative_mad` but not under `hybrid`). There is no single "obviously correct" method
+   without an external validation signal to choose between them.
+3. **False-alarm safety check, Farm A** (8 known-clean normal events: 3, 13, 14, 24, 25, 38, 69,
+   92) — **zero regressions** under both `iterative_mad` and `hybrid`. All 8 stayed clean.
+4. **False-alarm safety check, Farm B** (7 known-clean normal events: 2, 21, 52, 74, 82, 83, 86) —
+   **regressions found.** Under `hybrid`: 1 new false alarm (event 83, `ar1_z`, alarm_frac=0.003 —
+   marginal but real). Under `iterative_mad`: 5 of 7 events got new false alarms (events 2, 21, 74,
+   82, 83) across `ar1_z`/`pca_t2_z`/`pca_spe_z`/`omr_z`. (One `omr_z` case on event 83 newly fired
+   but was correctly discarded by the self-distrust gate — the gate did useful work there, but the
+   other channels on the same and other events were not discarded and are genuine new false
+   alarms.) This was reported to the user as "an ordinary precision/recall trade-off, not a clean
+   bug fix" — ACM's farm-wide labelled benchmark alone made this trade-off visible before any
+   external advice was needed.
+5. **Decisive test — ACM's own synthetic test suite, `tests/test_ml.py`.** This is the step that
+   actually settled the decision, not the CARE diagnostics above. Running the full suite with the
+   fix in place produced 3 failures that were clean before the change:
+   - `TestFalseAlarmResistance::test_clean_continuation_quiet` — alarm fraction on data with NO
+     fault at all jumped to 5.3% (required: < 2%).
+   - `TestFalseAlarmResistance::test_seasonal_shift_tolerated` — alarm fraction on an explained,
+     non-faulty ambient shift jumped to 26.5% (required: < 10%).
+   - `TestFaultSensitivity::test_bearing_style_drift_detected` — the alarm now fires *before* the
+     injected fault begins (sample 193 vs. the required ≥ 375).
+   These are exactly the tests built to catch this class of regression, and they caught it
+   immediately — a faster and more conclusive signal than the farm-by-farm diagnostics above.
+
+### Root cause of the rejection
+
+`CalibrationContaminationFilter` does blanket statistical trimming of the upper tail of a value
+distribution — it has no way to distinguish "this tail is genuine contamination" (Farm C event 4:
+a real fault baked into the training window) from "this tail is legitimate, rare-but-normal
+operation" (the synthetic clean-continuation and seasonal-shift tests, where there is no fault in
+training at all). On a real contaminated asset, trimming the tail correctly de-poisons the
+threshold. On a genuinely clean asset, trimming the same tail just deletes real, healthy variance
+from the "worst healthy day" estimate — making the resulting threshold too sensitive and producing
+exactly the false-alarm-on-clean-data failure mode the tests caught. This is the same
+genuine-fault-vs-legitimate-rare-variation ambiguity the self-distrust gate and the OMR fixes both
+had to solve with a *corroborating signal* (z-saturation magnitude for the gate; kurt/skew
+exclusion for OMR) rather than a blanket statistical trim — this candidate fix had no corroborating
+signal, which is exactly why it failed.
+
+### Decision
+
+**Rejected, not deferred.** `core/alarm_rules.py` was reverted to its pre-fix state via
+`git checkout -- core/alarm_rules.py`. Confirmed clean: all 17 `tests/test_ml.py` tests pass
+post-revert. The empty-`rule_fired` gap (both mechanisms, documented above) remains open and
+unfixed — this session ruled out one specific candidate fix with hard evidence, it did not solve
+the underlying gap.
+
+**What a real fix needs, for whoever picks this up next**: a mechanism with its own corroborating
+signal — e.g. detecting a *contiguous* elevated block in the rolling-rate trace (consistent with a
+real fault baked into training) rather than trimming by value-distribution percentile (which can't
+tell a contiguous contamination block from scattered legitimate tail values) — not a different
+`CalibrationContaminationFilter` method or parameterization. Re-tuning this same filter's
+parameters (z_threshold, iqr_multiplier, min_retained_ratio) is very unlikely to fix the underlying
+issue, because the problem is the mechanism (percentile trimming) being applied to a question
+(genuine contamination vs. legitimate tail) that percentile trimming structurally cannot answer.
+This needs its own plan-before-implement pass, per the standing ML Improvement Loop methodology —
+do not opportunistically retry a parameter sweep on the same mechanism.
+
+**Files changed then reverted**: `core/alarm_rules.py` (`_contamination_filtered_max_rate()`
+helper + both `base`/`base_h` call sites — implemented, tested, reverted; net diff is zero).
+No files remain changed from this attempt.
 
 ---
 
