@@ -64,6 +64,8 @@ VERDICT_COLOR = {
     "CLEAN": "#1a7f37",
     "MISSED": "#cf222e",
     "FALSE_ALARM": "#bf8700",
+    "ALARM": "#cf222e",
+    "OK": "#1a7f37",
 }
 
 CSS = """
@@ -396,6 +398,16 @@ tbody tr:hover {
 .badge-false_alarm, .badge-false-alarm {
     background: var(--amber);
     color: #fdf8ec;
+}
+
+.badge-alarm {
+    background: var(--red);
+    color: #fdf3f1;
+}
+
+.badge-ok {
+    background: var(--green);
+    color: #f3fbf6;
 }
 
 .badge:not([class*="badge-"]) {
@@ -805,7 +817,10 @@ def format_verdict_badge(verdict: Optional[str]) -> str:
     if pd.isna(verdict):
         verdict = "UNKNOWN"
     verdict_clean = str(verdict).upper().strip()
-    badge_class = f"badge-{verdict_clean.lower()}" if verdict_clean in VERDICT_COLOR else "badge"
+    # Always create a semantic badge class (badge-{verdict}), whether or not it's in VERDICT_COLOR.
+    # This ensures unknown verdicts still get a styled badge, and the CSS fallback applies only
+    # to verdicts that have no semantic class at all (shouldn't happen in normal usage).
+    badge_class = f"badge-{verdict_clean.lower()}"
     return f"<span class='badge {badge_class}'>{html.escape(verdict_clean)}</span>"
 
 
@@ -982,7 +997,9 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
             continue
 
         # Asset table row
-        lead = f"{meta['lead_h']:+.1f}h" if pd.notna(meta["lead_h"]) else "—"
+        # Use .get() for safe access in case lead_h column doesn't exist (e.g., in CARE data)
+        lead_h = meta.get("lead_h")
+        lead = f"{lead_h:+.1f}h" if pd.notna(lead_h) else "—"
         rules_display = format_rules_human(meta.get("rules_fired"),
                                           meta.get("alert_z"),
                                           s["fused"].max() if len(s) > 0 else None)
