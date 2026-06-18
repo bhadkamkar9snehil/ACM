@@ -1,7 +1,7 @@
 # ACM — Codebase Knowledge Base
 
 > Maintained for future agents. Update this file whenever you learn something new about the codebase.
-> Last updated: 2026-06-18 — ML pipeline bug fixes (#61-#67) + research paper planning / CARE ablation session + GMM PCA pre-reduction fix (Farm C generality) + OMR in-sample-bias/premature-clip fix + targeted Farm C re-validation + self-distrust gate magnitude-saturation fix + paper draft (Markdown) + detector-enable ablation wiring fix + fusion auto-tuning wiring gap discovered + paper System Architecture section + full Farm C 58-event re-validation (omr_z over-sensitivity found)
+> Last updated: 2026-06-18 — ML pipeline bug fixes (#61-#67) + research paper planning / CARE ablation session + GMM PCA pre-reduction fix (Farm C generality) + OMR in-sample-bias/premature-clip fix + targeted Farm C re-validation + self-distrust gate magnitude-saturation fix + paper draft (Markdown) + detector-enable ablation wiring fix + fusion auto-tuning wiring gap discovered + paper System Architecture section + full Farm C 58-event re-validation (omr_z over-sensitivity found) + OMR kurt/skew exclusion fix (#72) — Farm A exact-match, Farm C mixed result (precision/false-alarms up, recall down 2 events)
 
 ---
 
@@ -44,9 +44,10 @@
 35. [Self-distrust gate magnitude-saturation fix (2026-06-17)](#self-distrust-gate-magnitude-saturation-fix-2026-06-17)
 36. [Paper draft + detector-enable ablation wiring fix + fusion auto-tuning wiring gap (2026-06-18)](#paper-draft--detector-enable-ablation-wiring-fix--fusion-auto-tuning-wiring-gap-2026-06-18)
 37. [Farm C full 58-event re-validation after the OMR + self-distrust saturation fixes (2026-06-18)](#farm-c-full-58-event-re-validation-after-the-omr--self-distrust-saturation-fixes-2026-06-18)
-38. [Known Issues (Track as GitHub Issues)](#known-issues-track-as-github-issues)
-39. [Standing Rule: Flag Architecture-Violating Suggestions](#standing-rule-flag-architecture-violating-suggestions-dont-suppress-them) ← **Read before giving any suggestion**
-40. [User Working Style](#user-working-style)
+38. [OMR kurt/skew exclusion fix (2026-06-18)](#omr-kurtskew-exclusion-fix--farm-a-exact-match-farm-c-mixed-result-2026-06-18)
+39. [Known Issues (Track as GitHub Issues)](#known-issues-track-as-github-issues)
+40. [Standing Rule: Flag Architecture-Violating Suggestions](#standing-rule-flag-architecture-violating-suggestions-dont-suppress-them) ← **Read before giving any suggestion**
+41. [User Working Style](#user-working-style)
 
 ---
 
@@ -2119,6 +2120,106 @@ findings are synthesized across many datasets, not per-dataset as each one compl
 
 **Files**: no code changes — `results/farm_c_v2/` (gitignored, local-only) holds the full
 `results.csv`/`summary.json` for this run.
+
+---
+
+## OMR kurt/skew exclusion fix — Farm A exact-match, Farm C mixed result (2026-06-18)
+> *Added: 2026-06-18 — fixes GitHub issue #72 (OMR-driven false alarms on CARE Farm C)*
+
+Direct follow-on to the section immediately above. Diagnosed the newly-introduced `omr_z`
+false-alarm cluster (events 8, 48, 56, 58, 62, 63, 75) with a targeted script
+(`/tmp/diag_r2_inspect.py`, not committed) that computed in-sample R² per engineered feature
+against OMR's fitted reconstruction model and ranked features by mean score-window scaled
+residual. Result: the top features driving the false-alarm score on event 56 were
+`sensor_95_avg_kurt` (mean_scaled=2003.5), `sensor_81_avg_kurt` (1276.2), `sensor_95_avg_skew`
+(239.9), `sensor_81_avg_skew` (233.4), `sensor_88_avg_kurt` (94.0) — i.e. kurtosis/skewness
+engineered features dominate the top-3 candidate pool almost completely, both on the calibration
+holdout and on live scoring, regardless of true anomaly state. Root cause: kurtosis and skewness
+are 3rd/4th-moment statistics computed over a `window=16` rolling window; their sampling variance
+is inherently high even on perfectly healthy data (asymptotic var ≈24/n for kurtosis, ≈6/n for
+skewness — a property of the estimator, not of the data or the dataset). OMR's global
+reconstruction model also can't predict these higher-moment features well from other sensors'
+mean/std-type features, so their residuals stay large and noisy under reconstruction regardless of
+true health. Farm C merely has far more such columns (957 sensors → ~450 kurt/skew engineered
+columns) than Farm A (86 sensors → ~40), giving this latent, dataset-independent bug many more
+chances to dominate the top-3 vote.
+
+**Fix** (`core/omr.py`, `OMRDetector.score()`): kurt/skew-suffixed feature columns are excluded
+from the score's top-3 candidate pool entirely (`scaled[:, kurt_skew_mask] = -np.inf` before the
+`np.partition` top-k step). The pre-existing, separate `contributions`/`culprits` attribution path
+(its own `kurt_skew_weight=0.25` down-weighting) was left untouched — this only fixes the score
+itself, not the attribution display. (The OMR score vs. contributions formula divergence this
+surfaced is filed separately as issue #75, not bundled into this fix.)
+
+### Farm A re-validation (22 events) — exact, unchanged match
+
+| Metric | Pre-fix | Post-fix |
+|---|---|---|
+| recall | 1.0 (12/12) | 1.0 (12/12) |
+| precision | 0.923 | 0.923 |
+| F1 | 0.960 | 0.960 |
+| false alarms | events 17, 71 | events 17, 71 (identical) |
+
+Zero regression — exactly the signature expected from fixing a universal-but-rarely-triggered
+estimator-variance bug rather than a Farm-C-specific patch (Farm A has far fewer kurt/skew columns
+so the bug rarely won the top-3 vote there in the first place).
+
+### Farm C full 58-event re-validation — mixed result, KPI still FAIL
+
+| Metric | OMR+saturation-fix checkpoint | kurt/skew-fix checkpoint (this run) |
+|---|---|---|
+| recall | 0.778 (21/27) | **0.704 (19/27)** |
+| precision | 0.656 | **0.792** |
+| F1 | 0.712 | 0.745 |
+| false alarms (of 31 normal) | 11 | **5** |
+| KPI | FAIL | FAIL (recall short of 0.80; F1 short of 0.75 by 0.005) |
+
+Row-level diff (`results/farm_c_v2/results.csv` vs. `results/farm_c_kurtskew_fix/results.csv`,
+both gitignored/local):
+
+- **6 of 7 `omr_z`-driven false alarms cleared** (event_ids 48, 56, 58, 62, 63, 75 — all flipped
+  `+heads:omr_z` → no alarm). Zero new false alarms introduced anywhere; the 4 other pre-existing
+  false alarms unrelated to `omr_z` (36 `gmm_z`, 54 `pca_spe_z`, 88 `rate`, 94 `ar1_z`) are
+  byte-for-byte unchanged.
+- **One `omr_z`-driven false alarm did NOT clear**: event 8 (`+heads:omr_z` both before and after,
+  `fused_max` literally identical 7.409→7.409). This event's elevated `omr_z` is evidently coming
+  from a different root cause than the kurt/skew noise — not yet investigated.
+- **Two anomaly events flipped from detected → missed**:
+  - Event 47: was `+heads:omr_z` (alarm_frac 0.831), now alarm_frac 0.000, empty `rule_fired`.
+    `fused_max` barely moved (8.571→8.470) but the per-head `omr_z` rule itself no longer clears
+    its threshold — this event's earlier detection was riding the same kurt/skew noise signal that
+    drove the false alarms, just on an event where the timing happened to coincide with a genuine
+    anomaly.
+  - Event 90: was `+rate` (not `omr_z` per-head at all), now alarm_frac 0.000. `fused_max` dropped
+    9.574→8.924 and the self-tuned `alert_z_eff` dropped in lockstep (8.180→7.400) — OMR's lower
+    overall contribution to the fused ensemble score lowered the peak excursion needed to satisfy
+    the rate-of-change persistence rule.
+  - No anomaly events were newly detected by this fix.
+
+**Honest framing**: this is a real, measured trade-off, not a clean win. The false-alarm/precision
+improvement is substantial (11→5 false alarms, +0.136 precision) and directly validates the
+root-cause diagnosis. But two of the previously-detected anomalies were detected *via the same
+noisy mechanism* being fixed — removing the noise correctly suppressed the false alarms it caused
+elsewhere, but also removed an accidental true-positive ride-along on events 47 and 90. F1 moved
+in the right direction (0.712→0.745) but the farm-wide KPI remains FAIL on both legs. This was
+reported to the user in full (false-alarm win + recall cost, not just one side) before any
+merge-to-main decision was made, per the standing ML Improvement Loop "decide before act" rule —
+a real recall regression on a benchmark farm is exactly the kind of trade-off only the user should
+sign off on, not something to merge unilaterally because the headline F1 number moved up.
+
+**Open items, not yet investigated**:
+- Event 8's remaining `omr_z` false alarm has a non-kurt/skew root cause — separate from this fix.
+- Events 47 and 90's lost detections — whether they're worth chasing (e.g. a less blunt instrument
+  than full exclusion, such as down-weighting kurt/skew in the top-3 pool rather than removing them
+  outright) is an open question, not yet planned.
+- The 6 anomaly events with empty `rule_fired` on both checkpoints (4, 15, 35, 67, 76, 78) remain
+  the same distinct, still-uninvestigated "fused score never crosses `alert_z_eff`" gap noted since
+  the original GMM-fix checkpoint — untouched by this fix, as expected.
+
+**Files changed**: `core/omr.py` (`OMRDetector.score()` — kurt/skew exclusion mask before top-3
+`np.partition`). Committed `d6b5cd0`, pushed to `claude/research-paper-planning-ests5l`. Per-event
+diff and summaries: `results/farm_a_kurtskew_fix/`, `results/farm_c_kurtskew_fix/` (both
+gitignored/local).
 
 ---
 
