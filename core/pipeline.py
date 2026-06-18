@@ -123,12 +123,18 @@ def score_asset(
     fit_feat = train_feat.iloc[~calib_mask]
     calib_feat = train_feat.iloc[calib_mask]
 
-    # 4. detectors
+    # 4. detectors. Each head's enabled flag defaults to True (production
+    # behaviour, unchanged) but can be read from cfg["models"][name]["enabled"]
+    # for ablation experiments (e.g. --override '{"models": {"omr": {"enabled": false}}}').
+    models_cfg = cfg.get("models", {}) or {}
     t_fit = time.time()
     det = orch.fit_all_detectors(
         train=fit_feat, cfg=cfg,
-        ar1_enabled=True, pca_enabled=True, iforest_enabled=True,
-        gmm_enabled=True, omr_enabled=True,
+        ar1_enabled=bool(models_cfg.get("ar1", {}).get("enabled", True)),
+        pca_enabled=bool(models_cfg.get("pca", {}).get("enabled", True)),
+        iforest_enabled=bool(models_cfg.get("iforest", {}).get("enabled", True)),
+        gmm_enabled=bool(models_cfg.get("gmm", {}).get("enabled", True)),
+        omr_enabled=bool(models_cfg.get("omr", {}).get("enabled", True)),
     )
     _log("fit", f"detectors fitted in {time.time()-t_fit:.0f}s")
     # OMR's in-sample fit residuals systematically understate true residual

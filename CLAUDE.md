@@ -1,7 +1,7 @@
 # ACM — Codebase Knowledge Base
 
 > Maintained for future agents. Update this file whenever you learn something new about the codebase.
-> Last updated: 2026-06-17 — ML pipeline bug fixes (#61-#67) + research paper planning / CARE ablation session + GMM PCA pre-reduction fix (Farm C generality) + OMR in-sample-bias/premature-clip fix + targeted Farm C re-validation + self-distrust gate magnitude-saturation fix
+> Last updated: 2026-06-18 — ML pipeline bug fixes (#61-#67) + research paper planning / CARE ablation session + GMM PCA pre-reduction fix (Farm C generality) + OMR in-sample-bias/premature-clip fix + targeted Farm C re-validation + self-distrust gate magnitude-saturation fix + paper draft (Markdown) + detector-enable ablation wiring fix + fusion auto-tuning wiring gap discovered
 
 ---
 
@@ -1965,6 +1965,96 @@ own root-cause investigation.
 `train_sustained_frac`/`calib_frac` computation, diagnostic key renamed to `train_max_rate`),
 `tests/test_ml.py` (`test_distrust_gate_discards_moderate_always_on`,
 `test_distrust_gate_keeps_saturated_always_on` replace the old calib_frac-based tests).
+
+---
+
+## Paper draft + detector-enable ablation wiring fix + fusion auto-tuning wiring gap (2026-06-18)
+> *Added: 2026-06-18*
+
+### Paper draft started
+
+A Markdown-first paper draft now exists at `paper/draft.md` (not committed to `main`,
+lives on `claude/research-paper-planning-ests5l`) per two explicit user decisions: draft
+now and backfill numbers later (don't block writing on refreshing stale experiments), and
+Markdown first, LaTeX (NeurIPS/ICML workshop style) only once content is stable — do not
+set up a LaTeX project yet. The draft has a fully code-verified §3 Method and §4
+Experimental Setup; §5 Results and everything downstream is explicitly marked
+DRAFT/PLACEHOLDER/STALE per-section rather than silently presented as final. An
+"Editorial note" section inside the draft (not part of the paper itself) tracks what's
+verified vs. placeholder and records open findings for the maintainer — read it before
+extending the draft further.
+
+### Detector-enable ablation wiring fix — `no_omr` ablation leg was previously a no-op
+
+While re-running the Farm A ablation suite for the paper, found that `core/pipeline.py`
+hardcoded all five detector-enabled flags (`ar1_enabled=True, pca_enabled=True,
+iforest_enabled=True, gmm_enabled=True, omr_enabled=True`) directly as kwargs to its one
+`orch.fit_all_detectors()` call site — never reading them from `cfg` at all. This means
+the original 2026-06-16 ablation run's `--override '{"models": {"omr": {"enabled":
+false}}}'` silently did nothing: OMR still fit and scored exactly as in the full-system
+config, so that "No OMR" result row in the prior ablation table was actually a duplicate
+of the full system, not a real ablation. (The other four ablation legs — contamination
+filter, self-distrust gate, fusion weights — were genuinely wired correctly via existing
+`cfg` paths; only the detector-enable flags were the gap.)
+
+**Fix**: each flag now reads `cfg.get("models", {}).get(<name>, {}).get("enabled", True)`
+— defaulting to `True` so production behavior is byte-for-byte unchanged — instead of a
+hardcoded literal. Verified directly on synthetic data: with `models.omr.enabled=False`,
+the fit log shows `Fitted 4 detectors: AR1, PCA(5c), IForest(100), GMM(1)` (OMR genuinely
+skipped) and the fusion stage logs `Missing streams: ['omr_z']`; without the override, 5
+detectors fit including OMR and `omr_z` carries real (non-NaN) values end-to-end. All 17
+`test_ml.py` tests still pass unchanged. This is additive/default-preserving and was not
+treated as needing the ML Improvement Loop's decide-before-acting gate, since it only
+makes an ablation knob that was already supposed to exist actually work, and cannot change
+default behavior for any caller that doesn't set `models.<name>.enabled`.
+
+**Files changed**: `core/pipeline.py` (`score_asset()` — the `fit_all_detectors()` call
+site now derives all five `*_enabled` kwargs from `cfg["models"][<name>]["enabled"]`).
+
+### Fusion auto-tuning wiring gap — found, documented, NOT yet fixed (open decision)
+
+Separately (and NOT touched by the fix above), tracing `core/fuse.py`'s
+`tune_detector_weights()` and its one call site in `run_fusion_pipeline()` while writing
+the paper's §3.6 found that **`core/pipeline.py` never passes `episodes_df` into the
+fusion auto-tuner** — neither in production scoring nor in `scripts/care_benchmark.py`.
+Combined with `ml_defaults.py` setting `fusion.auto_tune.require_external_labels: False`
+(overriding the function's own default of `True`), this means:
+- `tuning_method` resolves to the configured default `"episode_separability"` rather than
+  ever falling back to the label-free `"statistical_diversity"` method that exists
+  specifically for the no-labels case.
+- Inside `episode_separability`, with `labels=None`, every detector's `metric_value`
+  resolves to the identical `"no_labels"` floor (`max(prior, 1e-3)` with all
+  `detector_priors` defaulting to 1.0) — so the post-softmax "tuned" target is *exactly
+  uniform* across whichever heads are present, regardless of any detector's actual
+  separability.
+- This uniform target is then EMA-blended into the current weights at
+  `learning_rate=0.3`, drift-clamped to `±20%`/run, and renormalized — i.e. the
+  auto-tuner's real, measured effect today is a bounded, repeated pull of the configured
+  base weights toward `1/n_detectors`, not label-informed reweighting.
+
+Confirmed against the actual deployed weight-tuning log line-by-line (e.g.
+`pca_spe_z: 0.300 -> 0.267`, `gmm_z: 0.050 -> 0.062`, both moving toward `1/6 ≈ 0.167`;
+manually recomputed the EMA+clamp math for `gmm_z` and it matches the observed log
+exactly). This also explains the earlier ablation finding that "auto-tuning's value on
+Farm A is calibration sharpness, not recall/precision, with no consistent win/loss
+pattern vs. equal weights" — the "tuned" weights were mostly a damped pull toward equal
+weighting in the first place, so of course they look similar to the equal-weights config.
+
+**This has NOT been fixed.** Per the standing ML Improvement Loop methodology, a behavior
+change to the production fusion-weight mechanism needs a deliberate decision before
+implementation, not a unilateral fix discovered mid-paper-writing. The paper draft
+documents the mechanism exactly as it behaves today (not as originally designed) and
+flags this as the most important correction relative to the original project plan. Two
+candidate fixes exist, neither implemented: (a) wire real held-out episode labels into
+`tune_detector_weights()` where available, or (b) flip the default fallback trigger so
+`statistical_diversity` (label-free, unaffected by this finding, already implemented) is
+what actually fires in the no-labels case instead of `episode_separability` silently
+degrading to uniform. Decide before `core/fuse.py`/`core/pipeline.py` are touched again
+for this; do not fix opportunistically as a side effect of unrelated work.
+
+**Files**: no production code changed for this finding — `core/fuse.py` (lines ~460-997,
+`tune_detector_weights()`) and `core/pipeline.py` (the `fuse.run_fusion_pipeline()` call
+site, which has no `episodes_df=` argument) were read and traced, not edited.
 
 ---
 
