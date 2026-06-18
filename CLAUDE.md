@@ -1,7 +1,7 @@
 # ACM — Codebase Knowledge Base
 
 > Maintained for future agents. Update this file whenever you learn something new about the codebase.
-> Last updated: 2026-06-18 — ML pipeline bug fixes (#61-#67) + research paper planning / CARE ablation session + GMM PCA pre-reduction fix (Farm C generality) + OMR in-sample-bias/premature-clip fix + targeted Farm C re-validation + self-distrust gate magnitude-saturation fix + paper draft (Markdown) + detector-enable ablation wiring fix + fusion auto-tuning wiring gap discovered + paper System Architecture section + full Farm C 58-event re-validation (omr_z over-sensitivity found) + OMR kurt/skew exclusion fix (#72) — Farm A exact-match, Farm C mixed result (precision/false-alarms up, recall down 2 events)
+> Last updated: 2026-06-18 — ML pipeline bug fixes (#61-#67) + research paper planning / CARE ablation session + GMM PCA pre-reduction fix (Farm C generality) + OMR in-sample-bias/premature-clip fix + targeted Farm C re-validation + self-distrust gate magnitude-saturation fix + paper draft (Markdown) + detector-enable ablation wiring fix + fusion auto-tuning wiring gap discovered + paper System Architecture section + full Farm C 58-event re-validation (omr_z over-sensitivity found) + OMR kurt/skew exclusion fix (#72) — Farm A exact-match, Farm C mixed result (precision/false-alarms up, recall down 2 events) + Farm B first full result (recall=0.333, worst of 3 farms) + TEP benchmark candidate feasibility confirmed + empty-rule_fired gap root-caused (two mechanisms, not yet fixed)
 
 ---
 
@@ -45,9 +45,12 @@
 36. [Paper draft + detector-enable ablation wiring fix + fusion auto-tuning wiring gap (2026-06-18)](#paper-draft--detector-enable-ablation-wiring-fix--fusion-auto-tuning-wiring-gap-2026-06-18)
 37. [Farm C full 58-event re-validation after the OMR + self-distrust saturation fixes (2026-06-18)](#farm-c-full-58-event-re-validation-after-the-omr--self-distrust-saturation-fixes-2026-06-18)
 38. [OMR kurt/skew exclusion fix (2026-06-18)](#omr-kurtskew-exclusion-fix--farm-a-exact-match-farm-c-mixed-result-2026-06-18)
-39. [Known Issues (Track as GitHub Issues)](#known-issues-track-as-github-issues)
-40. [Standing Rule: Flag Architecture-Violating Suggestions](#standing-rule-flag-architecture-violating-suggestions-dont-suppress-them) ← **Read before giving any suggestion**
-41. [User Working Style](#user-working-style)
+39. [CARE Farm B — first full result (2026-06-18)](#care-farm-b--first-full-result-2026-06-18)
+40. [New benchmark dataset research — TEP feasibility (2026-06-18)](#new-benchmark-dataset-research--tennessee-eastman-process-feasibility-confirmed-2026-06-18)
+41. [Empty-rule_fired gap root-caused (2026-06-18)](#empty-rule_fired-gap--root-caused-two-distinct-mechanisms-found-not-yet-fixed-open-decision-2026-06-18)
+42. [Known Issues (Track as GitHub Issues)](#known-issues-track-as-github-issues)
+43. [Standing Rule: Flag Architecture-Violating Suggestions](#standing-rule-flag-architecture-violating-suggestions-dont-suppress-them) ← **Read before giving any suggestion**
+44. [User Working Style](#user-working-style)
 
 ---
 
@@ -2351,6 +2354,84 @@ the exact sampling scheme has not been decided.
 "document → plan → decide before acting" methodology. `r-base-core` is now installed in this
 container's apt state (not committed to the repo; irrelevant to the codebase itself, only to this
 sandbox).
+
+---
+
+## Empty-`rule_fired` gap — root-caused, two distinct mechanisms found, NOT yet fixed (open decision) (2026-06-18)
+> *Added: 2026-06-18 — investigation of the gap flagged since the GMM-fix checkpoint, now confirmed on both Farm C (6 events) and Farm B (4 events)*
+
+Per the standing ML Improvement Loop, this is the "document" step for the cross-farm gap where a
+labelled anomaly's fused score never crosses `alert_z_eff` at all (`rule_fired=""`, `alarm_frac=0`).
+Investigated directly by re-running `apply_alarm_rules()` against the saved `event_*_scores.csv` /
+`event_*_train_fused.csv` for all 6 Farm C misses (events 4, 15, 35, 67, 76, 78) and all 4 Farm B
+misses (events 7, 19, 34, 77), inspecting `rules_diagnostic` and the score-side z arrays directly —
+not guessed at. Two distinct, well-evidenced mechanisms were found, not one:
+
+### Mechanism 1 — rate/per-head threshold pinned at the hard 0.9 ceiling (pervasive, but not solely decisive)
+
+`apply_alarm_rules()`'s rate rule (and each per-head rule) anchors its threshold to `base` — the
+training data's own **worst** rolling-window rate of `fused >= 3.0` (`np.nanmax(rolling_rate(...))`,
+`core/alarm_rules.py` line ~227) — then sets `thr = clip(base * 1.5 + 0.05, 0.05, 0.9)`. Measured
+directly: `base` (`train_max_rate` in the diagnostic) is **0.58–1.0** for 9 of the 10 missed events
+across both farms (e.g. Farm C event 35: `base=1.0`; Farm B event 19: `base=0.938`), which pins
+`thr` at the 0.9 ceiling — meaning the rule needs ~90% of an entire 24h (rate) or 7d (per-head)
+rolling window to read `z>=3.0` before it can fire at all, on top of the already-required
+persistence floor.
+
+This is real and pervasive — but checking the contrast set (Farm C's *detected* anomalies and a
+sample of Farm A events) shows `rate_thr` pinned at 0.9 in MANY of those too (e.g. Farm C event 9,
+detected via `+heads:omr_z`, also has `rate_thr=0.900`). So ceiling-saturation alone does not
+explain misses; it explains why the **rate rule specifically** is largely dead weight on Farm B/C,
+while detection in practice comes down to whether some *other* rule (sustained, availability, or a
+per-head rule whose own threshold happens NOT to be saturated) clears its own bar.
+
+**Why a naive "switch max to a quantile" fix doesn't actually work** (checked before proposing
+anything): for event 35, even `quantile(rolling_rate, 0.99) == 1.0` — identical to the true max.
+The elevated rolling-rate excursions in training aren't single-point outliers; they're **4 separate
+contiguous blocks covering 7.4% of the entire rolling-rate trace** (measured directly). A simple
+percentile swap would need to go above the 99th percentile to escape this, defeating the point of
+using a quantile in the first place. For event 4, `base=0.583` and even `quantile(0.999)=0.569` —
+still clips to 0.9 either way (`SAFETY=1.5` means anything above `~0.567` saturates), so a quantile
+swap changes nothing there either. The contamination is too large a fraction of the calibration
+window for an order-statistic swap to help; it would need genuine contamination *detection* (e.g.
+routing this `base` computation through something resembling `core/fuse.py`'s existing
+`CalibrationContaminationFilter`, which currently protects detector-level z-calibration but is
+never applied to this alarm-rule-layer "worst healthy day" computation at all — a real
+defense-in-depth gap between the two layers).
+
+### Mechanism 2 — a distinct, more fundamental detection-power gap on the spikiest events
+
+For Farm C event 4 specifically (and likely others), the per-head thresholds are NOT saturated
+(0.10–0.37, comfortably room to fire) — yet still never fire. Checked the score-side z arrays
+directly: every head DOES spike to the calibrated ceiling at times (raw z hits 10.0, `frac(z>=3.0)`
+is 1–12% per head) — the signal is genuinely there — but those spikes are too **scattered** to
+ever sustain a 7-day rolling rate above ~24% for any head (`ar1_z`'s 7d-rolling max is 0.242,
+clearing only the lowest, not the typical, per-head threshold). Separately, the sustained rule's
+longest actual run above `alert_z` is only 16 samples against a required persist of 49. This event's
+real fault signature is "frequent brief spikes, never long-or-dense enough" — falling between the
+cracks of both existing rule shapes (`sustained` wants a long contiguous plateau; `rate`/`per-head`
+want a long-window-sustained elevated rate). Farm B event 34 shows the same shape: longest run 8
+vs. required persist 34, and no per-head rolling rate reaches even its own (unsaturated) threshold.
+
+### Why this is being documented, not fixed, this session
+
+Both mechanisms point toward real fixes (contamination-aware "worst healthy day" estimation for
+Mechanism 1; a shorter/adaptive rate window or a new "spike density" rule shape for Mechanism 2) —
+but both would touch the same core alarm-rule calibration machinery that just passed a hard-won,
+exact-match Farm A zero-regression validation (see "OMR kurt/skew exclusion fix" above), and
+neither fix is a clear, low-risk, single-line correction the way the detector-enable wiring fix
+was. Per the standing rule ("a behavior change to the production fusion/alarm-rule mechanism needs
+a deliberate decision before implementation, not a unilateral fix discovered mid-investigation" —
+the same posture already applied to the fusion auto-tuning wiring gap above), this is recorded as
+an open decision point, not implemented. Candidate directions for whoever picks this up:
+(a) route the rate/per-head `base` computation through a contamination-aware estimator instead of
+a raw max — addresses Mechanism 1; (b) add a shorter, denser-spike-sensitive rolling-rate rule
+alongside the existing 24h/7d windows — addresses Mechanism 2; both need their own
+plan-before-implement pass and a full Farm A + Farm B + Farm C re-validation, no exceptions.
+
+**Files**: no code changes — `core/alarm_rules.py` (`apply_alarm_rules()`, `rolling_rate()`,
+`self_tune_alarm_rule()`) was read and diagnosed via direct re-invocation against saved score CSVs,
+not edited.
 
 ---
 
