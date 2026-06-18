@@ -1,7 +1,7 @@
 # ACM — Codebase Knowledge Base
 
 > Maintained for future agents. Update this file whenever you learn something new about the codebase.
-> Last updated: 2026-06-18 — ML pipeline bug fixes (#61-#67) + research paper planning / CARE ablation session + GMM PCA pre-reduction fix (Farm C generality) + OMR in-sample-bias/premature-clip fix + targeted Farm C re-validation + self-distrust gate magnitude-saturation fix + paper draft (Markdown) + detector-enable ablation wiring fix + fusion auto-tuning wiring gap discovered
+> Last updated: 2026-06-18 — ML pipeline bug fixes (#61-#67) + research paper planning / CARE ablation session + GMM PCA pre-reduction fix (Farm C generality) + OMR in-sample-bias/premature-clip fix + targeted Farm C re-validation + self-distrust gate magnitude-saturation fix + paper draft (Markdown) + detector-enable ablation wiring fix + fusion auto-tuning wiring gap discovered + paper System Architecture section + full Farm C 58-event re-validation (omr_z over-sensitivity found)
 
 ---
 
@@ -2055,6 +2055,67 @@ for this; do not fix opportunistically as a side effect of unrelated work.
 **Files**: no production code changed for this finding — `core/fuse.py` (lines ~460-997,
 `tune_detector_weights()`) and `core/pipeline.py` (the `fuse.run_fusion_pipeline()` call
 site, which has no `episodes_df=` argument) were read and traced, not edited.
+
+---
+
+## Farm C full 58-event re-validation after the OMR + self-distrust saturation fixes (2026-06-18)
+> *Added: 2026-06-18*
+
+Both the OMR in-sample-bias fix and the self-distrust gate magnitude-saturation fix (above)
+had only been checked against a **targeted 14-event subset** (the events already known to be
+problematic from the prior full run). This session ran the genuine full 58-event Farm C
+benchmark (`results/farm_c_v2/`, `--workers 2`, same `ML_DEFAULTS`) to get the real farm-wide
+number — and the targeted-subset caveat already on record ("does NOT substitute for a full-farm
+KPI re-validation — false alarms on previously-clean normal events... would not be visible")
+turned out to be exactly right.
+
+**Full-farm result:**
+| Metric | GMM-fix checkpoint | OMR+saturation-fix checkpoint (this run) |
+|---|---|---|
+| recall | 0.593 (16/27) | **0.778 (21/27)** |
+| precision | 0.842 | 0.656 |
+| F1 | 0.696 | 0.712 |
+| false alarms (of 31 normal) | 3 | **11** |
+| KPI | FAIL | FAIL (recall now within 1 event of passing; F1 short) |
+
+**What happened, precisely:**
+- Recall jumped +5 events (16→21) — OMR firing at all (it structurally could not before the
+  in-sample-bias fix) is now contributing real detections across the farm, not just the 3
+  events checked in the targeted subset.
+- But 7 of the 11 false alarms are newly-introduced `omr_z`-driven false positives on normal
+  events that were **never part of the targeted 14-event subset** (event_ids 8, 48, 56, 58, 62,
+  63, 75 — all `rule_fired = "+heads:omr_z"`). The targeted re-validation's own normal-event
+  checks (54, 88, 94) were unaffected and remain false alarms exactly as before — the regression
+  is entirely on previously-untested normal events, which is precisely the blind spot the
+  targeted-subset method warned about.
+- The 6 remaining missed anomalies (event_ids 4, 15, 35, 67, 76, 78) are **unchanged**, all with
+  empty `rule_fired` — confirming this is the same distinct, still-uninvestigated "fused score
+  never crosses `alert_z_eff`" gap flagged since the original GMM-fix checkpoint, not something
+  either the OMR or saturation fix touches.
+
+**Interpretation, not yet acted on (per the standing ML Improvement Loop methodology — document,
+then plan, then decide before touching code):** OMR now behaves on Farm C the way GMM did before
+its own PCA pre-reduction fix — newly capable of firing, and apparently over-sensitive on a subset
+of normal Farm C operating conditions at 957-sensor / ~3300-engineered-feature scale. This looks
+like the same family of dimensionality-driven calibration fragility already fixed once for GMM,
+but has NOT been investigated for OMR specifically. Do not patch this opportunistically; it needs
+its own root-cause pass (e.g. checking whether OMR's residual scale or top-3 aggregation degrades
+similarly with feature count) and an explicit Farm-A zero-regression re-check before any change,
+exactly like the GMM and OMR fixes above.
+
+**Read on methodology**: this is the clearest demonstration yet, with real numbers, of why a
+fix's validation scope matters — the 14-event targeted re-validation correctly confirmed its
+*target* bug was fixed with no regression on the events it checked, but a fix's blast radius can
+exceed the subset used to validate it. Full-farm (or full-dataset) re-validation is required
+before any fix is considered farm-wide-safe, not just subset-safe.
+
+**Per the user's explicit standing instruction this session, this farm-specific result is
+recorded here (the durable knowledge base) but is deliberately NOT being written into
+`paper/draft.md` as a standalone finding** — the paper's Results section is to be filled in once
+findings are synthesized across many datasets, not per-dataset as each one completes.
+
+**Files**: no code changes — `results/farm_c_v2/` (gitignored, local-only) holds the full
+`results.csv`/`summary.json` for this run.
 
 ---
 
