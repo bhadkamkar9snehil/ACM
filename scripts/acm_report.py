@@ -76,495 +76,264 @@ html {
 }
 
 body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
-    font-size: 15px;
-    line-height: 1.6;
-    color: #2c3e50;
-    background: linear-gradient(135deg, #f5f7fa 0%, #f9fafb 100%);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif;
+    font-size: 16px;
+    line-height: 1.55;
+    color: #1c2128;
+    background: #eef1f4;
     margin: 0;
     padding: 0;
-    min-height: 100vh;
 }
 
+/* ---- Header (industrial banner, flat, no gradients/shadows) ---- */
 .header {
-    background: #ffffff;
-    border-bottom: 1px solid #e1e8ed;
-    padding: 28px 40px;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.03);
-    margin-bottom: 32px;
+    background: #1c2530;
+    border-bottom: 4px solid #0969da;
+    padding: 30px 40px;
 }
 
 .header-content {
-    max-width: 1400px;
+    max-width: 1320px;
     margin: 0 auto;
 }
 
 .header h1 {
-    margin: 0 0 4px 0;
-    font-size: 32px;
+    margin: 0 0 6px 0;
+    font-size: 28px;
     font-weight: 700;
-    color: #1a202c;
-    letter-spacing: -0.5px;
+    color: #ffffff;
+    letter-spacing: -0.2px;
 }
 
 .header-meta {
     display: flex;
-    gap: 24px;
-    margin-top: 12px;
-    font-size: 13px;
-    color: #6e7681;
+    flex-wrap: wrap;
+    gap: 28px;
+    margin-top: 14px;
+    font-size: 14px;
+    color: #c4ccd6;
 }
 
 .header-meta span {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
 }
 
 .meta-label {
-    font-weight: 600;
-    color: #2c3e50;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    font-size: 12px;
+    color: #8b96a5;
 }
 
 .container {
-    max-width: 1400px;
+    max-width: 1320px;
     margin: 0 auto;
-    padding: 0 40px;
+    padding: 32px 40px 8px;
+}
+
+section {
+    margin-bottom: 44px;
 }
 
 h2 {
-    margin: 40px 0 24px 0;
-    font-size: 26px;
+    margin: 0 0 20px 0;
+    font-size: 19px;
     font-weight: 700;
-    color: #1a202c;
-    border-bottom: 3px solid #2c3e50;
-    padding-bottom: 12px;
+    color: #1c2128;
     text-transform: uppercase;
-    letter-spacing: 0.5px;
-    font-size: 20px;
+    letter-spacing: 0.6px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid #1c2128;
 }
 
 h3 {
-    margin: 32px 0 20px 0;
-    font-size: 18px;
+    margin: 28px 0 16px 0;
+    font-size: 17px;
     font-weight: 700;
-    color: #1a202c;
+    color: #1c2128;
 }
 
 h4 {
-    margin: 16px 0 12px 0;
-    font-size: 15px;
+    margin: 0 0 4px 0;
+    font-size: 16px;
     font-weight: 700;
-    color: #2c3e50;
+    color: #1c2128;
 }
 
 p {
     margin: 8px 0;
-    color: #555;
+    color: #444c56;
 }
 
-/* KPI Grid */
+.text-muted {
+    color: #6e7681;
+    font-style: italic;
+    margin: 12px 0;
+}
+
+/* ---- KPI strip: flat numeric blocks, no shadows/hover gimmicks ---- */
 .kpi-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-    gap: 20px;
-    margin: 24px 0 32px 0;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 1px;
+    margin: 0 0 8px 0;
+    background: #d0d7de;
+    border: 1px solid #d0d7de;
 }
 
 .kpi-box {
     background: #ffffff;
-    border: 1px solid #e1e8ed;
-    border-radius: 12px;
-    padding: 24px;
-    text-align: center;
-    transition: all 0.3s ease;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-}
-
-.kpi-box:hover {
-    border-color: #2c3e50;
-    box-shadow: 0 4px 12px rgba(44, 62, 80, 0.1);
-    transform: translateY(-2px);
+    padding: 20px 22px;
 }
 
 .kpi-label {
     font-size: 12px;
     color: #6e7681;
-    font-weight: 600;
+    font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.5px;
-    margin-bottom: 12px;
+    margin-bottom: 10px;
 }
 
 .kpi-value {
-    font-size: 42px;
-    font-weight: 800;
-    color: #1a202c;
-    margin: 12px 0 8px 0;
+    font-size: 36px;
+    font-weight: 700;
+    color: #1c2128;
     font-variant-numeric: tabular-nums;
+    line-height: 1;
 }
+
+.kpi-value.success { color: #1a7f37; }
+.kpi-value.error { color: #cf222e; }
+.kpi-value.warn { color: #9a6700; }
 
 .kpi-desc {
-    font-size: 13px;
+    font-size: 12.5px;
     color: #6e7681;
-    margin-top: 8px;
+    margin-top: 6px;
 }
 
-/* Tables */
+/* ---- Tables ---- */
 table {
     border-collapse: collapse;
     width: 100%;
-    margin: 24px 0;
-    font-size: 14px;
+    margin: 0;
+    font-size: 15px;
     background: #ffffff;
-    border: 1px solid #e1e8ed;
-    border-radius: 8px;
-    overflow: hidden;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
 }
 
 td, th {
-    padding: 14px 16px;
+    padding: 12px 16px;
     text-align: left;
     border-bottom: 1px solid #e1e8ed;
+    vertical-align: top;
 }
 
 th {
-    background: #f5f7fa;
+    background: #f0f2f5;
     font-weight: 700;
-    color: #2c3e50;
+    color: #444c56;
     text-transform: uppercase;
-    font-size: 12px;
-    letter-spacing: 0.3px;
+    font-size: 11.5px;
+    letter-spacing: 0.4px;
+    border-bottom: 2px solid #d0d7de;
 }
 
 tbody tr:last-child td {
     border-bottom: none;
 }
 
-tbody tr {
-    transition: background-color 0.2s ease;
-}
-
-tbody tr:nth-child(odd) {
-    background: #ffffff;
-}
-
-tbody tr:nth-child(even) {
-    background: #f9fafb;
-}
-
 tbody tr:hover {
-    background: #f0f4f8;
+    background: #f6f8fa;
 }
 
-/* Cards */
+.rules-text {
+    display: block;
+    font-size: 14px;
+    color: #1c2128;
+    line-height: 1.5;
+}
+
+.diag-line {
+    display: block;
+    font-size: 13px;
+    color: #57606a;
+    margin-top: 5px;
+    line-height: 1.45;
+}
+
+/* ---- Card frame (boxy / industrial, flat border, no shadow stack) ---- */
 .card {
     background: #ffffff;
-    border: 1px solid #e1e8ed;
-    border-radius: 12px;
-    padding: 24px;
-    margin: 24px 0;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-    transition: box-shadow 0.3s ease;
+    border: 1px solid #d0d7de;
+    padding: 0;
+    margin: 0 0 24px 0;
 }
 
-.card:hover {
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+.card > table {
+    margin: 0;
 }
 
-.card img {
-    width: 100%;
-    max-width: 100%;
-    border-radius: 8px;
-    margin: 16px 0;
-    border: 1px solid #e1e8ed;
-}
-
-/* Diagnostic Box */
-.diagnostic-box {
-    background: #f0f4f8;
-    border-left: 4px solid #3b82f6;
-    padding: 16px;
-    margin: 16px 0;
-    border-radius: 6px;
+/* ---- Diagnostic block: a labelled flat panel, NOT a colored accent stripe ---- */
+.diag-box {
+    background: #f6f8fa;
+    border: 1px solid #d8dee4;
+    padding: 12px 16px;
+    margin-top: 14px;
     font-size: 14px;
-    color: #2c3e50;
+    color: #1c2128;
+    line-height: 1.5;
 }
 
-.diagnostic-item {
-    margin: 6px 0;
-    display: flex;
-    align-items: center;
-    gap: 8px;
+.diag-box + .diag-box {
+    margin-top: 8px;
+    border-top: none;
 }
 
-.diagnostic-item strong {
-    color: #1a202c;
-}
-
-/* Status Indicators */
-.status-indicator {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 13px;
-    font-weight: 600;
-    padding: 6px 12px;
-    border-radius: 6px;
-    background: #f0f4f8;
-    color: #2c3e50;
-}
-
-.status-armed { background: #dbeafe; color: #1e40af; }
-.status-disarmed { background: #fecaca; color: #991b1b; }
-
-/* Badges */
-.badge {
-    display: inline-block;
-    padding: 6px 12px;
-    border-radius: 8px;
-    font-size: 13px;
+.diag-label {
+    display: block;
+    font-size: 11px;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.3px;
+    letter-spacing: 0.6px;
+    color: #57606a;
+    margin-bottom: 4px;
 }
 
-.badge-detected {
-    background: #dcfce7;
-    color: #166534;
-    border: 1px solid #86efac;
+/* ---- Badges: solid, flat, no border ring ---- */
+.badge {
+    display: inline-block;
+    padding: 4px 10px;
+    font-size: 12.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
 }
 
-.badge-clean {
-    background: #dcfce7;
-    color: #166534;
-    border: 1px solid #86efac;
+.badge-detected, .badge-clean {
+    background: #1a7f37;
+    color: #ffffff;
 }
 
 .badge-missed {
-    background: #fee2e2;
-    color: #991b1b;
-    border: 1px solid #fca5a5;
+    background: #cf222e;
+    color: #ffffff;
 }
 
-.badge-false-alarm {
-    background: #fef3c7;
-    color: #b45309;
-    border: 1px solid #fcd34d;
+.badge-false_alarm, .badge-false-alarm {
+    background: #9a6700;
+    color: #ffffff;
 }
 
-/* Details/Logs */
-details {
-    margin: 12px 0;
-    padding: 12px;
-    background: #ffffff;
-    border: 1px solid #e1e8ed;
-    border-radius: 8px;
+.badge:not([class*="badge-"]) {
+    background: #6e7681;
+    color: #ffffff;
 }
 
-summary {
-    cursor: pointer;
-    font-weight: 600;
-    padding: 8px;
-    user-select: none;
-    color: #2c3e50;
-    transition: color 0.2s ease;
-    display: flex;
-    align-items: center;
-}
-
-summary:hover {
-    color: #3b82f6;
-}
-
-summary::marker {
-    color: #3b82f6;
-}
-
-pre {
-    background: #f5f7fa;
-    padding: 16px;
-    border-radius: 6px;
-    font-size: 13px;
-    overflow-x: auto;
-    border: 1px solid #e1e8ed;
-    line-height: 1.5;
-    color: #2c3e50;
-    margin: 12px 0 0 0;
-}
-
-/* Text Colors */
-.info { color: #3b82f6; }
-.warn { color: #f59e0b; }
-.error { color: #ef4444; }
-.success { color: #10b981; }
-
-/* Log Summary */
-.log-summary {
-    font-size: 12px;
-    color: #6e7681;
-    font-weight: 500;
-    margin-left: 8px;
-}
-
-.timestamp {
-    color: #6e7681;
-    font-size: 13px;
-    font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, monospace;
-}
-
-/* Links */
-a {
-    color: #3b82f6;
-    text-decoration: none;
-    font-weight: 500;
-    transition: color 0.2s ease;
-}
-
-a:hover {
-    color: #1e40af;
-    text-decoration: underline;
-}
-
-/* Footer */
-.footer {
-    border-top: 1px solid #e1e8ed;
-    background: #ffffff;
-    padding: 24px 40px;
-    margin-top: 48px;
-    text-align: center;
-    font-size: 12px;
-    color: #6e7681;
-}
-
-/* Responsive */
-@media (max-width: 768px) {
-    .header {
-        padding: 20px 24px;
-    }
-
-    .container {
-        padding: 0 24px;
-    }
-
-    .kpi-grid {
-        grid-template-columns: 1fr;
-    }
-
-    .header-meta {
-        flex-direction: column;
-        gap: 8px;
-    }
-
-    h2 {
-        font-size: 22px;
-    }
-
-    .kpi-value {
-        font-size: 32px;
-    }
-}
-
-/* Print */
-@media print {
-    body {
-        background: #ffffff;
-        margin: 0;
-        padding: 0;
-    }
-
-    .header {
-        box-shadow: none;
-        border-bottom: 2px solid #2c3e50;
-    }
-
-    .footer {
-        display: none;
-    }
-
-    table, .card, details {
-        page-break-inside: avoid;
-        box-shadow: none;
-    }
-
-    a {
-        color: #2c3e50;
-    }
-}
-
-/* Animations */
-@keyframes fadeIn {
-    from {
-        opacity: 0;
-        transform: translateY(10px);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
-}
-
-.card, .kpi-box, table {
-    animation: fadeIn 0.3s ease;
-}
-
-h1 {
-    margin: 0;
-    font-size: 28px;
-    font-weight: 700;
-    color: #1a202c;
-    letter-spacing: -0.5px;
-}
-
-h2 {
-    margin: 28px 0 16px;
-    font-size: 20px;
-    font-weight: 700;
-    color: #1a202c;
-    border-bottom: 1px solid #e1e8ed;
-    padding-bottom: 12px;
-}
-
-section {
-    margin-bottom: 48px;
-}
-
-section:last-of-type {
-    margin-bottom: 32px;
-}
-
-.container {
-    max-width: 1400px;
-    margin: 0 auto;
-    padding: 0 40px;
-}
-
-.header-meta {
-    display: flex;
-    gap: 32px;
-    margin-top: 16px;
-    font-size: 14px;
-    color: #6e7681;
-}
-
-.header-meta span {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.meta-label {
-    font-weight: 600;
-    color: #2c3e50;
-}
-
-.text-muted {
-    color: #6e7681;
-    font-style: italic;
-    margin: 16px 0;
-}
-
+/* ---- Asset timeline cards ---- */
 .timeline-cards {
     display: flex;
     flex-direction: column;
@@ -572,218 +341,175 @@ section:last-of-type {
 }
 
 .timeline-cards .card {
-    padding: 20px;
-    border: 1px solid #e1e8ed;
-}
-
-.timeline-cards .card h4 {
-    margin: 0 0 12px;
-    font-size: 16px;
-    font-weight: 600;
-    color: #1a202c;
+    padding: 20px 24px 22px;
 }
 
 .timeline-cards .card img {
     width: 100%;
     height: auto;
-    border-radius: 4px;
-    margin-bottom: 12px;
     display: block;
+    margin: 10px 0 0;
+    border: 1px solid #d0d7de;
+    image-rendering: -webkit-optimize-contrast;
 }
 
-.diagnostic-box {
-    background: #f5f7fa;
-    padding: 12px 16px;
-    border-radius: 4px;
-    font-size: 13px;
-    color: #2c3e50;
-    border-left: 3px solid #0969da;
-    margin-top: 12px;
-}
-
+/* ---- Logs ---- */
 .logs-section {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 1px;
+    border: 1px solid #d0d7de;
 }
 
 .logs-section details {
-    padding: 12px 16px;
-    background: #f5f7fa;
-    border: 1px solid #e1e8ed;
-    border-radius: 4px;
-    cursor: pointer;
+    padding: 0;
+    background: #ffffff;
+    border-bottom: 1px solid #e1e8ed;
+}
+
+.logs-section details:last-child {
+    border-bottom: none;
 }
 
 .logs-section details[open] {
-    background: #ffffff;
-    border-color: #d1d9e0;
+    background: #fafbfc;
 }
 
 .logs-section summary {
+    cursor: pointer;
     font-weight: 600;
-    color: #2c3e50;
+    font-size: 15px;
+    padding: 12px 16px;
     user-select: none;
-    outline: none;
+    color: #1c2128;
+    list-style: none;
+}
+
+.logs-section summary::-webkit-details-marker {
+    display: none;
 }
 
 .logs-section summary:hover {
-    color: #0969da;
+    background: #f0f4f8;
 }
 
 .log-summary {
-    font-size: 12px;
+    font-size: 13px;
     color: #6e7681;
     font-weight: 400;
-    margin-left: 8px;
+    margin-left: 10px;
 }
 
 .logs-section pre {
-    margin: 12px 0 0;
-    padding: 12px;
-    background: #f9fafb;
-    border-left: 3px solid #d1d9e0;
-    border-radius: 0;
-    font-size: 12px;
-    overflow-x: auto;
-    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-}
-
-.logs-section .info {
-    color: #0969da;
-}
-
-.logs-section .warning {
-    color: #bf8700;
-    font-weight: 500;
-}
-
-.logs-section .error {
-    color: #cf222e;
-    font-weight: 500;
-}
-
-.logs-section .debug {
-    color: #6e7681;
-}
-
-.footer {
-    background: #ffffff;
+    margin: 0;
+    padding: 14px 16px 16px;
+    background: #f6f8fa;
     border-top: 1px solid #e1e8ed;
-    padding: 28px 40px;
-    margin-top: 48px;
-    text-align: center;
+    font-size: 13px;
+    line-height: 1.6;
+    overflow-x: auto;
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', Consolas, monospace;
+    white-space: pre-wrap;
+}
+
+.logs-section .info { color: #0969da; }
+.logs-section .warning { color: #9a6700; font-weight: 600; }
+.logs-section .error { color: #cf222e; font-weight: 600; }
+.logs-section .debug { color: #6e7681; }
+
+.timestamp {
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', Consolas, monospace;
+    font-size: 13px;
+    color: #57606a;
+}
+
+a {
+    color: #0969da;
+    text-decoration: none;
+    font-weight: 600;
+}
+
+a:hover {
+    text-decoration: underline;
+}
+
+/* ---- Footer ---- */
+.footer {
+    border-top: 4px solid #1c2128;
+    background: #ffffff;
+    padding: 22px 40px;
+    margin-top: 16px;
 }
 
 .footer-content {
-    max-width: 1400px;
+    max-width: 1320px;
     margin: 0 auto;
 }
 
 .footer p {
     margin: 0;
-    font-size: 14px;
-    color: #2c3e50;
-    font-weight: 500;
-}
-
-table thead {
-    background: #f5f7fa;
-}
-
-table tbody tr {
-    border-bottom: 1px solid #e1e8ed;
-}
-
-table tbody tr:hover {
-    background: #fafbfc;
-}
-
-table td {
-    vertical-align: middle;
-    padding: 12px;
-}
-
-table th {
-    vertical-align: middle;
-    padding: 12px;
-    font-weight: 600;
-    color: #2c3e50;
     font-size: 13px;
-    text-align: left;
-}
-
-.timestamp {
-    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-    font-size: 12px;
     color: #6e7681;
 }
 
-.badge {
-    display: inline-block;
-    padding: 4px 10px;
-    border-radius: 12px;
-    font-size: 12px;
-    font-weight: 600;
+.footer p strong {
+    color: #1c2128;
 }
 
-.badge-detected, .badge-clean {
-    background: #ddf4e8;
-    color: #1a7f37;
-}
-
-.badge-missed {
-    background: #ffebe6;
-    color: #cf222e;
-}
-
-.badge-false_alarm {
-    background: #fff3c6;
-    color: #bf8700;
-}
-
+/* ---- Responsive ---- */
 @media (max-width: 768px) {
-    .header-meta {
-        flex-direction: column;
-        gap: 12px;
+    .header {
+        padding: 22px 20px;
     }
 
     .container {
-        padding: 0 20px;
+        padding: 24px 20px 8px;
     }
 
-    h1 {
-        font-size: 24px;
+    .kpi-grid {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .header-meta {
+        flex-direction: column;
+        gap: 10px;
     }
 
     h2 {
-        font-size: 18px;
+        font-size: 17px;
+    }
+
+    .kpi-value {
+        font-size: 28px;
     }
 
     table {
         font-size: 13px;
     }
 
-    table td, table th {
-        padding: 8px;
+    td, th {
+        padding: 8px 10px;
     }
 }
 
+/* ---- Print ---- */
 @media print {
     body {
-        background: white;
+        background: #ffffff;
     }
 
-    .header, .footer {
-        page-break-after: avoid;
+    .header {
+        background: #1c2530;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
     }
 
-    section {
+    table, .card, details {
         page-break-inside: avoid;
     }
 
-    .timeline-cards .card {
-        page-break-inside: avoid;
+    a {
+        color: #1c2128;
     }
 }
 """
@@ -820,9 +546,9 @@ def select_assets(assets: pd.DataFrame, picks: Optional[list[str]], farm: Option
 
 
 def fig_to_b64(fig) -> str:
-    """Convert matplotlib figure to base64-encoded PNG."""
+    """Convert matplotlib figure to base64-encoded PNG at print-grade resolution."""
     buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=85, bbox_inches="tight")
+    fig.savefig(buf, format="png", dpi=170, bbox_inches="tight")
     plt.close(fig)
     return base64.b64encode(buf.getvalue()).decode()
 
@@ -897,14 +623,6 @@ def format_rules_human(rules_str: Optional[str], alert_z: Optional[float], fused
     return ". ".join(explanations) + "." if explanations else "No rules triggered"
 
 
-def parse_metrics_json(metrics_json: str) -> dict:
-    """Parse metrics JSON string and extract key metrics."""
-    if not metrics_json or pd.isna(metrics_json):
-        return {}
-    try:
-        return json.loads(metrics_json)
-    except (json.JSONDecodeError, TypeError):
-        return {}
 
 
 def format_data_quality_human(dq_json: Optional[str]) -> Optional[str]:
@@ -969,26 +687,28 @@ def asset_figure(s: pd.DataFrame, meta: pd.Series) -> tuple[str, str]:
     data_nans = s[Z_COLS].isna().sum().sum() / (len(s) * len(Z_COLS)) * 100 if len(s) > 0 else 0
 
     fig, (ax1, ax2) = plt.subplots(
-        2, 1, figsize=(12, 4.2), sharex=True,
-        gridspec_kw={"height_ratios": [3, 1.2], "hspace": 0.12})
+        2, 1, figsize=(13, 5.2), sharex=True,
+        gridspec_kw={"height_ratios": [3, 1.2], "hspace": 0.14})
 
     # Plot fused score
-    ax1.plot(ts, s["fused"], lw=0.7, color="#0969da", label="Fused score")
+    ax1.plot(ts, s["fused"], lw=0.9, color="#0969da", label="Fused score")
 
     # Plot alert threshold
     thr = meta.get("alert_z")
     if pd.notna(thr):
-        ax1.axhline(thr, color="#bf8700", lw=1.0, ls="--",
+        ax1.axhline(thr, color="#9a6700", lw=1.2, ls="--",
                     label=f"Alert threshold: {thr:.2f}")
 
     # Shade alarm regions
     alarm = s["alarm"].to_numpy().astype(bool)
     if alarm.any():
         ax1.fill_between(ts, 0, s["fused"].max() * 1.1, where=alarm,
-                         color="#cf222e", alpha=0.12, label="Alarm period")
+                         color="#cf222e", alpha=0.14, label="Alarm period")
 
-    ax1.set_ylabel("Anomaly Score (Z)", fontsize=11, fontweight=600)
-    ax1.legend(loc="upper left", fontsize=9, ncol=3, frameon=True, fancybox=True)
+    ax1.set_ylabel("Anomaly Score (Z)", fontsize=12, fontweight=600)
+    ax1.legend(loc="upper left", fontsize=10, ncol=3, frameon=True, fancybox=False,
+              edgecolor="#d0d7de")
+    ax1.tick_params(axis="both", labelsize=10)
 
     # Title with full description
     desc = meta.get("description") or meta.get("label") or ""
@@ -996,7 +716,7 @@ def asset_figure(s: pd.DataFrame, meta: pd.Series) -> tuple[str, str]:
         title = f"{meta['asset_key']} (ID: {meta['asset_id']}) — {desc}"
     else:
         title = f"{meta['asset_key']} (ID: {meta['asset_id']})"
-    ax1.set_title(title, fontsize=10, loc="left", fontweight=600)
+    ax1.set_title(title, fontsize=12, loc="left", fontweight=700)
     ax1.grid(True, alpha=0.2)
 
     # Detector heatmap
@@ -1008,16 +728,18 @@ def asset_figure(s: pd.DataFrame, meta: pd.Series) -> tuple[str, str]:
 
     # Detector labels with full names
     ax2.set_yticks(np.arange(len(Z_COLS)) + 0.5)
-    ax2.set_yticklabels([detector_label(z) for z in Z_COLS], fontsize=8)
-    ax2.set_ylabel("Detectors", fontsize=10, fontweight=600)
+    ax2.set_yticklabels([detector_label(z) for z in Z_COLS], fontsize=10)
+    ax2.set_ylabel("Detectors", fontsize=11, fontweight=600)
     ax2.xaxis_date()
-    ax2.set_xlabel("Time", fontsize=10, fontweight=600)
+    ax2.set_xlabel("Time", fontsize=11, fontweight=600)
+    ax2.tick_params(axis="x", labelsize=10)
 
     # Add colorbar
     cbar = fig.colorbar(im, ax=ax2, orientation="vertical", pad=0.02, fraction=0.05)
-    cbar.set_label("Score", fontsize=9)
+    cbar.set_label("Score", fontsize=10)
+    cbar.ax.tick_params(labelsize=9)
 
-    fig.autofmt_xdate(rotation=45, ha='right')
+    fig.autofmt_xdate(rotation=30, ha='right')
     fig.tight_layout()
 
     b64 = fig_to_b64(fig)
@@ -1035,14 +757,17 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
         print("No matching assets in store.")
         return
 
-    # Get KPI metrics
-    summaries = read_sql(con, f"SELECT * FROM {prefix}summary ORDER BY ingested_at DESC")
-    if farm:
-        summaries = summaries[summaries["farm"] == farm]
-
-    kpi_metrics = {}
-    if not summaries.empty:
-        kpi_metrics = parse_metrics_json(summaries.iloc[0]["metrics_json"])
+    # KPI metrics are derived strictly from the assets selected for THIS report
+    # (never from the fleet-wide summary table) so a scoped report — one asset,
+    # a handful of assets, a single farm — never bleeds in fleet-wide numbers.
+    verdicts = assets["verdict"].fillna("UNKNOWN").astype(str).str.upper()
+    kpi_metrics = {
+        "total_assets": int(len(assets)),
+        "detected": int((verdicts == "DETECTED").sum()),
+        "clean": int((verdicts == "CLEAN").sum()),
+        "missed": int((verdicts == "MISSED").sum()),
+        "false_alarms": int((verdicts == "FALSE_ALARM").sum()),
+    }
 
     # Get runs for operations table
     runs = read_sql(con, f"SELECT * FROM {prefix}runs ORDER BY started_at DESC")
@@ -1080,7 +805,7 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
             f"<td>{html.escape(meta.get('description') or '')}</td>"
             f"<td>{format_verdict_badge(meta.get('verdict'))}</td>"
             f"<td>{lead}</td>"
-            f"<td><small>{html.escape(rules_display)}</small></td>"
+            f"<td><span class='rules-text'>{html.escape(rules_display)}</span></td>"
             f"</tr>")
 
         # Asset timeline figure
@@ -1091,9 +816,9 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
             or data_quality_fallback
         calibration = format_calibration_human(run_row.get("calibration_json")) if run_row is not None else None
 
-        diag_boxes = f"<div class='diagnostic-box'><strong>Data Quality:</strong> {html.escape(data_quality)}</div>"
+        diag_boxes = f"<div class='diag-box'><span class='diag-label'>Data Quality</span>{html.escape(data_quality)}</div>"
         if calibration:
-            diag_boxes += f"<div class='diagnostic-box'><strong>Calibration:</strong> {html.escape(calibration)}</div>"
+            diag_boxes += f"<div class='diag-box'><span class='diag-label'>Calibration</span>{html.escape(calibration)}</div>"
 
         figs_html.append(
             f"<div class='card' id='{html.escape(meta['asset_key'])}'>"
@@ -1114,26 +839,24 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
         if pd.notna(r.rules_diagnostic_json):
             try:
                 diag = json.loads(r.rules_diagnostic_json)
-                diag_html = "<small>"
                 for rule_name, rule_info in diag.items():
                     if isinstance(rule_info, dict):
                         if rule_info.get("active"):
                             train_n = rule_info.get("train_n", "?")
                             thr = rule_info.get("thr", "?")
-                            diag_html += f"<div>{html.escape(rule_name)}: armed (n={train_n}, thr={thr})</div>"
+                            diag_html += f"<div class='diag-line'>{html.escape(rule_name)}: armed (n={train_n}, thr={thr})</div>"
                         else:
                             train_n = rule_info.get("train_n", "?")
-                            diag_html += f"<div>{html.escape(rule_name)}: disarmed (n={train_n})</div>"
-                diag_html += "</small>"
+                            diag_html += f"<div class='diag-line'>{html.escape(rule_name)}: disarmed (n={train_n})</div>"
             except (json.JSONDecodeError, TypeError):
                 pass
 
         data_quality_line = format_data_quality_human(getattr(r, "data_quality_json", None))
         calibration_line = format_calibration_human(getattr(r, "calibration_json", None))
         if data_quality_line:
-            diag_html += f"<small><div>Data: {html.escape(data_quality_line)}</div></small>"
+            diag_html += f"<div class='diag-line'>Data: {html.escape(data_quality_line)}</div>"
         if calibration_line:
-            diag_html += f"<small><div>{html.escape(calibration_line)}</div></small>"
+            diag_html += f"<div class='diag-line'>{html.escape(calibration_line)}</div>"
 
         ops_rows.append(
             f"<tr>"
@@ -1142,7 +865,7 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
             f"<td>{duration_str}</td>"
             f"<td>{html.escape(r.status or '')}</td>"
             f"<td>{alert_z_str}</td>"
-            f"<td><small>{html.escape(rules_exp)}</small>{diag_html}</td>"
+            f"<td><span class='rules-text'>{html.escape(rules_exp)}</span>{diag_html}</td>"
             f"</tr>")
 
     # Build logs section
@@ -1169,37 +892,42 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
             f"<pre>{lines_html}</pre>"
             f"</details>")
 
-    # KPI section
-    kpi_html = ""
-    if kpi_metrics:
-        total = kpi_metrics.get("total_assets", 0)
-        detected = kpi_metrics.get("detected", 0)
-        missed = kpi_metrics.get("missed", 0)
-        false_alarms = kpi_metrics.get("false_alarms", 0)
+    # KPI section — always derived from `assets` above, so this is exact for
+    # whatever scope (single asset / a handful / a farm / the whole fleet) was requested.
+    total = kpi_metrics["total_assets"]
+    detected = kpi_metrics["detected"]
+    clean = kpi_metrics["clean"]
+    missed = kpi_metrics["missed"]
+    false_alarms = kpi_metrics["false_alarms"]
 
-        kpi_html = f"""
-        <div class='kpi-grid'>
-            <div class='kpi-box'>
-                <div class='kpi-label'>Total Assets</div>
-                <div class='kpi-value'>{total}</div>
-            </div>
-            <div class='kpi-box'>
-                <div class='kpi-label'>Detected</div>
-                <div class='kpi-value success'>{detected}</div>
-                <div class='kpi-desc'>Anomalies found</div>
-            </div>
-            <div class='kpi-box'>
-                <div class='kpi-label'>Missed</div>
-                <div class='kpi-value error'>{missed}</div>
-                <div class='kpi-desc'>Not detected</div>
-            </div>
-            <div class='kpi-box'>
-                <div class='kpi-label'>False Alarms</div>
-                <div class='kpi-value warn'>{false_alarms}</div>
-                <div class='kpi-desc'>False positives</div>
-            </div>
+    kpi_html = f"""
+    <div class='kpi-grid'>
+        <div class='kpi-box'>
+            <div class='kpi-label'>Assets in Scope</div>
+            <div class='kpi-value'>{total}</div>
         </div>
-        """
+        <div class='kpi-box'>
+            <div class='kpi-label'>Detected</div>
+            <div class='kpi-value success'>{detected}</div>
+            <div class='kpi-desc'>Confirmed anomaly, flagged</div>
+        </div>
+        <div class='kpi-box'>
+            <div class='kpi-label'>Clean</div>
+            <div class='kpi-value success'>{clean}</div>
+            <div class='kpi-desc'>No anomaly, no flag</div>
+        </div>
+        <div class='kpi-box'>
+            <div class='kpi-label'>Missed</div>
+            <div class='kpi-value error'>{missed}</div>
+            <div class='kpi-desc'>Confirmed anomaly, not flagged</div>
+        </div>
+        <div class='kpi-box'>
+            <div class='kpi-label'>False Alarms</div>
+            <div class='kpi-value warn'>{false_alarms}</div>
+            <div class='kpi-desc'>Flagged, no confirmed anomaly</div>
+        </div>
+    </div>
+    """
 
     scope = f"farm {farm}" if farm else (f"{len(assets)} selected assets" if picks else "fleet")
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -1229,7 +957,7 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
     <div class='container'>
         <section>
             <h2>Performance Summary</h2>
-            {kpi_html if kpi_html else '<p class="text-muted">No summary metrics available</p>'}
+            {kpi_html}
         </section>
 
         <section>
