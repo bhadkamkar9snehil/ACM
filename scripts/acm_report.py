@@ -102,6 +102,7 @@ CSS = """
 
     /* geometry */
     --radius: 8px;
+    --content-width: 1800px;
 
     /* typography */
     --font: 'Satoshi', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -138,7 +139,7 @@ body {
 }
 
 .header-content {
-    max-width: 1360px;
+    width: min(96vw, var(--content-width));
     margin: 0 auto;
 }
 
@@ -176,7 +177,7 @@ body {
 }
 
 .container {
-    max-width: 1360px;
+    width: min(96vw, var(--content-width));
     margin: 0 auto;
     padding: 36px 44px 8px;
 }
@@ -423,6 +424,41 @@ tbody tr:hover {
     image-rendering: -webkit-optimize-contrast;
 }
 
+.asset-card-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 20px;
+}
+
+@media (min-width: 1800px) {
+    .asset-card-grid {
+        grid-template-columns: repeat(auto-fit, minmax(480px, 1fr));
+    }
+}
+
+.asset-card-chart, .asset-card-diag {
+    min-width: 0;
+}
+
+/* ---- Compact in-card tables (alarm history, detector stats) ---- */
+.mini-table {
+    width: 100%;
+    margin: 0;
+    font-size: 16px;
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.mini-table td, .mini-table th {
+    padding: 8px 12px;
+}
+
+.mini-table th {
+    font-size: 13px;
+}
+
 /* ---- Logs ---- */
 .logs-section {
     display: flex;
@@ -517,7 +553,7 @@ a:hover {
 }
 
 .footer-content {
-    max-width: 1360px;
+    width: min(96vw, var(--content-width));
     margin: 0 auto;
 }
 
@@ -624,7 +660,7 @@ def select_assets(assets: pd.DataFrame, picks: Optional[list[str]], farm: Option
 def fig_to_b64(fig) -> str:
     """Convert matplotlib figure to base64-encoded PNG at print-grade resolution."""
     buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=170, bbox_inches="tight")
+    fig.savefig(buf, format="png", dpi=200, bbox_inches="tight")
     plt.close(fig)
     return base64.b64encode(buf.getvalue()).decode()
 
@@ -718,7 +754,7 @@ def format_data_quality_human(dq_json: Optional[str]) -> Optional[str]:
         parts.append(f"{dq['channels']} channels")
     if dq.get("nan_density") is not None:
         parts.append(f"{dq['nan_density'] * 100:.2f}% missing")
-    if dq.get("duplicate_ts"):
+    if dq.get("duplicate_ts") is not None:
         parts.append(f"{dq['duplicate_ts']} duplicate timestamps")
     if dq.get("cadence_s"):
         cadence = dq["cadence_s"]
@@ -739,7 +775,29 @@ def format_calibration_human(calib_json: Optional[str]) -> Optional[str]:
         return None
     parts = [f"{detector_label(k)} {v:.2f}" for k, v in weights.items()]
     tuned = "auto-tuned from this run's data" if calib.get("auto_tuned") else "fixed weights"
-    return f"Fusion weights ({tuned}): " + ", ".join(parts)
+    line = f"Fusion weights ({tuned}): " + ", ".join(parts)
+    tuning = calib.get("tuning")
+    if isinstance(tuning, dict):
+        tuning_parts = [f"{k.replace('_', ' ')}={v}" for k, v in tuning.items()
+                        if isinstance(v, (int, float, str, bool))]
+        if tuning_parts:
+            line += " | Auto-tune diagnostics: " + ", ".join(tuning_parts)
+    return line
+
+
+def format_culprits_human(notes: Optional[str]) -> Optional[str]:
+    """Convert a run's notes field (e.g. "culprits: ch1, ch2, ch3") into one human-readable line."""
+    if not notes or pd.isna(notes):
+        return None
+    notes = str(notes).strip()
+    m = re.match(r"culprits:\s*(.+)", notes, re.IGNORECASE)
+    if not m:
+        return None
+    culprits = [c.strip() for c in m.group(1).split(",") if c.strip()]
+    if not culprits:
+        return None
+    labeled = [detector_label(c) for c in culprits]
+    return "Culprit sensors: " + ", ".join(labeled)
 
 
 def format_verdict_badge(verdict: Optional[str]) -> str:
@@ -763,7 +821,7 @@ def asset_figure(s: pd.DataFrame, meta: pd.Series) -> tuple[str, str]:
     data_nans = s[Z_COLS].isna().sum().sum() / (len(s) * len(Z_COLS)) * 100 if len(s) > 0 else 0
 
     fig, (ax1, ax2) = plt.subplots(
-        2, 1, figsize=(13, 5.2), sharex=True,
+        2, 1, figsize=(15, 6), sharex=True,
         gridspec_kw={"height_ratios": [3, 1.2], "hspace": 0.14})
 
     # Plot fused score
@@ -825,6 +883,57 @@ def asset_figure(s: pd.DataFrame, meta: pd.Series) -> tuple[str, str]:
     return b64, data_quality
 
 
+def alarm_history_table(alarms_for_asset: Optional[pd.DataFrame]) -> str:
+    """Render a compact alarm-episode history table for one asset, or '' if it has none."""
+    if alarms_for_asset is None or alarms_for_asset.empty:
+        return ""
+    rows = []
+    for a in alarms_for_asset.itertuples():
+        dur = f"{a.duration_h:.1f}h" if pd.notna(a.duration_h) else "—"
+        peak = f"{a.peak_fused:.2f}" if pd.notna(a.peak_fused) else "—"
+        if pd.notna(getattr(a, "ack_by", None)):
+            ack = f"Acknowledged by {html.escape(str(a.ack_by))} at {html.escape(str(a.ack_at or ''))}"
+            if pd.notna(getattr(a, "ack_note", None)) and a.ack_note:
+                ack += f" — {html.escape(str(a.ack_note))}"
+        else:
+            ack = "Unacknowledged"
+        rows.append(
+            f"<tr><td class='timestamp'>{html.escape(str(a.start_ts or ''))}</td>"
+            f"<td class='timestamp'>{html.escape(str(a.end_ts or ''))}</td>"
+            f"<td>{dur}</td><td>{peak}</td><td>{ack}</td></tr>")
+    return (
+        "<div class='diag-box'><span class='diag-label'>Alarm History</span>"
+        "<table class='mini-table'><thead><tr>"
+        "<th>Start</th><th>End</th><th>Duration</th><th>Peak Score</th><th>Acknowledgment</th>"
+        "</tr></thead><tbody>" + "".join(rows) + "</tbody></table></div>")
+
+
+def detector_stats_table(s: pd.DataFrame) -> str:
+    """Render peak/mean z-score per detector, overall and restricted to alarm-window rows
+    (when the asset has any alarm rows)."""
+    has_alarm = "alarm" in s.columns and s["alarm"].fillna(0).astype(bool).any()
+    alarm_mask = s["alarm"].fillna(0).astype(bool) if has_alarm else None
+    rows = []
+    for z in Z_COLS:
+        vals = pd.to_numeric(s[z], errors="coerce")
+        peak_str = f"{vals.max():.2f}" if vals.notna().any() else "—"
+        mean_str = f"{vals.mean():.2f}" if vals.notna().any() else "—"
+        if has_alarm:
+            a_vals = vals[alarm_mask]
+            a_peak_str = f"{a_vals.max():.2f}" if a_vals.notna().any() else "—"
+            a_mean_str = f"{a_vals.mean():.2f}" if a_vals.notna().any() else "—"
+            rows.append(f"<tr><td>{detector_label(z)}</td><td>{peak_str}</td><td>{mean_str}</td>"
+                       f"<td>{a_peak_str}</td><td>{a_mean_str}</td></tr>")
+        else:
+            rows.append(f"<tr><td>{detector_label(z)}</td><td>{peak_str}</td><td>{mean_str}</td></tr>")
+    header = ("<th>Detector</th><th>Peak</th><th>Mean</th><th>Alarm-window Peak</th><th>Alarm-window Mean</th>"
+              if has_alarm else "<th>Detector</th><th>Peak</th><th>Mean</th>")
+    return (
+        "<div class='diag-box'><span class='diag-label'>Detector Z-Scores</span>"
+        "<table class='mini-table'><thead><tr>" + header + "</tr></thead><tbody>"
+        + "".join(rows) + "</tbody></table></div>")
+
+
 def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Optional[list[str]]) -> None:
     """Build HTML report from database."""
     assets = read_sql(con, f"SELECT * FROM {prefix}assets ORDER BY farm, label DESC, asset_id")
@@ -856,6 +965,11 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
     # Get logs
     logs = read_sql(con, f"SELECT * FROM {prefix}run_log ORDER BY asset_key, ts")
     logs = logs[logs["asset_key"].isin(assets["asset_key"])]
+
+    # Get alarm episode history
+    alarms = read_sql(con, f"SELECT * FROM {prefix}alarms ORDER BY asset_key, start_ts")
+    alarms = alarms[alarms["asset_key"].isin(assets["asset_key"])]
+    alarms_by_asset = {k: g for k, g in alarms.groupby("asset_key")}
 
     # Build asset rows and figures
     rows_html = []
@@ -891,16 +1005,25 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
         data_quality = (format_data_quality_human(run_row.get("data_quality_json")) if run_row is not None else None) \
             or data_quality_fallback
         calibration = format_calibration_human(run_row.get("calibration_json")) if run_row is not None else None
+        culprits = format_culprits_human(run_row.get("notes")) if run_row is not None else None
 
         diag_boxes = f"<div class='diag-box'><span class='diag-label'>Data Quality</span>{html.escape(data_quality)}</div>"
         if calibration:
             diag_boxes += f"<div class='diag-box'><span class='diag-label'>Calibration</span>{html.escape(calibration)}</div>"
+        if culprits:
+            diag_boxes += f"<div class='diag-box'><span class='diag-label'>Culprits</span>{html.escape(culprits)}</div>"
+        diag_boxes += detector_stats_table(s)
+        diag_boxes += alarm_history_table(alarms_by_asset.get(meta["asset_key"]))
 
         figs_html.append(
             f"<div class='card' id='{html.escape(meta['asset_key'])}'>"
             f"<h4>{html.escape(meta['asset_key'])}</h4>"
+            f"<div class='asset-card-grid'>"
+            f"<div class='asset-card-chart'>"
             f"<img src='data:image/png;base64,{fig_b64}' alt='Timeline for {html.escape(meta['asset_key'])}'/>"
-            f"{diag_boxes}"
+            f"</div>"
+            f"<div class='asset-card-diag'>{diag_boxes}</div>"
+            f"</div>"
             f"</div>")
 
     # Build operations table
@@ -915,8 +1038,23 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
         if pd.notna(r.rules_diagnostic_json):
             try:
                 diag = json.loads(r.rules_diagnostic_json)
+            except (json.JSONDecodeError, TypeError):
+                diag = None
+            if isinstance(diag, dict):
                 for rule_name, rule_info in diag.items():
-                    if isinstance(rule_info, dict):
+                    if rule_name == "per_head" and isinstance(rule_info, dict):
+                        # per_head is a nested dict of detector_name -> {active, train_n, thr},
+                        # not a single rule_info dict — render one line per detector.
+                        for det_name, det_info in rule_info.items():
+                            if not isinstance(det_info, dict):
+                                continue
+                            train_n = det_info.get("train_n", "?")
+                            if det_info.get("active"):
+                                thr = det_info.get("thr", "?")
+                                diag_html += f"<div class='diag-line'>{html.escape(detector_label(det_name))}: armed (n={train_n}, thr={thr})</div>"
+                            else:
+                                diag_html += f"<div class='diag-line'>{html.escape(detector_label(det_name))}: disarmed (n={train_n})</div>"
+                    elif isinstance(rule_info, dict):
                         if rule_info.get("active"):
                             train_n = rule_info.get("train_n", "?")
                             thr = rule_info.get("thr", "?")
@@ -924,15 +1062,16 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
                         else:
                             train_n = rule_info.get("train_n", "?")
                             diag_html += f"<div class='diag-line'>{html.escape(rule_name)}: disarmed (n={train_n})</div>"
-            except (json.JSONDecodeError, TypeError):
-                pass
 
         data_quality_line = format_data_quality_human(getattr(r, "data_quality_json", None))
         calibration_line = format_calibration_human(getattr(r, "calibration_json", None))
+        culprits_line = format_culprits_human(getattr(r, "notes", None))
         if data_quality_line:
             diag_html += f"<div class='diag-line'>Data: {html.escape(data_quality_line)}</div>"
         if calibration_line:
             diag_html += f"<div class='diag-line'>{html.escape(calibration_line)}</div>"
+        if culprits_line:
+            diag_html += f"<div class='diag-line'>{html.escape(culprits_line)}</div>"
 
         ops_rows.append(
             f"<tr>"
@@ -951,16 +1090,13 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
         level_counts = grp["level"].value_counts().to_dict()
         level_str = ", ".join(f"{count} {level}" for level, count in sorted(level_counts.items()))
 
-        # Filter to WARNING/ERROR by default
-        grp_filtered = grp[grp["level"].isin(["WARNING", "ERROR"])]
-        if len(grp_filtered) == 0:
-            grp_filtered = grp.head(5)  # Show first 5 if no warnings/errors
-
-        lines_html = "".join(
-            f"<div class='{escape_and_format_log(str(l.level).lower())}'>"
-            f"<strong>[{escape_and_format_log(l.stage)}]</strong> {escape_and_format_log(l.message)}"
-            f"</div>"
-            for l in grp_filtered.itertuples())
+        lines_html = ""
+        for stage, stage_grp in grp.groupby("stage", sort=False):
+            lines_html += "".join(
+                f"<div class='{escape_and_format_log(str(l.level).lower())}'>"
+                f"<strong>[{escape_and_format_log(l.stage)}]</strong> {escape_and_format_log(l.message)}"
+                f"</div>"
+                for l in stage_grp.itertuples())
 
         log_html += (
             f"<details>"
