@@ -67,119 +67,724 @@ VERDICT_COLOR = {
 }
 
 CSS = """
-body {
-    font-family: system-ui, -apple-system, sans-serif;
-    font-size: 15px;
-    line-height: 1.5;
-    margin: 32px;
-    color: #1f2328;
-    background: #ffffff;
+* {
+    box-sizing: border-box;
 }
-h2 { margin-top: 0; margin-bottom: 8px; font-size: 28px; font-weight: 600; }
-h3 { margin-top: 24px; margin-bottom: 12px; font-size: 18px; font-weight: 600; border-bottom: 2px solid #eaeef2; padding-bottom: 6px; }
-h4 { margin-top: 12px; margin-bottom: 6px; font-size: 15px; font-weight: 600; }
-p { margin: 8px 0; }
+
+html {
+    scroll-behavior: smooth;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
+    font-size: 15px;
+    line-height: 1.6;
+    color: #2c3e50;
+    background: linear-gradient(135deg, #f5f7fa 0%, #f9fafb 100%);
+    margin: 0;
+    padding: 0;
+    min-height: 100vh;
+}
+
+.header {
+    background: #ffffff;
+    border-bottom: 1px solid #e1e8ed;
+    padding: 28px 40px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.03);
+    margin-bottom: 32px;
+}
+
+.header-content {
+    max-width: 1400px;
+    margin: 0 auto;
+}
+
+.header h1 {
+    margin: 0 0 4px 0;
+    font-size: 32px;
+    font-weight: 700;
+    color: #1a202c;
+    letter-spacing: -0.5px;
+}
+
+.header-meta {
+    display: flex;
+    gap: 24px;
+    margin-top: 12px;
+    font-size: 13px;
+    color: #6e7681;
+}
+
+.header-meta span {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.meta-label {
+    font-weight: 600;
+    color: #2c3e50;
+}
+
+.container {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 0 40px;
+}
+
+h2 {
+    margin: 40px 0 24px 0;
+    font-size: 26px;
+    font-weight: 700;
+    color: #1a202c;
+    border-bottom: 3px solid #2c3e50;
+    padding-bottom: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-size: 20px;
+}
+
+h3 {
+    margin: 32px 0 20px 0;
+    font-size: 18px;
+    font-weight: 700;
+    color: #1a202c;
+}
+
+h4 {
+    margin: 16px 0 12px 0;
+    font-size: 15px;
+    font-weight: 700;
+    color: #2c3e50;
+}
+
+p {
+    margin: 8px 0;
+    color: #555;
+}
+
+/* KPI Grid */
+.kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 20px;
+    margin: 24px 0 32px 0;
+}
+
+.kpi-box {
+    background: #ffffff;
+    border: 1px solid #e1e8ed;
+    border-radius: 12px;
+    padding: 24px;
+    text-align: center;
+    transition: all 0.3s ease;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.kpi-box:hover {
+    border-color: #2c3e50;
+    box-shadow: 0 4px 12px rgba(44, 62, 80, 0.1);
+    transform: translateY(-2px);
+}
+
+.kpi-label {
+    font-size: 12px;
+    color: #6e7681;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 12px;
+}
+
+.kpi-value {
+    font-size: 42px;
+    font-weight: 800;
+    color: #1a202c;
+    margin: 12px 0 8px 0;
+    font-variant-numeric: tabular-nums;
+}
+
+.kpi-desc {
+    font-size: 13px;
+    color: #6e7681;
+    margin-top: 8px;
+}
+
+/* Tables */
 table {
     border-collapse: collapse;
     width: 100%;
-    margin: 12px 0;
+    margin: 24px 0;
     font-size: 14px;
-}
-td, th {
-    border: 1px solid #d0d7de;
-    padding: 8px 12px;
-    text-align: left;
-}
-th {
-    background: #f6f8fa;
-    font-weight: 600;
-    color: #24292f;
-}
-tr:nth-child(even) { background: #fafbfc; }
-tr:hover { background: #f0f3f6; }
-.card {
-    margin: 16px 0;
-    border: 1px solid #d0d7de;
-    border-radius: 8px;
-    padding: 12px;
-    background: #fafbfc;
-}
-.kpi-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 16px;
-    margin: 16px 0;
-}
-.kpi-box {
-    border: 1px solid #d0d7de;
-    border-radius: 6px;
-    padding: 16px;
     background: #ffffff;
-    text-align: center;
+    border: 1px solid #e1e8ed;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
 }
-.kpi-label { font-size: 13px; color: #57606a; font-weight: 500; }
-.kpi-value { font-size: 28px; font-weight: 700; color: #1f2328; margin: 8px 0; }
-.kpi-desc { font-size: 12px; color: #6e7781; margin-top: 4px; }
-img { width: 100%; max-width: 100%; }
-pre {
-    background: #f6f8fa;
-    padding: 12px;
-    border-radius: 6px;
-    font-size: 13px;
-    overflow-x: auto;
-    border: 1px solid #e1e4e8;
-    line-height: 1.4;
+
+td, th {
+    padding: 14px 16px;
+    text-align: left;
+    border-bottom: 1px solid #e1e8ed;
 }
+
+th {
+    background: #f5f7fa;
+    font-weight: 700;
+    color: #2c3e50;
+    text-transform: uppercase;
+    font-size: 12px;
+    letter-spacing: 0.3px;
+}
+
+tbody tr:last-child td {
+    border-bottom: none;
+}
+
+tbody tr {
+    transition: background-color 0.2s ease;
+}
+
+tbody tr:nth-child(odd) {
+    background: #ffffff;
+}
+
+tbody tr:nth-child(even) {
+    background: #f9fafb;
+}
+
+tbody tr:hover {
+    background: #f0f4f8;
+}
+
+/* Cards */
+.card {
+    background: #ffffff;
+    border: 1px solid #e1e8ed;
+    border-radius: 12px;
+    padding: 24px;
+    margin: 24px 0;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    transition: box-shadow 0.3s ease;
+}
+
+.card:hover {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.card img {
+    width: 100%;
+    max-width: 100%;
+    border-radius: 8px;
+    margin: 16px 0;
+    border: 1px solid #e1e8ed;
+}
+
+/* Diagnostic Box */
 .diagnostic-box {
-    background: #f6f8fa;
-    border-left: 4px solid #0969da;
-    padding: 12px;
-    margin: 12px 0;
-    border-radius: 4px;
+    background: #f0f4f8;
+    border-left: 4px solid #3b82f6;
+    padding: 16px;
+    margin: 16px 0;
+    border-radius: 6px;
     font-size: 14px;
+    color: #2c3e50;
 }
+
 .diagnostic-item {
-    margin: 4px 0;
+    margin: 6px 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
 }
-.info { color: #0969da; }
-.warn { color: #bf8700; }
-.error { color: #cf222e; }
-.success { color: #1a7f37; }
+
+.diagnostic-item strong {
+    color: #1a202c;
+}
+
+/* Status Indicators */
+.status-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 6px 12px;
+    border-radius: 6px;
+    background: #f0f4f8;
+    color: #2c3e50;
+}
+
+.status-armed { background: #dbeafe; color: #1e40af; }
+.status-disarmed { background: #fecaca; color: #991b1b; }
+
+/* Badges */
+.badge {
+    display: inline-block;
+    padding: 6px 12px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.badge-detected {
+    background: #dcfce7;
+    color: #166534;
+    border: 1px solid #86efac;
+}
+
+.badge-clean {
+    background: #dcfce7;
+    color: #166534;
+    border: 1px solid #86efac;
+}
+
+.badge-missed {
+    background: #fee2e2;
+    color: #991b1b;
+    border: 1px solid #fca5a5;
+}
+
+.badge-false-alarm {
+    background: #fef3c7;
+    color: #b45309;
+    border: 1px solid #fcd34d;
+}
+
+/* Details/Logs */
 details {
-    margin: 8px 0;
-    padding: 8px;
-    background: #f6f8fa;
-    border: 1px solid #d0d7de;
-    border-radius: 4px;
+    margin: 12px 0;
+    padding: 12px;
+    background: #ffffff;
+    border: 1px solid #e1e8ed;
+    border-radius: 8px;
 }
+
 summary {
     cursor: pointer;
     font-weight: 600;
-    padding: 4px;
+    padding: 8px;
     user-select: none;
+    color: #2c3e50;
+    transition: color 0.2s ease;
+    display: flex;
+    align-items: center;
 }
-summary:hover { background: #eaeef2; }
+
+summary:hover {
+    color: #3b82f6;
+}
+
+summary::marker {
+    color: #3b82f6;
+}
+
+pre {
+    background: #f5f7fa;
+    padding: 16px;
+    border-radius: 6px;
+    font-size: 13px;
+    overflow-x: auto;
+    border: 1px solid #e1e8ed;
+    line-height: 1.5;
+    color: #2c3e50;
+    margin: 12px 0 0 0;
+}
+
+/* Text Colors */
+.info { color: #3b82f6; }
+.warn { color: #f59e0b; }
+.error { color: #ef4444; }
+.success { color: #10b981; }
+
+/* Log Summary */
+.log-summary {
+    font-size: 12px;
+    color: #6e7681;
+    font-weight: 500;
+    margin-left: 8px;
+}
+
+.timestamp {
+    color: #6e7681;
+    font-size: 13px;
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, monospace;
+}
+
+/* Links */
+a {
+    color: #3b82f6;
+    text-decoration: none;
+    font-weight: 500;
+    transition: color 0.2s ease;
+}
+
+a:hover {
+    color: #1e40af;
+    text-decoration: underline;
+}
+
+/* Footer */
+.footer {
+    border-top: 1px solid #e1e8ed;
+    background: #ffffff;
+    padding: 24px 40px;
+    margin-top: 48px;
+    text-align: center;
+    font-size: 12px;
+    color: #6e7681;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .header {
+        padding: 20px 24px;
+    }
+
+    .container {
+        padding: 0 24px;
+    }
+
+    .kpi-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .header-meta {
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    h2 {
+        font-size: 22px;
+    }
+
+    .kpi-value {
+        font-size: 32px;
+    }
+}
+
+/* Print */
+@media print {
+    body {
+        background: #ffffff;
+        margin: 0;
+        padding: 0;
+    }
+
+    .header {
+        box-shadow: none;
+        border-bottom: 2px solid #2c3e50;
+    }
+
+    .footer {
+        display: none;
+    }
+
+    table, .card, details {
+        page-break-inside: avoid;
+        box-shadow: none;
+    }
+
+    a {
+        color: #2c3e50;
+    }
+}
+
+/* Animations */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.card, .kpi-box, table {
+    animation: fadeIn 0.3s ease;
+}
+
+h1 {
+    margin: 0;
+    font-size: 28px;
+    font-weight: 700;
+    color: #1a202c;
+    letter-spacing: -0.5px;
+}
+
+h2 {
+    margin: 28px 0 16px;
+    font-size: 20px;
+    font-weight: 700;
+    color: #1a202c;
+    border-bottom: 1px solid #e1e8ed;
+    padding-bottom: 12px;
+}
+
+section {
+    margin-bottom: 48px;
+}
+
+section:last-of-type {
+    margin-bottom: 32px;
+}
+
+.container {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 0 40px;
+}
+
+.header-meta {
+    display: flex;
+    gap: 32px;
+    margin-top: 16px;
+    font-size: 14px;
+    color: #6e7681;
+}
+
+.header-meta span {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.meta-label {
+    font-weight: 600;
+    color: #2c3e50;
+}
+
+.text-muted {
+    color: #6e7681;
+    font-style: italic;
+    margin: 16px 0;
+}
+
+.timeline-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+}
+
+.timeline-cards .card {
+    padding: 20px;
+    border: 1px solid #e1e8ed;
+}
+
+.timeline-cards .card h4 {
+    margin: 0 0 12px;
+    font-size: 16px;
+    font-weight: 600;
+    color: #1a202c;
+}
+
+.timeline-cards .card img {
+    width: 100%;
+    height: auto;
+    border-radius: 4px;
+    margin-bottom: 12px;
+    display: block;
+}
+
+.diagnostic-box {
+    background: #f5f7fa;
+    padding: 12px 16px;
+    border-radius: 4px;
+    font-size: 13px;
+    color: #2c3e50;
+    border-left: 3px solid #0969da;
+    margin-top: 12px;
+}
+
+.logs-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.logs-section details {
+    padding: 12px 16px;
+    background: #f5f7fa;
+    border: 1px solid #e1e8ed;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.logs-section details[open] {
+    background: #ffffff;
+    border-color: #d1d9e0;
+}
+
+.logs-section summary {
+    font-weight: 600;
+    color: #2c3e50;
+    user-select: none;
+    outline: none;
+}
+
+.logs-section summary:hover {
+    color: #0969da;
+}
+
+.log-summary {
+    font-size: 12px;
+    color: #6e7681;
+    font-weight: 400;
+    margin-left: 8px;
+}
+
+.logs-section pre {
+    margin: 12px 0 0;
+    padding: 12px;
+    background: #f9fafb;
+    border-left: 3px solid #d1d9e0;
+    border-radius: 0;
+    font-size: 12px;
+    overflow-x: auto;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+}
+
+.logs-section .info {
+    color: #0969da;
+}
+
+.logs-section .warning {
+    color: #bf8700;
+    font-weight: 500;
+}
+
+.logs-section .error {
+    color: #cf222e;
+    font-weight: 500;
+}
+
+.logs-section .debug {
+    color: #6e7681;
+}
+
+.footer {
+    background: #ffffff;
+    border-top: 1px solid #e1e8ed;
+    padding: 28px 40px;
+    margin-top: 48px;
+    text-align: center;
+}
+
+.footer-content {
+    max-width: 1400px;
+    margin: 0 auto;
+}
+
+.footer p {
+    margin: 0;
+    font-size: 14px;
+    color: #2c3e50;
+    font-weight: 500;
+}
+
+table thead {
+    background: #f5f7fa;
+}
+
+table tbody tr {
+    border-bottom: 1px solid #e1e8ed;
+}
+
+table tbody tr:hover {
+    background: #fafbfc;
+}
+
+table td {
+    vertical-align: middle;
+    padding: 12px;
+}
+
+table th {
+    vertical-align: middle;
+    padding: 12px;
+    font-weight: 600;
+    color: #2c3e50;
+    font-size: 13px;
+    text-align: left;
+}
+
+.timestamp {
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-size: 12px;
+    color: #6e7681;
+}
+
 .badge {
     display: inline-block;
     padding: 4px 10px;
-    border-radius: 24px;
-    font-size: 13px;
+    border-radius: 12px;
+    font-size: 12px;
     font-weight: 600;
 }
-.badge-detected { background: #d3f9d8; color: #1a7f37; }
-.badge-clean { background: #d3f9d8; color: #1a7f37; }
-.badge-missed { background: #ffd6d6; color: #cf222e; }
-.badge-false-alarm { background: #fff8c5; color: #bf8700; }
-.log-summary { font-size: 13px; color: #6e7781; font-weight: 500; }
-.timestamp { color: #6e7781; font-size: 12px; font-family: monospace; }
-a { color: #0969da; text-decoration: none; }
-a:hover { text-decoration: underline; }
+
+.badge-detected, .badge-clean {
+    background: #ddf4e8;
+    color: #1a7f37;
+}
+
+.badge-missed {
+    background: #ffebe6;
+    color: #cf222e;
+}
+
+.badge-false_alarm {
+    background: #fff3c6;
+    color: #bf8700;
+}
+
+@media (max-width: 768px) {
+    .header-meta {
+        flex-direction: column;
+        gap: 12px;
+    }
+
+    .container {
+        padding: 0 20px;
+    }
+
+    h1 {
+        font-size: 24px;
+    }
+
+    h2 {
+        font-size: 18px;
+    }
+
+    table {
+        font-size: 13px;
+    }
+
+    table td, table th {
+        padding: 8px;
+    }
+}
+
 @media print {
-    body { margin: 0; }
-    .no-print { display: none; }
-    table { page-break-inside: avoid; }
-    .card { page-break-inside: avoid; }
-    details { page-break-inside: avoid; }
+    body {
+        background: white;
+    }
+
+    .header, .footer {
+        page-break-after: avoid;
+    }
+
+    section {
+        page-break-inside: avoid;
+    }
+
+    .timeline-cards .card {
+        page-break-inside: avoid;
+    }
 }
 """
 
@@ -542,55 +1147,95 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ACM Results — {html.escape(scope)}</title>
+    <title>ACM Condition Monitor Report — {html.escape(scope)}</title>
     <style>
 {CSS}
     </style>
 </head>
 <body>
-    <h2>ACM Results</h2>
-    <p><strong>Scope:</strong> {html.escape(scope)} | <strong>Generated:</strong> <span class='timestamp'>{html.escape(timestamp)}</span></p>
+    <div class='header'>
+        <div class='header-content'>
+            <h1>Condition Monitor Report</h1>
+            <div class='header-meta'>
+                <span><span class='meta-label'>Scope:</span> {html.escape(scope)}</span>
+                <span><span class='meta-label'>Assets Analyzed:</span> {len(assets)}</span>
+                <span><span class='meta-label'>Generated:</span> {html.escape(timestamp)}</span>
+            </div>
+        </div>
+    </div>
 
-    <h3>Summary</h3>
-    {kpi_html}
+    <div class='container'>
+        <section>
+            <h2>Performance Summary</h2>
+            {kpi_html if kpi_html else '<p class="text-muted">No summary metrics available</p>'}
+        </section>
 
-    <h3>Assets ({len(assets)})</h3>
-    <table>
-        <tr>
-            <th>Asset Key</th>
-            <th>ID</th>
-            <th>Label</th>
-            <th>Description</th>
-            <th>Verdict</th>
-            <th>Lead Time</th>
-            <th>Rules Fired</th>
-        </tr>
-        {''.join(rows_html)}
-    </table>
+        <section>
+            <h2>Assets Overview</h2>
+            <div class='card'>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Asset Key</th>
+                            <th>ID</th>
+                            <th>Label</th>
+                            <th>Description</th>
+                            <th>Verdict</th>
+                            <th>Lead Time</th>
+                            <th>Rules Fired</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {''.join(rows_html)}
+                    </tbody>
+                </table>
+            </div>
+        </section>
 
-    <h3>Timelines</h3>
-    {''.join(figs_html)}
+        <section>
+            <h2>Detailed Analysis</h2>
+            <div class='timeline-cards'>
+                {''.join(figs_html)}
+            </div>
+        </section>
 
-    <h3>Operations</h3>
-    <table>
-        <tr>
-            <th>Asset</th>
-            <th>Run Started</th>
-            <th>Duration</th>
-            <th>Status</th>
-            <th>Alert Z</th>
-            <th>Rules & Diagnostics</th>
-        </tr>
-        {''.join(ops_rows)}
-    </table>
+        <section>
+            <h2>Scoring Operations</h2>
+            <div class='card'>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Asset</th>
+                            <th>Run Started</th>
+                            <th>Duration</th>
+                            <th>Status</th>
+                            <th>Alert Z</th>
+                            <th>Rules & Diagnostics</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {''.join(ops_rows)}
+                    </tbody>
+                </table>
+            </div>
+        </section>
 
-    <h3>Logs</h3>
-    {log_html if log_html else '<p><em>No logs available</em></p>'}
+        <section>
+            <h2>Execution Logs</h2>
+            <div class='logs-section'>
+                {log_html if log_html else '<p class="text-muted">No logs available</p>'}
+            </div>
+        </section>
+    </div>
 
-    <hr>
-    <p style="font-size: 12px; color: #6e7781; margin-top: 32px;">
-        Generated by ACM Report Tool. Data from canonical SQL results store.
-    </p>
+    <div class='footer'>
+        <div class='footer-content'>
+            <p>ACM Condition Monitor | Professional Asset Assessment Report</p>
+            <p style='font-size: 13px; color: #6e7681; margin-top: 8px;'>
+                Data from canonical SQL results store — {html.escape(timestamp)}
+            </p>
+        </div>
+    </div>
 </body>
 </html>"""
 
