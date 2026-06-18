@@ -282,11 +282,15 @@ Mirror of the PowerShell script for Linux/macOS:
 ---
 
 ## CARE-to-Compare Dataset
-> *Added: 2026-06-14 · Last updated: 2026-06-15*
+> *Added: 2026-06-14 · Last updated: 2026-06-18*
 
 - Zenodo URL: `https://zenodo.org/records/15846963/files/CARE_To_Compare.zip?download=1`
 - Farm A: 22 events × ~36 MB (~800 MB total), 86 sensor features per event, CSV per event
-- Farm B: 37 events, 257 features; Farm C: 58 events (31 normal / 27 anomaly), 957 features
+- Farm B: **15 events (6 anomaly / 9 normal)**, 257 features, ~85-100 MB per event (~1.3 GB total)
+  (corrected 2026-06-18 — prior "37 events" was wrong, never verified against actual `event_info.csv`;
+  confirmed directly by downloading via `scripts/download_care_benchmark.py --dest care_data --farms B`
+  and reading `care_data/Wind Farm B/event_info.csv`, which has exactly 15 rows)
+- Farm C: 58 events (31 normal / 27 anomaly), 957 features
   (corrected 2026-06-17 — prior "36 events" was wrong, never verified against actual `event_info.csv`)
 - CSV columns: `time_stamp`, `status_type_id`, sensor columns, `train_test`
 - Download: `python scripts/download_care_dataset.py --dest sim_data/sample --farms A --count 10`
@@ -2220,6 +2224,133 @@ sign off on, not something to merge unilaterally because the headline F1 number 
 `np.partition`). Committed `d6b5cd0`, pushed to `claude/research-paper-planning-ests5l`. Per-event
 diff and summaries: `results/farm_a_kurtskew_fix/`, `results/farm_c_kurtskew_fix/` (both
 gitignored/local).
+
+---
+
+## CARE Farm B — first full result (2026-06-18)
+> *Added: 2026-06-18*
+
+Farm B (15 events: 6 anomaly / 9 normal, 257 features) was downloaded for the first time this
+session (`scripts/download_care_benchmark.py --dest care_data --farms B`) and benchmarked with the
+same `ML_DEFAULTS` used everywhere else, post-kurt/skew-fix, `--workers 2`. Confirms the corrected
+15-event count above (see CARE-to-Compare Dataset section).
+
+**Result:** `recall=0.333 (2/6), precision=0.5, F1=0.4` — **KPI FAIL, and the worst of the three CARE
+farms so far** (Farm A: recall 1.0/F1 0.960; Farm C: recall 0.704/F1 0.745).
+
+**Per-event breakdown** (`results/farm_b/results.csv`, gitignored/local):
+- **2 of 6 anomalies detected**, both bearing-damage faults: event 27 ("main bearing damage",
+  `+avail+heads:pca_spe_z,omr_z`) and event 53 ("Rotor Bearing 2 - Damage",
+  `+heads:ar1_z,pca_spe_z,iforest_z`).
+- **4 of 6 anomalies missed, all with completely empty `rule_fired`** (fused score never crosses
+  `alert_z_eff` at all) — events 7, 19, 34 (all "high temperature in transformer cell") and 77
+  ("Turbine in standstill ... due to rotorbearing damage"). This is the **same empty-`rule_fired`
+  failure signature already open and undiagnosed on Farm C** (6 events: 4, 15, 35, 67, 76, 78) —
+  Farm B's result is the first cross-farm confirmation that this gap is general, not Farm-C-specific.
+  Notably 3 of the 4 misses share one fault description ("high temperature in transformer cell"),
+  suggesting a possible thermal-drift signature that current detectors don't separate well from
+  normal variation — not yet investigated.
+- **2 of 9 normal events false-alarmed**, both via `+heads:pca_spe_z` (events 23, frac=0.154; and
+  87, frac=0.238) — `pca_spe_z` is implicated in both of Farm B's false alarms, same detector
+  flagged in some of Farm C's false alarms historically.
+
+**Not yet investigated or acted on** (per the standing ML Improvement Loop methodology — document
+first): why Farm B's empty-`rule_fired` rate (4/6 = 67%) is even higher than Farm C's post-fix rate
+(6/11 of originally-missed ≈ 35% of all 27 anomalies), and whether the thermal-fault pattern in 3 of
+4 misses points to a specific, fixable gap (e.g. a detector class that's better suited to slow
+thermal drift than the current ensemble) or is coincidental given the small (6-event) sample.
+
+**Files**: no code changes. `results/farm_b/` (gitignored/local) holds `results.csv`/`summary.json`.
+CARE-to-Compare Dataset section above corrected (37→15 events) in the same session.
+
+---
+
+## New benchmark dataset research — Tennessee Eastman Process feasibility confirmed (2026-06-18)
+> *Added: 2026-06-18*
+
+Per user request to find more benchmark datasets for validating ACM's accuracy (explicitly NOT a
+public-leaderboard requirement — accuracy validation only), researched candidates directly via
+WebSearch/WebFetch (no subagent, per explicit instruction) against the standing domain-fit
+criterion established by the SKAB rejection (see "Cross-Dataset Generality Testing" section above):
+industrial/SCADA-style assets, hour-to-day-scale fault persistence, sufficient pre-fault history.
+**The user also clarified the adoption bar this session: structural closeness to CARE's file layout
+is a loose requirement — any dataset that can be *transformed* into CARE's shape (`event_info.csv`
++ `datasets/{id}.csv`, train/prediction split, sensor columns) should be used, since the conversion
+is a one-time cost while `care_benchmark.py` itself then runs completely unmodified. Minimize new
+bespoke tooling; prefer reusable transforms over one-off harnesses.**
+
+### Candidates checked and their domain-fit verdict
+
+| Dataset | Verdict | Why |
+|---|---|---|
+| **CARE Farm B** | Done (see section above) | Same trusted dataset, zero new vetting |
+| **Tennessee Eastman Process (TEP)** | **Strong candidate, feasibility confirmed end-to-end** | See below |
+| **HAI (ICS security)** | **Rejected — same failure mode as SKAB** | Confirmed individual attacks last 2.5–48 minutes (not hours-to-days); the published "12/33/30/11/26 hour" figures are test-*file* spans containing many short attacks, not single attack durations |
+| **SWaT (ICS security)** | **Rejected — same failure mode as SKAB** | Confirmed most of the 36 attacks last 2–4 minutes; a few extend to 9 hours, but the modal case is short-transient |
+| **WADI (ICS security)** | **Rejected, same basis as SWaT** | Companion dataset to SWaT, same testbed design philosophy; also gated (iTrust request form, ~3 business days) — not pursued given the duration rejection on its sibling dataset |
+| **DAMADICS** | Lower priority | Real sugar-factory actuator faults (good duration fit, sustained from specific fault-injection dates), but no built-in per-event train/test split (would need fully custom windowing) and only ~1 day of pre-fault history — higher engineering cost for a dataset that doesn't reuse the CARE-shape transform cleanly |
+| **NASA SMAP/MSL** | Lower priority | Aerospace spacecraft telemetry, not SCADA/industrial; anomaly-duration fit vs. the criterion was not confirmed before TEP's feasibility check made it the clear next step |
+| **Zenodo 10958775** | Not a new dataset | Identical farm/feature structure to CARE-to-Compare (86/257/957 features, 95 events) — this is the same underlying dataset, not a diversification opportunity |
+
+**Standing-rule note**: HAI/SWaT/WADI all fail the exact same criterion that got SKAB rejected
+(short-transient anomalies, not hour-to-day-scale fault development). This is now a 4-for-4
+pattern across every ICS-*security* (cyberattack) benchmark checked — worth treating as a category
+signal: attack-style ICS datasets are structurally mismatched with ACM's slow-fault-development
+target domain, vs. process-simulation/SCADA-style datasets (CARE, TEP) which are not.
+
+### TEP feasibility — confirmed via direct hands-on verification, not just literature
+
+- **Source**: Harvard Dataverse `doi:10.7910/DVN/6C3JR1` (Rieth et al. 2017 deposit). Confirmed via
+  the Dataverse JSON API (`https://dataverse.harvard.edu/api/datasets/:persistentId/?persistentId=doi:10.7910/DVN/6C3JR1`)
+  to be genuinely open-access — direct `curl`/`wget` against
+  `https://dataverse.harvard.edu/api/access/datafile/{id}` works with **no auth, no API key, no
+  Kaggle credentials needed** (Kaggle's CSV mirrors of the same dataset were checked as a fallback
+  but would require credentials not present in this environment — the Dataverse RData files are the
+  better path). Four files: `TEP_FaultFree_Training/Testing.RData`,
+  `TEP_Faulty_Training/Testing.RData` (24 MB–837 MB).
+- **Structure, confirmed by actually parsing the data** (not just the paper): `faultNumber` (0 = none,
+  1–20 = fault type), `simulationRun` (1–500, independent simulations — directly analogous to a CARE
+  "event"), `sample` (1–500 for Training files, 1–960 for Testing files), then 52 numeric process
+  variables (`xmeas_1..41`, `xmv_1..11`) — clean, no missing-value markers, directly comparable in
+  shape to CARE's sensor columns.
+- **Fault timing, confirmed empirically (not assumed from literature)**: in `Faulty_Testing`, fault 1
+  / run 1, `xmeas_1` mean jumps from 0.249 (samples 1–160) to 0.760 (samples 161–960) — confirms the
+  fault is introduced at sample 161 and sustained through sample 960. At the dataset's documented
+  3-minute sampling interval that is **fault onset at hour 8, persisting ~40 hours to the end of the
+  48-hour test run** — squarely inside ACM's hour-to-day-scale domain-fit criterion, not a
+  short-transient case like the rejected ICS-security datasets above.
+- **A real engineering obstacle was found and resolved, not just a clean download**: `pyreadr`
+  (the standard Python RData reader) was killed by the OOM killer (exit 137) twice while parsing the
+  837 MB `Faulty_Testing.RData` on this 15 GB container — its cross-language conversion overhead is
+  apparently too memory-hungry for this file size in Python. **Fix**: installed `r-base-core` via
+  `apt-get install -y --no-install-recommends r-base-core` (plain `r-base-core` pulled in X11/Tk
+  dependencies that 404'd; the `--no-install-recommends` flag avoids that) and used R's own native
+  `load()` to parse the same file — this worked without incident, confirming the right production
+  path is a one-time R-side conversion (RData → per-run CSV/parquet) rather than a Python-side
+  `pyreadr` read of the full file. This is exactly the kind of one-time transform cost the user's
+  "transform once, reuse the harness forever" principle anticipates.
+
+### Recommended integration shape (not yet built — pending scope decision)
+
+A converter (R for the RData→flat step, Python for the CARE-shape emission) would produce, per
+selected `(faultNumber, simulationRun)` pair: a synthetic `time_stamp` (start + `sample * 3min`),
+`status_type_id`, `train_test` (`train` for samples 1–160, `prediction` for 161–960, matching the
+empirically-confirmed fault onset), and the 52 process variables as sensor columns — i.e. exactly
+CARE's `datasets/{id}.csv` shape, plus a generated `event_info.csv` with `event_label` derived from
+`faultNumber` (0 → normal, else anomaly) and `event_description` from the standard TEP fault-name
+table (e.g. fault 1 = "A/C feed ratio step"). Once those two files exist, `care_benchmark.py` should
+run completely unmodified — no new benchmark harness needed, per the user's stated preference.
+
+**Open scope question, not yet decided**: TEP has 500 simulation runs × 20 fault types — far more
+than CARE's 15–58 events per farm. A full cross-product benchmark (10,000 fault events + 500 normal
+runs) would be a massive, likely unnecessary compute cost; a representative subsample (e.g. one or a
+handful of runs per fault type, mirroring CARE's "tens of events" scale) is the obvious choice but
+the exact sampling scheme has not been decided.
+
+**Files**: no code changes yet — this section is feasibility research only, per the standing
+"document → plan → decide before acting" methodology. `r-base-core` is now installed in this
+container's apt state (not committed to the repo; irrelevant to the codebase itself, only to this
+sandbox).
 
 ---
 
