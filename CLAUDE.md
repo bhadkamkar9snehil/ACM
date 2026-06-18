@@ -41,9 +41,12 @@
 32. [GMM RobustScaler IQR-collapse fix (2026-06-17)](#gmm-robustscaler-iqr-collapse-fix--feature-z-clip-before-pca-2026-06-17)
 33. [OMR in-sample-bias + premature-clip fix (2026-06-17)](#omr-in-sample-bias--premature-clip-fix--out-of-sample-recalibration-2026-06-17)
 34. [Farm C targeted re-validation after the OMR fix (2026-06-17)](#farm-c-targeted-re-validation-after-the-omr-fix-2026-06-17)
-35. [Self-distrust gate magnitude-saturation fix (2026-06-17)](#self-distrust-gate-magnitude-saturation-fix-2026-06-17) ← **Latest work session**
-36. [Known Issues (Track as GitHub Issues)](#known-issues-track-as-github-issues)
-37. [User Working Style](#user-working-style)
+35. [Self-distrust gate magnitude-saturation fix (2026-06-17)](#self-distrust-gate-magnitude-saturation-fix-2026-06-17)
+36. [Paper draft + detector-enable ablation wiring fix + fusion auto-tuning wiring gap (2026-06-18)](#paper-draft--detector-enable-ablation-wiring-fix--fusion-auto-tuning-wiring-gap-2026-06-18)
+37. [Farm C full 58-event re-validation after the OMR + self-distrust saturation fixes (2026-06-18)](#farm-c-full-58-event-re-validation-after-the-omr--self-distrust-saturation-fixes-2026-06-18)
+38. [Known Issues (Track as GitHub Issues)](#known-issues-track-as-github-issues)
+39. [Standing Rule: Flag Architecture-Violating Suggestions](#standing-rule-flag-architecture-violating-suggestions-dont-suppress-them) ← **Read before giving any suggestion**
+40. [User Working Style](#user-working-style)
 
 ---
 
@@ -2148,6 +2151,41 @@ gh issue view 50
 
 ---
 
+## Standing Rule: Flag Architecture-Violating Suggestions, Don't Suppress Them
+> *Added: 2026-06-18*
+
+**When a suggestion (a fix, a design change, a new detector, a config knob) would violate an
+established ACM principle — the Issue-First Rule, the config split (`ml_defaults.py` vs.
+`config_table.csv`), a documented design decision in CLAUDE.md, a "Mistake Made in Earlier
+Sessions" entry, the "no dataset-specific patches" rule, the OPC UA/Simulator boundary, etc. —
+still give the suggestion. Do not self-censor a good idea because it conflicts with precedent.**
+
+**But explicitly WARN, inline, before presenting it:** name the specific principle/rule it
+conflicts with, and why that rule exists. State it as a researcher flagging a tradeoff, not as a
+quiet rule-break. Example phrasing: *"This would work, but it breaks the rule that ML
+hyperparameters live only in `ml_defaults.py` (see CLAUDE.md §Config Split) — flagging that before
+you decide."*
+
+**The decision to override the rule is the user's, not mine.** If the user says "do it anyway" (or
+the rule was already overridden earlier in the session), proceed without re-litigating it. If they
+don't address the warning, default to respecting the existing rule rather than silently breaking
+it.
+
+**ACM's design is not sacred for its own sake — results are.** The user has explicitly stated:
+*"We are READY to break ACM or its principles IF the end goal is achieved demonstrably."* A
+principle that's blocking a demonstrably better outcome is a candidate for revision, not a wall.
+The warning exists so that tradeoff is visible and chosen deliberately, not so that precedent wins
+by default.
+
+**Why this rule exists:** earlier in this same research-paper session, a root-cause fix (OMR
+per-feature reliability gating, see "Self-Distrust Gate" and "OMR" sections above and the
+now-superseded reliability-gating attempt for issue #72) was implemented and only found to be
+ineffective after the fact, via direct empirical measurement. Surfacing architecture tensions
+*before* implementation — not after — is cheaper and lets the user weigh in on the tradeoff while
+it's still a decision, not a sunk cost.
+
+---
+
 ## User Working Style
 > *Added: 2026-06-14*
 
@@ -2156,3 +2194,6 @@ gh issue view 50
 - Wants resilient installers: warn on non-critical failures, never abort
 - Expects knowledge base to be maintained proactively after every agent report
 - "Single UI" is a stated long-term goal for both tools
+- Willing to break ACM's own established principles/architecture if it demonstrably achieves the
+  end goal — but wants to be warned first when a suggestion crosses one (see "Standing Rule: Flag
+  Architecture-Violating Suggestions" above)

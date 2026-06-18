@@ -672,7 +672,27 @@ class OMRDetector:
             if (self.model.feature_resid_scale is not None
                     and len(self.model.feature_resid_scale) == residuals.shape[1]):
                 scaled = np.abs(residuals - self.model.feature_resid_med) / self.model.feature_resid_scale
-                k = min(3, scaled.shape[1])
+                # Kurtosis/skewness features are 3rd/4th-moment statistics over a
+                # small rolling window (window=16); their sampling variance is
+                # inherently high even on perfectly healthy data (asymptotic
+                # var ~24/n for kurtosis, ~6/n for skewness), and OMR can't
+                # reconstruct them well from other sensors' mean/std-type
+                # features. Confirmed directly (CARE Farm C event 56): these
+                # columns dominate the top-3 vote on 70-80%+ of rows on BOTH
+                # the calibration holdout and live data alike, with the score
+                # saturating at the candidate-pool ceiling regardless of true
+                # anomaly state -- noise from unstable moment estimators, not a
+                # genuine cross-sensor breakdown. Excluded from the score's
+                # top-k candidate pool entirely (contributions below already
+                # down-weight them at kurt_skew_weight=0.25 for the same
+                # underlying reason; this closes the gap for the score itself).
+                kurt_skew_mask = np.array(
+                    [fn.endswith('_kurt') or fn.endswith('_skew') for fn in feature_names])
+                if kurt_skew_mask.any() and kurt_skew_mask.shape[0] == scaled.shape[1]:
+                    scaled[:, kurt_skew_mask] = -np.inf
+                    k = min(3, int((~kurt_skew_mask).sum()))
+                else:
+                    k = min(3, scaled.shape[1])
                 omr_z = np.mean(np.partition(scaled, -k, axis=1)[:, -k:], axis=1)
                 del scaled
             else:
