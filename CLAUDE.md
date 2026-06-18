@@ -1,7 +1,7 @@
 # ACM — Codebase Knowledge Base
 
 > Maintained for future agents. Update this file whenever you learn something new about the codebase.
-> Last updated: 2026-06-18 — ML pipeline bug fixes (#61-#67) + research paper planning / CARE ablation session + GMM PCA pre-reduction fix (Farm C generality) + OMR in-sample-bias/premature-clip fix + targeted Farm C re-validation + self-distrust gate magnitude-saturation fix + paper draft (Markdown) + detector-enable ablation wiring fix + fusion auto-tuning wiring gap discovered + paper System Architecture section + full Farm C 58-event re-validation (omr_z over-sensitivity found) + OMR kurt/skew exclusion fix (#72) — Farm A exact-match, Farm C mixed result (precision/false-alarms up, recall down 2 events) + Farm B first full result (recall=0.333, worst of 3 farms) + TEP benchmark candidate feasibility confirmed + empty-rule_fired gap root-caused (two mechanisms, not yet fixed) + contamination-filter fix for rate/per-head threshold REJECTED (broke ACM's own false-alarm-resistance tests; cleanly reverted, zero net code change)
+> Last updated: 2026-06-18 — ML pipeline bug fixes (#61-#67) + research paper planning / CARE ablation session + GMM PCA pre-reduction fix (Farm C generality) + OMR in-sample-bias/premature-clip fix + targeted Farm C re-validation + self-distrust gate magnitude-saturation fix + paper draft (Markdown) + detector-enable ablation wiring fix + fusion auto-tuning wiring gap discovered + paper System Architecture section + full Farm C 58-event re-validation (omr_z over-sensitivity found) + OMR kurt/skew exclusion fix (#72) — Farm A exact-match, Farm C mixed result (precision/false-alarms up, recall down 2 events) + Farm B first full result (recall=0.333, worst of 3 farms) + TEP benchmark candidate feasibility confirmed + empty-rule_fired gap root-caused (two mechanisms, not yet fixed) + contamination-filter fix for rate/per-head threshold REJECTED (broke ACM's own false-alarm-resistance tests; cleanly reverted, zero net code change) + empty-rule_fired diagnosis CORRECTED (prior "two mechanisms / never crosses threshold" premise proven WRONG by multi-angle measurement: fused_max is above alert_z for 6/8 misses; fused score does NOT separate 6/8 misses from normal Farm C operation by any statistic; the 8 misses are 4 distinct situations — sub-cadence, availability-domain, genuinely-indistinguishable, separable-but-rule-shape — most NOT fixable at the alarm-rule layer; Farm C recall is bounded by event detectability mix, not pipeline quality)
 
 ---
 
@@ -47,11 +47,12 @@
 38. [OMR kurt/skew exclusion fix (2026-06-18)](#omr-kurtskew-exclusion-fix--farm-a-exact-match-farm-c-mixed-result-2026-06-18)
 39. [CARE Farm B — first full result (2026-06-18)](#care-farm-b--first-full-result-2026-06-18)
 40. [New benchmark dataset research — TEP feasibility (2026-06-18)](#new-benchmark-dataset-research--tennessee-eastman-process-feasibility-confirmed-2026-06-18)
-41. [Empty-rule_fired gap root-caused (2026-06-18)](#empty-rule_fired-gap--root-caused-two-distinct-mechanisms-found-not-yet-fixed-open-decision-2026-06-18)
+41. [Empty-rule_fired gap (two mechanisms) — SUPERSEDED (2026-06-18)](#empty-rule_fired-gap--root-caused-two-distinct-mechanisms-found-not-yet-fixed-open-decision-2026-06-18)
 42. [Contamination-filter fix attempt — rejected (2026-06-18)](#contamination-filter-fix-attempt-for-the-empty-rule_fired-gap--rejected-2026-06-18)
-43. [Known Issues (Track as GitHub Issues)](#known-issues-track-as-github-issues)
-44. [Standing Rule: Flag Architecture-Violating Suggestions](#standing-rule-flag-architecture-violating-suggestions-dont-suppress-them) ← **Read before giving any suggestion**
-45. [User Working Style](#user-working-style)
+43. [Empty-rule_fired gap — CORRECTED diagnosis (2026-06-18)](#empty-rule_fired-gap--corrected-diagnosis-the-premise-was-wrong-2026-06-18) ← **current correct understanding**
+44. [Known Issues (Track as GitHub Issues)](#known-issues-track-as-github-issues)
+45. [Standing Rule: Flag Architecture-Violating Suggestions](#standing-rule-flag-architecture-violating-suggestions-dont-suppress-them) ← **Read before giving any suggestion**
+46. [User Working Style](#user-working-style)
 
 ---
 
@@ -2361,6 +2362,19 @@ sandbox).
 ## Empty-`rule_fired` gap — root-caused, two distinct mechanisms found, NOT yet fixed (open decision) (2026-06-18)
 > *Added: 2026-06-18 — investigation of the gap flagged since the GMM-fix checkpoint, now confirmed on both Farm C (6 events) and Farm B (4 events)*
 
+> **⚠️ SUPERSEDED 2026-06-18 (later, multi-angle re-investigation) — the central premise of this
+> section is WRONG and the "two mechanisms" framing is incomplete. Read
+> "Empty-`rule_fired` gap — CORRECTED diagnosis (the premise was wrong)" below before acting on
+> anything here.** Two specific claims in this section do not survive direct measurement:
+> (1) "the fused score never crosses `alert_z_eff` at all" is FALSE for 6 of the 8 Farm C misses —
+> their `fused_max` (8.1–9.6) sits *well above* `alert_z` (5.8–8.2); the peak crosses, the *shape*
+> doesn't sustain. (2) "Mechanism 1 (rate threshold pinned at 0.9)" is not causal — the threshold is
+> pinned at 0.9 on detected events and clean normals too. The genuinely decisive finding (below) is
+> that **the fused score does not separate 6 of 8 missed anomalies from normal Farm C operation by
+> ANY statistic** — magnitude, fraction, or run-length, at any bar — so no fused-score rule can
+> recover them without a 1:1 false-alarm cost. The narrative below is preserved as the
+> investigation record, not as a correct conclusion.
+
 Per the standing ML Improvement Loop, this is the "document" step for the cross-farm gap where a
 labelled anomaly's fused score never crosses `alert_z_eff` at all (`rule_fired=""`, `alarm_frac=0`).
 Investigated directly by re-running `apply_alarm_rules()` against the saved `event_*_scores.csv` /
@@ -2535,6 +2549,108 @@ do not opportunistically retry a parameter sweep on the same mechanism.
 **Files changed then reverted**: `core/alarm_rules.py` (`_contamination_filtered_max_rate()`
 helper + both `base`/`base_h` call sites — implemented, tested, reverted; net diff is zero).
 No files remain changed from this attempt.
+
+---
+
+## Empty-`rule_fired` gap — CORRECTED diagnosis (the premise was wrong) (2026-06-18)
+> *Added: 2026-06-18 — multi-angle re-investigation that overturns the "Empty-`rule_fired` gap —
+> two mechanisms" section above. This is the current, correct understanding; that section is
+> SUPERSEDED and kept only as the investigation record.*
+
+Prompted by "take a step back, are we missing something?", the missed-anomaly events were
+re-investigated from angles the original write-up skipped: actual `fused_max` vs `alert_z`,
+post-`event_start` (fault-region-only) statistics, contiguous run-length at multiple magnitude
+bars, the fault DESCRIPTIONS from `event_info.csv`, and `status_type_id`. All numbers below are
+from direct measurement against `results/farm_c_v2/event_*_scores.csv` + `care_data/Wind Farm
+C/event_info.csv` (scripts run ad-hoc, not committed). **Three load-bearing claims in the prior
+section turned out to be false or incomplete:**
+
+### What was wrong
+
+1. **"The fused score never crosses `alert_z_eff`" is FALSE.** For 6 of the 8 Farm C misses,
+   `fused_max` is *well above* the self-tuned threshold:
+
+   | event | fused_max | alert_z | crosses? |
+   |---|---|---|---|
+   | 4 | 8.10 | 5.84 | YES (peak) |
+   | 15 | 8.18 | 5.66 | YES |
+   | 35 | 8.70 | 9.16 | no (threshold inflated) |
+   | 47 | 8.57 | 6.13 | YES |
+   | 67 | 9.62 | 6.12 | YES |
+   | 76 | 7.51 | 8.91 | no (threshold inflated) |
+   | 78 | 9.34 | 6.52 | YES |
+   | 90 | 9.57 | 8.18 | YES |
+
+   The peak crosses; the *shape* doesn't sustain. The `sustained` rule needs a contiguous run of
+   `persist` (26–70) samples above `alert_z`; the actual longest runs are 8–21. So this was never a
+   "score too low" problem — it's a "score elevated but bursty, not a plateau" problem.
+
+2. **"Mechanism 1 (rate threshold pinned at 0.9)" is not causal.** The 0.9 pin is real but pinned
+   identically on *detected* anomalies and on *clean normals* — it does not discriminate misses
+   from hits, so it cannot be the cause of the misses. The prior section half-acknowledged this
+   ("not solely decisive") but still framed it as fixable Mechanism 1; the contamination-filter fix
+   attempt (rejected, see section above) was aimed squarely at this non-causal knob.
+
+3. **The fault is NOT diluted across the window** (a confound I worried about and checked):
+   `event_start` sits near the start of each scored window (onset index 144–432 of windows
+   586–8929 long), so post-onset statistics ≈ whole-window statistics. Dilution is not the issue.
+
+### The decisive finding — the fused score does not SEPARATE these events from normal operation
+
+Computed contiguous run-length and `frac(fused ≥ bar)` for all 31 Farm C normal events and the 8
+misses, at bars z ≥ 6.0 / 6.5 / 7.0. **Normal Farm C operation routinely sustains longer, denser
+high-fused excursions than the missed anomalies do:**
+
+- At z ≥ 6.0: normal longest-run max = **36 samples**, normal `frac` max = **0.077**.
+- The misses: ev4 run=16/frac=0.018, ev15 run=2, ev35 run=12, ev47 run=16/frac=0.065,
+  ev67 run=21/frac=0.025, ev76 run=11, ev78 run=16/frac=0.097, ev90 run=48/frac=0.084.
+- **Only ev90 clears the normal envelope on every statistic** (run 48 > 36, frac 0.084 > 0.077 at
+  all three bars). ev78 partially separates on `frac`. The other 6 sit *inside* the normal
+  envelope on magnitude, fraction, AND run-length.
+
+This is now established from five independent angles (peak magnitude, fraction, run-length,
+post-onset concentration, multi-bar), not one. **Conclusion: for 6 of 8 misses, no statistic of the
+fused score distinguishes the fault from this farm's normal operation. Therefore no fused-score
+rule — no threshold, no burst rule, no rate-window change — can recover them without an equal
+false-alarm cost on the indistinguishable normals.** This is the same 1:1 seesaw that sank the
+contamination-filter attempt, and it is now explained: it is not bad tuning luck, it is that the
+signal genuinely is not there in fused-score space on these events.
+
+### The events are FOUR different situations, not one gap (from the fault descriptions)
+
+The `event_info.csv` descriptions — never consulted in the prior write-up — show the 8 misses are
+not a single failure mode and most are not score-rule problems at all:
+
+| Situation | Events | Why the score rules can't / shouldn't fire |
+|---|---|---|
+| **Sub-cadence / too short** | 35 ("several short standstills, max 8min"), likely 90 ("COMMUNICATION FAULT"), parts of 47 ("2h later back in production") | An 8-minute event at 600s (10-min) SCADA cadence is **< 1 sample**. Not fairly detectable at this cadence — a data/labeling reality, not an ACM defect. |
+| **Standstill / availability-domain** | 15 ("longer standstill due to defect pitch encoder"), 35 | A *parked* turbine is the symptom — the availability rule (R4), not score magnitude, owns this. But `status_type_id` shows only scattered non-normal codes (ev35: 226 status-3 samples spread out, consistent with many sub-cadence stops), never a continuous 48h outage, so R4 correctly can't fire. Lowering R4's 48h floor to catch short standstills would fire on routine maintenance stops. |
+| **Genuinely indistinguishable in fused-score space** | 4 ("Axis 3 not ready-to-operate"), 67 ("overpressure on main transformer"), 76 ("pitch battery issues"), 15 | Per the separation analysis above: no fused-score statistic separates these from normal Farm C operation. Hard detection-power limit at the feature/detector level, not a rule-layer bug. |
+| **Separable but missed by rule shape** | 90 (clearly), 78 (partially) | The ONE/two events where the fused score genuinely exceeds the normal envelope. A rule keyed to "sustained run above a bar that clears the normal envelope with margin" *would* catch ev90 — and it was in fact detected via `+rate` before the kurt/skew fix lowered its fused magnitude. |
+
+### What this means for "the fix" and for the paper
+
+- **There is no single fix, and most of the gap is not fixable at the alarm-rule layer.** A perfect
+  rule-shape fix recovers ≈1–2 events (ev90, maybe ev78): recall 19/27 → ~20–21/27 ≈ 0.78, still
+  short of the 0.80 KPI. The KPI cannot be reached honestly by rule-layer work alone, because the
+  dominant misses are sub-cadence, availability-domain, or genuinely indistinguishable.
+- **Recall against CARE Farm C is bounded by the detectability MIX of its labelled events, not just
+  by pipeline quality.** Several "anomaly" events are sub-cadence transients, communication faults,
+  or short standstills that produce no sustained sensor-correlation anomaly at SCADA cadence. A fair
+  evaluation should **categorize events by detectability** rather than treating 27/27 as the
+  achievable ceiling. This is the most important correction for the paper: do not present Farm C
+  recall as a pure measure of detector quality, and do not chase the indistinguishable events at the
+  rule layer (that is precisely how the false-alarm regressions in this session were introduced).
+- **If a rule-shape fix is pursued for the genuinely-separable case (ev90-style)**, the corroborating
+  signal is "sustained run at a magnitude bar that exceeds the asset's own normal-operation
+  envelope with margin" — and it MUST be validated with the full-label discriminator (separate every
+  fixable anomaly from every normal, on the complete A+B+C label set) BEFORE coding, plus
+  `tests/test_ml.py` 17/17 + two new burst/clean-baseline tests, plus Farm A exact-match, plus FULL
+  (not subset) Farm B + Farm C re-validation. This is a production alarm-rule change and per the
+  standing rule needs an explicit decision before `core/alarm_rules.py` is touched.
+
+**Files**: no code changes — diagnostic-only re-investigation against saved score CSVs +
+`event_info.csv`. The prior "two mechanisms" section is now SUPERSEDED (banner added inline there).
 
 ---
 
