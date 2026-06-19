@@ -95,11 +95,29 @@ def infer_score_days(ts: pd.Series, min_train_days: float = MIN_TRAIN_DAYS) -> f
 
 
 def parse_timestamp_col(values: pd.Series) -> pd.Series:
-    """Parse common CSV timestamp columns, including mixed ISO precision."""
-    try:
-        return pd.to_datetime(values)
-    except ValueError:
-        return pd.to_datetime(values, format="mixed")
+    """Parse common CSV timestamp columns, including mixed ISO precision.
+
+    Tries dayfirst=False then dayfirst=True as whole-column-consistent
+    formats and keeps whichever parses every row with no failures. A bare
+    `pd.to_datetime(values)` lets pandas guess a single format from the
+    first rows -- for ambiguous day<=12 values (e.g. "01-04-2018") it can
+    silently guess month-first, then either corrupt every such row with no
+    error at all, or raise once a day>12 row breaks that guess. format=
+    "mixed" (per-row guessing) is used only as a last resort, when neither
+    single consistent format covers every row -- that's the genuine
+    mixed-precision case (e.g. some rows with fractional seconds, some
+    without), not a day/month ambiguity.
+    """
+    n_missing = int(values.isna().sum())
+    best = None
+    for dayfirst in (False, True):
+        parsed = pd.to_datetime(values, dayfirst=dayfirst, errors="coerce")
+        n_bad = int(parsed.isna().sum()) - n_missing
+        if n_bad == 0:
+            return parsed
+        if best is None or n_bad < best[0]:
+            best = (n_bad, parsed)
+    return pd.to_datetime(values, format="mixed")
 
 
 def load_frame(args, source: str) -> pd.DataFrame:

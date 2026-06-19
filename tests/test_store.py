@@ -115,6 +115,22 @@ class TestRunnerCSV:
         assert ts.notna().all()
         assert ts.iloc[1] > ts.iloc[0]
 
+    def test_parse_timestamp_col_resolves_day_first_ambiguity(self):
+        # day<=12 rows are ambiguous (could be read month-first); day=13/31
+        # rows are not. A correct parse must read every row day-first and
+        # land in chronological order; the pre-fix code silently swapped
+        # day/month on the ambiguous rows instead.
+        ts = parse_timestamp_col(pd.Series([
+            "01-04-2018 00:00",
+            "02-04-2018 00:00",
+            "13-04-2018 00:00",
+            "31-07-2018 00:00",
+        ]))
+        assert ts.notna().all()
+        assert ts.is_monotonic_increasing
+        assert ts.iloc[0] == pd.Timestamp("2018-04-01 00:00:00")
+        assert ts.iloc[-1] == pd.Timestamp("2018-07-31 00:00:00")
+
     @pytest.mark.slow
     def test_acm_run_csv_end_to_end(self, tmp_path):
         import subprocess
