@@ -296,6 +296,8 @@ p {
 .kpi-value.success { color: var(--green); }
 .kpi-value.error { color: var(--red); }
 .kpi-value.warn { color: var(--amber); }
+.kpi-value.alarm { color: var(--red); }
+.kpi-value.ok { color: var(--green); }
 
 .kpi-desc {
     font-size: 1.1rem;
@@ -470,6 +472,13 @@ tbody tr:hover {
     margin: 12px 0 0;
     border: 1px solid var(--line);
     background: var(--paper);
+}
+
+.chart-note {
+    margin: 4px 0 0;
+    font-family: var(--mono);
+    font-size: 0.98rem;
+    color: var(--muted);
 }
 
 .asset-card-grid {
@@ -656,12 +665,31 @@ a:hover {
         font-size: 2.6rem;
     }
 
+    .asset-card-diag {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .diag-box, .chart-note {
+        overflow-wrap: anywhere;
+    }
+
+    .mini-table {
+        display: block;
+        overflow-x: auto;
+    }
+
     table {
         font-size: 1.1rem;
     }
 
     td, th {
         padding: 11px 13px;
+    }
+}
+
+@media (max-width: 480px) {
+    .kpi-grid {
+        grid-template-columns: 1fr;
     }
 }
 
@@ -875,6 +903,14 @@ def format_verdict_badge(verdict: Optional[str]) -> str:
     return f"<span class='badge {badge_class}'>{html.escape(verdict_clean)}</span>"
 
 
+def finite_number_list(values: pd.Series) -> list[Optional[float]]:
+    """Return JSON-safe numeric values without changing finite data."""
+    out: list[Optional[float]] = []
+    for v in pd.to_numeric(values, errors="coerce").to_numpy(dtype=float):
+        out.append(float(v) if np.isfinite(v) else None)
+    return out
+
+
 def asset_figure_spec(s: pd.DataFrame, meta: pd.Series) -> tuple[dict, str]:
     """
     Build a Plotly figure spec (as a plain dict, JSON-embedded into the page)
@@ -897,20 +933,22 @@ def asset_figure_spec(s: pd.DataFrame, meta: pd.Series) -> tuple[dict, str]:
 
     # Fused score line (row 1)
     traces.append({
-        "type": "scattergl", "mode": "lines", "name": "Fused score",
-        "x": ts_list, "y": fused.round(3).tolist(),
+        "type": "scattergl", "mode": "lines", "name": "Fused",
+        "x": ts_list, "y": finite_number_list(fused),
         "line": {"color": "#b3551e", "width": 1.6},
         "xaxis": "x", "yaxis": "y", "legendgroup": "fused",
+        "hovertemplate": "Time: %{x}<br>Fused Z: %{y:.2f}<extra>Fused</extra>",
     })
 
     # Alert threshold (row 1)
     thr = meta.get("alert_z")
     if pd.notna(thr):
         traces.append({
-            "type": "scattergl", "mode": "lines", "name": f"Alert threshold: {thr:.2f}",
+            "type": "scattergl", "mode": "lines", "name": f"Alert Z {thr:.2f}",
             "x": [ts_list[0], ts_list[-1]], "y": [float(thr), float(thr)],
             "line": {"color": "#2f6f8f", "width": 1.6, "dash": "dash"},
             "xaxis": "x", "yaxis": "y",
+            "hovertemplate": "Time: %{x}<br>Alert Z: %{y:.2f}<extra>Threshold</extra>",
         })
 
     # Alarm shading (row 1) - bottom follows the data's own minimum instead
@@ -934,7 +972,7 @@ def asset_figure_spec(s: pd.DataFrame, meta: pd.Series) -> tuple[dict, str]:
         for k, (i0, i1) in enumerate(regions):
             traces.append({
                 "type": "scatter", "mode": "lines", "fill": "toself",
-                "name": "Alarm period", "showlegend": (k == 0),
+                "name": "Alarm window", "showlegend": (k == 0),
                 "legendgroup": "alarm",
                 "x": [ts_list[i0], ts_list[i1], ts_list[i1], ts_list[i0]],
                 "y": [fused_min, fused_min, fused_max, fused_max],
@@ -945,18 +983,18 @@ def asset_figure_spec(s: pd.DataFrame, meta: pd.Series) -> tuple[dict, str]:
             })
 
     # Per-detector heatmap (row 2) - the primary "see all heads at once" view
-    zmat = np.vstack([np.clip(np.nan_to_num(pd.to_numeric(s[z], errors="coerce").to_numpy(), nan=0.0), 0, 8)
-                      for z in Z_COLS])
+    zmat = [finite_number_list(s[z]) for z in Z_COLS]
     detector_labels = [detector_label(z) for z in Z_COLS]
     traces.append({
-        "type": "heatmap", "name": "Detector heat",
-        "x": ts_list, "y": detector_labels, "z": zmat.tolist(),
+        "type": "heatmap", "name": "Detector heatmap",
+        "x": ts_list, "y": detector_labels, "z": zmat,
         "zmin": 0, "zmax": 8,
         "colorscale": [[0, "#2a2118"], [0.5, "#c8762a"], [1, "#ffb347"]],
-        "colorbar": {"title": {"text": "Score", "font": {"size": 12}},
+        "colorbar": {"title": {"text": "Detector Z", "font": {"size": 13}},
+                     "tickfont": {"size": 12},
                      "len": 0.42, "y": 0.18, "thickness": 14},
         "xaxis": "x2", "yaxis": "y2",
-        "hovertemplate": "%{y}<br>%{x}<br>Score: %{z:.2f}<extra></extra>",
+        "hovertemplate": "Time: %{x}<br>Detector: %{y}<br>Z: %{z:.2f}<extra></extra>",
     })
 
     # Per-detector line traces (row 2 area, hidden by default) - clicking a
@@ -964,40 +1002,66 @@ def asset_figure_spec(s: pd.DataFrame, meta: pd.Series) -> tuple[dict, str]:
     # line over time, on its own y-axis range, answering the "select to see
     # the various heads" requirement without replacing the heatmap overview.
     for z in Z_COLS:
-        vals = pd.to_numeric(s[z], errors="coerce").round(3)
+        det_name = detector_label(z)
         traces.append({
-            "type": "scattergl", "mode": "lines", "name": f"{detector_label(z)} (line)",
-            "x": ts_list, "y": vals.tolist(),
+            "type": "scattergl", "mode": "lines", "name": det_name,
+            "x": ts_list, "y": finite_number_list(s[z]),
             "line": {"color": DETECTOR_COLORS.get(z, "#8a5a16"), "width": 1.2},
             "xaxis": "x3", "yaxis": "y3",
             "visible": "legendonly",
             "legendgroup": "heads",
+            "hovertemplate": f"Time: %{{x}}<br>{html.escape(det_name)} Z: %{{y:.2f}}<extra>{html.escape(det_name)}</extra>",
         })
 
     desc = meta.get("description") or meta.get("label") or ""
     title = f"{meta['asset_key']} (ID: {meta['asset_id']}) - {desc}" if desc else f"{meta['asset_key']} (ID: {meta['asset_id']})"
 
     layout = {
-        "title": {"text": title, "font": {"size": 18, "family": "Barlow Condensed, sans-serif"}, "x": 0},
-        "font": {"family": "Barlow Condensed, sans-serif", "size": 13, "color": "#332819"},
+        "font": {"family": "Barlow Condensed, sans-serif", "size": 15, "color": "#332819"},
         "paper_bgcolor": "#f7f3ec",
         "plot_bgcolor": "#f7f3ec",
-        "margin": {"l": 70, "r": 30, "t": 50, "b": 40},
+        "margin": {"l": 72, "r": 168, "t": 86, "b": 58},
         "showlegend": True,
-        "legend": {"orientation": "h", "x": 0, "y": 1.12, "font": {"size": 12}},
+        "legend": {
+            "orientation": "v",
+            "x": 1.02,
+            "xanchor": "left",
+            "y": 1.0,
+            "yanchor": "top",
+            "bgcolor": "rgba(247,243,236,0.96)",
+            "bordercolor": "#c2b596",
+            "borderwidth": 1,
+            "font": {"size": 13},
+            "title": {"text": "Series", "font": {"size": 13}},
+            "tracegroupgap": 10,
+        },
         "hovermode": "x unified",
+        "hoverlabel": {"font": {"size": 12}},
+        "uirevision": str(meta["asset_key"]),
+        "annotations": [
+            {"text": "Fused score", "xref": "paper", "yref": "paper", "x": 0,
+             "y": 1.04, "xanchor": "left", "showarrow": False,
+             "font": {"size": 15, "color": "#6b5c45"}},
+            {"text": "Detector heatmap", "xref": "paper", "yref": "paper", "x": 0,
+             "y": 0.43, "xanchor": "left", "showarrow": False,
+             "font": {"size": 14, "color": "#6b5c45"}},
+            {"text": "Detector line detail", "xref": "paper", "yref": "paper", "x": 0,
+             "y": 0.22, "xanchor": "left", "showarrow": False,
+             "font": {"size": 14, "color": "#6b5c45"}},
+        ],
         # Row 1: fused timeline (55% height); Row 2: heatmap (20%);
         # Row 3: per-detector lines, hidden until a head is selected (25%).
         "xaxis": {"domain": [0, 1], "anchor": "y", "showticklabels": False,
                   "gridcolor": "#e0d6c0"},
-        "yaxis": {"domain": [0.45, 1], "title": {"text": "Anomaly Score (Z)", "font": {"size": 13}},
-                  "gridcolor": "#e0d6c0"},
+        "yaxis": {"domain": [0.45, 1], "title": {"text": "Fused Z", "font": {"size": 15}},
+                  "tickfont": {"size": 13}, "gridcolor": "#e0d6c0"},
         "xaxis2": {"domain": [0, 1], "anchor": "y2", "showticklabels": False, "matches": "x"},
-        "yaxis2": {"domain": [0.25, 0.42], "title": {"text": "", "font": {"size": 11}}},
-        "xaxis3": {"domain": [0, 1], "anchor": "y3", "matches": "x", "title": {"text": "Time", "font": {"size": 13}},
-                   "gridcolor": "#e0d6c0"},
-        "yaxis3": {"domain": [0, 0.2], "title": {"text": "Head Z", "font": {"size": 11}},
-                   "gridcolor": "#e0d6c0"},
+        "yaxis2": {"domain": [0.25, 0.42], "title": {"text": "", "font": {"size": 12}},
+                   "tickfont": {"size": 13}},
+        "xaxis3": {"domain": [0, 1], "anchor": "y3", "matches": "x", "title": {"text": "Time", "font": {"size": 15}},
+                   "tickfont": {"size": 13}, "gridcolor": "#e0d6c0"},
+        "yaxis3": {"domain": [0, 0.2], "title": {"text": "Detector Z", "font": {"size": 14}},
+                   "tickfont": {"size": 13}, "gridcolor": "#e0d6c0"},
     }
 
     spec = {"data": traces, "layout": layout}
@@ -1070,10 +1134,13 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
     verdicts = assets["verdict"].fillna("UNKNOWN").astype(str).str.upper()
     kpi_metrics = {
         "total_assets": int(len(assets)),
+        "alarm": int((verdicts == "ALARM").sum()),
+        "ok": int((verdicts == "OK").sum()),
         "detected": int((verdicts == "DETECTED").sum()),
         "clean": int((verdicts == "CLEAN").sum()),
         "missed": int((verdicts == "MISSED").sum()),
         "false_alarms": int((verdicts == "FALSE_ALARM").sum()),
+        "unknown": int((~verdicts.isin(["ALARM", "OK", "DETECTED", "CLEAN", "MISSED", "FALSE_ALARM"])).sum()),
     }
 
     # Get runs for operations table
@@ -1163,6 +1230,7 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
             f"<div class='asset-card-grid'>"
             f"<div class='asset-card-chart'>"
             f"<div class='chart-container' id='{chart_id}' style='height:760px;'></div>"
+            f"<p class='chart-note'>Chart values use raw ACM score rows; visible labels round to 2 decimals.</p>"
             f"</div>"
             f"<div class='asset-card-diag'>{diag_boxes}</div>"
             f"</div>"
@@ -1259,39 +1327,40 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
     # KPI section - always derived from `assets` above, so this is exact for
     # whatever scope (single asset / a handful / a farm / the whole fleet) was requested.
     total = kpi_metrics["total_assets"]
-    detected = kpi_metrics["detected"]
-    clean = kpi_metrics["clean"]
-    missed = kpi_metrics["missed"]
-    false_alarms = kpi_metrics["false_alarms"]
+    def kpi_box(label: str, value: int, klass: str = "", desc: str = "") -> str:
+        klass_attr = f" {klass}" if klass else ""
+        desc_html = f"<div class='kpi-desc'>{html.escape(desc)}</div>" if desc else ""
+        return (
+            "<div class='kpi-box'>"
+            f"<div class='kpi-label'>{html.escape(label)}</div>"
+            f"<div class='kpi-value{klass_attr}'>{value}</div>"
+            f"{desc_html}"
+            "</div>"
+        )
 
-    kpi_html = f"""
-    <div class='kpi-grid'>
-        <div class='kpi-box'>
-            <div class='kpi-label'>Assets in Scope</div>
-            <div class='kpi-value'>{total}</div>
-        </div>
-        <div class='kpi-box'>
-            <div class='kpi-label'>Detected</div>
-            <div class='kpi-value success'>{detected}</div>
-            <div class='kpi-desc'>Confirmed anomaly, flagged</div>
-        </div>
-        <div class='kpi-box'>
-            <div class='kpi-label'>Clean</div>
-            <div class='kpi-value success'>{clean}</div>
-            <div class='kpi-desc'>No anomaly, no flag</div>
-        </div>
-        <div class='kpi-box'>
-            <div class='kpi-label'>Missed</div>
-            <div class='kpi-value error'>{missed}</div>
-            <div class='kpi-desc'>Confirmed anomaly, not flagged</div>
-        </div>
-        <div class='kpi-box'>
-            <div class='kpi-label'>False Alarms</div>
-            <div class='kpi-value warn'>{false_alarms}</div>
-            <div class='kpi-desc'>Flagged, no confirmed anomaly</div>
-        </div>
-    </div>
-    """
+    care_total = (
+        kpi_metrics["detected"] + kpi_metrics["clean"] +
+        kpi_metrics["missed"] + kpi_metrics["false_alarms"]
+    )
+    acm_total = kpi_metrics["alarm"] + kpi_metrics["ok"]
+    if acm_total and not care_total:
+        kpi_cards = [
+            kpi_box("Assets in Scope", total),
+            kpi_box("Assets in Alarm", kpi_metrics["alarm"], "alarm", "ACM verdict = ALARM"),
+            kpi_box("Assets OK", kpi_metrics["ok"], "ok", "ACM verdict = OK"),
+        ]
+    else:
+        kpi_cards = [
+            kpi_box("Assets in Scope", total),
+            kpi_box("Detected", kpi_metrics["detected"], "success", "Confirmed anomaly, flagged"),
+            kpi_box("Clean", kpi_metrics["clean"], "success", "No anomaly, no flag"),
+            kpi_box("Missed", kpi_metrics["missed"], "error", "Confirmed anomaly, not flagged"),
+            kpi_box("False Alarms", kpi_metrics["false_alarms"], "warn", "Flagged, no confirmed anomaly"),
+        ]
+    if kpi_metrics["unknown"]:
+        kpi_cards.append(kpi_box("Unknown", kpi_metrics["unknown"], "warn", "Unmapped verdict"))
+
+    kpi_html = "<div class='kpi-grid'>" + "".join(kpi_cards) + "</div>"
 
     scope = f"farm {farm}" if farm else (f"{len(assets)} selected assets" if picks else "fleet")
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -1350,7 +1419,7 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
 
         <section>
             <h2>Detailed Analysis</h2>
-            <p class='text-muted'>Click a detector name in a chart's legend to isolate that head's raw score line. Click the heatmap or fused-score trace names to toggle them off.</p>
+            <p class='text-muted'>Legend controls show or hide visual layers. Numeric chart values come from stored ACM score rows and are only rounded in visible labels.</p>
             <div class='timeline-cards'>
                 {''.join(figs_html)}
             </div>
@@ -1399,11 +1468,34 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
         var specs = {chart_specs_json};
         var config = {{responsive: true, displaylogo: false,
                        modeBarButtonsToRemove: ['lasso2d', 'select2d']}};
+        function layoutForWidth(baseLayout, width) {{
+            var layout = JSON.parse(JSON.stringify(baseLayout));
+            if (width < 760) {{
+                layout.margin = {{l: 54, r: 18, t: 82, b: 140}};
+                layout.legend = Object.assign({{}}, layout.legend, {{
+                    orientation: 'h',
+                    x: 0,
+                    xanchor: 'left',
+                    y: -0.24,
+                    yanchor: 'top',
+                    title: {{text: ''}},
+                    tracegroupgap: 4,
+                    itemwidth: 76
+                }});
+                layout.font = Object.assign({{}}, layout.font, {{size: 11}});
+                if (layout.colorbar) layout.colorbar = Object.assign({{}}, layout.colorbar, {{thickness: 10}});
+            }}
+            return layout;
+        }}
+
         Object.keys(specs).forEach(function(chartId) {{
             var el = document.getElementById(chartId);
             if (!el) return;
             var spec = specs[chartId];
-            Plotly.newPlot(el, spec.data, spec.layout, config);
+            Plotly.newPlot(el, spec.data, layoutForWidth(spec.layout, el.clientWidth), config);
+            window.addEventListener('resize', function() {{
+                Plotly.relayout(el, layoutForWidth(spec.layout, el.clientWidth));
+            }});
         }});
     }})();
     </script>

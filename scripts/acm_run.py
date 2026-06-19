@@ -82,6 +82,14 @@ def infer_score_days(ts: pd.Series, min_train_days: float = MIN_TRAIN_DAYS) -> f
     return max(0.0, min(raw_score_days, span_days))
 
 
+def parse_timestamp_col(values: pd.Series) -> pd.Series:
+    """Parse common CSV timestamp columns, including mixed ISO precision."""
+    try:
+        return pd.to_datetime(values)
+    except ValueError:
+        return pd.to_datetime(values, format="mixed")
+
+
 def load_frame(args, source: str) -> pd.DataFrame:
     if args.query or args.table:
         import pyodbc
@@ -94,7 +102,7 @@ def load_frame(args, source: str) -> pd.DataFrame:
     if args.timestamp_col not in df.columns:
         raise SystemExit(f"timestamp column '{args.timestamp_col}' not in {source} "
                          f"(columns: {list(df.columns)[:8]}...)")
-    df[args.timestamp_col] = pd.to_datetime(df[args.timestamp_col])
+    df[args.timestamp_col] = parse_timestamp_col(df[args.timestamp_col])
     return df.sort_values(args.timestamp_col)
 
 
