@@ -261,6 +261,29 @@ distinguish a normal run from an ablation run except this label, by design, so y
 baseline and ablation runs in the same report/database and still tell them apart later. See
 `docs/report-flow-testing.md` for the full report-flow walkthrough.
 
+**Comparing several configs side-by-side in one report - give each one its own `--asset` key.**
+`acm_run.py` ingests with `keep_history=False` (it's a one-shot batch runner, not the live
+service - see `scripts/acm_store.py`'s `ingest_result()`): every invocation **replaces** that
+asset's previous `runs`/`scores` rows in the database. Re-running the same `--asset` key with a
+different `--override` does not accumulate a history - only the latest run survives. To compare a
+baseline against several ablations (e.g. each detector on/off, or each detector run alone) in a
+single report, give every config its own `--asset` key against the same CSV and `--db`:
+
+```bash
+python scripts/acm_run.py --csv pump7.csv --timestamp-col time_stamp --asset pump7_baseline --db acm_results.db
+
+python scripts/acm_run.py --csv pump7.csv --timestamp-col time_stamp --asset pump7_no_ar1 --db acm_results.db \
+  --override '{"models": {"ar1": {"enabled": false}}}'
+
+python scripts/acm_run.py --csv pump7.csv --timestamp-col time_stamp --asset pump7_only_omr --db acm_results.db \
+  --override '{"models": {"ar1": {"enabled": false}, "pca": {"enabled": false}, "iforest": {"enabled": false}, "gmm": {"enabled": false}}}'
+
+python scripts/acm_report.py --db acm_results.db --assets pump7 --out pump7_ablation_report.html
+```
+
+`--assets pump7` substring-matches every `pump7_*` key, so all configs land in one report, each
+showing its own Ablation Override box (baseline has none - that's the visual tell).
+
 ---
 
 ## Repository Map
