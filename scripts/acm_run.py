@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ACM production runner — score any assets, in parallel, straight into SQL.
+ACM production runner - score any assets, in parallel, straight into SQL.
 
 Input per asset is ANY tabular sensor history: a CSV file (timestamp column +
 numeric channels, optional status column) or a SQL Server table/query. The
@@ -15,14 +15,14 @@ Examples:
       --timestamp-col time --status-col status --score-from 2026-05-01 \
       --db acm_results.db
 
-  # a fleet in parallel (one CSV per asset, score the last 30 days)
-  python scripts/acm_run.py --csv data/*.csv --score-days 30 --workers 3 \
+  # a fleet in parallel (one CSV per asset, infer score window from each dataset)
+  python scripts/acm_run.py --csv data/*.csv --workers 3 \
       --db acm_results.db --report fleet.html
 
   # from SQL Server historian, results back into SQL Server
   python scripts/acm_run.py --backend mssql --conn "DRIVER={...};SERVER=...;DATABASE=ACM" \
       --query "SELECT * FROM Historian WHERE EquipID=5010" --asset WFA_T10 \
-      --timestamp-col EntryDateTime --score-days 30
+      --timestamp-col EntryDateTime
 """
 from __future__ import annotations
 
@@ -53,7 +53,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-_SEP = "  " + "─" * 53
+_SEP = "  " + "-" * 53
 _CYN = "\x1b[36m"
 _GRN = "\x1b[32m"
 _RED = "\x1b[31m"
@@ -65,6 +65,21 @@ _RST = "\x1b[0m"
 from core.pipeline import Z_COLS, score_asset                       # noqa: E402
 from scripts.acm_feed import MIN_TRAIN_DAYS, frame_sensors          # noqa: E402
 from scripts.acm_store import Store, alarm_episodes, ingest_result  # noqa: E402
+
+
+def infer_score_days(ts: pd.Series, min_train_days: float = MIN_TRAIN_DAYS) -> float:
+    """Infer a trailing score window when --score-days is omitted."""
+    if len(ts) < 2:
+        return 0.0
+    span_days = (ts.iloc[-1] - ts.iloc[0]).total_seconds() / 86400.0
+    if span_days <= 0:
+        return 0.0
+
+    raw_score_days = max(1.0, span_days / 3.0)
+    available_after_baseline = span_days - float(min_train_days)
+    if available_after_baseline > 0:
+        return max(0.0, min(raw_score_days, available_after_baseline))
+    return max(0.0, min(raw_score_days, span_days))
 
 
 def load_frame(args, source: str) -> pd.DataFrame:
@@ -88,14 +103,18 @@ def run_one(args, source: str, asset_key: str) -> Dict:
     ts = df[args.timestamp_col]
     if args.score_from:
         cut = pd.Timestamp(args.score_from)
+        split_note = f"from={args.score_from}"
     else:
-        cut = ts.iloc[-1] - pd.Timedelta(days=args.score_days)
+        score_days = args.score_days if args.score_days is not None else infer_score_days(ts)
+        cut = ts.iloc[-1] - pd.Timedelta(days=score_days)
+        split_note = f"score_days={score_days:.2f}" + (" auto" if args.score_days is None else "")
     train_df, score_df = df[ts < cut], df[ts >= cut]
     # Time-aware maturity gate: a baseline needs ENOUGH TIME behind it, not a
     # row count (1000 rows is a week at 10-min cadence but 17 minutes at 1Hz).
     span_days = ((cut - ts.iloc[0]).total_seconds() / 86400.0) if len(train_df) else 0.0
     if span_days < MIN_TRAIN_DAYS or not len(score_df):
         return {"asset_key": asset_key,
+                "split_note": split_note,
                 "error": f"MATURING (history span {span_days:.1f} d, "
                          f"need {MIN_TRAIN_DAYS:.0f} d)"}
 
@@ -103,7 +122,7 @@ def run_one(args, source: str, asset_key: str) -> Dict:
     score_raw, score_status = frame_sensors(score_df, args.timestamp_col, args.status_col)
     res = score_asset(train_raw=train_raw, score_raw=score_raw,
                       train_status=train_status, score_status=score_status)
-    return {"asset_key": asset_key, "result": res}
+    return {"asset_key": asset_key, "result": res, "split_note": split_note}
 
 
 def main() -> int:
@@ -118,8 +137,8 @@ def main() -> int:
                      help="operating-status column (0/2=normal); enables the availability rule")
     split = ap.add_argument_group("train/score split")
     split.add_argument("--score-from", default=None, help="score everything from this timestamp")
-    split.add_argument("--score-days", type=float, default=30.0,
-                       help="score the trailing N days (default 30)")
+    split.add_argument("--score-days", type=float, default=None,
+                       help="score the trailing N days (default: infer from dataset span)")
     out = ap.add_argument_group("output")
     out.add_argument("--backend", choices=["sqlite", "mssql"], default="sqlite")
     out.add_argument("--db", default="acm_results.db")
@@ -149,26 +168,31 @@ def main() -> int:
     else:
         outputs = [run_one(args, s, k) for s, k in sources]
 
-    # ── header ────────────────────────────────────────────────────────────────
+    # header
     print(flush=True)
-    print(f"{_CYN}  ACM  ·  one-shot run{_RST}", flush=True)
+    print(f"{_CYN}  ACM - one-shot run{_RST}", flush=True)
     print(f"{_DIM}{_SEP}{_RST}", flush=True)
     n = len(sources)
     backend_label = "SQL Server" if args.backend == "mssql" else "SQLite"
-    print(f"{_DIM}  {n} asset{'s' if n != 1 else ''}  ·  {backend_label}  ·  {args.db}{_RST}", flush=True)
+    print(f"{_DIM}  {n} asset{'s' if n != 1 else ''} - {backend_label} - {args.db}{_RST}", flush=True)
     print(flush=True)
 
     store = Store(args.backend, db=args.db, conn_str=args.conn)
     ok_count = skip_count = alarm_count = 0
+    report_assets: List[str] = []
     try:
         for o in outputs:
             key = o["asset_key"]
+            split_note = o.get("split_note")
             if "error" in o:
                 skip_count += 1
-                print(f"  {_YLW}⊘{_RST}  {_BLD}{key}{_RST}  {_DIM}skipped  ·  {o['error']}{_RST}", flush=True)
+                if split_note:
+                    print(f"     split: {split_note}", flush=True)
+                print(f"  {_YLW}!{_RST}  {_BLD}{key}{_RST}  {_DIM}skipped - {o['error']}{_RST}", flush=True)
                 continue
             res = o["result"]
             ingest_result(store, args.group, key, res)
+            report_assets.append(f"{args.group}/{key}")
             d = res.decision
             is_alarm = bool(d.alarm.any())
             if is_alarm:
@@ -177,28 +201,35 @@ def main() -> int:
             else:
                 ok_count += 1
                 state_str = f"{_GRN}ok{_RST}"
-            rule  = d.rule_fired or "─"
-            print(f"  {_GRN}✓{_RST}  {_BLD}{key}{_RST}  {state_str}"
+            rule  = d.rule_fired or "-"
+            if split_note:
+                print(f"     split: {split_note}", flush=True)
+            print(f"  {_GRN}+{_RST}  {_BLD}{key}{_RST}  {state_str}"
                   f"  {_DIM}z={d.alert_z:.2f}  rule={rule}  {res.runtime_s}s{_RST}", flush=True)
     finally:
         store.close()
 
-    # ── footer ────────────────────────────────────────────────────────────────
+    # footer
     print(flush=True)
     print(f"{_DIM}{_SEP}{_RST}", flush=True)
     parts = []
     if ok_count:    parts.append(f"{_GRN}{ok_count} ok{_RST}")
     if alarm_count: parts.append(f"{_RED}{alarm_count} alarm{_RST}")
     if skip_count:  parts.append(f"{_YLW}{skip_count} skipped{_RST}")
-    print(f"  {'  ·  '.join(parts)}", flush=True)
+    print(f"  {' - '.join(parts)}", flush=True)
+
+    if args.report and not report_assets:
+        print(f"  {_YLW}Report skipped: no assets were scored{_RST}", flush=True)
+        args.report = None
 
     if args.report:
         import subprocess
         subprocess.run([sys.executable, str(ROOT / "scripts" / "acm_report.py"),
                         "--backend", args.backend, "--db", args.db,
                         *( ["--conn", args.conn] if args.conn else []),
-                        "--out", args.report], check=False)
-        print(f"  {_DIM}Report  ·  {args.report}{_RST}", flush=True)
+                        "--out", args.report,
+                        *(["--assets", *report_assets] if report_assets else [])], check=False)
+        print(f"  {_DIM}Report - {args.report}{_RST}", flush=True)
 
     print(f"{_DIM}{_SEP}{_RST}", flush=True)
     print(flush=True)

@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from core.pipeline import score_asset                                # noqa: E402
+from scripts.acm_run import infer_score_days                         # noqa: E402
 from scripts.acm_store import Store, ingest_result, sync_config      # noqa: E402
 from tests.test_ml import make_plant                                 # noqa: E402
 
@@ -86,7 +87,7 @@ class TestConfigSync:
         assert {"data", "sql", "runtime"} <= set(cfg.category)
         # no ML categories may leak back into human config
         assert not ({"models", "thresholds", "fusion", "regimes"} & set(cfg.category)), \
-            "ML parameters found in human config — they belong in core/ml_defaults.py"
+            "ML parameters found in human config - they belong in core/ml_defaults.py"
 
     def test_sync_is_idempotent(self, store, tmp_path):
         sync_config(store, ROOT / "configs" / "config_table.csv")
@@ -98,6 +99,14 @@ class TestConfigSync:
 
 
 class TestRunnerCSV:
+    def test_infer_score_days_uses_dataset_span(self):
+        ts = pd.Series(pd.date_range("2025-01-01", periods=201, freq="D"))
+        assert infer_score_days(ts) == pytest.approx(200 / 3)
+
+    def test_infer_score_days_keeps_minimum_training_baseline(self):
+        ts = pd.Series(pd.date_range("2025-01-01", periods=16, freq="D"))
+        assert infer_score_days(ts) == pytest.approx(1.0)
+
     @pytest.mark.slow
     def test_acm_run_csv_end_to_end(self, tmp_path):
         import subprocess

@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """
-ACM visual report — one module, any selection of assets, full timeline.
+ACM visual report - one module, any selection of assets, full timeline.
 
 Reads the canonical SQL results store (scripts/acm_store.py; SQLite file or
-SQL Server) and renders a self-contained HTML report: per asset the fused
+SQL Server) and renders a standalone HTML report: per asset the fused
 anomaly timeline start-to-end with the self-tuned threshold and alarm
-shading, a per-detector z heat strip, and the verdict; a fleet summary table
-on top. No server required — open the file in a browser.
+shading, a per-detector z heat strip (with click-to-isolate per detector),
+and the verdict; a fleet summary table on top. No server required - open
+the file in a browser. Charts are interactive Plotly figures loaded from a
+CDN script tag; no local asset files are required.
 
 Usage:
   # everything in the store
@@ -28,9 +30,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import base64
 import html
-import io
 import json
 import re
 import sqlite3
@@ -41,11 +41,6 @@ from typing import Any, Optional
 
 import numpy as np
 import pandas as pd
-
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
 
 Z_COLS = ["ar1_z", "pca_spe_z", "pca_t2_z", "iforest_z", "gmm_z", "omr_z"]
 
@@ -59,60 +54,80 @@ DETECTOR_NAMES = {
     "omr_z": "OMR",
 }
 
+# Per-detector trace colors for the interactive heatmap/timeline, drawn from
+# the same warm industrial palette as the page CSS so charts and chrome read
+# as one design system instead of two.
+DETECTOR_COLORS = {
+    "ar1_z": "#b3551e",
+    "pca_spe_z": "#c2742a",
+    "pca_t2_z": "#a8731f",
+    "iforest_z": "#8a5a16",
+    "gmm_z": "#c98a3a",
+    "omr_z": "#7a4a12",
+}
+
+# Verdict vocabulary covers both pipelines seen in production data:
+# DETECTED/CLEAN/MISSED/FALSE_ALARM (care-style scoring) and ALARM/OK
+# (fleet-style scoring). DETECTED is a confirmed anomaly so it gets its own
+# attention-orange rather than sharing green with CLEAN/OK (nothing wrong).
 VERDICT_COLOR = {
-    "DETECTED": "#1a7f37",
-    "CLEAN": "#1a7f37",
-    "MISSED": "#cf222e",
-    "FALSE_ALARM": "#bf8700",
-    "ALARM": "#cf222e",
-    "OK": "#1a7f37",
+    "DETECTED": "#b3551e",
+    "CLEAN": "#3d7a3f",
+    "MISSED": "#a8342b",
+    "FALSE_ALARM": "#a8791f",
+    "ALARM": "#a8342b",
+    "OK": "#3d7a3f",
 }
 
 CSS = """
+@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600;700;800&family=Share+Tech+Mono&display=swap');
+
 :root {
-    /* warm industrial base */
-    --bg: #f0ede9;
-    --paper: #f8f6f3;
-    --panel: #eae5e0;
-    --panel2: #e0d9d3;
-    --card: #f5f2ee;
+    /* warm industrial paper base, light theme */
+    --bg: #ece6dc;
+    --paper: #f7f3ec;
+    --panel: #e4dccd;
+    --panel2: #d8cdb8;
+    --card: #f7f3ec;
 
     /* ink and muted text */
-    --ink: #12100e;
-    --text: #1e1916;
-    --muted: #72685f;
-    --soft: #a4998f;
+    --ink: #2a2014;
+    --text: #332819;
+    --muted: #6b5c45;
+    --soft: #998765;
 
-    /* borders */
-    --line: #d5cec7;
-    --line2: #c4bdb5;
+    /* borders - thick, structural, no rounding */
+    --line: #c2b596;
+    --line2: #a89871;
 
-    /* dark command surfaces */
-    --dark: #0d0c0b;
-    --dark2: #161311;
-    --dark3: #221c19;
-    --darkLine: #3d3229;
+    /* dark command surfaces (header band, footer, log pane) */
+    --dark: #241b10;
+    --dark2: #2e2210;
+    --dark3: #1c150d;
+    --darkLine: #4a3a22;
 
-    /* semantic accents */
-    --blue: #1d55d4;
-    --blue-light: #3b7df5;
-    --green: #15783f;
-    --orange: #c84e00;
-    --amber: #a87800;
-    --red: #c93426;
-    --purple: #6842c2;
+    /* semantic accents, warm forge family */
+    --blue: #2f6f8f;
+    --blue-light: #4a8ba8;
+    --green: #3d7a3f;
+    --orange: #b3551e;
+    --amber: #a8791f;
+    --red: #a8342b;
+    --purple: #6e5490;
 
-    /* geometry */
-    --radius: 8px;
+    /* geometry - boxy, no rounding on structural elements */
+    --radius: 0px;
     --content-width: 1800px;
 
-    /* typography */
-    --font: 'Satoshi', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Consolas, monospace;
+    /* typography - strict role split, large readable base */
+    --font: 'Barlow Condensed', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --mono: 'Share Tech Mono', ui-monospace, SFMono-Regular, Consolas, monospace;
 
-    --shadow: 0 1px 0 rgba(255,255,255,.7) inset, 0 1px 2px rgba(18,16,14,.08);
-    --shadow-deep: 0 1px 0 rgba(255,255,255,.6) inset, 0 3px 10px rgba(18,16,14,.10);
-    --shadow-inset: inset 0 1px 3px rgba(18,16,14,.18);
+    /* tactile 3D physics: raised casts a soft drop shadow with a light top
+       highlight; inset has a heavy inner shadow and no outer shadow */
+    --shadow: 0 1px 0 rgba(255,252,245,.6) inset, 0 2px 4px rgba(42,32,20,.18);
+    --shadow-deep: 0 1px 0 rgba(255,252,245,.5) inset, 0 4px 12px rgba(42,32,20,.22);
+    --shadow-inset: inset 0 3px 6px rgba(42,32,20,.28);
 }
 
 * {
@@ -121,36 +136,43 @@ CSS = """
 
 html {
     scroll-behavior: smooth;
+    font-size: 18px;
 }
 
 body {
     font-family: var(--font);
-    font-size: 20px;
+    font-size: 1.25rem;
     line-height: 1.6;
     color: var(--text);
     background: var(--bg);
     margin: 0;
     padding: 0;
+    font-weight: 500;
+    overflow-x: hidden;
 }
 
-/* ---- Header: dark command band ---- */
+/* ---- Header: dark command band, raised against the page ---- */
 .header {
     background: linear-gradient(180deg, var(--dark2), var(--dark));
-    border-bottom: 3px solid var(--orange);
+    border-bottom: 4px solid var(--orange);
     padding: 36px 44px;
+    max-width: 100%;
+    overflow-x: hidden;
 }
 
 .header-content {
     width: min(96vw, var(--content-width));
     margin: 0 auto;
+    overflow-wrap: anywhere;
 }
 
 .header h1 {
     margin: 0 0 12px 0;
-    font-size: 56px;
+    font-size: 3.4rem;
     font-weight: 800;
-    color: #faf7f3;
-    letter-spacing: -0.02em;
+    color: #faf3e6;
+    letter-spacing: -0.01em;
+    text-transform: uppercase;
 }
 
 .header-meta {
@@ -158,9 +180,9 @@ body {
     flex-wrap: wrap;
     gap: 32px;
     margin-top: 16px;
-    font-size: 22px;
+    font-size: 1.4rem;
     font-weight: 600;
-    color: #ddd3c8;
+    color: #e6d9c0;
 }
 
 .header-meta span {
@@ -174,8 +196,8 @@ body {
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    font-size: 15.5px;
-    color: #9a8d7d;
+    font-size: 1.05rem;
+    color: #b8a780;
 }
 
 .container {
@@ -190,28 +212,30 @@ section {
 
 h2 {
     margin: 0 0 24px 0;
-    font-size: 30px;
+    font-size: 2rem;
     font-weight: 800;
     color: var(--ink);
     text-transform: uppercase;
     letter-spacing: 0.05em;
     padding-bottom: 14px;
-    border-bottom: 3px solid var(--dark);
+    border-bottom: 4px solid var(--dark);
 }
 
 h3 {
     margin: 30px 0 18px 0;
-    font-size: 25px;
-    font-weight: 800;
+    font-size: 1.7rem;
+    font-weight: 700;
     color: var(--ink);
 }
 
 h4 {
     margin: 0 0 6px 0;
-    font-size: 23px;
-    font-weight: 800;
+    font-size: 1.55rem;
+    font-weight: 700;
     color: var(--ink);
-    letter-spacing: -0.01em;
+    letter-spacing: 0.01em;
+    overflow-wrap: anywhere;
+    word-break: break-word;
 }
 
 p {
@@ -223,32 +247,36 @@ p {
     color: var(--muted);
     font-style: italic;
     margin: 12px 0;
+    font-size: 1.2rem;
 }
 
-/* ---- KPI strip: tactile raised cards on a recessed rail ---- */
+/* ---- KPI strip: tactile raised cells on an inset rail, equal-height rows ---- */
 .kpi-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 14px;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    grid-auto-rows: 1fr;
+    align-items: stretch;
+    gap: 4px;
     margin: 0 0 8px 0;
     background: var(--panel2);
-    padding: 14px;
-    border: 1px solid var(--line2);
-    border-radius: var(--radius);
+    padding: 4px;
+    border: 4px solid var(--line2);
     box-shadow: var(--shadow-inset);
 }
 
 .kpi-box {
-    background: linear-gradient(180deg, #ffffff, var(--card));
+    display: flex;
+    flex-direction: column;
+    background: linear-gradient(180deg, #fffdf8, var(--card));
     border: 1px solid var(--line);
-    border-radius: 6px;
+    border-top: 1px solid #fffdf8;
     box-shadow: var(--shadow);
     padding: 22px 24px;
 }
 
 .kpi-label {
     font-family: var(--mono);
-    font-size: 16px;
+    font-size: 1.05rem;
     color: var(--muted);
     font-weight: 700;
     text-transform: uppercase;
@@ -257,11 +285,11 @@ p {
 }
 
 .kpi-value {
-    font-size: 64px;
+    font-size: 3.6rem;
     font-weight: 800;
     color: var(--ink);
     font-variant-numeric: tabular-nums;
-    letter-spacing: -0.02em;
+    letter-spacing: -0.01em;
     line-height: 1;
 }
 
@@ -270,18 +298,19 @@ p {
 .kpi-value.warn { color: var(--amber); }
 
 .kpi-desc {
-    font-size: 17px;
+    font-size: 1.1rem;
     font-weight: 600;
     color: var(--muted);
     margin-top: 10px;
+    min-height: 1.6em;
 }
 
-/* ---- Tables: white inset surface, mono headers, dense industrial rows ---- */
+/* ---- Tables: paper surface, mono headers, large readable rows ---- */
 table {
     border-collapse: collapse;
     width: 100%;
     margin: 0;
-    font-size: 20px;
+    font-size: 1.25rem;
     background: var(--paper);
 }
 
@@ -298,7 +327,7 @@ th {
     font-weight: 700;
     color: var(--text);
     text-transform: uppercase;
-    font-size: 15.5px;
+    font-size: 1.05rem;
     letter-spacing: 0.06em;
     border-bottom: 2px solid var(--line2);
 }
@@ -313,7 +342,7 @@ tbody tr:hover {
 
 .rules-text {
     display: block;
-    font-size: 20px;
+    font-size: 1.25rem;
     font-weight: 600;
     color: var(--ink);
     line-height: 1.5;
@@ -322,92 +351,102 @@ tbody tr:hover {
 .diag-line {
     display: block;
     font-family: var(--mono);
-    font-size: 17px;
+    font-size: 1.1rem;
     color: var(--muted);
     margin-top: 8px;
     line-height: 1.5;
 }
 
-/* ---- Card frame: raised panel, layered shadow, no flat slab ---- */
+/* ---- Card frame: raised panel, thick border, layered shadow ---- */
 .card {
     background: var(--card);
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
+    border: 4px solid var(--line2);
     box-shadow: var(--shadow-deep);
     padding: 0;
     margin: 0 0 24px 0;
-    overflow: hidden;
+    overflow-x: auto;
+    overflow-y: visible;
 }
 
 .card > table {
     margin: 0;
 }
 
-/* ---- Diagnostic block: labelled inset panel, NOT a colored accent stripe ---- */
+/* ---- Diagnostic block: labelled inset panel ---- */
 .diag-box {
-    background: var(--paper);
+    background: var(--panel);
     border: 1px solid var(--line);
-    border-radius: 6px;
     box-shadow: var(--shadow-inset);
     padding: 16px 20px;
-    margin-top: 16px;
-    font-size: 19px;
+    font-size: 1.2rem;
     font-weight: 600;
     color: var(--text);
     line-height: 1.5;
 }
 
-.diag-box + .diag-box {
-    margin-top: 12px;
-}
-
 .diag-label {
     display: block;
     font-family: var(--mono);
-    font-size: 14.5px;
+    font-size: 1rem;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    color: var(--soft);
+    color: var(--orange);
     margin-bottom: 8px;
+}
+
+/* tidy key:value rows inside a diag-box (tuning diagnostics, armed heads) -
+   replaces a single dense comma-joined paragraph with a scannable list */
+.diag-kv-list {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 4px 16px;
+    margin-top: 4px;
+    font-family: var(--mono);
+    font-size: 1.05rem;
+}
+
+.diag-kv-list dt {
+    color: var(--soft);
+    font-weight: 700;
+}
+
+.diag-kv-list dd {
+    margin: 0;
+    color: var(--text);
 }
 
 /* ---- Status pills: tactile, filled, semantic ---- */
 .badge {
     display: inline-block;
     padding: 8px 16px;
-    border-radius: 5px;
-    font-size: 16px;
+    font-size: 1.05rem;
     font-weight: 800;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    border: 1px solid rgba(0,0,0,.12);
-    box-shadow: 0 1px 0 rgba(255,255,255,.25) inset, 0 1px 2px rgba(18,16,14,.18);
+    font-family: var(--mono);
+    border: 1px solid rgba(42,32,20,.25);
+    box-shadow: 0 1px 0 rgba(255,255,255,.3) inset, 0 1px 2px rgba(42,32,20,.2);
 }
 
-.badge-detected, .badge-clean {
+.badge-detected {
+    background: var(--orange);
+    color: #fdf3e6;
+}
+
+.badge-clean, .badge-ok {
     background: var(--green);
-    color: #f3fbf6;
+    color: #eef8ee;
 }
 
-.badge-missed {
+.badge-missed, .badge-alarm {
     background: var(--red);
-    color: #fdf3f1;
+    color: #fbeceb;
 }
 
 .badge-false_alarm, .badge-false-alarm {
     background: var(--amber);
-    color: #fdf8ec;
-}
-
-.badge-alarm {
-    background: var(--red);
-    color: #fdf3f1;
-}
-
-.badge-ok {
-    background: var(--green);
-    color: #f3fbf6;
+    color: #fbf2dc;
 }
 
 .badge:not([class*="badge-"]) {
@@ -426,40 +465,47 @@ tbody tr:hover {
     padding: 22px 26px 24px;
 }
 
-.timeline-cards .card img {
+.chart-container {
     width: 100%;
-    height: auto;
-    display: block;
     margin: 12px 0 0;
     border: 1px solid var(--line);
-    border-radius: 6px;
-    image-rendering: -webkit-optimize-contrast;
+    background: var(--paper);
 }
 
 .asset-card-grid {
-    display: grid;
-    grid-template-columns: 1fr;
+    display: flex;
+    flex-direction: column;
     gap: 20px;
 }
 
-@media (min-width: 1800px) {
-    .asset-card-grid {
-        grid-template-columns: repeat(auto-fit, minmax(480px, 1fr));
-    }
+.asset-card-chart, .asset-card-diag {
+    width: 100%;
+    min-width: 0;
 }
 
-.asset-card-chart, .asset-card-diag {
-    min-width: 0;
+.asset-card-chart {
+    overflow-x: auto;
+}
+
+.asset-card-diag {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+    gap: 16px;
+    align-items: start;
+}
+
+.asset-card-diag > .diag-box:first-child,
+.asset-card-diag > .mini-table:first-child {
+    margin-top: 0;
 }
 
 /* ---- Compact in-card tables (alarm history, detector stats) ---- */
 .mini-table {
     width: 100%;
     margin: 0;
-    font-size: 16px;
+    font-size: 1.05rem;
     background: var(--paper);
     border: 1px solid var(--line);
-    border-radius: 6px;
     overflow: hidden;
 }
 
@@ -468,7 +514,7 @@ tbody tr:hover {
 }
 
 .mini-table th {
-    font-size: 13px;
+    font-size: 0.95rem;
 }
 
 /* ---- Logs ---- */
@@ -476,8 +522,7 @@ tbody tr:hover {
     display: flex;
     flex-direction: column;
     gap: 1px;
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
+    border: 4px solid var(--line2);
     overflow: hidden;
     box-shadow: var(--shadow-deep);
 }
@@ -499,7 +544,7 @@ tbody tr:hover {
 .logs-section summary {
     cursor: pointer;
     font-weight: 700;
-    font-size: 20px;
+    font-size: 1.25rem;
     padding: 16px 20px;
     user-select: none;
     color: var(--ink);
@@ -516,7 +561,7 @@ tbody tr:hover {
 
 .log-summary {
     font-family: var(--mono);
-    font-size: 17px;
+    font-size: 1.1rem;
     color: var(--muted);
     font-weight: 500;
     margin-left: 10px;
@@ -527,22 +572,23 @@ tbody tr:hover {
     padding: 18px 20px 20px;
     background: var(--dark3);
     border-top: 1px solid var(--darkLine);
-    font-size: 16.5px;
+    font-size: 1.05rem;
     line-height: 1.6;
     overflow-x: auto;
     font-family: var(--mono);
     white-space: pre-wrap;
-    color: #e7ded3;
+    color: #f0e6d2;
 }
 
-.logs-section .info { color: #7fb3ff; }
-.logs-section .warning { color: #e0b04a; font-weight: 700; }
-.logs-section .error { color: #f0786a; font-weight: 700; }
-.logs-section .debug { color: #9a8d7d; }
+/* log levels - warm palette tones against the dark log pane */
+.logs-section .info { color: #7fb8d8; }
+.logs-section .warning { color: #e0b558; font-weight: 700; }
+.logs-section .error { color: #e08a78; font-weight: 700; }
+.logs-section .debug { color: #b8a780; }
 
 .timestamp {
     font-family: var(--mono);
-    font-size: 18px;
+    font-size: 1.15rem;
     color: var(--muted);
 }
 
@@ -558,20 +604,23 @@ a:hover {
 
 /* ---- Footer ---- */
 .footer {
-    border-top: 3px solid var(--dark);
+    border-top: 4px solid var(--dark);
     background: var(--paper);
     padding: 24px 44px;
     margin-top: 16px;
+    max-width: 100%;
+    overflow-x: hidden;
 }
 
 .footer-content {
     width: min(96vw, var(--content-width));
     margin: 0 auto;
+    overflow-wrap: anywhere;
 }
 
 .footer p {
     margin: 0;
-    font-size: 17px;
+    font-size: 1.1rem;
     font-weight: 600;
     color: var(--muted);
 }
@@ -600,15 +649,15 @@ a:hover {
     }
 
     h2 {
-        font-size: 24px;
+        font-size: 1.6rem;
     }
 
     .kpi-value {
-        font-size: 42px;
+        font-size: 2.6rem;
     }
 
     table {
-        font-size: 17px;
+        font-size: 1.1rem;
     }
 
     td, th {
@@ -667,14 +716,6 @@ def select_assets(assets: pd.DataFrame, picks: Optional[list[str]], farm: Option
         else:
             keep |= assets["asset_key"].str.contains(p, regex=False)
     return assets[keep]
-
-
-def fig_to_b64(fig) -> str:
-    """Convert matplotlib figure to base64-encoded PNG at print-grade resolution."""
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=200, bbox_inches="tight")
-    plt.close(fig)
-    return base64.b64encode(buf.getvalue()).decode()
 
 
 def detector_label(col_name: str) -> str:
@@ -774,8 +815,12 @@ def format_data_quality_human(dq_json: Optional[str]) -> Optional[str]:
     return ", ".join(parts) if parts else None
 
 
-def format_calibration_human(calib_json: Optional[str]) -> Optional[str]:
-    """Convert a run's calibration_json (fusion weights) into one human-readable line."""
+def format_calibration_human(calib_json: Optional[str]) -> Optional[tuple[str, dict[str, str]]]:
+    """Convert a run's calibration_json (fusion weights) into a short summary
+    line plus a key/value dict of auto-tune diagnostics, so the caller can
+    render the tuning internals as a scannable list instead of one dense
+    comma-joined paragraph. Numeric values are rounded to readable precision
+    (raw floats from the tuner can run 15+ decimal places)."""
     if not calib_json or pd.isna(calib_json):
         return None
     try:
@@ -787,14 +832,20 @@ def format_calibration_human(calib_json: Optional[str]) -> Optional[str]:
         return None
     parts = [f"{detector_label(k)} {v:.2f}" for k, v in weights.items()]
     tuned = "auto-tuned from this run's data" if calib.get("auto_tuned") else "fixed weights"
-    line = f"Fusion weights ({tuned}): " + ", ".join(parts)
+    summary = f"Fusion weights ({tuned}): " + ", ".join(parts)
+
+    tuning_kv: dict[str, str] = {}
     tuning = calib.get("tuning")
     if isinstance(tuning, dict):
-        tuning_parts = [f"{k.replace('_', ' ')}={v}" for k, v in tuning.items()
-                        if isinstance(v, (int, float, str, bool))]
-        if tuning_parts:
-            line += " | Auto-tune diagnostics: " + ", ".join(tuning_parts)
-    return line
+        for k, v in tuning.items():
+            if not isinstance(v, (int, float, str, bool)):
+                continue
+            label = k.replace("_", " ")
+            if isinstance(v, float):
+                tuning_kv[label] = f"{v:.3g}"
+            else:
+                tuning_kv[label] = str(v)
+    return summary, tuning_kv
 
 
 def format_culprits_human(notes: Optional[str]) -> Optional[str]:
@@ -824,78 +875,134 @@ def format_verdict_badge(verdict: Optional[str]) -> str:
     return f"<span class='badge {badge_class}'>{html.escape(verdict_clean)}</span>"
 
 
-def asset_figure(s: pd.DataFrame, meta: pd.Series) -> tuple[str, str]:
+def asset_figure_spec(s: pd.DataFrame, meta: pd.Series) -> tuple[dict, str]:
     """
-    Create matplotlib figure with timeline and heatmap.
-    Returns: (base64_image, data_quality_text)
+    Build a Plotly figure spec (as a plain dict, JSON-embedded into the page)
+    for one asset: fused-score timeline with threshold and alarm shading on
+    top, a per-detector z heatmap below. Each detector is also drawn as its
+    own toggleable line trace (hidden by default) so the legend can be used
+    to isolate individual heads on top of the heatmap - addressing the need
+    to inspect specific detectors interactively rather than only as a static
+    stacked image.
+    Returns: (figure_spec_dict, data_quality_text)
     """
     ts = pd.to_datetime(s["ts"])
+    ts_list = ts.dt.strftime("%Y-%m-%dT%H:%M:%S").tolist()
 
-    # Compute data quality metrics
     data_rows = len(s)
     data_nans = s[Z_COLS].isna().sum().sum() / (len(s) * len(Z_COLS)) * 100 if len(s) > 0 else 0
 
-    fig, (ax1, ax2) = plt.subplots(
-        2, 1, figsize=(15, 6), sharex=True,
-        gridspec_kw={"height_ratios": [3, 1.2], "hspace": 0.14})
+    fused = pd.to_numeric(s["fused"], errors="coerce")
+    traces = []
 
-    # Plot fused score
-    ax1.plot(ts, s["fused"], lw=0.9, color="#0969da", label="Fused score")
+    # Fused score line (row 1)
+    traces.append({
+        "type": "scattergl", "mode": "lines", "name": "Fused score",
+        "x": ts_list, "y": fused.round(3).tolist(),
+        "line": {"color": "#b3551e", "width": 1.6},
+        "xaxis": "x", "yaxis": "y", "legendgroup": "fused",
+    })
 
-    # Plot alert threshold
+    # Alert threshold (row 1)
     thr = meta.get("alert_z")
     if pd.notna(thr):
-        ax1.axhline(thr, color="#9a6700", lw=1.2, ls="--",
-                    label=f"Alert threshold: {thr:.2f}")
+        traces.append({
+            "type": "scattergl", "mode": "lines", "name": f"Alert threshold: {thr:.2f}",
+            "x": [ts_list[0], ts_list[-1]], "y": [float(thr), float(thr)],
+            "line": {"color": "#2f6f8f", "width": 1.6, "dash": "dash"},
+            "xaxis": "x", "yaxis": "y",
+        })
 
-    # Shade alarm regions
-    alarm = s["alarm"].to_numpy().astype(bool)
+    # Alarm shading (row 1) - bottom follows the data's own minimum instead
+    # of a hardcoded 0, so shading never clips below negative fused values.
+    alarm = s["alarm"].fillna(0).to_numpy().astype(bool) if "alarm" in s.columns else np.zeros(len(s), dtype=bool)
     if alarm.any():
-        ax1.fill_between(ts, 0, s["fused"].max() * 1.1, where=alarm,
-                         color="#cf222e", alpha=0.14, label="Alarm period")
+        fused_min = float(min(0.0, fused.min())) if fused.notna().any() else 0.0
+        fused_max = float(fused.max()) * 1.1 if fused.notna().any() else 1.0
+        # Build contiguous alarm-region shapes instead of per-point markers,
+        # so the shading reads as bands rather than noise.
+        regions = []
+        start_idx = None
+        for i, a in enumerate(alarm):
+            if a and start_idx is None:
+                start_idx = i
+            elif not a and start_idx is not None:
+                regions.append((start_idx, i - 1))
+                start_idx = None
+        if start_idx is not None:
+            regions.append((start_idx, len(alarm) - 1))
+        for k, (i0, i1) in enumerate(regions):
+            traces.append({
+                "type": "scatter", "mode": "lines", "fill": "toself",
+                "name": "Alarm period", "showlegend": (k == 0),
+                "legendgroup": "alarm",
+                "x": [ts_list[i0], ts_list[i1], ts_list[i1], ts_list[i0]],
+                "y": [fused_min, fused_min, fused_max, fused_max],
+                "fillcolor": "rgba(168,52,43,0.16)",
+                "line": {"width": 0},
+                "hoverinfo": "skip",
+                "xaxis": "x", "yaxis": "y",
+            })
 
-    ax1.set_ylabel("Anomaly Score (Z)", fontsize=12, fontweight=600)
-    ax1.legend(loc="upper left", fontsize=10, ncol=3, frameon=True, fancybox=False,
-              edgecolor="#d0d7de")
-    ax1.tick_params(axis="both", labelsize=10)
-
-    # Title with full description
-    desc = meta.get("description") or meta.get("label") or ""
-    if desc:
-        title = f"{meta['asset_key']} (ID: {meta['asset_id']}) — {desc}"
-    else:
-        title = f"{meta['asset_key']} (ID: {meta['asset_id']})"
-    ax1.set_title(title, fontsize=12, loc="left", fontweight=700)
-    ax1.grid(True, alpha=0.2)
-
-    # Detector heatmap
-    zmat = np.vstack([np.nan_to_num(pd.to_numeric(s[z], errors="coerce").to_numpy(), nan=0.0)
+    # Per-detector heatmap (row 2) - the primary "see all heads at once" view
+    zmat = np.vstack([np.clip(np.nan_to_num(pd.to_numeric(s[z], errors="coerce").to_numpy(), nan=0.0), 0, 8)
                       for z in Z_COLS])
-    im = ax2.imshow(np.clip(zmat, 0, 8), aspect="auto", cmap="inferno", vmin=0, vmax=8,
-                    extent=[mdates.date2num(ts.iloc[0]), mdates.date2num(ts.iloc[-1]),
-                           len(Z_COLS), 0])
+    detector_labels = [detector_label(z) for z in Z_COLS]
+    traces.append({
+        "type": "heatmap", "name": "Detector heat",
+        "x": ts_list, "y": detector_labels, "z": zmat.tolist(),
+        "zmin": 0, "zmax": 8,
+        "colorscale": [[0, "#2a2118"], [0.5, "#c8762a"], [1, "#ffb347"]],
+        "colorbar": {"title": {"text": "Score", "font": {"size": 12}},
+                     "len": 0.42, "y": 0.18, "thickness": 14},
+        "xaxis": "x2", "yaxis": "y2",
+        "hovertemplate": "%{y}<br>%{x}<br>Score: %{z:.2f}<extra></extra>",
+    })
 
-    # Detector labels with full names
-    ax2.set_yticks(np.arange(len(Z_COLS)) + 0.5)
-    ax2.set_yticklabels([detector_label(z) for z in Z_COLS], fontsize=10)
-    ax2.set_ylabel("Detectors", fontsize=11, fontweight=600)
-    ax2.xaxis_date()
-    ax2.set_xlabel("Time", fontsize=11, fontweight=600)
-    ax2.tick_params(axis="x", labelsize=10)
+    # Per-detector line traces (row 2 area, hidden by default) - clicking a
+    # detector name in the legend shows/isolates that head's raw z-score
+    # line over time, on its own y-axis range, answering the "select to see
+    # the various heads" requirement without replacing the heatmap overview.
+    for z in Z_COLS:
+        vals = pd.to_numeric(s[z], errors="coerce").round(3)
+        traces.append({
+            "type": "scattergl", "mode": "lines", "name": f"{detector_label(z)} (line)",
+            "x": ts_list, "y": vals.tolist(),
+            "line": {"color": DETECTOR_COLORS.get(z, "#8a5a16"), "width": 1.2},
+            "xaxis": "x3", "yaxis": "y3",
+            "visible": "legendonly",
+            "legendgroup": "heads",
+        })
 
-    # Add colorbar
-    cbar = fig.colorbar(im, ax=ax2, orientation="vertical", pad=0.02, fraction=0.05)
-    cbar.set_label("Score", fontsize=10)
-    cbar.ax.tick_params(labelsize=9)
+    desc = meta.get("description") or meta.get("label") or ""
+    title = f"{meta['asset_key']} (ID: {meta['asset_id']}) - {desc}" if desc else f"{meta['asset_key']} (ID: {meta['asset_id']})"
 
-    fig.autofmt_xdate(rotation=30, ha='right')
-    fig.tight_layout()
+    layout = {
+        "title": {"text": title, "font": {"size": 18, "family": "Barlow Condensed, sans-serif"}, "x": 0},
+        "font": {"family": "Barlow Condensed, sans-serif", "size": 13, "color": "#332819"},
+        "paper_bgcolor": "#f7f3ec",
+        "plot_bgcolor": "#f7f3ec",
+        "margin": {"l": 70, "r": 30, "t": 50, "b": 40},
+        "showlegend": True,
+        "legend": {"orientation": "h", "x": 0, "y": 1.12, "font": {"size": 12}},
+        "hovermode": "x unified",
+        # Row 1: fused timeline (55% height); Row 2: heatmap (20%);
+        # Row 3: per-detector lines, hidden until a head is selected (25%).
+        "xaxis": {"domain": [0, 1], "anchor": "y", "showticklabels": False,
+                  "gridcolor": "#e0d6c0"},
+        "yaxis": {"domain": [0.45, 1], "title": {"text": "Anomaly Score (Z)", "font": {"size": 13}},
+                  "gridcolor": "#e0d6c0"},
+        "xaxis2": {"domain": [0, 1], "anchor": "y2", "showticklabels": False, "matches": "x"},
+        "yaxis2": {"domain": [0.25, 0.42], "title": {"text": "", "font": {"size": 11}}},
+        "xaxis3": {"domain": [0, 1], "anchor": "y3", "matches": "x", "title": {"text": "Time", "font": {"size": 13}},
+                   "gridcolor": "#e0d6c0"},
+        "yaxis3": {"domain": [0, 0.2], "title": {"text": "Head Z", "font": {"size": 11}},
+                   "gridcolor": "#e0d6c0"},
+    }
 
-    b64 = fig_to_b64(fig)
-
+    spec = {"data": traces, "layout": layout}
     data_quality = f"Data: {data_rows} rows, {len(Z_COLS)} detectors, {data_nans:.2f}% missing"
-
-    return b64, data_quality
+    return spec, data_quality
 
 
 def alarm_history_table(alarms_for_asset: Optional[pd.DataFrame]) -> str:
@@ -904,12 +1011,12 @@ def alarm_history_table(alarms_for_asset: Optional[pd.DataFrame]) -> str:
         return ""
     rows = []
     for a in alarms_for_asset.itertuples():
-        dur = f"{a.duration_h:.2f}h" if pd.notna(a.duration_h) else "—"
-        peak = f"{a.peak_fused:.2f}" if pd.notna(a.peak_fused) else "—"
+        dur = f"{a.duration_h:.2f}h" if pd.notna(a.duration_h) else "-"
+        peak = f"{a.peak_fused:.2f}" if pd.notna(a.peak_fused) else "-"
         if pd.notna(getattr(a, "ack_by", None)):
             ack = f"Acknowledged by {html.escape(str(a.ack_by))} at {html.escape(str(a.ack_at or ''))}"
             if pd.notna(getattr(a, "ack_note", None)) and a.ack_note:
-                ack += f" — {html.escape(str(a.ack_note))}"
+                ack += f" - {html.escape(str(a.ack_note))}"
         else:
             ack = "Unacknowledged"
         rows.append(
@@ -931,12 +1038,12 @@ def detector_stats_table(s: pd.DataFrame) -> str:
     rows = []
     for z in Z_COLS:
         vals = pd.to_numeric(s[z], errors="coerce")
-        peak_str = f"{vals.max():.2f}" if vals.notna().any() else "—"
-        mean_str = f"{vals.mean():.2f}" if vals.notna().any() else "—"
+        peak_str = f"{vals.max():.2f}" if vals.notna().any() else "-"
+        mean_str = f"{vals.mean():.2f}" if vals.notna().any() else "-"
         if has_alarm:
             a_vals = vals[alarm_mask]
-            a_peak_str = f"{a_vals.max():.2f}" if a_vals.notna().any() else "—"
-            a_mean_str = f"{a_vals.mean():.2f}" if a_vals.notna().any() else "—"
+            a_peak_str = f"{a_vals.max():.2f}" if a_vals.notna().any() else "-"
+            a_mean_str = f"{a_vals.mean():.2f}" if a_vals.notna().any() else "-"
             rows.append(f"<tr><td>{detector_label(z)}</td><td>{peak_str}</td><td>{mean_str}</td>"
                        f"<td>{a_peak_str}</td><td>{a_mean_str}</td></tr>")
         else:
@@ -958,8 +1065,8 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
         return
 
     # KPI metrics are derived strictly from the assets selected for THIS report
-    # (never from the fleet-wide summary table) so a scoped report — one asset,
-    # a handful of assets, a single farm — never bleeds in fleet-wide numbers.
+    # (never from the fleet-wide summary table) so a scoped report - one asset,
+    # a handful of assets, a single farm - never bleeds in fleet-wide numbers.
     verdicts = assets["verdict"].fillna("UNKNOWN").astype(str).str.upper()
     kpi_metrics = {
         "total_assets": int(len(assets)),
@@ -989,6 +1096,7 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
     # Build asset rows and figures
     rows_html = []
     figs_html = []
+    chart_specs: dict[str, dict] = {}
 
     for _, meta in assets.iterrows():
         s = read_sql(con, f"SELECT * FROM {prefix}scores WHERE asset_key = ? ORDER BY ts",
@@ -999,15 +1107,23 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
         # Asset table row
         # Use .get() for safe access in case lead_h column doesn't exist (e.g., in CARE data)
         lead_h = meta.get("lead_h")
-        lead = f"{lead_h:+.2f}h" if pd.notna(lead_h) else "—"
+        lead = f"{lead_h:+.2f}h" if pd.notna(lead_h) else "-"
         rules_display = format_rules_human(meta.get("rules_fired"),
                                           meta.get("alert_z"),
                                           s["fused"].max() if len(s) > 0 else None)
 
+        asset_id_val = meta.get("asset_id")
+        if pd.notna(asset_id_val):
+            # A nullable int column becomes float64 in pandas once it has
+            # any nulls, so a clean integer id can arrive here as 1.0 -
+            # display it as "1", not "1.0".
+            asset_id_str = str(int(asset_id_val)) if float(asset_id_val).is_integer() else str(asset_id_val)
+        else:
+            asset_id_str = "-"
         rows_html.append(
             f"<tr>"
             f"<td><a href='#{html.escape(meta['asset_key'])}'><strong>{html.escape(meta['asset_key'])}</strong></a></td>"
-            f"<td>{meta['asset_id']}</td>"
+            f"<td>{html.escape(asset_id_str)}</td>"
             f"<td>{html.escape(meta.get('label') or '')}</td>"
             f"<td>{html.escape(meta.get('description') or '')}</td>"
             f"<td>{format_verdict_badge(meta.get('verdict'))}</td>"
@@ -1015,8 +1131,10 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
             f"<td><span class='rules-text'>{html.escape(rules_display)}</span></td>"
             f"</tr>")
 
-        # Asset timeline figure
-        fig_b64, data_quality_fallback = asset_figure(s, meta)
+        # Asset timeline figure (interactive Plotly spec, rendered client-side)
+        fig_spec, data_quality_fallback = asset_figure_spec(s, meta)
+        chart_id = f"chart-{re.sub(r'[^a-zA-Z0-9_-]', '_', meta['asset_key'])}"
+        chart_specs[chart_id] = fig_spec
 
         run_row = latest_runs.loc[meta["asset_key"]] if meta["asset_key"] in latest_runs.index else None
         data_quality = (format_data_quality_human(run_row.get("data_quality_json")) if run_row is not None else None) \
@@ -1026,7 +1144,14 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
 
         diag_boxes = f"<div class='diag-box'><span class='diag-label'>Data Quality</span>{html.escape(data_quality)}</div>"
         if calibration:
-            diag_boxes += f"<div class='diag-box'><span class='diag-label'>Calibration</span>{html.escape(calibration)}</div>"
+            calib_summary, tuning_kv = calibration
+            calib_html = html.escape(calib_summary)
+            if tuning_kv:
+                kv_items = "".join(
+                    f"<dt>{html.escape(k)}</dt><dd>{html.escape(v)}</dd>"
+                    for k, v in tuning_kv.items())
+                calib_html += f"<dl class='diag-kv-list'>{kv_items}</dl>"
+            diag_boxes += f"<div class='diag-box'><span class='diag-label'>Calibration</span>{calib_html}</div>"
         if culprits:
             diag_boxes += f"<div class='diag-box'><span class='diag-label'>Culprits</span>{html.escape(culprits)}</div>"
         diag_boxes += detector_stats_table(s)
@@ -1037,7 +1162,7 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
             f"<h4>{html.escape(meta['asset_key'])}</h4>"
             f"<div class='asset-card-grid'>"
             f"<div class='asset-card-chart'>"
-            f"<img src='data:image/png;base64,{fig_b64}' alt='Timeline for {html.escape(meta['asset_key'])}'/>"
+            f"<div class='chart-container' id='{chart_id}' style='height:760px;'></div>"
             f"</div>"
             f"<div class='asset-card-diag'>{diag_boxes}</div>"
             f"</div>"
@@ -1046,11 +1171,13 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
     # Build operations table
     ops_rows = []
     for r in runs.itertuples():
-        alert_z_str = f"{r.alert_z:.2f}" if pd.notna(r.alert_z) else "—"
-        duration_str = f"{r.duration_s:.2f}s" if pd.notna(r.duration_s) else "—"
+        alert_z_str = f"{r.alert_z:.2f}" if pd.notna(r.alert_z) else "-"
+        duration_str = f"{r.duration_s:.2f}s" if pd.notna(r.duration_s) else "-"
         rules_exp = format_rules_human(r.rules_fired, r.alert_z, None)
 
-        # Parse diagnostics if available
+        # Parse diagnostics if available. Per-detector thresholds are rounded
+        # to 3 significant figures - the raw tuner output runs 15+ decimal
+        # places, which reads as noise rather than information.
         diag_html = ""
         if pd.notna(r.rules_diagnostic_json):
             try:
@@ -1061,32 +1188,40 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
                 for rule_name, rule_info in diag.items():
                     if rule_name == "per_head" and isinstance(rule_info, dict):
                         # per_head is a nested dict of detector_name -> {active, train_n, thr},
-                        # not a single rule_info dict — render one line per detector.
+                        # not a single rule_info dict - render one line per detector.
                         for det_name, det_info in rule_info.items():
                             if not isinstance(det_info, dict):
                                 continue
                             train_n = det_info.get("train_n", "?")
                             if det_info.get("active"):
-                                thr = det_info.get("thr", "?")
-                                diag_html += f"<div class='diag-line'>{html.escape(detector_label(det_name))}: armed (n={train_n}, thr={thr})</div>"
+                                thr = det_info.get("thr")
+                                thr_str = f"{thr:.3g}" if isinstance(thr, (int, float)) else "?"
+                                diag_html += f"<div class='diag-line'>{html.escape(detector_label(det_name))}: armed (n={train_n}, thr={thr_str})</div>"
                             else:
                                 diag_html += f"<div class='diag-line'>{html.escape(detector_label(det_name))}: disarmed (n={train_n})</div>"
                     elif isinstance(rule_info, dict):
                         if rule_info.get("active"):
                             train_n = rule_info.get("train_n", "?")
-                            thr = rule_info.get("thr", "?")
-                            diag_html += f"<div class='diag-line'>{html.escape(rule_name)}: armed (n={train_n}, thr={thr})</div>"
+                            thr = rule_info.get("thr")
+                            thr_str = f"{thr:.3g}" if isinstance(thr, (int, float)) else "?"
+                            diag_html += f"<div class='diag-line'>{html.escape(rule_name)}: armed (n={train_n}, thr={thr_str})</div>"
                         else:
                             train_n = rule_info.get("train_n", "?")
                             diag_html += f"<div class='diag-line'>{html.escape(rule_name)}: disarmed (n={train_n})</div>"
 
         data_quality_line = format_data_quality_human(getattr(r, "data_quality_json", None))
-        calibration_line = format_calibration_human(getattr(r, "calibration_json", None))
+        calibration = format_calibration_human(getattr(r, "calibration_json", None))
         culprits_line = format_culprits_human(getattr(r, "notes", None))
         if data_quality_line:
             diag_html += f"<div class='diag-line'>Data: {html.escape(data_quality_line)}</div>"
-        if calibration_line:
-            diag_html += f"<div class='diag-line'>{html.escape(calibration_line)}</div>"
+        if calibration:
+            calib_summary, tuning_kv = calibration
+            diag_html += f"<div class='diag-line'>{html.escape(calib_summary)}</div>"
+            if tuning_kv:
+                kv_items = "".join(
+                    f"<dt>{html.escape(k)}</dt><dd>{html.escape(v)}</dd>"
+                    for k, v in tuning_kv.items())
+                diag_html += f"<dl class='diag-kv-list'>{kv_items}</dl>"
         if culprits_line:
             diag_html += f"<div class='diag-line'>{html.escape(culprits_line)}</div>"
 
@@ -1117,11 +1252,11 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
 
         log_html += (
             f"<details>"
-            f"<summary>{html.escape(key)} — <span class='log-summary'>{level_str}</span></summary>"
+            f"<summary>{html.escape(key)} - <span class='log-summary'>{level_str}</span></summary>"
             f"<pre>{lines_html}</pre>"
             f"</details>")
 
-    # KPI section — always derived from `assets` above, so this is exact for
+    # KPI section - always derived from `assets` above, so this is exact for
     # whatever scope (single asset / a handful / a farm / the whole fleet) was requested.
     total = kpi_metrics["total_assets"]
     detected = kpi_metrics["detected"]
@@ -1160,13 +1295,15 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
 
     scope = f"farm {farm}" if farm else (f"{len(assets)} selected assets" if picks else "fleet")
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    chart_specs_json = json.dumps(chart_specs)
 
     html_content = f"""<!doctype html>
 <html lang="en">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ACM Condition Monitor Report — {html.escape(scope)}</title>
+    <title>ACM Condition Monitor Report - {html.escape(scope)}</title>
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
     <style>
 {CSS}
     </style>
@@ -1213,6 +1350,7 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
 
         <section>
             <h2>Detailed Analysis</h2>
+            <p class='text-muted'>Click a detector name in a chart's legend to isolate that head's raw score line. Click the heatmap or fused-score trace names to toggle them off.</p>
             <div class='timeline-cards'>
                 {''.join(figs_html)}
             </div>
@@ -1251,14 +1389,28 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
         <div class='footer-content'>
             <p>ACM Condition Monitor | Professional Asset Assessment Report</p>
             <p style='margin-top: 8px;'>
-                Data from canonical SQL results store — {html.escape(timestamp)}
+                Data from canonical SQL results store - {html.escape(timestamp)}
             </p>
         </div>
     </div>
+
+    <script>
+    (function() {{
+        var specs = {chart_specs_json};
+        var config = {{responsive: true, displaylogo: false,
+                       modeBarButtonsToRemove: ['lasso2d', 'select2d']}};
+        Object.keys(specs).forEach(function(chartId) {{
+            var el = document.getElementById(chartId);
+            if (!el) return;
+            var spec = specs[chartId];
+            Plotly.newPlot(el, spec.data, spec.layout, config);
+        }});
+    }})();
+    </script>
 </body>
 </html>"""
 
-    out.write_text(html_content)
+    out.write_text(html_content, encoding="utf-8")
     print(f"Report written: {out} ({len(figs_html)} assets, {out.stat().st_size/1e6:.2f} MB)")
 
 
