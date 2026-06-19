@@ -1,13 +1,25 @@
 # ACM  Codebase Knowledge Base
 
 > Maintained for future agents. Update this file whenever you learn something new about the codebase.
-> Last updated: 2026-06-19  ML pipeline bug fixes (#61-#67) + research paper planning / CARE ablation session + GMM PCA pre-reduction fix (Farm C generality) + OMR in-sample-bias/premature-clip fix + targeted Farm C re-validation + self-distrust gate magnitude-saturation fix + paper draft (Markdown) + detector-enable ablation wiring fix + fusion auto-tuning wiring gap discovered + paper System Architecture section + full Farm C 58-event re-validation (omr_z over-sensitivity found) + OMR kurt/skew exclusion fix (#72)  Farm A exact-match, Farm C mixed result (precision/false-alarms up, recall down 2 events) + Farm B first full result (recall=0.333, worst of 3 farms) + TEP benchmark candidate feasibility confirmed + empty-rule_fired gap root-caused (two mechanisms, not yet fixed) + contamination-filter fix for rate/per-head threshold REJECTED (broke ACM's own false-alarm-resistance tests; cleanly reverted, zero net code change) + empty-rule_fired diagnosis CORRECTED (prior "two mechanisms / never crosses threshold" premise proven WRONG by multi-angle measurement: fused_max is above alert_z for 6/8 misses; fused score does NOT separate 6/8 misses from normal Farm C operation by any statistic; the 8 misses are 4 distinct situations  sub-cadence, availability-domain, genuinely-indistinguishable, separable-but-rule-shape  most NOT fixable at the alarm-rule layer; Farm C recall is bounded by event detectability mix, not pipeline quality) + self-distrust gate SATURATION_FRAC_FLOOR hardcoded-magic-number regression found and fixed (was a bare 0.2 constant eyeballed against 4 CARE events, violating the file's own "calculated from asset's own history" principle  replaced with a per-asset calculated floor; zero KPI regression on Farm A/C)
+> Last updated: 2026-06-19  ML pipeline bug fixes (#61-#67) + research paper planning / CARE ablation session + GMM PCA pre-reduction fix (Farm C generality) + OMR in-sample-bias/premature-clip fix + targeted Farm C re-validation + self-distrust gate magnitude-saturation fix + paper draft (Markdown) + detector-enable ablation wiring fix + fusion auto-tuning wiring gap discovered + paper System Architecture section + full Farm C 58-event re-validation (omr_z over-sensitivity found) + OMR kurt/skew exclusion fix (#72)  Farm A exact-match, Farm C mixed result (precision/false-alarms up, recall down 2 events) + Farm B first full result (recall=0.333, worst of 3 farms) + TEP benchmark candidate feasibility confirmed + empty-rule_fired gap root-caused (two mechanisms, not yet fixed) + contamination-filter fix for rate/per-head threshold REJECTED (broke ACM's own false-alarm-resistance tests; cleanly reverted, zero net code change) + empty-rule_fired diagnosis CORRECTED (prior "two mechanisms / never crosses threshold" premise proven WRONG by multi-angle measurement: fused_max is above alert_z for 6/8 misses; fused score does NOT separate 6/8 misses from normal Farm C operation by any statistic; the 8 misses are 4 distinct situations  sub-cadence, availability-domain, genuinely-indistinguishable, separable-but-rule-shape  most NOT fixable at the alarm-rule layer; Farm C recall is bounded by event detectability mix, not pipeline quality) + self-distrust gate SATURATION_FRAC_FLOOR hardcoded-magic-number regression found and fixed (was a bare 0.2 constant eyeballed against 4 CARE events, violating the file's own "calculated from asset's own history" principle  replaced with a per-asset calculated floor; zero KPI regression on Farm A/C) + CSV-agnostic ablation testing wired into acm_run.py + HTML report flow (#79)
 
 ---
 
 ## ASCII-Only Rule
 
 All future edits to code, docs, comments, CLI output, generated templates, and agent instruction files must use ASCII characters only. Use '-' instead of em dashes, '->' instead of arrows, 'x' instead of multiplication symbols, '+/-' instead of plus-minus, and plain words instead of icons. Before finishing any change, run an ASCII scan on every touched file and remove any non-ASCII character.
+
+---
+
+## README-Sync Rule
+> *Added: 2026-06-19*
+
+Whenever a change adds or modifies a flag/command on a user-facing script (`acm_run.py`,
+`acm_report.py`, `acm_service.py`, `care_benchmark.py`, setup scripts, etc.), `README.md` MUST be
+updated in the same change, at the correct existing section  not bolted on as an unrelated
+addendum. Find the section that already documents that script/command and update it there with the
+new flag and an example, mirroring the surrounding style. Do not consider a user-facing
+script/command change complete until the README reflects it.
 
 ---
 
@@ -57,9 +69,10 @@ All future edits to code, docs, comments, CLI output, generated templates, and a
 42. [Contamination-filter fix attempt  rejected (2026-06-18)](#contamination-filter-fix-attempt-for-the-empty-rule_fired-gap--rejected-2026-06-18)
 43. [Empty-rule_fired gap  CORRECTED diagnosis (2026-06-18)](#empty-rule_fired-gap--corrected-diagnosis-the-premise-was-wrong-2026-06-18)  **current correct understanding**
 44. [Self-distrust gate SATURATION_FRAC_FLOOR magic-number regression  found and fixed (2026-06-19)](#self-distrust-gate-saturation_frac_floor-magic-number-regression--found-and-fixed-2026-06-19)
-45. [Known Issues (Track as GitHub Issues)](#known-issues-track-as-github-issues)
-46. [Standing Rule: Flag Architecture-Violating Suggestions](#standing-rule-flag-architecture-violating-suggestions-dont-suppress-them)  **Read before giving any suggestion**
-47. [User Working Style](#user-working-style)
+45. [CSV-agnostic ablation testing wired into acm_run.py + report flow (2026-06-19)](#csv-agnostic-ablation-testing-wired-into-acm_runpy--report-flow-2026-06-19)
+46. [Known Issues (Track as GitHub Issues)](#known-issues-track-as-github-issues)
+47. [Standing Rule: Flag Architecture-Violating Suggestions](#standing-rule-flag-architecture-violating-suggestions-dont-suppress-them)  **Read before giving any suggestion**
+48. [User Working Style](#user-working-style)
 
 ---
 
@@ -2765,6 +2778,74 @@ layer too, but that layer was untouched by this fix.
 `SATURATION_FLOOR_MIN` + new `_train_saturation_rate()` helper; `_broken_baseline()` signature
 gains a `z_train` parameter; all three call sites updated to pass each rule's own training-side
 z-array). Committed on `claude/research-paper-planning-ests5l`, merged to `main`.
+
+---
+
+## CSV-agnostic ablation testing wired into acm_run.py + report flow (2026-06-19)
+> *Added: 2026-06-19  fixes GitHub issue #79*
+
+The `--override` ablation mechanism (deep-merge JSON onto `core.ml_defaults.ML_DEFAULTS`,
+already live in `care_benchmark.py`/`smd_benchmark.py`/`skab_benchmark.py`) was CARE-benchmark-only
+until now. User's explicit scoping for this work, verbatim: *"Ablation testing SHOULD BY DEFAULT BE
+CSV AGNOSTIC. We are talking about data and not shape... For now; I want ablation testing to be
+wired into report generation flow/testing flow SEAMLESSLY."* Two things were explicitly OUT of
+scope and deferred: "structure flexibility" (schema/column auto-detection) and a side-by-side
+multi-dataset ablation sweep  both "way later," not attempted this session.
+
+### What shipped
+
+- **`scripts/acm_run.py`**  gained the same `--override JSON` flag `care_benchmark.py` has. Works
+  on any CSV/SQL source `acm_run.py` already accepts  ablation is no longer tied to CARE at all.
+  `_deep_merge()` patches `ML_DEFAULTS`  `cfg`, threaded through `run_one()` to `score_asset(cfg=cfg)`
+  on both the sequential and `ProcessPoolExecutor` code paths.
+- **`core/pipeline.py`**  `PipelineResult` gained `override_json: Optional[str] = None`, set
+  post-hoc by the caller (`res.override_json = args.override` in `acm_run.py`), not by
+  `score_asset()` itself  keeps the pipeline core override-agnostic.
+- **`scripts/acm_store.py`**  `runs` table gained an `override_json` column (DDL for both
+  sqlite/mssql, `_migrate_sqlite()` auto-migration for existing DBs, all 3 INSERT call sites:
+  `ingest()` and `record_run_error()` hardcode `None`, `ingest_result()` threads
+  `getattr(res, "override_json", None)`  the live/batch path used by both `acm_service.py` and
+  `acm_run.py`).
+- **`scripts/acm_report.py`**  `format_override_human()` (already existed) wired into both render
+  sites: the per-asset diagnostic-box loop (`<div class='diag-box'><span class='diag-label'>Ablation
+  Override</span>...`, alongside Data Quality/Calibration) and the Scoring Operations history table
+  loop. Both query sites already use `SELECT *`, so the new DB column flows through with zero query
+  changes.
+
+### Why this satisfies "seamlessly wired into the report flow"
+
+Score the same CSV multiple times with different `--override` values into the same `--db`, then
+generate one report (`acm_report.py --db ... --assets ...`)  ablation and baseline runs sit side by
+side in the same report, each visually labeled if (and only if) it was an ablation run. No separate
+tool, no separate flag on the report generator itself  the report just reflects whatever was in the
+`runs` table.
+
+### Validation
+
+- End-to-end against real CARE Farm A data (event 40 CSV): an override run
+  (`{"models": {"omr": {"enabled": false}}}`) produces a correctly-labeled "Ablation Override" box
+  with the exact patched key in both render locations; a non-override run on the same data produces
+  zero occurrences anywhere in its report  clean positive/negative discrimination, by design (a run
+  without `--override` has nothing to compare against, which is the expected baseline state).
+- Full applicable test suite: `pytest tests/test_ml.py tests/test_service.py tests/test_store.py
+  tests/test_performance.py -m "not slow"`  **68 passed**, zero regressions. (The 5th test file,
+  `tests/ui/test_ui.py`, cannot run in this sandbox  `playwright` is not installed here; this is a
+  pre-existing environment limitation, not caused by this change.)
+
+### Docs updated (per the standing rule: user-facing command/flag changes require a README update
+at the correct section, not just a changelog mention)
+
+- `README.md`  new "### Ablation testing on any CSV (not just CARE)" subsection immediately after
+  the existing CARE-specific ablation docs, with the exact `acm_run.py --override ... --report ...`
+  command shape and what to expect in the generated report.
+- `docs/report-flow-testing.md`  new "## 5. Ablation Testing Through the Report Flow" section
+  (PowerShell, matching the rest of that doc), inserted before the "Teammate Command Template"
+  section.
+
+**Files changed**: `core/pipeline.py`, `scripts/acm_run.py`, `scripts/acm_store.py`,
+`scripts/acm_report.py`, `README.md`, `docs/report-flow-testing.md`. Committed `1b3631e` on
+`claude/research-paper-planning-ests5l`, merged (fast-forward) and pushed to `main`. Issue #79
+closed with this commit reference.
 
 ---
 
