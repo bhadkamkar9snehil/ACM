@@ -35,9 +35,22 @@ DISTRUST_COVERAGE = 0.5
 # +/-10.0 as a universal, dataset-independent ceiling (the same code path
 # for every detector on every asset). SATURATION_Z sits at 90% of that
 # ceiling -- "pegged near the top of the calibrated scale" -- and is used
-# by the self-distrust gate's magnitude corroboration below.
+# by the self-distrust gate's magnitude corroboration below. This constant
+# is structural (anchored to fuse.py's own architecture-wide hard clip, not
+# to any dataset), consistent with ALERT_Z_FLOOR/SAFETY/DISTRUST_COVERAGE
+# above.
 SATURATION_Z = 9.0
-SATURATION_FRAC_FLOOR = 0.2
+# SATURATION_FLOOR_MIN is the additive headroom applied on top of THIS
+# ASSET's OWN calculated training-side near-saturation rate (see
+# _train_saturation_rate below) -- the same SAFETY-margin-over-a-calculated-
+# baseline pattern already used by rate_thr/thr_h elsewhere in this file
+# (`clip(base * SAFETY + 0.05, 0.05, 0.9)`). A prior version of this gate
+# used a bare fixed floor (0.2) with no per-asset derivation at all -- the
+# one threshold in this file that wasn't calculated from the asset's own
+# history, picked by eyeballing 4 known CARE events. Replaced because ACM's
+# whole premise is that thresholds come from each asset's own data, not a
+# constant tuned against a specific benchmark's answer key.
+SATURATION_FLOOR_MIN = 0.05
 
 # Rule horizons are defined in TIME and converted to sample counts from the
 # asset's own cadence. Sample-count constants silently broke semantics off
@@ -195,7 +208,20 @@ def apply_alarm_rules(
     # relationships entirely. Only discard when the magnitude evidence ALSO
     # looks mild -- never for a saturated signal, no matter how early/wide
     # its onset.
-    def _broken_baseline(mask: np.ndarray, eval_start: int, z_values: np.ndarray) -> bool:
+    def _train_saturation_rate(z_train: Optional[np.ndarray]) -> float:
+        """Fraction of THIS asset's own training/calibration z-values that
+        already sit at/above the saturation ceiling -- the calculated,
+        per-asset baseline the score-side excursion must clear."""
+        if z_train is None:
+            return 0.0
+        zt = np.asarray(z_train, dtype=np.float64)
+        zt = zt[np.isfinite(zt)]
+        if zt.size == 0:
+            return 0.0
+        return float(np.mean(zt >= SATURATION_Z))
+
+    def _broken_baseline(mask: np.ndarray, eval_start: int, z_values: np.ndarray,
+                          z_train: Optional[np.ndarray]) -> bool:
         if mask.mean() <= distrust_coverage:
             return False
         first = int(np.argmax(mask))
@@ -208,7 +234,9 @@ def apply_alarm_rules(
         if z_in_mask.size == 0:
             return True
         near_sat = float(np.mean(z_in_mask >= SATURATION_Z))
-        return near_sat < SATURATION_FRAC_FLOOR
+        base_sat = _train_saturation_rate(z_train)
+        floor = float(np.clip(base_sat * SAFETY + SATURATION_FLOOR_MIN, SATURATION_FLOOR_MIN, 1.0))
+        return near_sat < floor
 
     # z0 is the universal "clearly elevated" level on the CALIBRATED scale:
     # calibration already standardizes detectors, so re-deriving z0 from the
@@ -285,16 +313,16 @@ def apply_alarm_rules(
             # head's own score-side magnitude -- a head genuinely saturating
             # the calibrated scale keeps firing even if another head's
             # signature looks like a broken baseline.
-            if _broken_baseline(mask_h, head_eval_start, np.asarray(z_sc, dtype=np.float64)):
+            if _broken_baseline(mask_h, head_eval_start, np.asarray(z_sc, dtype=np.float64), ztr):
                 heads_distrusted.append(name)
                 continue
             heads_fired.append(name)
             alarm_heads |= mask_h
 
     distrusted: List[str] = []
-    if _broken_baseline(alarm_sustained, persist, fused):
+    if _broken_baseline(alarm_sustained, persist, fused, train_fused):
         distrusted.append("sustained"); alarm_sustained = np.zeros(n, dtype=bool)
-    if _broken_baseline(alarm_rate, rate_window // 2 + persist_floor, fused):
+    if _broken_baseline(alarm_rate, rate_window // 2 + persist_floor, fused, train_fused):
         distrusted.append("rate"); alarm_rate = np.zeros(n, dtype=bool)
     if heads_distrusted:
         distrusted.append("heads:" + ",".join(heads_distrusted))
