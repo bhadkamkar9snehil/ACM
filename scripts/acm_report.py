@@ -155,7 +155,7 @@ body {
 .header {
     background: linear-gradient(180deg, var(--dark2), var(--dark));
     border-bottom: 4px solid var(--orange);
-    padding: 36px 44px;
+    padding: 20px 44px;
     max-width: 100%;
     overflow-x: hidden;
 }
@@ -167,8 +167,8 @@ body {
 }
 
 .header h1 {
-    margin: 0 0 12px 0;
-    font-size: 3.4rem;
+    margin: 0 0 6px 0;
+    font-size: 2.7rem;
     font-weight: 800;
     color: #faf3e6;
     letter-spacing: -0.01em;
@@ -178,9 +178,9 @@ body {
 .header-meta {
     display: flex;
     flex-wrap: wrap;
-    gap: 32px;
-    margin-top: 16px;
-    font-size: 1.4rem;
+    gap: 22px;
+    margin-top: 8px;
+    font-size: 1.18rem;
     font-weight: 600;
     color: #e6d9c0;
 }
@@ -196,28 +196,28 @@ body {
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    font-size: 1.05rem;
+    font-size: 0.95rem;
     color: #b8a780;
 }
 
 .container {
     width: min(96vw, var(--content-width));
     margin: 0 auto;
-    padding: 36px 44px 8px;
+    padding: 26px 44px 8px;
 }
 
 section {
-    margin-bottom: 48px;
+    margin-bottom: 34px;
 }
 
 h2 {
-    margin: 0 0 24px 0;
-    font-size: 2rem;
+    margin: 0 0 16px 0;
+    font-size: 1.85rem;
     font-weight: 800;
     color: var(--ink);
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    padding-bottom: 14px;
+    padding-bottom: 10px;
     border-bottom: 4px solid var(--dark);
 }
 
@@ -253,7 +253,7 @@ p {
 /* ---- KPI strip: tactile raised cells on an inset rail, equal-height rows ---- */
 .kpi-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
     grid-auto-rows: 1fr;
     align-items: stretch;
     gap: 4px;
@@ -271,21 +271,21 @@ p {
     border: 1px solid var(--line);
     border-top: 1px solid #fffdf8;
     box-shadow: var(--shadow);
-    padding: 22px 24px;
+    padding: 14px 18px;
 }
 
 .kpi-label {
     font-family: var(--mono);
-    font-size: 1.05rem;
+    font-size: 0.98rem;
     color: var(--muted);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.07em;
-    margin-bottom: 14px;
+    margin-bottom: 8px;
 }
 
 .kpi-value {
-    font-size: 3.6rem;
+    font-size: 2.8rem;
     font-weight: 800;
     color: var(--ink);
     font-variant-numeric: tabular-nums;
@@ -300,11 +300,11 @@ p {
 .kpi-value.ok { color: var(--green); }
 
 .kpi-desc {
-    font-size: 1.1rem;
+    font-size: 1rem;
     font-weight: 600;
     color: var(--muted);
-    margin-top: 10px;
-    min-height: 1.6em;
+    margin-top: 6px;
+    min-height: 0;
 }
 
 /* ---- Tables: paper surface, mono headers, large readable rows ---- */
@@ -317,7 +317,7 @@ table {
 }
 
 td, th {
-    padding: 16px 20px;
+    padding: 14px 18px;
     text-align: left;
     border-bottom: 1px solid var(--line);
     vertical-align: top;
@@ -329,8 +329,8 @@ th {
     font-weight: 700;
     color: var(--text);
     text-transform: uppercase;
-    font-size: 1.05rem;
-    letter-spacing: 0.06em;
+    font-size: 1.22rem;
+    letter-spacing: 0.04em;
     border-bottom: 2px solid var(--line2);
 }
 
@@ -376,6 +376,46 @@ tbody tr:hover {
 .table-card {
     overflow-x: auto;
     overflow-y: visible;
+}
+
+.ops-table {
+    table-layout: fixed;
+}
+
+.ops-table th:nth-child(1),
+.ops-table td:nth-child(1) { width: 26%; }
+.ops-table th:nth-child(2),
+.ops-table td:nth-child(2) { width: 20%; }
+.ops-table th:nth-child(3),
+.ops-table td:nth-child(3) { width: 11%; }
+.ops-table th:nth-child(4),
+.ops-table td:nth-child(4) { width: 9%; }
+.ops-table th:nth-child(5),
+.ops-table td:nth-child(5) { width: 8%; }
+.ops-table th:nth-child(6),
+.ops-table td:nth-child(6) { width: 26%; }
+
+.ops-diag-row > td {
+    padding: 0 18px 16px;
+    background: var(--paper);
+}
+
+.ops-table .timestamp {
+    white-space: normal;
+    font-size: 1.08rem;
+    line-height: 1.45;
+}
+
+.ops-table td {
+    overflow-wrap: anywhere;
+}
+
+.timestamp .time-part {
+    color: var(--muted);
+}
+
+.ops-table .rules-cell {
+    overflow-wrap: anywhere;
 }
 
 /* ---- Diagnostic block: labelled inset panel ---- */
@@ -664,10 +704,85 @@ tbody tr:hover {
 .op-details summary {
     cursor: pointer;
     font-family: var(--mono);
-    font-size: 1rem;
+    font-size: 1.08rem;
     color: var(--muted);
     font-weight: 700;
     text-transform: uppercase;
+}
+
+.op-diag-stack {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px 14px;
+    margin-top: 10px;
+}
+
+.op-diag-section {
+    border: 1px solid var(--line);
+    background: var(--paper);
+}
+
+.op-diag-section.wide {
+    grid-column: 1 / -1;
+}
+
+.op-diag-title {
+    padding: 7px 10px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+    font-family: var(--mono);
+    font-size: 0.98rem;
+    font-weight: 700;
+    color: var(--orange);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+.op-diag-table {
+    width: 100%;
+    margin: 0;
+    border: 0;
+    font-size: 1.02rem;
+}
+
+.op-diag-table td,
+.op-diag-table th {
+    padding: 6px 10px;
+    border-bottom: 1px solid rgba(194,181,150,.55);
+}
+
+.op-diag-table th {
+    font-size: 0.98rem;
+}
+
+.op-diag-table tr:last-child td {
+    border-bottom: none;
+}
+
+.op-diag-key {
+    width: 36%;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.op-diag-value {
+    color: var(--text);
+    overflow-wrap: anywhere;
+}
+
+.op-diag-status {
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+.op-diag-status.armed {
+    color: var(--red);
+}
+
+.op-diag-status.disarmed {
+    color: var(--muted);
 }
 
 .timestamp {
@@ -758,6 +873,10 @@ a:hover {
 
     .mini-table-scroll {
         overflow-x: auto;
+    }
+
+    .op-diag-stack {
+        grid-template-columns: minmax(0, 1fr);
     }
 
     table {
@@ -1022,6 +1141,139 @@ def format_report_datetime(value: Any) -> str:
     date_part = f"{ts.strftime('%b')} {ts.day}, {ts.year}"
     time_part = ts.strftime("%I:%M %p").lstrip("0")
     return f"{date_part} {time_part}{suffix}"
+
+
+def format_report_datetime_cell(value: Any) -> str:
+    """Render a human datetime as two lines for narrow table cells."""
+    text = format_report_datetime(value)
+    parts = text.split(" ")
+    if len(parts) >= 5 and parts[1].endswith(","):
+        date_part = " ".join(parts[:3])
+        time_part = " ".join(parts[3:])
+        return f"{html.escape(date_part)}<br><span class='time-part'>{html.escape(time_part)}</span>"
+    return html.escape(text)
+
+
+def format_diag_number(value: Any, digits: int = 3) -> str:
+    """Display diagnostic floats compactly without changing stored values."""
+    if isinstance(value, (int, float)) and np.isfinite(float(value)):
+        if digits == 0:
+            return f"{float(value):.0f}"
+        return f"{float(value):.{digits}g}"
+    if value is None or pd.isna(value):
+        return "-"
+    return str(value)
+
+
+def render_key_value_section(title: str, rows: list[tuple[str, str]], wide: bool = False) -> str:
+    """Render compact diagnostic key/value rows."""
+    if not rows:
+        return ""
+    cls = "op-diag-section wide" if wide else "op-diag-section"
+    body = "".join(
+        "<tr>"
+        f"<td class='op-diag-key'>{html.escape(str(k))}</td>"
+        f"<td class='op-diag-value'>{html.escape(str(v))}</td>"
+        "</tr>"
+        for k, v in rows
+    )
+    return (
+        f"<div class='{cls}'>"
+        f"<div class='op-diag-title'>{html.escape(title)}</div>"
+        f"<table class='op-diag-table'><tbody>{body}</tbody></table>"
+        "</div>"
+    )
+
+
+def render_rule_diagnostics(rules_json: Any) -> str:
+    """Render rule diagnostics as a compact status table."""
+    if rules_json is None or pd.isna(rules_json):
+        return ""
+    try:
+        diag = json.loads(rules_json)
+    except (json.JSONDecodeError, TypeError):
+        return ""
+    if not isinstance(diag, dict):
+        return ""
+
+    rows = []
+    for rule_name, rule_info in diag.items():
+        if rule_name == "per_head" and isinstance(rule_info, dict):
+            for det_name, det_info in rule_info.items():
+                if not isinstance(det_info, dict):
+                    continue
+                status = "armed" if det_info.get("active") else "disarmed"
+                rows.append((
+                    detector_label(det_name),
+                    status,
+                    format_diag_number(det_info.get("train_n"), 0),
+                    format_diag_number(det_info.get("thr")),
+                ))
+        elif isinstance(rule_info, dict):
+            status = "armed" if rule_info.get("active") else "disarmed"
+            rows.append((
+                str(rule_name).replace("_", " ").title(),
+                status,
+                format_diag_number(rule_info.get("train_n"), 0),
+                format_diag_number(rule_info.get("thr")),
+            ))
+    if not rows:
+        return ""
+
+    body = "".join(
+        "<tr>"
+        f"<td>{html.escape(name)}</td>"
+        f"<td><span class='op-diag-status {html.escape(status)}'>{html.escape(status)}</span></td>"
+        f"<td>{html.escape(train_n)}</td>"
+        f"<td>{html.escape(thr)}</td>"
+        "</tr>"
+        for name, status, train_n, thr in rows
+    )
+    return (
+        "<div class='op-diag-section wide'>"
+        "<div class='op-diag-title'>Rule Arming</div>"
+        "<table class='op-diag-table'>"
+        "<thead><tr><th>Rule</th><th>Status</th><th>Train N</th><th>Threshold</th></tr></thead>"
+        f"<tbody>{body}</tbody>"
+        "</table></div>"
+    )
+
+
+def render_run_diagnostics(r: Any) -> str:
+    """Render run diagnostics as structured report sections."""
+    sections = []
+    rule_section = render_rule_diagnostics(getattr(r, "rules_diagnostic_json", None))
+    if rule_section:
+        sections.append(rule_section)
+
+    data_quality_line = format_data_quality_human(getattr(r, "data_quality_json", None))
+    if data_quality_line:
+        sections.append(render_key_value_section("Data Quality", [("Summary", data_quality_line)], wide=True))
+
+    calibration = format_calibration_human(getattr(r, "calibration_json", None))
+    if calibration:
+        calib_summary, tuning_kv = calibration
+        rows = [("Summary", calib_summary)]
+        rows.extend((k.title(), v) for k, v in tuning_kv.items())
+        sections.append(render_key_value_section("Calibration", rows, wide=True))
+
+    override_line = format_override_human(getattr(r, "override_json", None))
+    if override_line:
+        sections.append(render_key_value_section("Ablation Override", [("Override", override_line)], wide=True))
+
+    culprits_line = format_culprits_human(getattr(r, "notes", None))
+    if culprits_line:
+        sections.append(render_key_value_section("Culprits", [("Sensors", culprits_line)], wide=True))
+
+    if not sections:
+        return ""
+    return (
+        "<details class='op-details'>"
+        "<summary>Run diagnostics</summary>"
+        "<div class='op-diag-stack'>"
+        + "".join(sections) +
+        "</div></details>"
+    )
 
 
 def format_verdict_badge(verdict: Optional[str]) -> str:
@@ -1388,76 +1640,20 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
         alert_z_str = f"{r.alert_z:.2f}" if pd.notna(r.alert_z) else "-"
         duration_str = f"{r.duration_s:.2f}s" if pd.notna(r.duration_s) else "-"
         rules_exp = format_rules_human(r.rules_fired, r.alert_z, None)
+        diag_block = render_run_diagnostics(r)
 
-        # Parse diagnostics if available. Per-detector thresholds are rounded
-        # to 3 significant figures - the raw tuner output runs 15+ decimal
-        # places, which reads as noise rather than information.
-        diag_html = ""
-        if pd.notna(r.rules_diagnostic_json):
-            try:
-                diag = json.loads(r.rules_diagnostic_json)
-            except (json.JSONDecodeError, TypeError):
-                diag = None
-            if isinstance(diag, dict):
-                for rule_name, rule_info in diag.items():
-                    if rule_name == "per_head" and isinstance(rule_info, dict):
-                        # per_head is a nested dict of detector_name -> {active, train_n, thr},
-                        # not a single rule_info dict - render one line per detector.
-                        for det_name, det_info in rule_info.items():
-                            if not isinstance(det_info, dict):
-                                continue
-                            train_n = det_info.get("train_n", "?")
-                            if det_info.get("active"):
-                                thr = det_info.get("thr")
-                                thr_str = f"{thr:.3g}" if isinstance(thr, (int, float)) else "?"
-                                diag_html += f"<div class='diag-line'>{html.escape(detector_label(det_name))}: armed (n={train_n}, thr={thr_str})</div>"
-                            else:
-                                diag_html += f"<div class='diag-line'>{html.escape(detector_label(det_name))}: disarmed (n={train_n})</div>"
-                    elif isinstance(rule_info, dict):
-                        if rule_info.get("active"):
-                            train_n = rule_info.get("train_n", "?")
-                            thr = rule_info.get("thr")
-                            thr_str = f"{thr:.3g}" if isinstance(thr, (int, float)) else "?"
-                            diag_html += f"<div class='diag-line'>{html.escape(rule_name)}: armed (n={train_n}, thr={thr_str})</div>"
-                        else:
-                            train_n = rule_info.get("train_n", "?")
-                            diag_html += f"<div class='diag-line'>{html.escape(rule_name)}: disarmed (n={train_n})</div>"
-
-        data_quality_line = format_data_quality_human(getattr(r, "data_quality_json", None))
-        calibration = format_calibration_human(getattr(r, "calibration_json", None))
-        override_line = format_override_human(getattr(r, "override_json", None))
-        culprits_line = format_culprits_human(getattr(r, "notes", None))
-        if data_quality_line:
-            diag_html += f"<div class='diag-line'>Data: {html.escape(data_quality_line)}</div>"
-        if calibration:
-            calib_summary, tuning_kv = calibration
-            diag_html += f"<div class='diag-line'>{html.escape(calib_summary)}</div>"
-            if tuning_kv:
-                kv_items = "".join(
-                    f"<dt>{html.escape(k)}</dt><dd>{html.escape(v)}</dd>"
-                    for k, v in tuning_kv.items())
-                diag_html += f"<dl class='diag-kv-list'>{kv_items}</dl>"
-        if override_line:
-            diag_html += f"<div class='diag-line'>{html.escape(override_line)}</div>"
-        if culprits_line:
-            diag_html += f"<div class='diag-line'>{html.escape(culprits_line)}</div>"
-
-        diag_block = (
-            "<details class='op-details'>"
-            "<summary>Run diagnostics</summary>"
-            f"{diag_html}"
-            "</details>"
-        ) if diag_html else ""
-
-        ops_rows.append(
+        main_row = (
             f"<tr>"
             f"<td>{html.escape(r.asset_key)}</td>"
-            f"<td class='timestamp'>{html.escape(r.started_at or '')}</td>"
+            f"<td class='timestamp'>{format_report_datetime_cell(getattr(r, 'started_at', None))}</td>"
             f"<td>{duration_str}</td>"
             f"<td>{html.escape(r.status or '')}</td>"
             f"<td>{alert_z_str}</td>"
-            f"<td><span class='rules-text'>{html.escape(rules_exp)}</span>{diag_block}</td>"
+            f"<td class='rules-cell'><span class='rules-text'>{html.escape(rules_exp)}</span></td>"
             f"</tr>")
+        if diag_block:
+            main_row += f"<tr class='ops-diag-row'><td colspan='6'>{diag_block}</td></tr>"
+        ops_rows.append(main_row)
 
     # Build logs section
     log_html = ""
@@ -1519,7 +1715,7 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
     kpi_html = "<div class='kpi-grid'>" + "".join(kpi_cards) + "</div>"
 
     scope = f"farm {farm}" if farm else (f"{len(assets)} selected assets" if picks else "fleet")
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    timestamp = format_report_datetime(datetime.now().astimezone().isoformat())
     chart_specs_json = json.dumps(chart_specs)
 
     html_content = f"""<!doctype html>
@@ -1584,7 +1780,7 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
         <section>
             <h2>Scoring Operations</h2>
             <div class='card table-card'>
-                <table>
+                <table class='ops-table'>
                     <thead>
                         <tr>
                             <th>Asset</th>
