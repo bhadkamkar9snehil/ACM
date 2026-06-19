@@ -171,16 +171,76 @@ python scripts/acm_report.py --db acm_results.db --list
 
 ### CARE wind-farm benchmark
 
-```bash
-# Download 10 Farm A events (~360 MB)
-python scripts/download_care_dataset.py --farms A --count 10 --sim-dir sim_data/sample
+`care_benchmark.py` needs each farm's `event_info.csv` + `datasets/{id}.csv` structure — use
+`download_care_benchmark.py` for this (not `download_care_dataset.py`, which flattens files for
+the Simulate tab and has no `event_info.csv`):
 
-# Seed as ACM assets
-python scripts/acm_seed_demo.py --care-dir sim_data/sample --db acm_results.db
+```bash
+# Download Farm A in the structure care_benchmark.py expects
+python scripts/download_care_benchmark.py --dest care_data --farms A
 
 # Run the benchmark against ground-truth labels
-python scripts/care_benchmark.py --data-dir care_data --out results/A
+python scripts/care_benchmark.py --data-dir "care_data/Wind Farm A" --out results/A --workers 2
 ```
+
+KPI: **PASS** requires event-level recall ≥ 0.80 and F1 ≥ 0.75. Output: `results/A/summary.json`
+(recall, precision, F1, false alarms) plus per-event score/diagnostic CSVs.
+
+### Ablation Testing
+
+Every detector and pipeline component (contamination filtering, the self-distrust gate, fusion
+auto-tuning) can be switched off **with no source code changes**, to measure exactly what it
+contributes to detection accuracy. `care_benchmark.py --override` takes a JSON string that's
+deep-merged onto `core/ml_defaults.py`'s defaults at runtime — the same mechanism used internally
+to validate every architectural decision in this codebase: run the labelled benchmark with and
+without a component, diff the resulting `summary.json`.
+
+| Disable… | `--override` JSON |
+|---|---|
+| AR1 detector | `{"models": {"ar1": {"enabled": false}}}` |
+| PCA (drops both SPE and T² scores) | `{"models": {"pca": {"enabled": false}}}` |
+| Isolation Forest | `{"models": {"iforest": {"enabled": false}}}` |
+| GMM | `{"models": {"gmm": {"enabled": false}}}` |
+| OMR | `{"models": {"omr": {"enabled": false}}}` |
+| Contamination-aware calibration filter | `{"thresholds": {"contamination_filter": {"enabled": false}}}` |
+| Self-distrust gate (broken-baseline discard) | `{"alarm_rules": {"distrust_coverage": 2.0}}` |
+| Fusion auto-tuning | `{"fusion": {"auto_tune": {"enabled": false}}}` |
+| Equal detector weights, no auto-tune | `{"fusion": {"auto_tune": {"enabled": false}, "weights": {"ar1_z": 0.1667, "pca_spe_z": 0.1667, "pca_t2_z": 0.1667, "iforest_z": 0.1667, "gmm_z": 0.1667, "omr_z": 0.1667}}}` |
+
+Combine any rows by merging their JSON objects into one override — e.g. disable OMR and the
+contamination filter together in a single run.
+
+**Windows (PowerShell)** — single-quoted strings are literal here too, so the JSON needs no
+escaping; use a trailing backtick for line continuation:
+
+```powershell
+# 1. Baseline — always run first, every ablation below is compared against this
+python scripts\care_benchmark.py --data-dir "care_data\Wind Farm A" --out results\full --workers 2
+
+# 2. Disable one component at a time (run sequentially, not in parallel — see note below)
+python scripts\care_benchmark.py --data-dir "care_data\Wind Farm A" --out results\no_omr --workers 2 `
+  --override '{"models": {"omr": {"enabled": false}}}'
+
+python scripts\care_benchmark.py --data-dir "care_data\Wind Farm A" --out results\no_distrust --workers 2 `
+  --override '{"alarm_rules": {"distrust_coverage": 2.0}}'
+
+python scripts\care_benchmark.py --data-dir "care_data\Wind Farm A" --out results\equal_weights --workers 2 `
+  --override '{"fusion": {"auto_tune": {"enabled": false}, "weights": {"ar1_z": 0.1667, "pca_spe_z": 0.1667, "pca_t2_z": 0.1667, "iforest_z": 0.1667, "gmm_z": 0.1667, "omr_z": 0.1667}}}'
+
+# 3. Compare
+Get-ChildItem results -Directory | ForEach-Object {
+    Write-Host "== $($_.Name) =="
+    Get-Content "$($_.FullName)\summary.json"
+}
+```
+
+Linux/macOS: identical flags and JSON, `/` paths, `\` instead of the backtick for line
+continuation.
+
+`--override` implies `--force` — a cached score from a different configuration is never reused.
+Run ablation configs **sequentially**: each spawns its own `--workers` pool, and concurrent runs
+multiply total worker/memory usage. Farm A (22 events) is fast enough for quick iteration;
+Farm B/C are larger and better for confirming an effect holds at scale.
 
 ---
 
