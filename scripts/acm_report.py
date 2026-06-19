@@ -366,12 +366,16 @@ tbody tr:hover {
     box-shadow: var(--shadow-deep);
     padding: 0;
     margin: 0 0 24px 0;
-    overflow-x: auto;
-    overflow-y: visible;
+    overflow: hidden;
 }
 
 .card > table {
     margin: 0;
+}
+
+.table-card {
+    overflow-x: auto;
+    overflow-y: visible;
 }
 
 /* ---- Diagnostic block: labelled inset panel ---- */
@@ -384,6 +388,8 @@ tbody tr:hover {
     font-weight: 600;
     color: var(--text);
     line-height: 1.5;
+    min-width: 0;
+    overflow-wrap: anywhere;
 }
 
 .diag-label {
@@ -416,6 +422,21 @@ tbody tr:hover {
 .diag-kv-list dd {
     margin: 0;
     color: var(--text);
+}
+
+.diag-details {
+    margin-top: 10px;
+    border-top: 1px solid var(--line);
+    padding-top: 8px;
+}
+
+.diag-details summary {
+    cursor: pointer;
+    font-family: var(--mono);
+    font-size: 0.98rem;
+    color: var(--muted);
+    font-weight: 700;
+    text-transform: uppercase;
 }
 
 /* ---- Status pills: tactile, filled, semantic ---- */
@@ -492,15 +513,29 @@ tbody tr:hover {
     min-width: 0;
 }
 
-.asset-card-chart {
-    overflow-x: auto;
-}
-
 .asset-card-diag {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+    grid-template-columns: repeat(12, minmax(0, 1fr));
     gap: 16px;
     align-items: start;
+}
+
+.asset-card-diag > .diag-box {
+    grid-column: 1 / -1;
+}
+
+.diag-summary,
+.diag-calibration,
+.diag-culprits {
+    grid-column: 1 / -1;
+}
+
+.diag-detectors {
+    grid-column: 1 / -1;
+}
+
+.diag-history {
+    grid-column: 1 / -1;
 }
 
 .asset-card-diag > .diag-box:first-child,
@@ -515,15 +550,40 @@ tbody tr:hover {
     font-size: 1.05rem;
     background: var(--paper);
     border: 1px solid var(--line);
-    overflow: hidden;
+    table-layout: auto;
 }
 
 .mini-table td, .mini-table th {
     padding: 8px 12px;
+    white-space: nowrap;
 }
 
 .mini-table th {
     font-size: 0.95rem;
+}
+
+.mini-table-scroll {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: visible;
+}
+
+.diag-detectors .mini-table {
+    min-width: 620px;
+}
+
+.diag-history .mini-table {
+    min-width: 860px;
+}
+
+.diag-history .timestamp {
+    font-size: 0.95rem;
+}
+
+.diag-history .ack-cell {
+    min-width: 160px;
+    white-space: normal;
 }
 
 /* ---- Logs ---- */
@@ -594,6 +654,21 @@ tbody tr:hover {
 .logs-section .warning { color: #e0b558; font-weight: 700; }
 .logs-section .error { color: #e08a78; font-weight: 700; }
 .logs-section .debug { color: #b8a780; }
+
+.op-details {
+    margin-top: 10px;
+    border-top: 1px solid var(--line);
+    padding-top: 8px;
+}
+
+.op-details summary {
+    cursor: pointer;
+    font-family: var(--mono);
+    font-size: 1rem;
+    color: var(--muted);
+    font-weight: 700;
+    text-transform: uppercase;
+}
 
 .timestamp {
     font-family: var(--mono);
@@ -669,12 +744,19 @@ a:hover {
         grid-template-columns: minmax(0, 1fr);
     }
 
+    .diag-summary,
+    .diag-calibration,
+    .diag-culprits,
+    .diag-detectors,
+    .diag-history {
+        grid-column: auto;
+    }
+
     .diag-box, .chart-note {
         overflow-wrap: anywhere;
     }
 
-    .mini-table {
-        display: block;
+    .mini-table-scroll {
         overflow-x: auto;
     }
 
@@ -917,6 +999,31 @@ def format_culprits_human(notes: Optional[str]) -> Optional[str]:
     return "Culprit sensors: " + ", ".join(labeled)
 
 
+def format_report_datetime(value: Any) -> str:
+    """Render stored timestamps as readable report labels without changing source values."""
+    if value is None or pd.isna(value):
+        return "-"
+    text = str(value).strip()
+    if not text:
+        return "-"
+    try:
+        ts = pd.to_datetime(text, errors="coerce")
+    except (TypeError, ValueError):
+        return text
+    if pd.isna(ts):
+        return text
+    suffix = ""
+    if getattr(ts, "tzinfo", None) is not None:
+        try:
+            ts = ts.tz_convert("UTC")
+            suffix = " UTC"
+        except (TypeError, ValueError):
+            suffix = ""
+    date_part = f"{ts.strftime('%b')} {ts.day}, {ts.year}"
+    time_part = ts.strftime("%I:%M %p").lstrip("0")
+    return f"{date_part} {time_part}{suffix}"
+
+
 def format_verdict_badge(verdict: Optional[str]) -> str:
     """Return HTML badge for verdict."""
     if pd.isna(verdict):
@@ -1104,20 +1211,23 @@ def alarm_history_table(alarms_for_asset: Optional[pd.DataFrame]) -> str:
         dur = f"{a.duration_h:.2f}h" if pd.notna(a.duration_h) else "-"
         peak = f"{a.peak_fused:.2f}" if pd.notna(a.peak_fused) else "-"
         if pd.notna(getattr(a, "ack_by", None)):
-            ack = f"Acknowledged by {html.escape(str(a.ack_by))} at {html.escape(str(a.ack_at or ''))}"
+            ack_time = format_report_datetime(getattr(a, "ack_at", None))
+            ack = f"Acknowledged by {html.escape(str(a.ack_by))} at {html.escape(ack_time)}"
             if pd.notna(getattr(a, "ack_note", None)) and a.ack_note:
                 ack += f" - {html.escape(str(a.ack_note))}"
         else:
             ack = "Unacknowledged"
+        start_ts = format_report_datetime(getattr(a, "start_ts", None))
+        end_ts = format_report_datetime(getattr(a, "end_ts", None))
         rows.append(
-            f"<tr><td class='timestamp'>{html.escape(str(a.start_ts or ''))}</td>"
-            f"<td class='timestamp'>{html.escape(str(a.end_ts or ''))}</td>"
-            f"<td>{dur}</td><td>{peak}</td><td>{ack}</td></tr>")
+            f"<tr><td class='timestamp'>{html.escape(start_ts)}</td>"
+            f"<td class='timestamp'>{html.escape(end_ts)}</td>"
+            f"<td>{dur}</td><td>{peak}</td><td class='ack-cell'>{ack}</td></tr>")
     return (
-        "<div class='diag-box'><span class='diag-label'>Alarm History</span>"
-        "<table class='mini-table'><thead><tr>"
+        "<div class='diag-box diag-history'><span class='diag-label'>Alarm History</span>"
+        "<div class='mini-table-scroll'><table class='mini-table'><thead><tr>"
         "<th>Start</th><th>End</th><th>Duration</th><th>Peak Score</th><th>Acknowledgment</th>"
-        "</tr></thead><tbody>" + "".join(rows) + "</tbody></table></div>")
+        "</tr></thead><tbody>" + "".join(rows) + "</tbody></table></div></div>")
 
 
 def detector_stats_table(s: pd.DataFrame) -> str:
@@ -1141,9 +1251,9 @@ def detector_stats_table(s: pd.DataFrame) -> str:
     header = ("<th>Detector</th><th>Peak</th><th>Mean</th><th>Alarm-window Peak</th><th>Alarm-window Mean</th>"
               if has_alarm else "<th>Detector</th><th>Peak</th><th>Mean</th>")
     return (
-        "<div class='diag-box'><span class='diag-label'>Detector Z-Scores</span>"
-        "<table class='mini-table'><thead><tr>" + header + "</tr></thead><tbody>"
-        + "".join(rows) + "</tbody></table></div>")
+        "<div class='diag-box diag-detectors'><span class='diag-label'>Detector Z-Scores</span>"
+        "<div class='mini-table-scroll'><table class='mini-table'><thead><tr>"
+        + header + "</tr></thead><tbody>" + "".join(rows) + "</tbody></table></div></div>")
 
 
 def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Optional[list[str]]) -> None:
@@ -1236,7 +1346,7 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
         override = format_override_human(run_row.get("override_json")) if run_row is not None else None
         culprits = format_culprits_human(run_row.get("notes")) if run_row is not None else None
 
-        diag_boxes = f"<div class='diag-box'><span class='diag-label'>Data Quality</span>{html.escape(data_quality)}</div>"
+        diag_boxes = f"<div class='diag-box diag-summary'><span class='diag-label'>Data Quality</span>{html.escape(data_quality)}</div>"
         if calibration:
             calib_summary, tuning_kv = calibration
             calib_html = html.escape(calib_summary)
@@ -1244,12 +1354,19 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
                 kv_items = "".join(
                     f"<dt>{html.escape(k)}</dt><dd>{html.escape(v)}</dd>"
                     for k, v in tuning_kv.items())
-                calib_html += f"<dl class='diag-kv-list'>{kv_items}</dl>"
-            diag_boxes += f"<div class='diag-box'><span class='diag-label'>Calibration</span>{calib_html}</div>"
+                calib_html += (
+                    "<details class='diag-details'>"
+                    "<summary>Tuning details</summary>"
+                    f"<dl class='diag-kv-list'>{kv_items}</dl>"
+                    "</details>")
+            diag_boxes += f"<div class='diag-box diag-calibration'><span class='diag-label'>Calibration</span>{calib_html}</div>"
         if override:
-            diag_boxes += f"<div class='diag-box'><span class='diag-label'>Ablation Override</span>{html.escape(override)}</div>"
+            diag_boxes += (
+                "<div class='diag-box diag-override'>"
+                "<span class='diag-label'>Ablation Override</span>"
+                f"{html.escape(override)}</div>")
         if culprits:
-            diag_boxes += f"<div class='diag-box'><span class='diag-label'>Culprits</span>{html.escape(culprits)}</div>"
+            diag_boxes += f"<div class='diag-box diag-culprits'><span class='diag-label'>Culprits</span>{html.escape(culprits)}</div>"
         diag_boxes += detector_stats_table(s)
         diag_boxes += alarm_history_table(alarms_by_asset.get(meta["asset_key"]))
 
@@ -1325,6 +1442,13 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
         if culprits_line:
             diag_html += f"<div class='diag-line'>{html.escape(culprits_line)}</div>"
 
+        diag_block = (
+            "<details class='op-details'>"
+            "<summary>Run diagnostics</summary>"
+            f"{diag_html}"
+            "</details>"
+        ) if diag_html else ""
+
         ops_rows.append(
             f"<tr>"
             f"<td>{html.escape(r.asset_key)}</td>"
@@ -1332,7 +1456,7 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
             f"<td>{duration_str}</td>"
             f"<td>{html.escape(r.status or '')}</td>"
             f"<td>{alert_z_str}</td>"
-            f"<td><span class='rules-text'>{html.escape(rules_exp)}</span>{diag_html}</td>"
+            f"<td><span class='rules-text'>{html.escape(rules_exp)}</span>{diag_block}</td>"
             f"</tr>")
 
     # Build logs section
@@ -1429,7 +1553,7 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
 
         <section>
             <h2>Assets Overview</h2>
-            <div class='card'>
+            <div class='card table-card'>
                 <table>
                     <thead>
                         <tr>
@@ -1459,7 +1583,7 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
 
         <section>
             <h2>Scoring Operations</h2>
-            <div class='card'>
+            <div class='card table-card'>
                 <table>
                     <thead>
                         <tr>
