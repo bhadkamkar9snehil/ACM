@@ -54,17 +54,45 @@ DETECTOR_NAMES = {
     "omr_z": "OMR",
 }
 
-# Per-detector trace colors for the interactive heatmap/timeline, drawn from
-# the same warm industrial palette as the page CSS so charts and chrome read
-# as one design system instead of two.
-DETECTOR_COLORS = {
-    "ar1_z": "#b3551e",
-    "pca_spe_z": "#c2742a",
-    "pca_t2_z": "#a8731f",
-    "iforest_z": "#8a5a16",
-    "gmm_z": "#c98a3a",
-    "omr_z": "#7a4a12",
+# Detector line palettes for the interactive detail panel. The default uses
+# strong hue separation so selected detector lines do not collapse into one
+# orange/brown bundle.
+DETECTOR_PALETTES = {
+    "contrast": {
+        "ar1_z": "#1f77b4",
+        "pca_spe_z": "#ff7f0e",
+        "pca_t2_z": "#9467bd",
+        "iforest_z": "#2ca02c",
+        "gmm_z": "#d62728",
+        "omr_z": "#17becf",
+    },
+    "industrial": {
+        "ar1_z": "#b3551e",
+        "pca_spe_z": "#2f6f8f",
+        "pca_t2_z": "#6e5490",
+        "iforest_z": "#3d7a3f",
+        "gmm_z": "#a8342b",
+        "omr_z": "#a8791f",
+    },
+    "cool": {
+        "ar1_z": "#2563eb",
+        "pca_spe_z": "#0891b2",
+        "pca_t2_z": "#7c3aed",
+        "iforest_z": "#059669",
+        "gmm_z": "#db2777",
+        "omr_z": "#475569",
+    },
+    "signal": {
+        "ar1_z": "#005f73",
+        "pca_spe_z": "#ee9b00",
+        "pca_t2_z": "#9b2226",
+        "iforest_z": "#0a9396",
+        "gmm_z": "#ca6702",
+        "omr_z": "#6a4c93",
+    },
 }
+
+DETECTOR_COLORS = DETECTOR_PALETTES["contrast"]
 
 # Verdict vocabulary covers both pipelines seen in production data:
 # DETECTED/CLEAN/MISSED/FALSE_ALARM (care-style scoring) and ALARM/OK
@@ -533,6 +561,56 @@ tbody tr:hover {
     margin: 12px 0 0;
     border: 1px solid var(--line);
     background: var(--paper);
+}
+
+.chart-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin: 10px 0 0;
+    font-family: var(--mono);
+}
+
+.chart-control-label {
+    color: var(--muted);
+    font-size: 0.98rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+.palette-btn {
+    border: 1px solid var(--line2);
+    background: var(--panel);
+    color: var(--text);
+    padding: 5px 10px;
+    font-family: var(--mono);
+    font-size: 0.95rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    cursor: pointer;
+    box-shadow: var(--shadow);
+}
+
+.palette-btn.active {
+    background: var(--dark);
+    color: #faf3e6;
+    border-color: var(--orange);
+}
+
+.palette-swatches {
+    display: inline-flex;
+    gap: 2px;
+    margin-left: 6px;
+    vertical-align: middle;
+}
+
+.palette-swatch {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border: 1px solid rgba(42,32,20,.22);
 }
 
 .chart-note {
@@ -1377,7 +1455,7 @@ def asset_figure_spec(s: pd.DataFrame, meta: pd.Series) -> tuple[dict, str]:
         "colorscale": [[0, "#2a2118"], [0.5, "#c8762a"], [1, "#ffb347"]],
         "colorbar": {"title": {"text": "Detector Z", "font": {"size": 13}},
                      "tickfont": {"size": 12},
-                     "len": 0.42, "y": 0.18, "thickness": 14},
+                     "len": 0.34, "y": 0.42, "thickness": 14},
         "xaxis": "x2", "yaxis": "y2",
         "hovertemplate": "Time: %{x}<br>Detector: %{y}<br>Z: %{z:.2f}<extra></extra>",
     })
@@ -1391,7 +1469,7 @@ def asset_figure_spec(s: pd.DataFrame, meta: pd.Series) -> tuple[dict, str]:
         traces.append({
             "type": "scattergl", "mode": "lines", "name": det_name,
             "x": ts_list, "y": finite_number_list(s[z]),
-            "line": {"color": DETECTOR_COLORS.get(z, "#8a5a16"), "width": 1.2},
+            "line": {"color": DETECTOR_COLORS.get(z, "#8a5a16"), "width": 1.6},
             "xaxis": "x3", "yaxis": "y3",
             "visible": "legendonly",
             "legendgroup": "heads",
@@ -1428,24 +1506,26 @@ def asset_figure_spec(s: pd.DataFrame, meta: pd.Series) -> tuple[dict, str]:
              "y": 1.04, "xanchor": "left", "showarrow": False,
              "font": {"size": 15, "color": "#6b5c45"}},
             {"text": "Detector heatmap", "xref": "paper", "yref": "paper", "x": 0,
-             "y": 0.43, "xanchor": "left", "showarrow": False,
+             "y": 0.52, "xanchor": "left", "showarrow": False,
              "font": {"size": 14, "color": "#6b5c45"}},
             {"text": "Detector line detail", "xref": "paper", "yref": "paper", "x": 0,
-             "y": 0.22, "xanchor": "left", "showarrow": False,
+             "y": 0.34, "xanchor": "left", "showarrow": False,
              "font": {"size": 14, "color": "#6b5c45"}},
         ],
-        # Row 1: fused timeline (55% height); Row 2: heatmap (20%);
-        # Row 3: per-detector lines, hidden until a head is selected (25%).
+        # Row 1: fused timeline; Row 2: heatmap; Row 3: per-detector
+        # lines, hidden until a head is selected. The detector detail panel
+        # deliberately gets a larger share so selected detector lines remain
+        # readable instead of huddled at the bottom of the chart.
         "xaxis": {"domain": [0, 1], "anchor": "y", "showticklabels": False,
                   "gridcolor": "#e0d6c0"},
-        "yaxis": {"domain": [0.45, 1], "title": {"text": "Fused Z", "font": {"size": 15}},
+        "yaxis": {"domain": [0.57, 1], "title": {"text": "Fused Z", "font": {"size": 15}},
                   "tickfont": {"size": 13}, "gridcolor": "#e0d6c0"},
         "xaxis2": {"domain": [0, 1], "anchor": "y2", "showticklabels": False, "matches": "x"},
-        "yaxis2": {"domain": [0.25, 0.42], "title": {"text": "", "font": {"size": 12}},
+        "yaxis2": {"domain": [0.38, 0.51], "title": {"text": "", "font": {"size": 12}},
                    "tickfont": {"size": 13}},
         "xaxis3": {"domain": [0, 1], "anchor": "y3", "matches": "x", "title": {"text": "Time", "font": {"size": 15}},
                    "tickfont": {"size": 13}, "gridcolor": "#e0d6c0"},
-        "yaxis3": {"domain": [0, 0.2], "title": {"text": "Detector Z", "font": {"size": 14}},
+        "yaxis3": {"domain": [0, 0.32], "title": {"text": "Detector Z", "font": {"size": 14}},
                    "tickfont": {"size": 13}, "gridcolor": "#e0d6c0"},
     }
 
@@ -1506,6 +1586,29 @@ def detector_stats_table(s: pd.DataFrame) -> str:
         "<div class='diag-box diag-detectors'><span class='diag-label'>Detector Z-Scores</span>"
         "<div class='mini-table-scroll'><table class='mini-table'><thead><tr>"
         + header + "</tr></thead><tbody>" + "".join(rows) + "</tbody></table></div></div>")
+
+
+def palette_controls(chart_id: str) -> str:
+    """Render detector palette buttons for one chart."""
+    buttons = []
+    for i, (name, palette) in enumerate(DETECTOR_PALETTES.items()):
+        swatches = "".join(
+            f"<span class='palette-swatch' style='background:{html.escape(color)}'></span>"
+            for color in palette.values()
+        )
+        active = " active" if i == 0 else ""
+        label = name.replace("_", " ").title()
+        buttons.append(
+            f"<button type='button' class='palette-btn{active}' "
+            f"data-chart='{html.escape(chart_id)}' data-palette='{html.escape(name)}'>"
+            f"{html.escape(label)}<span class='palette-swatches'>{swatches}</span></button>"
+        )
+    return (
+        "<div class='chart-controls'>"
+        "<span class='chart-control-label'>Detector colors</span>"
+        + "".join(buttons) +
+        "</div>"
+    )
 
 
 def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Optional[list[str]]) -> None:
@@ -1627,7 +1730,8 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
             f"<h4>{html.escape(meta['asset_key'])}</h4>"
             f"<div class='asset-card-grid'>"
             f"<div class='asset-card-chart'>"
-            f"<div class='chart-container' id='{chart_id}' style='height:760px;'></div>"
+            f"{palette_controls(chart_id)}"
+            f"<div class='chart-container' id='{chart_id}' style='height:980px;'></div>"
             f"<p class='chart-note'>Chart values use raw ACM score rows; visible labels round to 2 decimals.</p>"
             f"</div>"
             f"<div class='asset-card-diag'>{diag_boxes}</div>"
@@ -1717,6 +1821,8 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
     scope = f"farm {farm}" if farm else (f"{len(assets)} selected assets" if picks else "fleet")
     timestamp = format_report_datetime(datetime.now().astimezone().isoformat())
     chart_specs_json = json.dumps(chart_specs)
+    detector_palettes_json = json.dumps(DETECTOR_PALETTES)
+    detector_names_json = json.dumps({detector_label(k): k for k in Z_COLS})
 
     html_content = f"""<!doctype html>
 <html lang="en">
@@ -1818,6 +1924,8 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
     <script>
     (function() {{
         var specs = {chart_specs_json};
+        var detectorPalettes = {detector_palettes_json};
+        var detectorNameToKey = {detector_names_json};
         var config = {{responsive: true, displaylogo: false,
                        modeBarButtonsToRemove: ['lasso2d', 'select2d']}};
         function layoutForWidth(baseLayout, width) {{
@@ -1847,6 +1955,32 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
             Plotly.newPlot(el, spec.data, layoutForWidth(spec.layout, el.clientWidth), config);
             window.addEventListener('resize', function() {{
                 Plotly.relayout(el, layoutForWidth(spec.layout, el.clientWidth));
+            }});
+        }});
+
+        function applyPalette(chartId, paletteName) {{
+            var el = document.getElementById(chartId);
+            var palette = detectorPalettes[paletteName];
+            if (!el || !palette || !el.data) return;
+            var colors = [];
+            var traceIndexes = [];
+            el.data.forEach(function(trace, i) {{
+                var key = detectorNameToKey[trace.name];
+                if (!key || !palette[key]) return;
+                colors.push(palette[key]);
+                traceIndexes.push(i);
+            }});
+            if (traceIndexes.length) {{
+                Plotly.restyle(el, {{'line.color': colors, 'marker.color': colors}}, traceIndexes);
+            }}
+            document.querySelectorAll('.palette-btn[data-chart="' + chartId + '"]').forEach(function(btn) {{
+                btn.classList.toggle('active', btn.getAttribute('data-palette') === paletteName);
+            }});
+        }}
+
+        document.querySelectorAll('.palette-btn').forEach(function(btn) {{
+            btn.addEventListener('click', function() {{
+                applyPalette(btn.getAttribute('data-chart'), btn.getAttribute('data-palette'));
             }});
         }});
     }})();
