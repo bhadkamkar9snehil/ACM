@@ -876,6 +876,32 @@ def format_calibration_human(calib_json: Optional[str]) -> Optional[tuple[str, d
     return summary, tuning_kv
 
 
+def format_override_human(override_json: Optional[str]) -> Optional[str]:
+    """Convert a run's override_json (the raw ablation --override CLI JSON, see
+    scripts/acm_run.py) into one human-readable "dotted.path=value" summary line."""
+    if not override_json or pd.isna(override_json):
+        return None
+    try:
+        override = json.loads(override_json)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(override, dict) or not override:
+        return None
+
+    def _flatten(d: dict, prefix: str = "") -> list[str]:
+        pairs = []
+        for k, v in d.items():
+            path = f"{prefix}.{k}" if prefix else k
+            if isinstance(v, dict):
+                pairs.extend(_flatten(v, path))
+            else:
+                pairs.append(f"{path}={json.dumps(v)}")
+        return pairs
+
+    pairs = _flatten(override)
+    return "Ablation override active: " + ", ".join(pairs) if pairs else None
+
+
 def format_culprits_human(notes: Optional[str]) -> Optional[str]:
     """Convert a run's notes field (e.g. "culprits: ch1, ch2, ch3") into one human-readable line."""
     if not notes or pd.isna(notes):
@@ -1207,6 +1233,7 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
         data_quality = (format_data_quality_human(run_row.get("data_quality_json")) if run_row is not None else None) \
             or data_quality_fallback
         calibration = format_calibration_human(run_row.get("calibration_json")) if run_row is not None else None
+        override = format_override_human(run_row.get("override_json")) if run_row is not None else None
         culprits = format_culprits_human(run_row.get("notes")) if run_row is not None else None
 
         diag_boxes = f"<div class='diag-box'><span class='diag-label'>Data Quality</span>{html.escape(data_quality)}</div>"
@@ -1219,6 +1246,8 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
                     for k, v in tuning_kv.items())
                 calib_html += f"<dl class='diag-kv-list'>{kv_items}</dl>"
             diag_boxes += f"<div class='diag-box'><span class='diag-label'>Calibration</span>{calib_html}</div>"
+        if override:
+            diag_boxes += f"<div class='diag-box'><span class='diag-label'>Ablation Override</span>{html.escape(override)}</div>"
         if culprits:
             diag_boxes += f"<div class='diag-box'><span class='diag-label'>Culprits</span>{html.escape(culprits)}</div>"
         diag_boxes += detector_stats_table(s)
@@ -1279,6 +1308,7 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
 
         data_quality_line = format_data_quality_human(getattr(r, "data_quality_json", None))
         calibration = format_calibration_human(getattr(r, "calibration_json", None))
+        override_line = format_override_human(getattr(r, "override_json", None))
         culprits_line = format_culprits_human(getattr(r, "notes", None))
         if data_quality_line:
             diag_html += f"<div class='diag-line'>Data: {html.escape(data_quality_line)}</div>"
@@ -1290,6 +1320,8 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
                     f"<dt>{html.escape(k)}</dt><dd>{html.escape(v)}</dd>"
                     for k, v in tuning_kv.items())
                 diag_html += f"<dl class='diag-kv-list'>{kv_items}</dl>"
+        if override_line:
+            diag_html += f"<div class='diag-line'>{html.escape(override_line)}</div>"
         if culprits_line:
             diag_html += f"<div class='diag-line'>{html.escape(culprits_line)}</div>"
 

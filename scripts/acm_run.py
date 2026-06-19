@@ -37,6 +37,7 @@ os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
 
 import argparse
 import glob
+import json
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -62,9 +63,20 @@ _DIM = "\x1b[2m"
 _BLD = "\x1b[1m"
 _RST = "\x1b[0m"
 
+from core.ml_defaults import ML_DEFAULTS                            # noqa: E402
 from core.pipeline import Z_COLS, score_asset                       # noqa: E402
 from scripts.acm_feed import MIN_TRAIN_DAYS, frame_sensors          # noqa: E402
 from scripts.acm_store import Store, alarm_episodes, ingest_result  # noqa: E402
+
+
+def _deep_merge(base: dict, patch: dict) -> dict:
+    result = dict(base)
+    for k, v in patch.items():
+        if k in result and isinstance(result[k], dict) and isinstance(v, dict):
+            result[k] = _deep_merge(result[k], v)
+        else:
+            result[k] = v
+    return result
 
 
 def infer_score_days(ts: pd.Series, min_train_days: float = MIN_TRAIN_DAYS) -> float:
@@ -106,7 +118,7 @@ def load_frame(args, source: str) -> pd.DataFrame:
     return df.sort_values(args.timestamp_col)
 
 
-def run_one(args, source: str, asset_key: str) -> Dict:
+def run_one(args, source: str, asset_key: str, cfg: Optional[dict] = None) -> Dict:
     df = load_frame(args, source)
     ts = df[args.timestamp_col]
     if args.score_from:
@@ -129,7 +141,9 @@ def run_one(args, source: str, asset_key: str) -> Dict:
     train_raw, train_status = frame_sensors(train_df, args.timestamp_col, args.status_col)
     score_raw, score_status = frame_sensors(score_df, args.timestamp_col, args.status_col)
     res = score_asset(train_raw=train_raw, score_raw=score_raw,
-                      train_status=train_status, score_status=score_status)
+                      train_status=train_status, score_status=score_status, cfg=cfg)
+    if args.override:
+        res.override_json = args.override
     return {"asset_key": asset_key, "result": res, "split_note": split_note}
 
 
@@ -154,7 +168,16 @@ def main() -> int:
     out.add_argument("--group", default="fleet", help="asset group name in the store")
     out.add_argument("--report", default=None, help="also write an HTML report here")
     ap.add_argument("--workers", type=int, default=1)
+    ap.add_argument("--override", default=None, metavar="JSON",
+                    help="JSON deep-merged onto core.ml_defaults.ML_DEFAULTS for ablation "
+                         "testing, e.g. '{\"models\": {\"omr\": {\"enabled\": false}}}'")
     args = ap.parse_args()
+
+    cfg: Optional[dict] = None
+    if args.override:
+        patch = json.loads(args.override)
+        cfg = _deep_merge(dict(ML_DEFAULTS), patch)
+        print(f"[ablation] ML_DEFAULTS patched with: {args.override}")
 
     sources: List[tuple] = []
     if args.csv:
@@ -171,10 +194,10 @@ def main() -> int:
     if args.workers > 1 and len(sources) > 1:
         import concurrent.futures as cf
         with cf.ProcessPoolExecutor(max_workers=args.workers) as pool:
-            futs = [pool.submit(run_one, args, s, k) for s, k in sources]
+            futs = [pool.submit(run_one, args, s, k, cfg) for s, k in sources]
             outputs = [f.result() for f in cf.as_completed(futs)]
     else:
-        outputs = [run_one(args, s, k) for s, k in sources]
+        outputs = [run_one(args, s, k, cfg) for s, k in sources]
 
     # header
     print(flush=True)

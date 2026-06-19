@@ -242,6 +242,25 @@ Run ablation configs **sequentially**: each spawns its own `--workers` pool, and
 multiply total worker/memory usage. Farm A (22 events) is fast enough for quick iteration;
 Farm B/C are larger and better for confirming an effect holds at scale.
 
+### Ablation testing on any CSV (not just CARE)
+
+`scripts/acm_run.py` takes the same `--override` flag, so ablation isn't tied to the CARE
+benchmark - it works on any CSV/SQL source `acm_run.py` already accepts:
+
+```bash
+python scripts/acm_run.py --csv pump7.csv --timestamp-col time_stamp \
+  --override '{"models": {"omr": {"enabled": false}}}' \
+  --report pump7_no_omr.html --db acm_results.db
+```
+
+The override is carried all the way into the HTML report: any asset scored with `--override`
+shows an **"Ablation Override"** box (same place as the Data Quality / Calibration boxes) listing
+exactly which `ml_defaults` keys were patched for that run, and the "Scoring Operations" history
+table shows it per-run too. Runs without `--override` show no such box - there's nothing to
+distinguish a normal run from an ablation run except this label, by design, so you can mix
+baseline and ablation runs in the same report/database and still tell them apart later. See
+`docs/report-flow-testing.md` for the full report-flow walkthrough.
+
 ---
 
 ## Repository Map

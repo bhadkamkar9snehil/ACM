@@ -63,6 +63,7 @@ class PipelineResult:
     runtime_s: float = 0.0
     calibration_json: Optional[str] = None   # detector weights + tuning diagnostics (#65)
     data_quality_json: Optional[str] = None  # NaN density, duplicates, skew (#66)
+    override_json: Optional[str] = None      # ablation --override JSON, set post-hoc by callers (#79)
 
 
 def score_asset(

@@ -90,6 +90,30 @@ Visually check:
 - Diagnostic tables render: Asset Summary, Data Quality, Rule Diagnostics, Calibration, Detector Z-Scores, Alarm History.
 - On narrow screens, long asset names wrap and wide tables scroll horizontally inside their table panels.
 
+## 5. Ablation Testing Through the Report Flow
+
+`acm_run.py --override` (see README -> Ablation Testing) is wired directly into this same report
+flow - no separate tooling. Pass both flags together:
+
+```powershell
+python scripts/acm_run.py `
+  --csv sim_data\generated\pump_bearing_wear_for_acm.csv `
+  --timestamp-col time_stamp `
+  --override '{"models": {"omr": {"enabled": false}}}' `
+  --report artifacts\report-flow\pump_no_omr.html
+```
+
+Open the report and check the asset's detail card: an **"Ablation Override"** diagnostic box
+appears alongside Data Quality and Calibration, listing the patched `ml_defaults` path(s) (e.g.
+`models.omr.enabled=false`). The same line appears in that run's row in the "Scoring Operations"
+history table. A run made without `--override` shows neither - there is no override box to
+compare against, which is the expected baseline state.
+
+This means you can score the same CSV multiple times with different `--override` values into the
+same `--db`, then generate one report covering all of them (`acm_report.py --db ... --assets ...`)
+and visually compare ablation runs side by side in the Scoring Operations table, without needing
+a different tool than the one used for ordinary report-flow testing.
+
 ## Teammate Command Template
 
 For a specific dataset, change only the CSV path, timestamp column, and report output name:
