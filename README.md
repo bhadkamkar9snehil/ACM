@@ -2,40 +2,6 @@
 
 ACM watches industrial assets and tells you when something is wrong — **with no labels, no training-data preparation, and no human tuning**. Point it at any asset's raw sensor history (CSV, SQL, OPC UA, or MQTT): it learns what normal looks like from the first tick, sets its own alarm thresholds, names the sensors driving every alarm, and retains everything in SQLite or SQL Server.
 
-## Interface Preview
-
-ACM features a fully responsive industrial control panel with **14 themes** — 5 dark, 9 light — across four tabs.
-
----
-
-### Fleet Operator View
-
-| Factory (dark) | Forge Dark | Solarised (light) |
-|---|---|---|
-| ![Factory — Operator](docs/screenshots/factory_operator.png) | ![Forge Dark — Operator](docs/screenshots/forge_operator.png) | ![Solarised — Operator](docs/screenshots/solarised_operator.png) |
-
-*Real-time fleet health KPIs, asset state badges, unified hierarchical alarm timelines, and one-click acknowledgments.*
-
----
-
-### Reliability Engineer View
-
-| Factory (dark) | Forge Dark | Solarised (light) |
-|---|---|---|
-| ![Factory — Engineer](docs/screenshots/factory_engineer.png) | ![Forge Dark — Engineer](docs/screenshots/forge_engineer.png) | ![Solarised — Engineer](docs/screenshots/solarised_engineer.png) |
-
-*Fused anomaly score chart, six-detector heatmap strip, culprit sensor ranking, and daily diagnostic stats.*
-
----
-
-### Admin / ML Ops View
-
-| Factory (dark) | Forge Dark | Solarised (light) |
-|---|---|---|
-| ![Factory — Admin](docs/screenshots/factory_admin.png) | ![Forge Dark — Admin](docs/screenshots/forge_admin.png) | ![Solarised — Admin](docs/screenshots/solarised_admin.png) |
-
-*Service health metrics, monitored asset registry, live configuration table with audit trail, and backend run logs.*
-
 ---
 
 ## Quick Start
