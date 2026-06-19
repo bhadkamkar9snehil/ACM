@@ -1,7 +1,7 @@
 # ACM — Codebase Knowledge Base
 
 > Maintained for future agents. Update this file whenever you learn something new about the codebase.
-> Last updated: 2026-06-18 — ML pipeline bug fixes (#61-#67) + research paper planning / CARE ablation session + GMM PCA pre-reduction fix (Farm C generality) + OMR in-sample-bias/premature-clip fix + targeted Farm C re-validation + self-distrust gate magnitude-saturation fix + paper draft (Markdown) + detector-enable ablation wiring fix + fusion auto-tuning wiring gap discovered + paper System Architecture section + full Farm C 58-event re-validation (omr_z over-sensitivity found) + OMR kurt/skew exclusion fix (#72) — Farm A exact-match, Farm C mixed result (precision/false-alarms up, recall down 2 events) + Farm B first full result (recall=0.333, worst of 3 farms) + TEP benchmark candidate feasibility confirmed + empty-rule_fired gap root-caused (two mechanisms, not yet fixed) + contamination-filter fix for rate/per-head threshold REJECTED (broke ACM's own false-alarm-resistance tests; cleanly reverted, zero net code change) + empty-rule_fired diagnosis CORRECTED (prior "two mechanisms / never crosses threshold" premise proven WRONG by multi-angle measurement: fused_max is above alert_z for 6/8 misses; fused score does NOT separate 6/8 misses from normal Farm C operation by any statistic; the 8 misses are 4 distinct situations — sub-cadence, availability-domain, genuinely-indistinguishable, separable-but-rule-shape — most NOT fixable at the alarm-rule layer; Farm C recall is bounded by event detectability mix, not pipeline quality)
+> Last updated: 2026-06-19 — ML pipeline bug fixes (#61-#67) + research paper planning / CARE ablation session + GMM PCA pre-reduction fix (Farm C generality) + OMR in-sample-bias/premature-clip fix + targeted Farm C re-validation + self-distrust gate magnitude-saturation fix + paper draft (Markdown) + detector-enable ablation wiring fix + fusion auto-tuning wiring gap discovered + paper System Architecture section + full Farm C 58-event re-validation (omr_z over-sensitivity found) + OMR kurt/skew exclusion fix (#72) — Farm A exact-match, Farm C mixed result (precision/false-alarms up, recall down 2 events) + Farm B first full result (recall=0.333, worst of 3 farms) + TEP benchmark candidate feasibility confirmed + empty-rule_fired gap root-caused (two mechanisms, not yet fixed) + contamination-filter fix for rate/per-head threshold REJECTED (broke ACM's own false-alarm-resistance tests; cleanly reverted, zero net code change) + empty-rule_fired diagnosis CORRECTED (prior "two mechanisms / never crosses threshold" premise proven WRONG by multi-angle measurement: fused_max is above alert_z for 6/8 misses; fused score does NOT separate 6/8 misses from normal Farm C operation by any statistic; the 8 misses are 4 distinct situations — sub-cadence, availability-domain, genuinely-indistinguishable, separable-but-rule-shape — most NOT fixable at the alarm-rule layer; Farm C recall is bounded by event detectability mix, not pipeline quality) + self-distrust gate SATURATION_FRAC_FLOOR hardcoded-magic-number regression found and fixed (was a bare 0.2 constant eyeballed against 4 CARE events, violating the file's own "calculated from asset's own history" principle — replaced with a per-asset calculated floor; zero KPI regression on Farm A/C)
 
 ---
 
@@ -50,9 +50,10 @@
 41. [Empty-rule_fired gap (two mechanisms) — SUPERSEDED (2026-06-18)](#empty-rule_fired-gap--root-caused-two-distinct-mechanisms-found-not-yet-fixed-open-decision-2026-06-18)
 42. [Contamination-filter fix attempt — rejected (2026-06-18)](#contamination-filter-fix-attempt-for-the-empty-rule_fired-gap--rejected-2026-06-18)
 43. [Empty-rule_fired gap — CORRECTED diagnosis (2026-06-18)](#empty-rule_fired-gap--corrected-diagnosis-the-premise-was-wrong-2026-06-18) ← **current correct understanding**
-44. [Known Issues (Track as GitHub Issues)](#known-issues-track-as-github-issues)
-45. [Standing Rule: Flag Architecture-Violating Suggestions](#standing-rule-flag-architecture-violating-suggestions-dont-suppress-them) ← **Read before giving any suggestion**
-46. [User Working Style](#user-working-style)
+44. [Self-distrust gate SATURATION_FRAC_FLOOR magic-number regression — found and fixed (2026-06-19)](#self-distrust-gate-saturation_frac_floor-magic-number-regression--found-and-fixed-2026-06-19)
+45. [Known Issues (Track as GitHub Issues)](#known-issues-track-as-github-issues)
+46. [Standing Rule: Flag Architecture-Violating Suggestions](#standing-rule-flag-architecture-violating-suggestions-dont-suppress-them) ← **Read before giving any suggestion**
+47. [User Working Style](#user-working-style)
 
 ---
 
@@ -2651,6 +2652,113 @@ not a single failure mode and most are not score-rule problems at all:
 
 **Files**: no code changes — diagnostic-only re-investigation against saved score CSVs +
 `event_info.csv`. The prior "two mechanisms" section is now SUPERSEDED (banner added inline there).
+
+---
+
+## Self-distrust gate SATURATION_FRAC_FLOOR magic-number regression — found and fixed (2026-06-19)
+> *Added: 2026-06-19 — user-reported regression: "Why the fuck was threshold fixed at all??? We
+> always wanted that calculated properly... Some commit in the last 1-2 days introduced this silent
+> regression." Confirmed correct on investigation.*
+
+### The regression
+
+Commit `004c657` (2026-06-17, "Self-distrust gate magnitude-saturation fix" section above)
+introduced two new module constants in `core/alarm_rules.py`:
+```python
+SATURATION_Z = 9.0
+SATURATION_FRAC_FLOOR = 0.2
+```
+`SATURATION_Z` is structurally sound — it's anchored to `core/fuse.py`'s pre-existing,
+architecture-wide ±10.0 hard z-clip (`np.clip(z, -10.0, 10.0)`, applies identically to every
+detector on every asset), so 9.0 = 90% of a universal, dataset-independent ceiling.
+
+`SATURATION_FRAC_FLOOR = 0.2` was different and wrong: a bare constant with **zero per-asset
+derivation**, picked by eyeballing exactly 4 known CARE events (Farm A event 92 false alarm:
+near_sat≈0.051; Farm C events 9/47/70 genuine anomalies: near_sat 0.465–1.0) and choosing 0.2 to
+separate them. This violates `core/alarm_rules.py`'s own stated design principle, present in its
+module docstring and consistently followed by every OTHER threshold in the file: "Every threshold
+is derived from the asset's OWN unlabelled history; no labels, no per-site tuning." Every other
+rule in the file follows the same idiom — calculate a per-asset baseline, then apply a fixed
+SAFETY-margin proportion on top of it (e.g. `rate_thr = clip(base * SAFETY + 0.05, 0.05, 0.9)`,
+`thr_h = clip(base_h * SAFETY + 0.05, 0.05, 0.9)`, with `SAFETY=1.5` a pre-existing structural
+constant). `SATURATION_FRAC_FLOOR` was the one threshold that skipped the "calculate a baseline"
+step entirely and went straight to a fixed number — silently re-introducing dataset-specific tuning
+into a system whose entire premise is running unsupervised, with zero per-site/per-dataset tuning.
+
+### Fix (`core/alarm_rules.py`)
+
+Replaced the fixed floor with a calculated one, following the exact same idiom as the rest of the
+file:
+```python
+SATURATION_FLOOR_MIN = 0.05   # additive headroom, same role as the "+ 0.05" in rate_thr/thr_h
+
+def _train_saturation_rate(z_train: Optional[np.ndarray]) -> float:
+    """Fraction of THIS asset's own training/calibration z-values that
+    already sit at/above the saturation ceiling -- the calculated,
+    per-asset baseline the score-side excursion must clear."""
+    if z_train is None:
+        return 0.0
+    zt = np.asarray(z_train, dtype=np.float64)
+    zt = zt[np.isfinite(zt)]
+    if zt.size == 0:
+        return 0.0
+    return float(np.mean(zt >= SATURATION_Z))
+
+def _broken_baseline(mask, eval_start, z_values, z_train) -> bool:
+    ...
+    near_sat = float(np.mean(z_in_mask >= SATURATION_Z))
+    base_sat = _train_saturation_rate(z_train)
+    floor = float(np.clip(base_sat * SAFETY + SATURATION_FLOOR_MIN, SATURATION_FLOOR_MIN, 1.0))
+    return near_sat < floor
+```
+`_broken_baseline()` now takes the asset's own training-side z-array (`train_fused` for the
+sustained/rate rules, each head's own `train` z-array for the per-head rule, already threaded
+through `apply_alarm_rules()`'s existing call sites — no upstream signature changes needed since
+`core/pipeline.py` already passes `train_fused`/`head_z_train` into `apply_alarm_rules()`). The
+floor each asset must clear to be trusted now scales with how often THAT asset's own training data
+already sits near the saturation ceiling — exactly the same calculated-baseline-plus-safety-margin
+pattern as every other threshold in the file, not a constant tuned against CARE's answer key.
+
+### Validation
+
+1. **17/17 `tests/test_ml.py` pass unchanged.**
+2. **Exact reproduction of the 4 events the original 0.2 was tuned against** — Farm A event 92
+   stays distrusted, Farm C events 9/47/70 stay un-distrusted, confirmed via direct
+   `apply_alarm_rules()` re-invocation against saved score CSVs.
+3. **Full OLD-vs-NEW binary-detection diff, Farm A (22 events) + Farm C (58 events), 80 events
+   total** — built a reusable comparison script
+   (`results/saturation_floor_fix/validation_script.py`, re-evaluates saved score CSVs via
+   `apply_alarm_rules()` exactly like `care_benchmark.py`'s own `try_reuse_event()`, so no full
+   pipeline re-run was needed since this fix is isolated to the alarm-rule layer) and ran it once
+   against the pre-fix code (via `git stash`) and once against the fix:
+   - **Zero binary `detected` flips across all 80 events** — every single anomaly/normal
+     classification is identical before and after.
+   - Exactly **one diagnostic-string-only difference**: Farm C event 30 (a confirmed genuine
+     anomaly, "Pitch failure - defect fan on pitch motor") goes from
+     `sustained+rate+avail+heads:pca_t2_z,iforest_z(distrusted:heads:ar1_z,pca_spe_z,omr_z)` to
+     `sustained+rate+avail+heads:ar1_z,pca_t2_z,iforest_z,omr_z(distrusted:heads:pca_spe_z)` — MORE
+     heads correctly firing instead of being wrongly distrusted. `detected=True` under both old and
+     new logic (the `sustained`/`rate` rules already fired either way) — a pure diagnostic-quality
+     improvement, not a KPI change.
+   - **Farm A: recall=1.0 (12/12), false_alarms=1/10 — identical, old and new.**
+   - **Farm C: recall=0.704 (19/27), false_alarms=5/31 — identical, old and new.**
+
+   Saved: `results/saturation_floor_fix/{old_logic,new_logic}_farmA_farmC.csv` + `summary.json`
+   (gitignored/local, per the repo's established results/ convention — durable record is this
+   section).
+
+**Read on why this validation approach was sufficient without a full pipeline re-run**: this fix
+is confined entirely to `apply_alarm_rules()`/`_broken_baseline()` — it does not touch detector
+fitting, calibration, or fusion. Re-evaluating the alarm-rule layer against already-scored,
+already-calibrated CSVs (the same crash-proof-resume pattern `care_benchmark.py` already uses in
+`try_reuse_event()`) exercises the exact code path that changed, with the exact same inputs a full
+pipeline run would produce. A full Farm A/B/C `score_asset()` re-run would re-verify the detector
+layer too, but that layer was untouched by this fix.
+
+**Files changed**: `core/alarm_rules.py` (`SATURATION_FRAC_FLOOR` constant removed, replaced by
+`SATURATION_FLOOR_MIN` + new `_train_saturation_rate()` helper; `_broken_baseline()` signature
+gains a `z_train` parameter; all three call sites updated to pass each rule's own training-side
+z-array). Committed on `claude/research-paper-planning-ests5l`, merged to `main`.
 
 ---
 
