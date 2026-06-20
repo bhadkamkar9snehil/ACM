@@ -1,7 +1,7 @@
 # ACM  Codebase Knowledge Base
 
 > Maintained for future agents. Update this file whenever you learn something new about the codebase.
-> Last updated: 2026-06-19  ML pipeline bug fixes (#61-#67) + research paper planning / CARE ablation session + GMM PCA pre-reduction fix (Farm C generality) + OMR in-sample-bias/premature-clip fix + targeted Farm C re-validation + self-distrust gate magnitude-saturation fix + paper draft (Markdown) + detector-enable ablation wiring fix + fusion auto-tuning wiring gap discovered + paper System Architecture section + full Farm C 58-event re-validation (omr_z over-sensitivity found) + OMR kurt/skew exclusion fix (#72)  Farm A exact-match, Farm C mixed result (precision/false-alarms up, recall down 2 events) + Farm B first full result (recall=0.333, worst of 3 farms) + TEP benchmark candidate feasibility confirmed + empty-rule_fired gap root-caused (two mechanisms, not yet fixed) + contamination-filter fix for rate/per-head threshold REJECTED (broke ACM's own false-alarm-resistance tests; cleanly reverted, zero net code change) + empty-rule_fired diagnosis CORRECTED (prior "two mechanisms / never crosses threshold" premise proven WRONG by multi-angle measurement: fused_max is above alert_z for 6/8 misses; fused score does NOT separate 6/8 misses from normal Farm C operation by any statistic; the 8 misses are 4 distinct situations  sub-cadence, availability-domain, genuinely-indistinguishable, separable-but-rule-shape  most NOT fixable at the alarm-rule layer; Farm C recall is bounded by event detectability mix, not pipeline quality) + self-distrust gate SATURATION_FRAC_FLOOR hardcoded-magic-number regression found and fixed (was a bare 0.2 constant eyeballed against 4 CARE events, violating the file's own "calculated from asset's own history" principle  replaced with a per-asset calculated floor; zero KPI regression on Farm A/C) + CSV-agnostic ablation testing wired into acm_run.py + HTML report flow (#79)
+> Last updated: 2026-06-19  ML pipeline bug fixes (#61-#67) + research paper planning / CARE ablation session + GMM PCA pre-reduction fix (Farm C generality) + OMR in-sample-bias/premature-clip fix + targeted Farm C re-validation + self-distrust gate magnitude-saturation fix + paper draft (Markdown) + detector-enable ablation wiring fix + fusion auto-tuning wiring gap discovered + paper System Architecture section + full Farm C 58-event re-validation (omr_z over-sensitivity found) + OMR kurt/skew exclusion fix (#72)  Farm A exact-match, Farm C mixed result (precision/false-alarms up, recall down 2 events) + Farm B first full result (recall=0.333, worst of 3 farms) + TEP benchmark candidate feasibility confirmed + empty-rule_fired gap root-caused (two mechanisms, not yet fixed) + contamination-filter fix for rate/per-head threshold REJECTED (broke ACM's own false-alarm-resistance tests; cleanly reverted, zero net code change) + empty-rule_fired diagnosis CORRECTED (prior "two mechanisms / never crosses threshold" premise proven WRONG by multi-angle measurement: fused_max is above alert_z for 6/8 misses; fused score does NOT separate 6/8 misses from normal Farm C operation by any statistic; the 8 misses are 4 distinct situations  sub-cadence, availability-domain, genuinely-indistinguishable, separable-but-rule-shape  most NOT fixable at the alarm-rule layer; Farm C recall is bounded by event detectability mix, not pipeline quality) + self-distrust gate SATURATION_FRAC_FLOOR hardcoded-magic-number regression found and fixed (was a bare 0.2 constant eyeballed against 4 CARE events, violating the file's own "calculated from asset's own history" principle  replaced with a per-asset calculated floor; zero KPI regression on Farm A/C) + CSV-agnostic ablation testing wired into acm_run.py + HTML report flow (#79) + public validation dataset adapters/report evidence (#83/#84)
 
 ---
 
@@ -70,9 +70,10 @@ script/command change complete until the README reflects it.
 43. [Empty-rule_fired gap  CORRECTED diagnosis (2026-06-18)](#empty-rule_fired-gap--corrected-diagnosis-the-premise-was-wrong-2026-06-18)  **current correct understanding**
 44. [Self-distrust gate SATURATION_FRAC_FLOOR magic-number regression  found and fixed (2026-06-19)](#self-distrust-gate-saturation_frac_floor-magic-number-regression--found-and-fixed-2026-06-19)
 45. [CSV-agnostic ablation testing wired into acm_run.py + report flow (2026-06-19)](#csv-agnostic-ablation-testing-wired-into-acm_runpy--report-flow-2026-06-19)
-46. [Known Issues (Track as GitHub Issues)](#known-issues-track-as-github-issues)
-47. [Standing Rule: Flag Architecture-Violating Suggestions](#standing-rule-flag-architecture-violating-suggestions-dont-suppress-them)  **Read before giving any suggestion**
-48. [User Working Style](#user-working-style)
+46. [Public validation datasets and report evidence (2026-06-20)](#public-validation-datasets-and-report-evidence-2026-06-20)
+47. [Known Issues (Track as GitHub Issues)](#known-issues-track-as-github-issues)
+48. [Standing Rule: Flag Architecture-Violating Suggestions](#standing-rule-flag-architecture-violating-suggestions-dont-suppress-them)  **Read before giving any suggestion**
+49. [User Working Style](#user-working-style)
 
 ---
 
@@ -2846,6 +2847,74 @@ at the correct section, not just a changelog mention)
 `scripts/acm_report.py`, `README.md`, `docs/report-flow-testing.md`. Committed `1b3631e` on
 `claude/research-paper-planning-ests5l`, merged (fast-forward) and pushed to `main`. Issue #79
 closed with this commit reference.
+
+---
+
+## Public validation datasets and report evidence (2026-06-20)
+> *Added: 2026-06-20  issues #83 and #84*
+
+`scripts/download_validation_datasets.py` is now the public-dataset adapter entrypoint. It downloads
+or adapts public validation datasets into the same CSV shape ACM already accepts: a `timestamp`
+column plus numeric channels only. Labels and known event windows are written separately as
+`labels*.csv` and `known_events.csv`; labels must never enter `acm_run.py` model input.
+
+Supported adapter names: `metropt3`, `batadal`, `smd`, `ai4i`, `secom`, `cmapss`, `milling`,
+`bearing`, `tep`, and `skab` (retained for stress testing, not paper evidence). Default destination:
+`data/public_datasets/`, which is local-only and gitignored. Multi-asset adapters accept
+`--max-assets` for sample runs.
+
+Representative commands:
+```bash
+python scripts/download_validation_datasets.py --dataset metropt3
+python scripts/download_validation_datasets.py --dataset batadal
+python scripts/download_validation_datasets.py --dataset smd --max-assets 10
+python scripts/download_validation_datasets.py --dataset secom
+python scripts/download_validation_datasets.py --dataset ai4i
+python scripts/download_validation_datasets.py --dataset cmapss --max-assets 10
+python scripts/download_validation_datasets.py --dataset milling
+python scripts/download_validation_datasets.py --dataset bearing --max-assets 3
+python scripts/download_validation_datasets.py --dataset tep
+```
+
+`tep` currently downloads Harvard Dataverse `.RData` files only. Raw files were successfully
+present locally after the 2026-06-20 run: `TEP_FaultFree_Testing.RData`,
+`TEP_FaultFree_Training.RData`, `TEP_Faulty_Testing.RData`, and `TEP_Faulty_Training.RData`.
+Conversion to ACM-ready CSV still needs an R/RData conversion path. RStudio being installed is not
+enough if `Rscript` is not on the PowerShell `PATH`; check with `Get-Command Rscript` before
+assuming conversion can run unattended.
+
+`bearing` direct download is simple but large (`nasa_bearing.zip`, about 1.08GB). The first adapter
+attempt produced only `manifest.json` and an empty `known_events.csv` because no asset CSVs were
+found from the current ZIP-entry matching rule. Treat bearing as adapter-fix-needed before scoring.
+
+`scripts/acm_report.py` now auto-discovers `data/public_datasets/adapted/*/known_events.csv` and
+adds validation evidence to generated HTML reports when asset names match public validation
+datasets. The report now shows:
+- top-level known events in scored window, hits, misses, event recall, alarm episodes, alarm
+  episodes without known-event overlap, and alarm episode hours;
+- per-asset score coverage: scored rows, alarm rows/rate, alarm episodes/hours, fused peak/mean/P95,
+  and scored time span;
+- per-asset known-event match table with `HIT`, `MISSED`, or `OUTSIDE SCORE WINDOW`, first
+  overlapping alarm, lag, and peak fused score.
+
+Completed ACM smoke reports in `results/public_dataset_smoke/` on 2026-06-20:
+
+| Dataset | Known events in scored window | Hit | Missed | Event recall | Alarm episodes | Interpretation |
+|---|---:|---:|---:|---:|---:|---|
+| MetroPT-3 | 0 | 0 | 0 | N/A | 2 | Inconclusive: ACM alarmed in Aug-Sep, but known failures are Apr-Jul. Rerun with event-aligned split. |
+| BATADAL | 1 | 0 | 1 | 0.0% | 0 | Poor on current split/features: missed the one scored attack window. |
+| SMD sample (10 machines) | 74 | 28 | 46 | 37.8% | 29 | Best signal so far: real cross-domain detection, but recall is uneven and alarm episodes are broad. |
+| SECOM | 9 | 0 | 9 | 0.0% | 2 | Poor label alignment; likely wrong benchmark shape for ACM without a batch-process adapter. |
+
+Current effectiveness read: ACM is credible but not yet robust. SMD shows the detector stack finds
+real cross-domain signal without per-dataset tuning. BATADAL and SECOM expose gaps: BATADAL likely
+needs process-state consistency features, and SECOM is sparse snapshot classification rather than
+continuous asset telemetry. MetroPT-3 needs a benchmark runner that aligns score windows to the
+known failures before judging detection quality.
+
+Do not tune `ml_defaults.py` just to improve one public dataset. Follow the ML Improvement Loop:
+first fix benchmark protocol and reporting, then diagnose whether a miss is a general pipeline gap,
+then re-validate CARE before accepting any ML behavior change.
 
 ---
 

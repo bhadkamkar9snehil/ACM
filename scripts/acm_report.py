@@ -42,6 +42,7 @@ from typing import Any, Optional
 import numpy as np
 import pandas as pd
 
+ROOT = Path(__file__).resolve().parents[1]
 Z_COLS = ["ar1_z", "pca_spe_z", "pca_t2_z", "iforest_z", "gmm_z", "omr_z"]
 
 # Detector display names
@@ -656,6 +657,11 @@ tbody tr:hover {
     grid-column: 1 / -1;
 }
 
+.diag-score,
+.diag-validation {
+    grid-column: 1 / -1;
+}
+
 .asset-card-diag > .diag-box:first-child,
 .asset-card-diag > .mini-table:first-child {
     margin-top: 0;
@@ -693,6 +699,25 @@ tbody tr:hover {
 
 .diag-history .mini-table {
     min-width: 860px;
+}
+
+.diag-validation .mini-table {
+    min-width: 980px;
+}
+
+.event-hit {
+    color: var(--green);
+    font-weight: 800;
+}
+
+.event-missed {
+    color: var(--red);
+    font-weight: 800;
+}
+
+.event-outside {
+    color: var(--muted);
+    font-weight: 700;
 }
 
 .diag-history .timestamp {
@@ -1588,6 +1613,298 @@ def detector_stats_table(s: pd.DataFrame) -> str:
         + header + "</tr></thead><tbody>" + "".join(rows) + "</tbody></table></div></div>")
 
 
+def parse_mixed_datetime_series(values: pd.Series) -> pd.Series:
+    """Parse mixed report/event timestamp strings without assuming one format."""
+    try:
+        return pd.to_datetime(values, format="mixed", errors="coerce")
+    except TypeError:
+        return pd.to_datetime(values, errors="coerce")
+
+
+def intervals_overlap(a_start: Any, a_end: Any, b_start: Any, b_end: Any) -> bool:
+    """True when two closed timestamp intervals overlap."""
+    if pd.isna(a_start) or pd.isna(a_end) or pd.isna(b_start) or pd.isna(b_end):
+        return False
+    return max(a_start, b_start) <= min(a_end, b_end)
+
+
+def infer_validation_dataset(asset_key: str) -> Optional[str]:
+    """Map ACM asset keys/stems from public adapters back to validation dataset names."""
+    key = str(asset_key).lower()
+    for name in ("metropt3", "batadal", "cmapss", "milling", "secom", "ai4i", "bearing", "skab"):
+        if name in key:
+            return name
+    if "smd_" in key or "smd-machine" in key or "smd_machine" in key:
+        return "smd"
+    if "machine-" in key and "smd" in key:
+        return "smd"
+    return None
+
+
+def load_validation_events(root: Path = ROOT / "data" / "public_datasets" / "adapted") -> dict[str, pd.DataFrame]:
+    """Load known event windows from adapted public datasets, if present."""
+    events: dict[str, pd.DataFrame] = {}
+    if not root.exists():
+        return events
+    for path in sorted(root.glob("*/known_events.csv")):
+        try:
+            df = pd.read_csv(path)
+        except Exception:
+            continue
+        required = {"event_start", "event_end", "description"}
+        if not required.issubset(df.columns):
+            continue
+        df = df.copy()
+        df["event_start"] = parse_mixed_datetime_series(df["event_start"])
+        df["event_end"] = parse_mixed_datetime_series(df["event_end"])
+        df = df.dropna(subset=["event_start", "event_end"])
+        df["dataset"] = path.parent.name
+        df["source_file"] = str(path)
+        events[path.parent.name] = df
+    return events
+
+
+def filter_events_for_asset(dataset: str, asset_key: str, events: pd.DataFrame) -> pd.DataFrame:
+    """Restrict dataset event windows to the current asset when the adapter encodes asset identity."""
+    if events.empty:
+        return events
+    key = str(asset_key)
+    if dataset == "smd":
+        machine_match = re.search(r"(machine-\d+-\d+)", key)
+        if machine_match:
+            machine = machine_match.group(1)
+            return events[events["description"].astype(str).str.contains(machine, regex=False, na=False)].copy()
+    if dataset == "cmapss":
+        unit_match = re.search(r"unit0*(\d+)", key, flags=re.IGNORECASE)
+        fd_match = re.search(r"(FD\d+)", key, flags=re.IGNORECASE)
+        filtered = events
+        if fd_match:
+            filtered = filtered[filtered["description"].astype(str).str.contains(fd_match.group(1).upper(), regex=False, na=False)]
+        if unit_match:
+            token = f"unit {int(unit_match.group(1))}"
+            filtered = filtered[filtered["description"].astype(str).str.contains(token, regex=False, na=False)]
+        return filtered.copy()
+    if dataset == "batadal" and "train1" in key.lower():
+        return events[events["description"].astype(str).str.contains("train1", regex=False, na=False)].copy()
+    return events.copy()
+
+
+def score_coverage_box(s: pd.DataFrame, alarms_for_asset: Optional[pd.DataFrame]) -> str:
+    """Render score/alarm counts and score distribution for one asset."""
+    score_rows = len(s)
+    alarm_rows = int(s["alarm"].fillna(0).astype(bool).sum()) if "alarm" in s.columns else 0
+    alarm_rate = (alarm_rows / score_rows * 100.0) if score_rows else 0.0
+    fused = pd.to_numeric(s["fused"], errors="coerce") if "fused" in s.columns else pd.Series(dtype=float)
+    peak = f"{fused.max():.2f}" if fused.notna().any() else "-"
+    mean = f"{fused.mean():.2f}" if fused.notna().any() else "-"
+    p95 = f"{fused.quantile(0.95):.2f}" if fused.notna().any() else "-"
+    ts = parse_mixed_datetime_series(s["ts"]) if "ts" in s.columns else pd.Series(dtype="datetime64[ns]")
+    span = "-"
+    if ts.notna().any():
+        span = f"{format_report_datetime(ts.min())} to {format_report_datetime(ts.max())}"
+    episode_count = 0
+    alarm_hours = 0.0
+    if alarms_for_asset is not None and not alarms_for_asset.empty:
+        episode_count = int(len(alarms_for_asset))
+        if "duration_h" in alarms_for_asset.columns:
+            alarm_hours = float(pd.to_numeric(alarms_for_asset["duration_h"], errors="coerce").fillna(0).sum())
+    rows = [
+        ("Scored Rows", f"{score_rows:,}"),
+        ("Alarm Rows", f"{alarm_rows:,} ({alarm_rate:.2f}%)"),
+        ("Alarm Episodes", str(episode_count)),
+        ("Alarm Episode Hours", f"{alarm_hours:.2f}"),
+        ("Fused Peak / Mean / P95", f"{peak} / {mean} / {p95}"),
+        ("Scored Span", span),
+    ]
+    body = "".join(
+        f"<tr><td>{html.escape(k)}</td><td>{html.escape(v)}</td></tr>"
+        for k, v in rows
+    )
+    return (
+        "<div class='diag-box diag-score'><span class='diag-label'>Score Coverage</span>"
+        "<div class='mini-table-scroll'><table class='mini-table'><tbody>"
+        + body + "</tbody></table></div></div>"
+    )
+
+
+def validation_for_asset(
+    asset_key: str,
+    s: pd.DataFrame,
+    alarms_for_asset: Optional[pd.DataFrame],
+    validation_events: dict[str, pd.DataFrame],
+) -> tuple[dict[str, Any], str]:
+    """Compute known-event overlap evidence and render one asset validation box."""
+    dataset = infer_validation_dataset(asset_key)
+    base_summary: dict[str, Any] = {
+        "asset_key": asset_key,
+        "dataset": dataset,
+        "known_total": 0,
+        "events_in_span": 0,
+        "events_hit": 0,
+        "events_missed": 0,
+        "alarm_episodes": 0,
+        "alarm_episodes_without_event": 0,
+        "alarm_hours": 0.0,
+        "has_source": False,
+    }
+    if not dataset or dataset not in validation_events or s.empty or "ts" not in s.columns:
+        return base_summary, ""
+
+    events = filter_events_for_asset(dataset, asset_key, validation_events[dataset])
+    base_summary["known_total"] = int(len(events))
+    base_summary["has_source"] = True
+    if events.empty:
+        return base_summary, (
+            "<div class='diag-box diag-validation'><span class='diag-label'>Known Event Match</span>"
+            f"No known event rows matched asset {html.escape(asset_key)} in dataset {html.escape(dataset)}.</div>"
+        )
+
+    score_ts = parse_mixed_datetime_series(s["ts"])
+    if not score_ts.notna().any():
+        return base_summary, ""
+    score_start, score_end = score_ts.min(), score_ts.max()
+
+    alarm_ranges: list[tuple[Any, Any, float]] = []
+    if alarms_for_asset is not None and not alarms_for_asset.empty:
+        base_summary["alarm_episodes"] = int(len(alarms_for_asset))
+        if "duration_h" in alarms_for_asset.columns:
+            base_summary["alarm_hours"] = float(pd.to_numeric(alarms_for_asset["duration_h"], errors="coerce").fillna(0).sum())
+        for a in alarms_for_asset.itertuples():
+            alarm_ranges.append((pd.to_datetime(a.start_ts, errors="coerce"),
+                                 pd.to_datetime(a.end_ts, errors="coerce"),
+                                 float(a.peak_fused) if pd.notna(getattr(a, "peak_fused", None)) else float("nan")))
+
+    event_rows = []
+    event_hits: list[bool] = []
+    for e in events.itertuples():
+        in_span = intervals_overlap(score_start, score_end, e.event_start, e.event_end)
+        if not in_span:
+            event_rows.append((e, "outside", None, None))
+            continue
+        hit_alarm = None
+        for a_start, a_end, a_peak in alarm_ranges:
+            if intervals_overlap(a_start, a_end, e.event_start, e.event_end):
+                hit_alarm = (a_start, a_end, a_peak)
+                break
+        event_hits.append(hit_alarm is not None)
+        event_rows.append((e, "hit" if hit_alarm else "missed", hit_alarm, None))
+
+    base_summary["events_in_span"] = int(len(event_hits))
+    base_summary["events_hit"] = int(sum(event_hits))
+    base_summary["events_missed"] = int(len(event_hits) - sum(event_hits))
+
+    false_alarm_episodes = 0
+    for a_start, a_end, _peak in alarm_ranges:
+        any_event = any(intervals_overlap(a_start, a_end, e.event_start, e.event_end) for e in events.itertuples())
+        if not any_event:
+            false_alarm_episodes += 1
+    base_summary["alarm_episodes_without_event"] = false_alarm_episodes
+
+    summary = (
+        f"Dataset {dataset}: {base_summary['events_hit']} hit, "
+        f"{base_summary['events_missed']} missed, {base_summary['events_in_span']} known events in scored span, "
+        f"{base_summary['known_total']} known events total for this asset."
+    )
+    rows = []
+    for e, status, hit_alarm, _unused in event_rows:
+        if status == "outside":
+            status_label = "<span class='event-outside'>OUTSIDE SCORE WINDOW</span>"
+            alarm_text = "-"
+            lag_text = "-"
+            peak_text = "-"
+        elif status == "hit" and hit_alarm is not None:
+            a_start, _a_end, peak = hit_alarm
+            lag_h = (a_start - e.event_start).total_seconds() / 3600.0 if pd.notna(a_start) else float("nan")
+            status_label = "<span class='event-hit'>HIT</span>"
+            alarm_text = format_report_datetime(a_start)
+            lag_text = f"{lag_h:+.2f}h" if np.isfinite(lag_h) else "-"
+            peak_text = f"{peak:.2f}" if np.isfinite(peak) else "-"
+        else:
+            status_label = "<span class='event-missed'>MISSED</span>"
+            alarm_text = "-"
+            lag_text = "-"
+            peak_text = "-"
+        rows.append(
+            "<tr>"
+            f"<td>{status_label}</td>"
+            f"<td class='timestamp'>{html.escape(format_report_datetime(e.event_start))}</td>"
+            f"<td class='timestamp'>{html.escape(format_report_datetime(e.event_end))}</td>"
+            f"<td>{html.escape(str(e.description))}</td>"
+            f"<td class='timestamp'>{html.escape(alarm_text)}</td>"
+            f"<td>{html.escape(lag_text)}</td>"
+            f"<td>{html.escape(peak_text)}</td>"
+            "</tr>"
+        )
+    return base_summary, (
+        "<div class='diag-box diag-validation'><span class='diag-label'>Known Event Match</span>"
+        f"{html.escape(summary)}"
+        "<div class='mini-table-scroll'><table class='mini-table'><thead><tr>"
+        "<th>Status</th><th>Event Start</th><th>Event End</th><th>Description</th>"
+        "<th>First Alarm Start</th><th>Alarm Lag</th><th>Alarm Peak</th>"
+        "</tr></thead><tbody>"
+        + "".join(rows) +
+        "</tbody></table></div></div>"
+    )
+
+
+def validation_summary_section(validation_summaries: list[dict[str, Any]]) -> str:
+    """Render cross-asset validation evidence for known-event datasets."""
+    rows = [r for r in validation_summaries if r.get("has_source")]
+    if not rows:
+        return ""
+    events_in_span = sum(int(r["events_in_span"]) for r in rows)
+    hits = sum(int(r["events_hit"]) for r in rows)
+    missed = sum(int(r["events_missed"]) for r in rows)
+    known_total = sum(int(r["known_total"]) for r in rows)
+    alarm_episodes = sum(int(r["alarm_episodes"]) for r in rows)
+    false_alarm_episodes = sum(int(r["alarm_episodes_without_event"]) for r in rows)
+    alarm_hours = sum(float(r["alarm_hours"]) for r in rows)
+    recall = (hits / events_in_span * 100.0) if events_in_span else 0.0
+
+    kpis = [
+        ("Known Events In Scored Window", f"{events_in_span:,}"),
+        ("Known Events Hit", f"{hits:,}"),
+        ("Known Events Missed", f"{missed:,}"),
+        ("Event Recall", f"{recall:.1f}%"),
+        ("Known Events Total", f"{known_total:,}"),
+        ("Alarm Episodes", f"{alarm_episodes:,}"),
+        ("Alarm Episodes Without Known Event", f"{false_alarm_episodes:,}"),
+        ("Alarm Episode Hours", f"{alarm_hours:.2f}"),
+    ]
+    kpi_html = "".join(
+        "<div class='kpi-box'>"
+        f"<div class='kpi-label'>{html.escape(label)}</div>"
+        f"<div class='kpi-value'>{html.escape(value)}</div>"
+        "</div>"
+        for label, value in kpis
+    )
+    table_rows = "".join(
+        "<tr>"
+        f"<td>{html.escape(str(r['asset_key']))}</td>"
+        f"<td>{html.escape(str(r['dataset']))}</td>"
+        f"<td>{int(r['events_hit'])}</td>"
+        f"<td>{int(r['events_missed'])}</td>"
+        f"<td>{int(r['events_in_span'])}</td>"
+        f"<td>{int(r['known_total'])}</td>"
+        f"<td>{int(r['alarm_episodes'])}</td>"
+        f"<td>{int(r['alarm_episodes_without_event'])}</td>"
+        f"<td>{float(r['alarm_hours']):.2f}</td>"
+        "</tr>"
+        for r in rows
+    )
+    return (
+        "<section>"
+        "<h2>Validation Evidence</h2>"
+        "<p class='text-muted'>Known event windows are loaded from adapted dataset known_events.csv files when asset names match a public validation dataset. Labels are not fed into ACM scoring.</p>"
+        f"<div class='kpi-grid'>{kpi_html}</div>"
+        "<div class='card table-card'><table>"
+        "<thead><tr><th>Asset</th><th>Dataset</th><th>Hit</th><th>Missed</th><th>Events In Score Span</th>"
+        "<th>Known Events Total</th><th>Alarm Episodes</th><th>Alarm Episodes Without Event</th><th>Alarm Hours</th></tr></thead>"
+        f"<tbody>{table_rows}</tbody></table></div>"
+        "</section>"
+    )
+
+
 def palette_controls(chart_id: str) -> str:
     """Render detector palette buttons for one chart."""
     buttons = []
@@ -1650,11 +1967,13 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
     alarms = read_sql(con, f"SELECT * FROM {prefix}alarms ORDER BY asset_key, start_ts")
     alarms = alarms[alarms["asset_key"].isin(assets["asset_key"])]
     alarms_by_asset = {k: g for k, g in alarms.groupby("asset_key")}
+    validation_events = load_validation_events()
 
     # Build asset rows and figures
     rows_html = []
     figs_html = []
     chart_specs: dict[str, dict] = {}
+    validation_summaries: list[dict[str, Any]] = []
 
     for _, meta in assets.iterrows():
         s = read_sql(con, f"SELECT * FROM {prefix}scores WHERE asset_key = ? ORDER BY ts",
@@ -1722,8 +2041,14 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
                 f"{html.escape(override)}</div>")
         if culprits:
             diag_boxes += f"<div class='diag-box diag-culprits'><span class='diag-label'>Culprits</span>{html.escape(culprits)}</div>"
+        asset_alarms = alarms_by_asset.get(meta["asset_key"])
+        diag_boxes += score_coverage_box(s, asset_alarms)
         diag_boxes += detector_stats_table(s)
-        diag_boxes += alarm_history_table(alarms_by_asset.get(meta["asset_key"]))
+        diag_boxes += alarm_history_table(asset_alarms)
+        validation_summary, validation_box = validation_for_asset(
+            str(meta["asset_key"]), s, asset_alarms, validation_events)
+        validation_summaries.append(validation_summary)
+        diag_boxes += validation_box
 
         figs_html.append(
             f"<div class='card' id='{html.escape(meta['asset_key'])}'>"
@@ -1817,6 +2142,7 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
         kpi_cards.append(kpi_box("Unknown", kpi_metrics["unknown"], "warn", "Unmapped verdict"))
 
     kpi_html = "<div class='kpi-grid'>" + "".join(kpi_cards) + "</div>"
+    validation_html = validation_summary_section(validation_summaries)
 
     scope = f"farm {farm}" if farm else (f"{len(assets)} selected assets" if picks else "fleet")
     timestamp = format_report_datetime(datetime.now().astimezone().isoformat())
@@ -1852,6 +2178,8 @@ def build_report(con, prefix: str, out: Path, farm: Optional[str], picks: Option
             <h2>Performance Summary</h2>
             {kpi_html}
         </section>
+
+        {validation_html}
 
         <section>
             <h2>Assets Overview</h2>

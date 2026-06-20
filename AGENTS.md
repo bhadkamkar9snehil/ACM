@@ -62,9 +62,10 @@ Read this file before non-trivial ACM work. Keep `CLAUDE.md` unchanged unless th
 36. [Paper draft + detector-enable ablation wiring fix + fusion auto-tuning wiring gap (2026-06-18)](#paper-draft--detector-enable-ablation-wiring-fix--fusion-auto-tuning-wiring-gap-2026-06-18)
 37. [Farm C full 58-event re-validation after the OMR + self-distrust saturation fixes (2026-06-18)](#farm-c-full-58-event-re-validation-after-the-omr--self-distrust-saturation-fixes-2026-06-18)
 38. [OMR kurt/skew exclusion fix (2026-06-18)](#omr-kurtskew-exclusion-fix--farm-a-exact-match-farm-c-mixed-result-2026-06-18)
-39. [Known Issues (Track as GitHub Issues)](#known-issues-track-as-github-issues)
-40. [Standing Rule: Flag Architecture-Violating Suggestions](#standing-rule-flag-architecture-violating-suggestions-dont-suppress-them)  **Read before giving any suggestion**
-41. [User Working Style](#user-working-style)
+39. [Public validation datasets and report evidence (2026-06-20)](#public-validation-datasets-and-report-evidence-2026-06-20)
+40. [Known Issues (Track as GitHub Issues)](#known-issues-track-as-github-issues)
+41. [Standing Rule: Flag Architecture-Violating Suggestions](#standing-rule-flag-architecture-violating-suggestions-dont-suppress-them)  **Read before giving any suggestion**
+42. [User Working Style](#user-working-style)
 
 ---
 
@@ -2257,6 +2258,74 @@ sign off on, not something to merge unilaterally because the headline F1 number 
 `np.partition`). Committed `d6b5cd0`, pushed to `claude/research-paper-planning-ests5l`. Per-event
 diff and summaries: `results/farm_a_kurtskew_fix/`, `results/farm_c_kurtskew_fix/` (both
 gitignored/local).
+
+---
+
+## Public validation datasets and report evidence (2026-06-20)
+> *Added: 2026-06-20  issues #83 and #84*
+
+`scripts/download_validation_datasets.py` is now the public-dataset adapter entrypoint. It downloads
+or adapts public validation datasets into the same CSV shape ACM already accepts: a `timestamp`
+column plus numeric channels only. Labels and known event windows are written separately as
+`labels*.csv` and `known_events.csv`; labels must never enter `acm_run.py` model input.
+
+Supported adapter names: `metropt3`, `batadal`, `smd`, `ai4i`, `secom`, `cmapss`, `milling`,
+`bearing`, `tep`, and `skab` (retained for stress testing, not paper evidence). Default destination:
+`data/public_datasets/`, which is local-only and gitignored. Multi-asset adapters accept
+`--max-assets` for sample runs.
+
+Representative commands:
+```bash
+python scripts/download_validation_datasets.py --dataset metropt3
+python scripts/download_validation_datasets.py --dataset batadal
+python scripts/download_validation_datasets.py --dataset smd --max-assets 10
+python scripts/download_validation_datasets.py --dataset secom
+python scripts/download_validation_datasets.py --dataset ai4i
+python scripts/download_validation_datasets.py --dataset cmapss --max-assets 10
+python scripts/download_validation_datasets.py --dataset milling
+python scripts/download_validation_datasets.py --dataset bearing --max-assets 3
+python scripts/download_validation_datasets.py --dataset tep
+```
+
+`tep` currently downloads Harvard Dataverse `.RData` files only. Raw files were successfully
+present locally after the 2026-06-20 run: `TEP_FaultFree_Testing.RData`,
+`TEP_FaultFree_Training.RData`, `TEP_Faulty_Testing.RData`, and `TEP_Faulty_Training.RData`.
+Conversion to ACM-ready CSV still needs an R/RData conversion path. RStudio being installed is not
+enough if `Rscript` is not on the PowerShell `PATH`; check with `Get-Command Rscript` before
+assuming conversion can run unattended.
+
+`bearing` direct download is simple but large (`nasa_bearing.zip`, about 1.08GB). The first adapter
+attempt produced only `manifest.json` and an empty `known_events.csv` because no asset CSVs were
+found from the current ZIP-entry matching rule. Treat bearing as adapter-fix-needed before scoring.
+
+`scripts/acm_report.py` now auto-discovers `data/public_datasets/adapted/*/known_events.csv` and
+adds validation evidence to generated HTML reports when asset names match public validation
+datasets. The report now shows:
+- top-level known events in scored window, hits, misses, event recall, alarm episodes, alarm
+  episodes without known-event overlap, and alarm episode hours;
+- per-asset score coverage: scored rows, alarm rows/rate, alarm episodes/hours, fused peak/mean/P95,
+  and scored time span;
+- per-asset known-event match table with `HIT`, `MISSED`, or `OUTSIDE SCORE WINDOW`, first
+  overlapping alarm, lag, and peak fused score.
+
+Completed ACM smoke reports in `results/public_dataset_smoke/` on 2026-06-20:
+
+| Dataset | Known events in scored window | Hit | Missed | Event recall | Alarm episodes | Interpretation |
+|---|---:|---:|---:|---:|---:|---|
+| MetroPT-3 | 0 | 0 | 0 | N/A | 2 | Inconclusive: ACM alarmed in Aug-Sep, but known failures are Apr-Jul. Rerun with event-aligned split. |
+| BATADAL | 1 | 0 | 1 | 0.0% | 0 | Poor on current split/features: missed the one scored attack window. |
+| SMD sample (10 machines) | 74 | 28 | 46 | 37.8% | 29 | Best signal so far: real cross-domain detection, but recall is uneven and alarm episodes are broad. |
+| SECOM | 9 | 0 | 9 | 0.0% | 2 | Poor label alignment; likely wrong benchmark shape for ACM without a batch-process adapter. |
+
+Current effectiveness read: ACM is credible but not yet robust. SMD shows the detector stack finds
+real cross-domain signal without per-dataset tuning. BATADAL and SECOM expose gaps: BATADAL likely
+needs process-state consistency features, and SECOM is sparse snapshot classification rather than
+continuous asset telemetry. MetroPT-3 needs a benchmark runner that aligns score windows to the
+known failures before judging detection quality.
+
+Do not tune `ml_defaults.py` just to improve one public dataset. Follow the ML Improvement Loop:
+first fix benchmark protocol and reporting, then diagnose whether a miss is a general pipeline gap,
+then re-validate CARE before accepting any ML behavior change.
 
 ---
 
