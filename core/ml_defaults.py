@@ -62,16 +62,6 @@ ML_DEFAULTS = {
         "window": 16
     },
     "fusion": {
-        "auto_tune": {
-            "enabled": True,
-            "fallback_method": "statistical_diversity",
-            "learning_rate": 0.3,
-            "method": "episode_separability",
-            "min_weight": 0.05,
-            "require_external_labels": False,
-            "temperature": 1.5,
-            "warm_start_lr": 0.7
-        },
         "cooldown": 10,
         "min_silent_gap": 10,
         "omr_correlation_disable_threshold": 0.95,

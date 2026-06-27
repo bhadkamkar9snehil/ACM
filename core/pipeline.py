@@ -185,8 +185,6 @@ def score_asset(
 
     calibration_json = json.dumps({
         "weights_used": {k: round(v, 4) for k, v in fusion.weights_used.items()},
-        "auto_tuned": fusion.auto_tuned,
-        "tuning": fusion.tuning_diagnostics or {},
     }, default=str)
 
     # 7. alarm rules (self-tuned, label-free). Horizons are time-defined and

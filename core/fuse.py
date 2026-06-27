@@ -457,545 +457,6 @@ class CalibrationContaminationFilter:
         )
 
 
-def tune_detector_weights(
-    streams: Dict[str, np.ndarray],
-    fused: np.ndarray,
-    current_weights: Dict[str, float],
-    cfg: Optional[Dict[str, Any]] = None,
-    episodes_df: Optional[pd.DataFrame] = None,
-    fused_index: Optional[pd.Index] = None,
-) -> Tuple[Dict[str, float], Dict[str, Any]]:
-    """
-    FUSE-07/08/09: Auto-tune detector weights using episode separability metrics.
-    
-    Improvements over correlation-based tuning:
-    1. FUSE-07: Uses episode detection quality (NOT circular correlation to fused)
-    2. FUSE-08: Proportional sample check: max(10, 0.1*len)
-    3. FUSE-09: Configurable softmax parameters (temperature, min_weight, detector_priors)
-    
-    Strategy:
-    - Split data into train/validation folds
-    - For each detector, compute episode separability metrics:
-      * Defect episode detection rate (% of known defects captured)
-      * False positive rate (% of normal data flagged)
-      * Mean separation (difference between defect and normal z-scores)
-    - Convert metrics to weights using configurable softmax with priors
-    - Blend with existing weights using learning rate
-    
-    Args:
-        streams: Dict of detector z-scores (e.g., {"pca_spe_z": array, "ar1_z": array})
-    fused: Current fused z-score array (used only for validation splits, NOT for correlation)
-        current_weights: Existing weights from config or previous run
-        cfg: Configuration dict with tuning parameters
-    episodes_df: Optional DataFrame with detected episodes for validation/labeling
-    fused_index: Optional DatetimeIndex aligned to `fused` for episode window labeling
-        
-    Returns:
-        Tuple of (tuned_weights, diagnostics)
-    """
-    tune_cfg = (cfg or {}).get("fusion", {}).get("auto_tune", {}) if cfg else {}
-
-    with Span("fusion.tune_weights", n_detectors=len(streams), n_samples=len(fused) if isinstance(fused, np.ndarray) else 0):
-        # FUSE-09: Configurable parameters
-        learning_rate = float(tune_cfg.get("learning_rate", 0.3))
-        min_weight = float(tune_cfg.get("min_weight", 0.05))
-        temperature = float(tune_cfg.get("temperature", 2.0))
-        detector_priors = tune_cfg.get("detector_priors", {})  # Dict[str, float] for per-detector biases
-    
-        # P0-FIX (v11.2.2): Circular tuning guard - DEFAULT TO TRUE
-        # ANALYTICAL AUDIT FLAW #1: Circular weight tuning causes self-reinforcing feedback
-        # Using same-run episodes to tune weights creates mode collapse risk
-        # CHANGE: Default to True (was False) to enforce external validation
-        require_external = tune_cfg.get("require_external_labels", True)
-    
-        # Check if episodes_df has a "source" column or attribute indicating origin
-        episode_source = "unknown"
-        if episodes_df is not None and not episodes_df.empty:
-            if hasattr(episodes_df, 'attrs') and 'source' in episodes_df.attrs:
-                episode_source = episodes_df.attrs.get('source', 'unknown')
-            elif 'source' in episodes_df.columns:
-                episode_source = episodes_df['source'].iloc[0] if len(episodes_df) > 0 else 'unknown'
-    
-        # v11.4.0: If require_external is True but no external labels, fall back to 
-        # statistical_diversity method which doesn't use episode labels at all.
-        # This method weights detectors based on:
-        # 1. Signal variance (more variance = more informative)
-        # 2. Low correlation with other detectors (diversity bonus)
-        # 3. Tail behavior (detectors that catch extreme events)
-        use_statistical_fallback = False
-        if require_external and episode_source in ("current_run", "same_run", "unknown"):
-            fallback_method = tune_cfg.get("fallback_method", "statistical_diversity")
-            if fallback_method == "statistical_diversity":
-                Console.info(
-                    f"No external episodes (source='{episode_source}'). "
-                    f"Using statistical_diversity method for weight tuning.",
-                    component="TUNE", episode_source=episode_source
-                )
-                use_statistical_fallback = True
-            else:
-                # Use explicit fallback method
-                Console.info(
-                    f"No external episodes. Using fallback_method='{fallback_method}'",
-                    component="TUNE"
-                )
-                use_statistical_fallback = fallback_method == "statistical_diversity"
-
-        # ANA-02: Enforce episode_separability as default and log requested method
-        requested_method_raw = tune_cfg.get("method", "episode_separability")
-        requested_method = str(requested_method_raw).strip().lower()
-        # v11.4.0: Added statistical_diversity method for when no external labels available
-        valid_methods = {"episode_separability", "statistical_diversity", "correlation"}
-        method_fallback_reason: Optional[str] = None
-        if requested_method not in valid_methods:
-            Console.warn(f"Unknown tuning method '{requested_method_raw}', defaulting to episode_separability", component="TUNE", requested_method=requested_method_raw, valid_methods=list(valid_methods))
-            tuning_method = "episode_separability"
-            method_fallback_reason = "unknown_method"
-        else:
-            tuning_method = requested_method
-    
-        # Warn about potential circularity even when guard is disabled
-        if tuning_method == "episode_separability" and episode_source in ("current_run", "same_run"):
-            Console.warn(
-                f"Weight tuning using episode_separability with same-run episodes (source='{episode_source}'). "
-                "This may cause self-reinforcing weight drift. Consider require_external_labels=True.",
-                component="TUNE", episode_source=episode_source
-            )
-    
-        diagnostics = {
-            "enabled": True,
-            "method": tuning_method,
-            "requested_method": requested_method,
-            "episode_source": episode_source,  # v11.1.6: Track episode source
-            "learning_rate": learning_rate,
-            "temperature": temperature,
-            "min_weight": min_weight,
-            "detector_priors": dict(detector_priors),
-            "detector_metrics": {},
-            "config_weights": dict(current_weights),  # ANA-01: Capture original config weights
-            "raw_weights": {},
-            "tuned_weights": {},
-            "present_detectors": sorted(list(streams.keys()))  # ANA-03: Track which detectors were available
-        }
-
-        fused_signal = np.asarray(fused, dtype=np.float32).reshape(-1)
-        n_total = len(fused_signal)
-        if n_total == 0:
-            diagnostics["reason"] = "empty_fused_signal"
-            return current_weights, diagnostics
-
-        min_samples_required = max(10, int(0.1 * n_total))
-
-        if method_fallback_reason:
-            diagnostics["fallback_reason"] = method_fallback_reason
-
-        # Construct binary labels from episode windows when available.
-        labels: Optional[np.ndarray] = None
-        if episodes_df is not None and not episodes_df.empty:
-            if fused_index is None or len(fused_index) != n_total:
-                Console.warn("Episodes provided but fused_index missing or misaligned; skipping PR-AUC labeling", component="TUNE", episodes_count=len(episodes_df), fused_index_len=len(fused_index) if fused_index is not None else 0, n_total=n_total)
-            else:
-                try:
-                    fused_dt_index = pd.DatetimeIndex(fused_index)
-                except Exception:
-                    fused_dt_index = pd.to_datetime(cast(Any, fused_index))
-
-                # Normalize tz to avoid tz-aware/naive comparison errors
-                try:
-                    if getattr(fused_dt_index, "tz", None) is not None:
-                        fused_dt_index = fused_dt_index.tz_localize(None)
-                except Exception:
-                    pass
-
-                # PERF-OPT: Vectorized episode mask construction
-                positive_mask = np.zeros(n_total, dtype=bool)
-            
-                # Pre-parse all episode timestamps at once
-                start_ts_col = episodes_df["start_ts"] if "start_ts" in episodes_df.columns else pd.Series(dtype="datetime64[ns]")
-                end_ts_col = episodes_df["end_ts"] if "end_ts" in episodes_df.columns else pd.Series(dtype="datetime64[ns]")
-                start_times = pd.to_datetime(start_ts_col, errors="coerce")
-                end_times = pd.to_datetime(end_ts_col, errors="coerce")
-            
-                # Remove timezone info if present
-                if hasattr(start_times, 'tz') and start_times.tz is not None:
-                    start_times = start_times.tz_localize(None)
-                if hasattr(end_times, 'tz') and end_times.tz is not None:
-                    end_times = end_times.tz_localize(None)
-            
-                # Build mask for valid episodes
-                valid_mask = (
-                    pd.notna(start_times) & 
-                    pd.notna(end_times) & 
-                    (end_times >= start_times) &
-                    (end_times >= fused_dt_index[0]) &
-                    (start_times <= fused_dt_index[-1])
-                )
-            
-                # Create positive mask using numpy broadcasting for valid episodes
-                fused_values = fused_dt_index.values
-            
-                # PERF-OPT: Pre-extract valid episode boundaries as numpy arrays
-                valid_indices = valid_mask[valid_mask].index.tolist()
-                n_valid_episodes = len(valid_indices)
-            
-                if n_valid_episodes > 0:
-                    valid_starts = start_times.loc[valid_indices].values
-                    valid_ends = end_times.loc[valid_indices].values
-                
-                    # Vectorized interval check - loop over episodes (typically <100)
-                    for start_ts, end_ts in zip(valid_starts, valid_ends):
-                        window_mask = (fused_values >= start_ts) & (fused_values <= end_ts)
-                        if window_mask.any():
-                            positive_mask |= window_mask
-
-                diagnostics["label_source"] = {
-                    "label_type": "episodes_window",
-                    "episodes_count": int(len(episodes_df)),
-                    "positive_samples": int(positive_mask.sum()),
-                    "negative_samples": int(n_total - positive_mask.sum())
-                }
-
-                if positive_mask.any():
-                    labels = positive_mask.astype(np.int8)
-                else:
-                    diagnostics["label_source"]["warning"] = "no_samples_marked_positive"
-
-        if "label_source" not in diagnostics:
-            diagnostics["label_source"] = {
-                "label_type": "unavailable",
-                "episodes_count": int(len(episodes_df)) if episodes_df is not None else 0
-            }
-
-        diagnostics["primary_metric"] = "pr_auc"
-
-        if tuning_method == "episode_separability":
-            quality_scores: Dict[str, float] = {}
-
-            for detector_name, detector_signal in streams.items():
-                det_diag: Dict[str, Any] = {}
-                try:
-                    mask = np.isfinite(detector_signal)
-                    n_valid = int(np.sum(mask))
-                    det_diag["n_samples"] = n_valid
-
-                    if n_valid < min_samples_required:
-                        Console.warn(f"{detector_name}: under-sampled ({n_valid}/{min_samples_required}) - using prior", component="TUNE", detector=detector_name, n_valid=n_valid, min_required=min_samples_required, method=tuning_method)
-                        prior = float(detector_priors.get(detector_name, 1.0 / max(len(streams), 1)))
-                        fallback_score = prior
-                        quality_scores[detector_name] = fallback_score
-                        det_diag.update({
-                            "status": "under_sampled",
-                            "metric_type": "prior_only",
-                            "metric_value": 0.0,
-                            "prior": prior,
-                            "final_score": float(fallback_score)
-                        })
-                        diagnostics["detector_metrics"][detector_name] = det_diag
-                        continue
-
-                    det_clean = detector_signal[mask].astype(np.float64)
-
-                    # Degenerate signal guards
-                    if np.allclose(det_clean, 0.0, atol=1e-6):
-                        Console.warn(f"{detector_name}: all zeros - limited separability", component="TUNE", detector=detector_name, n_samples=len(det_clean), method=tuning_method)
-                        prior = float(detector_priors.get(detector_name, 1.0))
-                        fallback_score = prior * 0.01
-                        quality_scores[detector_name] = fallback_score
-                        det_diag.update({
-                            "status": "degenerate_zeros",
-                            "metric_type": "prior_only",
-                            "metric_value": 0.0,
-                            "prior": prior,
-                            "final_score": float(fallback_score)
-                        })
-                        diagnostics["detector_metrics"][detector_name] = det_diag
-                        continue
-
-                    finite_signal = det_clean[np.abs(det_clean) > 1e-6]
-                    if finite_signal.size > 0 and np.unique(np.sign(finite_signal)).size == 1:
-                        Console.warn(f"{detector_name}: all same sign - limited separability", component="TUNE", detector=detector_name, n_samples=len(finite_signal), method=tuning_method)
-                        prior = float(detector_priors.get(detector_name, 1.0))
-                        fallback_score = prior * 0.1
-                        quality_scores[detector_name] = fallback_score
-                        det_diag.update({
-                            "status": "degenerate_same_sign",
-                            "metric_type": "prior_only",
-                            "metric_value": 0.0,
-                            "prior": prior,
-                            "final_score": float(fallback_score)
-                        })
-                        diagnostics["detector_metrics"][detector_name] = det_diag
-                        continue
-
-                    metric_type: Optional[str] = None
-                    metric_value: Optional[float] = None
-                    metric_details: Dict[str, Any] = {}
-
-                    if labels is not None:
-                        labels_clean = labels[mask]
-                        pos_valid = int(labels_clean.sum())
-                        neg_valid = int(len(labels_clean) - pos_valid)
-                        det_diag["positive_samples"] = pos_valid
-                        det_diag["negative_samples"] = neg_valid
-
-                        if pos_valid > 0 and neg_valid > 0:
-                            try:
-                                pr_auc = float(average_precision_score(labels_clean, det_clean))
-                                if np.isfinite(pr_auc):
-                                    metric_type = "pr_auc"
-                                    metric_value = float(np.clip(pr_auc, 0.0, 1.0))
-                            except Exception as pr_err:
-                                det_diag["pr_auc_error"] = str(pr_err)
-
-                            if metric_value is None:
-                                try:
-                                    fpr, tpr, thresholds = roc_curve(labels_clean, det_clean)
-                                    if tpr.size:
-                                        youden = tpr - fpr
-                                        if not np.all(np.isnan(youden)):
-                                            idx_best = int(np.nanargmax(youden))
-                                            metric_type = "youden_j"
-                                            metric_value = float(np.clip(youden[idx_best], 0.0, 1.0))
-                                            metric_details = {
-                                                "best_threshold": float(thresholds[idx_best]),
-                                                "tpr": float(tpr[idx_best]),
-                                                "fpr": float(fpr[idx_best])
-                                            }
-                                except Exception as roc_err:
-                                    det_diag["youden_error"] = str(roc_err)
-                        else:
-                            det_diag["status"] = "imbalanced_labels"
-                    else:
-                        det_diag["status"] = det_diag.get("status", "no_labels")
-
-                    if metric_value is None or not np.isfinite(metric_value):
-                        metric_value = 0.0
-                        metric_type = metric_type or ("no_labels" if labels is None else "insufficient_data")
-
-                    prior = float(detector_priors.get(detector_name, 1.0))
-                    final_score = float(max(metric_value, 0.0)) * prior
-                    if final_score <= 0:
-                        final_score = max(prior * 1e-3, 1e-6)
-
-                    quality_scores[detector_name] = final_score
-                    det_diag.setdefault("status", "ok")
-                    det_diag.update({
-                        "metric_type": metric_type,
-                        "metric_value": float(metric_value),
-                        "prior": prior,
-                        "final_score": float(final_score)
-                    })
-                    det_diag.update(metric_details)
-                    diagnostics["detector_metrics"][detector_name] = det_diag
-
-                except Exception as e:
-                    raise RuntimeError(
-                        f"{detector_name}: metric calculation failed for method={tuning_method}: {e}"
-                    ) from e
-
-            if not quality_scores:
-                diagnostics["reason"] = "no_valid_quality_scores"
-                return current_weights, diagnostics
-
-            # BUGFIX v11.1.5: Numerically stable softmax (subtract max before exp)
-            # Prevents overflow when quality scores are large relative to temperature
-            score_array = np.array(list(quality_scores.values()), dtype=np.float64)
-            scaled_scores = score_array / temperature
-            shifted_scores = scaled_scores - np.max(scaled_scores)  # Stability: max becomes 0
-            exp_scores = np.exp(shifted_scores)
-            softmax_weights = exp_scores / np.sum(exp_scores)
-
-            raw_weights = {}
-            for i, detector_name in enumerate(quality_scores.keys()):
-                weight_val = float(softmax_weights[i])
-                raw_weights[detector_name] = weight_val
-                diagnostics["raw_weights"][detector_name] = weight_val
-    
-        elif use_statistical_fallback or tuning_method == "statistical_diversity":
-            # v11.4.0: Statistical diversity weighting - no external labels needed
-            # This method computes weights based on:
-            # 1. Signal informativeness: higher variance = more informative detector
-            # 2. Diversity bonus: low correlation with other detectors = unique signal
-            # 3. Tail sensitivity: P95/P50 ratio indicates extreme event sensitivity
-            #
-            # Research basis: Ensemble diversity is well-established in ML literature
-            # (Kuncheva & Whitaker 2003, "Measures of Diversity in Classifier Ensembles")
-            quality_scores: Dict[str, float] = {}
-            
-            # Compute correlation matrix for diversity scoring
-            detector_names = list(streams.keys())
-            n_det = len(detector_names)
-            signals = []
-            valid_detectors = []
-            
-            for det_name in detector_names:
-                signal = np.asarray(streams[det_name], dtype=np.float64)
-                mask = np.isfinite(signal)
-                if mask.sum() >= min_samples_required:
-                    signals.append(signal)
-                    valid_detectors.append(det_name)
-            
-            if len(signals) < 2:
-                Console.warn("Insufficient valid detectors for diversity scoring", component="TUNE")
-                diagnostics["reason"] = "insufficient_valid_detectors"
-                return current_weights, diagnostics
-            
-            # Stack signals and compute correlation
-            signal_matrix = np.vstack(signals)
-            try:
-                corr_matrix = np.corrcoef(signal_matrix)
-            except Exception:
-                corr_matrix = np.eye(len(signals))
-            
-            for idx, det_name in enumerate(valid_detectors):
-                det_diag: Dict[str, Any] = {}
-                signal = signals[idx]
-                mask = np.isfinite(signal)
-                det_clean = signal[mask]
-                n_valid = len(det_clean)
-                
-                # 1. Variance score (normalized by MAD for robustness)
-                med = np.median(det_clean)
-                mad = np.median(np.abs(det_clean - med)) * 1.4826
-                variance_score = min(1.0, mad / 3.0) if mad > 0 else 0.1
-                
-                # 2. Diversity score: 1 - mean(|correlation| with others)
-                other_corrs = [abs(corr_matrix[idx, j]) for j in range(len(signals)) if j != idx]
-                mean_corr = np.mean(other_corrs) if other_corrs else 0.0
-                diversity_score = 1.0 - mean_corr
-                
-                # 3. Tail sensitivity: P95 / P50 ratio (capped)
-                p50 = np.percentile(np.abs(det_clean), 50)
-                p95 = np.percentile(np.abs(det_clean), 95)
-                tail_ratio = min(5.0, p95 / max(p50, 1e-6))
-                tail_score = min(1.0, tail_ratio / 5.0)
-                
-                # Combined score with weights
-                combined = 0.4 * variance_score + 0.4 * diversity_score + 0.2 * tail_score
-                prior = float(detector_priors.get(det_name, 1.0))
-                final_score = float(combined * prior)
-                
-                quality_scores[det_name] = float(max(final_score, 1e-6))
-                det_diag.update({
-                    "status": "ok",
-                    "metric_type": "statistical_diversity",
-                    "variance_score": float(variance_score),
-                    "diversity_score": float(diversity_score),
-                    "tail_score": float(tail_score),
-                    "combined_score": float(combined),
-                    "mean_correlation": float(mean_corr),
-                    "prior": prior,
-                    "final_score": float(final_score),
-                    "n_samples": n_valid
-                })
-                diagnostics["detector_metrics"][det_name] = det_diag
-            
-            # Handle detectors that weren't in valid_detectors
-            for det_name in detector_names:
-                if det_name not in quality_scores:
-                    prior = float(detector_priors.get(det_name, 0.1))
-                    quality_scores[det_name] = prior * 0.1
-                    diagnostics["detector_metrics"][det_name] = {
-                        "status": "insufficient_samples",
-                        "metric_type": "prior_only",
-                        "prior": prior,
-                        "final_score": prior * 0.1
-                    }
-            
-            # Softmax to get weights
-            score_array = np.array([quality_scores[d] for d in detector_names], dtype=np.float64)
-            scaled_scores = score_array / temperature
-            shifted_scores = scaled_scores - np.max(scaled_scores)
-            exp_scores = np.exp(shifted_scores)
-            softmax_weights = exp_scores / np.sum(exp_scores)
-            
-            raw_weights = {}
-            for i, det_name in enumerate(detector_names):
-                weight_val = float(softmax_weights[i])
-                raw_weights[det_name] = weight_val
-                diagnostics["raw_weights"][det_name] = weight_val
-            
-            diagnostics["method"] = "statistical_diversity"
-            Console.info("Statistical diversity weights computed:", component="TUNE")
-            for det_name in sorted(raw_weights.keys()):
-                det_diag = diagnostics["detector_metrics"].get(det_name, {})
-                Console.info(
-                    f"  {det_name:15s}: weight={raw_weights[det_name]:.3f} "
-                    f"(var={det_diag.get('variance_score', 0):.2f}, "
-                    f"div={det_diag.get('diversity_score', 0):.2f}, "
-                    f"tail={det_diag.get('tail_score', 0):.2f})"
-                )
-    
-        else:
-            # Legacy correlation method removed in v11.2 - was circular and deprecated
-            # If someone explicitly configures method=correlation, fall back to episode_separability
-            Console.error("Correlation tuning method removed. Using episode_separability instead.", component="TUNE")
-            diagnostics["reason"] = "correlation_method_removed"
-            return current_weights, diagnostics
-    
-        # ANA-01: Capture pre_tune_weights before any modifications
-        diagnostics["pre_tune_weights"] = dict(current_weights)
-    
-        # Blend with existing weights using learning rate
-        # P0-FIX (v11.2.2): Add weight stability guard
-        tuned_weights = {}
-        max_drift_threshold = tune_cfg.get("max_weight_drift", 0.20)  # 20% max change
-        
-        for detector_name in streams.keys():
-            old_weight = current_weights.get(detector_name, 0.0)
-            new_weight = raw_weights.get(detector_name, 0.0)
-        
-            # Exponential moving average
-            blended = (1 - learning_rate) * old_weight + learning_rate * new_weight
-
-            # Stability guard: CLAMP per-detector drift to max_drift_threshold
-            # instead of rejecting the whole tune. Hard rejection froze the
-            # weights permanently whenever true detector importance shifted
-            # (every subsequent tune exceeded the threshold too), so the
-            # system could never adapt. Clamping keeps each batch's change
-            # bounded while still converging over multiple batches.
-            if True:  # always check; use floored denominator so near-zero weights are also clamped
-                drift = abs(blended - old_weight) / max(old_weight, 0.01)
-                if drift > max_drift_threshold:
-                    clamped = old_weight * (1.0 + np.sign(blended - old_weight) * max_drift_threshold)
-                    Console.info(
-                        f"Weight drift clamped for {detector_name}: {old_weight:.3f} -> {clamped:.3f} "
-                        f"(raw target {blended:.3f}, drift={drift:.1%} > {max_drift_threshold:.1%})",
-                        component="TUNE", detector=detector_name, old_weight=old_weight,
-                        new_weight=clamped, raw_weight=blended, drift=drift
-                    )
-                    diagnostics.setdefault("clamped_detectors", []).append(detector_name)
-                    blended = clamped
-
-            # Enforce minimum weight
-            tuned_weights[detector_name] = max(blended, min_weight)
-    
-        # ANA-01: Capture pre-normalization weights (ANA-04)
-        diagnostics["pre_renorm_weights"] = dict(tuned_weights)
-    
-        # Normalize to sum to 1.0
-        total = sum(tuned_weights.values())
-        if total > 0:
-            tuned_weights = {k: v / total for k, v in tuned_weights.items()}
-    
-        # ANA-01: Capture final post-tune weights after normalization
-        diagnostics["post_tune_weights"] = dict(tuned_weights)
-        diagnostics["tuned_weights"] = tuned_weights  # Keep for backward compatibility
-    
-        # Log tuning results
-        Console.info(f"Detector weight auto-tuning ({tuning_method}):", component="TUNE")
-        for detector_name in sorted(tuned_weights.keys()):
-            old = current_weights.get(detector_name, 0.0)
-            new = tuned_weights[detector_name]
-            delta = new - old
-            det_diag = diagnostics["detector_metrics"].get(detector_name, {})
-            metric_type = det_diag.get("metric_type", "n/a")
-            metric_val = det_diag.get("metric_value", 0.0)
-            Console.info(
-                f"  {detector_name:15s}: {old:.3f} -> {new:.3f} (Delta{delta:+.3f}, {metric_type}={metric_val:.3f})"
-            )
-    
-        return tuned_weights, diagnostics
-
 
 class ScoreCalibrator:
     """
@@ -2527,8 +1988,6 @@ class FusionResult:
     fused_scores: np.ndarray
     episodes: pd.DataFrame
     weights_used: Dict[str, float]
-    auto_tuned: bool
-    tuning_diagnostics: Optional[Dict[str, Any]] = None
     train_fused: Optional[np.ndarray] = None
 
 
@@ -2602,13 +2061,13 @@ def run_fusion_pipeline(
     score_regime_labels: Optional[np.ndarray] = None,
     train_regime_labels: Optional[np.ndarray] = None,
     output_manager: Optional[Any] = None,
-    previous_weights: Optional[Dict[str, float]] = None,
     omr_contributions: Optional[pd.DataFrame] = None,
     equip: str = "",
 ) -> FusionResult:
     """
-    Execute complete fusion pipeline: validate -> auto-tune -> fuse -> detect episodes.
-    
+    Execute complete fusion pipeline: validate -> fuse -> detect episodes.
+    Detector weights are the fixed, correlation-discounted configured weights.
+
     Args:
         frame: Score data with detector z-score columns
         train_frame: Train data with detector z-score columns (for threshold calc)
@@ -2618,7 +2077,6 @@ def run_fusion_pipeline(
         score_regime_labels: Regime labels for score data
         train_regime_labels: Regime labels for train data
         output_manager: For writing fusion metrics
-        previous_weights: Previous run's weights for comparison
         equip: Equipment name for logging
     
     Returns:
@@ -2640,36 +2098,11 @@ def run_fusion_pipeline(
         weights, present, omr_correlation_disable_threshold=_omr_disable_thresh
     )
 
-    # 3. Auto-tune detector weights (baseline fuse pass, no episodes)
-    auto_tuned = False
-    tuning_diagnostics = None
-    with Span("fusion.baseline", n_detectors=len(present), n_samples=len(score_data)):
-        fused_baseline = Fuser(weights=weights, ep=episode_params).fuse(
-            present, score_data, discounted_weights=discounted_weights
-        )
-    fused_baseline_np = np.asarray(fused_baseline, dtype=np.float32).reshape(-1)
-
-    tuned, diagnostics = tune_detector_weights(
-        streams=present, fused=fused_baseline_np,
-        current_weights=weights, cfg=cfg,
-    )
-
-    if diagnostics.get("enabled"):
-        weights = tuned
-        auto_tuned = True
-        tuning_diagnostics = diagnostics
-        # Recompute discounted weights with the newly tuned base weights
-        discounted_weights = compute_discounted_weights(
-            weights, present, quiet=True,
-            omr_correlation_disable_threshold=_omr_disable_thresh,
-        )
-
-        if output_manager:
-            output_manager.write_fusion_metrics(
-                fusion_weights=weights,
-                tuning_diagnostics=diagnostics,
-                previous_weights=previous_weights,
-            )
+    # 3. Detector weights are the fixed, configured base weights
+    # (cfg["fusion"]["weights"]), correlation-discounted above. The previous
+    # episode-separability "auto-tuner" was removed: with no external labels it
+    # collapsed to a damped pull toward uniform 1/n weights and never changed
+    # detection outcomes (see CLAUDE.md). Weights are now deterministic.
 
     # 4. Fuse training data (for threshold baseline, no episodes needed)
     train_fused = None
@@ -2702,16 +2135,14 @@ def run_fusion_pipeline(
         raise RuntimeError(f"Fused length {fused_np.shape[0]} != frame length {len(frame.index)}")
     
     Console.info(
-        f"Fusion: detectors={len(present)} | episodes={len(episodes)} | auto_tuned={auto_tuned}",
+        f"Fusion: detectors={len(present)} | episodes={len(episodes)}",
         component="FUSE"
     )
-    
+
     return FusionResult(
         fused_scores=fused_np,
         episodes=episodes,
         weights_used=weights,
-        auto_tuned=auto_tuned,
-        tuning_diagnostics=tuning_diagnostics,
         train_fused=train_fused,
     )
 
@@ -2768,7 +2199,6 @@ def run_fusion_stage(
     score_regime_labels: Optional[np.ndarray] = None,
     train_regime_labels: Optional[np.ndarray] = None,
     output_manager: Optional[Any] = None,
-    previous_weights: Optional[Dict[str, float]] = None,
     omr_contributions: Optional[pd.DataFrame] = None,
     equip: str = "",
     record_detector_scores_fn: Optional[Callable[..., None]] = None,
@@ -2786,7 +2216,6 @@ def run_fusion_stage(
         score_regime_labels=score_regime_labels,
         train_regime_labels=train_regime_labels,
         output_manager=output_manager,
-        previous_weights=previous_weights,
         omr_contributions=omr_contributions,
         equip=equip,
     )
@@ -2840,7 +2269,6 @@ def run_health_stage(
     output_manager: Any,
     logger: Any,
     equip: str,
-    previous_weights: Optional[Dict[str, float]],
     omr_contributions_data: Optional[pd.DataFrame],
     record_detector_scores_fn: Optional[Callable[..., None]],
     record_episode_fn: Optional[Callable[..., None]],
@@ -2923,7 +2351,6 @@ def run_health_stage(
             score_regime_labels=score_regime_labels,
             train_regime_labels=train_regime_labels,
             output_manager=output_manager,
-            previous_weights=previous_weights,
             omr_contributions=omr_contributions_data,
             equip=equip,
             record_detector_scores_fn=record_detector_scores_fn,

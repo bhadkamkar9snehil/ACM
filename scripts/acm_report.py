@@ -1163,20 +1163,11 @@ def format_calibration_human(calib_json: Optional[str]) -> Optional[tuple[str, d
     if not weights:
         return None
     parts = [f"{detector_label(k)} {v:.2f}" for k, v in weights.items()]
-    tuned = "auto-tuned from this run's data" if calib.get("auto_tuned") else "fixed weights"
-    summary = f"Fusion weights ({tuned}): " + ", ".join(parts)
+    summary = "Fusion weights (fixed weights): " + ", ".join(parts)
 
+    # Detector weights are fixed/configured (correlation-discounted at fuse time);
+    # there is no per-run weight tuning, so no tuning diagnostics to render.
     tuning_kv: dict[str, str] = {}
-    tuning = calib.get("tuning")
-    if isinstance(tuning, dict):
-        for k, v in tuning.items():
-            if not isinstance(v, (int, float, str, bool)):
-                continue
-            label = k.replace("_", " ")
-            if isinstance(v, float):
-                tuning_kv[label] = f"{v:.3g}"
-            else:
-                tuning_kv[label] = str(v)
     return summary, tuning_kv
 
 

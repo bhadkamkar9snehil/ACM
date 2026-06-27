@@ -2918,6 +2918,61 @@ then re-validate CARE before accepting any ML behavior change.
 
 ---
 
+## Fusion detector-weight auto-tuning REMOVED completely (2026-06-27)
+> *Added: 2026-06-27  user decision: "Since we dont need it; lets remove it COMPLETELY and TRULY first."*
+
+The fusion detector-weight auto-tuner (`tune_detector_weights()` and the `fusion.auto_tune` config
+block) was removed in full. Detector fusion weights are now the fixed, configured base weights
+(`cfg["fusion"]["weights"]`), correlation-discounted at fuse time exactly as before. This is a
+deliberate, evidence-backed removal, not a deferral.
+
+**Why it was removed (objective evidence already on record in this file):**
+- It never changed binary detection outcomes. The Farm A ablation showed `equal_weights` vs
+  `auto_tuned` had no consistent recall/precision win-loss pattern - only marginal calibration
+  sharpness.
+- We later root-caused WHY (see "fusion auto-tuning wiring gap" section above): with no external
+  labels, `episode_separability` collapsed every detector's target to an identical `no_labels`
+  floor, so the post-softmax target was exactly uniform `1/n`. EMA-blended at `learning_rate=0.3`
+  and drift-clamped, its real measured effect was a damped pull of the configured weights toward
+  equal weighting - which is why it looked the same as equal weights in the ablation.
+- The label-informed version is architecturally incompatible with the product anyway: ACM's whole
+  premise is unsupervised, "no labels, no per-site tuning." Episode labels only exist in benchmarks,
+  never in production. So the "good" auto-tuner could never actually run in production.
+- Net: it was dead-weight complexity plus a correctness liability (code did something different
+  from what it claimed). Removing it makes the fusion stage deterministic and honest.
+
+**What was deleted/changed (the FULL footprint - "truly" complete):**
+- `core/fuse.py`: deleted the entire `tune_detector_weights()` function (~540 lines); removed the
+  baseline-fuse-then-tune call site in `run_fusion_pipeline()`; removed `auto_tuned` and
+  `tuning_diagnostics` fields from the `FusionResult` dataclass; removed the now-dead
+  `previous_weights` plumbing param from `run_fusion_pipeline()`, `run_fusion_stage()`, and
+  `run_health_stage()` (it was internal to `fuse.py`, no external callers); removed the
+  `output_manager.write_fusion_metrics()` call (the method definition is left as harmless infra).
+- `core/ml_defaults.py`: removed the entire `fusion.auto_tune` block. `fusion.weights` (the fixed
+  base weights, sum=1.0) stays.
+- `core/pipeline.py`: `calibration_json` now carries only `weights_used` (dropped `auto_tuned`,
+  `tuning`).
+- `scripts/acm_report.py`: fusion-weights summary now always reads "fixed weights"; the tuning-kv
+  diagnostic render block (always empty now) removed.
+
+**Explicitly NOT touched (three separate, legitimately-named mechanisms - do not confuse with this):**
+- `episodes.cpd.auto_tune` (change-point-detection k/h sigma tuning) in `ml_defaults.py` / `fuse.py`.
+- `auto_tune_parameters()` in `core/model_evaluation.py` (threshold/refit-request tuning).
+- IForest `warm_start` in `core/outliers.py` (sklearn estimator flag).
+The correlation-discounted fusion (`compute_discounted_weights()`) is also untouched - that is core
+ACM fusion, not the auto-tuner.
+
+**Validation:** `tests/test_ml.py` 17/17 pass (these exercise fusion end-to-end on synthetic data -
+false-alarm resistance, fault sensitivity, distrust gate). `tests/test_store.py` 9/9 (non-slow)
+pass (the `calibration_json` DB round-trip path). All four edited modules import cleanly. Config
+verified: `fusion.auto_tune` absent, fixed weights intact, `FusionResult` has no auto-tune fields,
+`tune_detector_weights` no longer defined. A full Farm A zero-regression benchmark re-run was NOT
+done in-sandbox (CARE data not present here) - run it before citing updated CARE numbers, though
+behavior is expected to match the existing `equal_weights`-adjacent baseline since the auto-tuner's
+measured effect was already near-uniform.
+
+---
+
 ## Known Issues (Track as GitHub Issues)
 > *Added: 2026-06-16  Updated: 2026-06-17 (ML issues #61-#67 all fixed)*
 
