@@ -15,7 +15,7 @@ Stages (all self-contained, no SQL, no services):
   4. detectors          AR1, PCA-SPE/T2, IForest, GMM, OMR
   5. calibration        production calibration stage (adaptive clip,
                         contamination filter) on the held-out blocks
-  6. fusion             correlation-discounted weighted fusion, auto-tuned
+  6. fusion             correlation-discounted weighted fusion (fixed weights)
   7. alarm rules        self-tuned sustained/rate/per-head/availability rules
                         with the self-distrust gate (core.alarm_rules)
 """
