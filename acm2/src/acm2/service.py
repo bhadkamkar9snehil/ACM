@@ -85,6 +85,21 @@ def create_app(runtime: FleetRuntime) -> FastAPI:
     def tick() -> JSONResponse:
         return JSONResponse({"assets_moved": runtime.tick_all()})
 
+    @app.get("/api/immune/{asset_key:path}")
+    def immune(asset_key: str) -> JSONResponse:
+        r = runtime.immune_results.get(asset_key)
+        if r is None:
+            return JSONResponse(
+                {"status": "not yet checked"}, status_code=404
+            )
+        return JSONResponse(r)
+
+    @app.post("/api/immune-pass/{asset_key:path}")
+    def immune_now(asset_key: str) -> JSONResponse:
+        if asset_key not in runtime.monitors:
+            return JSONResponse({"error": "unknown asset"}, status_code=404)
+        return JSONResponse(runtime.immune_pass(asset_key))
+
     return app
 
 

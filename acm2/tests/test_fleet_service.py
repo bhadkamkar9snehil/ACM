@@ -111,3 +111,36 @@ def test_fleet_scale_smoke(tmp_path):
     assert s["assets"] == 40
     assert len(s["rows"]) == 40
     assert onboard_s < 120 and tick_s < 60, (onboard_s, tick_s)
+
+
+# ------------------------------------------------- runtime immune path
+def test_immune_pass_healthy(runtime):
+    r = runtime.immune_pass("f/ok1")
+    assert r["conformance_ok"] and not r["sick"]
+    assert r["action"] == "none"
+    assert r["pit"] in ("ok", "channels", "n/a")
+    s = runtime.fleet_summary()
+    assert s["immune"]["checked"] >= 1 and s["immune"]["sick"] == 0
+
+
+def test_immune_pass_catches_dead_scorer_and_rebuilds(runtime):
+    import numpy as np
+
+    em = runtime.monitors["f/ok2"]
+    em.monitor.scorer.score = lambda frame: np.zeros(frame.height)  # kill it
+    epoch_before = em.monitor.model_epoch
+    r = runtime.immune_pass("f/ok2")
+    assert r["sick"] and r["action"] == "rebuild"
+    # the rebuild replaced the dead scorer with a freshly calibrated one
+    assert em.monitor.scorer is not None
+    assert em.monitor.model_epoch != epoch_before or not r["scorer_dead"]
+    fresh = em.monitor.scorer.score(runtime.store.read("f/ok2").tail(100))
+    assert float(fresh.std()) > 0, "rebuilt scorer must be alive"
+
+
+def test_immune_endpoints(runtime):
+    client = TestClient(create_app(runtime))
+    assert client.get("/api/immune/f/ok1").status_code == 404  # not yet run
+    r = client.post("/api/immune-pass/f/ok1").json()
+    assert "sick" in r and "floors" in r
+    assert client.get("/api/immune/f/ok1").status_code == 200
