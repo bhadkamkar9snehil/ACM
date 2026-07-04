@@ -118,6 +118,26 @@ class ConditionalSurpriseScorer:
             )
         return pits
 
+    def concentration(self, frame: pl.DataFrame, top_k: int = 2) -> float:
+        """Share of total surprise carried by the top_k channels (recent
+        tail). Near 1 = channel-local (fault-like); low = coordinated
+        (operating-change-like). The corroborating axis for step-shaped
+        episodes - shape alone cannot separate a constant-severity fault
+        from a setpoint change (both plateau; found on the real pilots)."""
+        tail_h = min(frame.height, 256)
+        rz = np.abs(self._residual_z(frame.tail(tail_h)))
+        contrib = np.nanmean(rz, axis=0)
+        total = float(contrib.sum())
+        d = contrib.size
+        if total <= 0 or d <= top_k:
+            return 0.0
+        raw = float(np.sort(contrib)[::-1][:top_k].sum()) / total
+        uniform = top_k / d
+        # normalized: 0 = spread evenly over all channels, 1 = all surprise
+        # in the top_k. Without this, few-channel assets read concentrated
+        # at baseline (top-2 of 3 uniform channels is already 0.67).
+        return max(0.0, (raw - uniform) / (1.0 - uniform))
+
     def attribution(self, frame: pl.DataFrame, top_k: int = 5) -> list[str]:
         tail_h = min(frame.height, 256)
         rz = np.abs(self._residual_z(frame.tail(tail_h)))
