@@ -4,6 +4,7 @@ version = "2.0.0a0"
 description = "ACM2 - unsupervised, self-validating asset condition monitoring (the gem architecture spine)"
 requires-python = ">=3.11"
 dependencies = [
+    "numpy>=2.4.6",
     "polars>=1.0",
     "pyarrow>=15.0",
     # Windows ships no IANA tz database; polars timezone ops need it there.
