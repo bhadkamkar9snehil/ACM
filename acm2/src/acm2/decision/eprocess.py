@@ -55,6 +55,33 @@ import numpy as np
 
 _EPS_GRID = np.array([0.05, 0.1, 0.2, 0.35, 0.5, 0.65, 0.8])
 _LOG_WEALTH_CAP = 700.0  # exp overflow guard; far above any alarm threshold
+_ACF_DECORR_THRESHOLD = 0.1  # |acf| below this = effectively decorrelated
+_MIN_CALIB_BLOCKS = 30
+
+
+def decorrelation_length(x: np.ndarray, max_lag: int | None = None) -> int:
+    """Smallest lag at which |autocorrelation| stays below threshold.
+
+    This is how block sizes are DERIVED from the asset's own calibration
+    scores instead of chosen: blocks shorter than the correlation length
+    break exchangeability and inflate false alarms (the D12 trap, observed
+    directly on the S1 pilots at 1s cadence). Never hardcode a block size.
+    """
+    x = np.asarray(x, dtype=np.float64)
+    x = x[np.isfinite(x)]
+    n = x.size
+    if n < 60:
+        return 1
+    x = x - x.mean()
+    denom = float(np.dot(x, x))
+    if denom <= 0.0:
+        return 1
+    max_lag = max_lag or n // (2 * _MIN_CALIB_BLOCKS)
+    for lag in range(1, max(2, max_lag)):
+        acf = float(np.dot(x[:-lag], x[lag:])) / denom
+        if abs(acf) < _ACF_DECORR_THRESHOLD:
+            return lag
+    return max(1, max_lag)
 
 
 @dataclass
@@ -71,6 +98,11 @@ class EProcess:
     _buffer: list[float] = field(default_factory=list)
 
     def __post_init__(self) -> None:
+        if not 0.0 < self.alpha < 1.0:
+            raise ValueError(
+                f"alpha must be a probability in (0,1), got {self.alpha}; "
+                "rate dials must be converted (see REANCHORS_PER_YEAR)"
+            )
         calib = np.asarray(self.calibration, dtype=np.float64)
         calib = calib[np.isfinite(calib)]
         if calib.size < 30:
@@ -142,19 +174,32 @@ class EProcessBank:
         self,
         calibration: np.ndarray,
         alpha: float,
-        block_sizes: tuple[int, ...] = (1, 6, 36),
+        block_sizes: tuple[int, ...] | None = None,
         seed: int = 0,
     ) -> None:
+        calib = np.asarray(calibration, dtype=np.float64)
+        calib = calib[np.isfinite(calib)]
+        if block_sizes is None:
+            # Derive from the asset's own calibration: base block = the
+            # decorrelation length; longer members at geometric spacing for
+            # slower fault timescales; keep only members the calibration
+            # can actually support with >= 30 blocks.
+            base = decorrelation_length(calib)
+            candidates = [base, 4 * base, 16 * base]
+            block_sizes = tuple(
+                b for b in candidates if calib.size // b >= _MIN_CALIB_BLOCKS
+            ) or (base,)
         member_alpha = alpha / len(block_sizes)
         self.members = [
             EProcess(
-                calibration=calibration,
+                calibration=calib,
                 alpha=member_alpha,
                 block_size=b,
                 seed=seed + i,
             )
             for i, b in enumerate(block_sizes)
         ]
+        self.block_sizes = tuple(block_sizes)
 
     def update(self, scores: np.ndarray | list[float]) -> BankState:
         for m in self.members:
@@ -165,14 +210,16 @@ class EProcessBank:
         member_states = {
             m.block_size: (m.log_wealth, m.alarmed) for m in self.members
         }
-        # Display floor at 0: under health, log-wealth drifts negative (a
-        # supermartingale earns nothing on uniform p-values); negative
-        # wealth is "no evidence", not "negative evidence". The known cost
-        # - deep negative wealth delays detection after long healthy runs -
-        # is accepted for S1 and revisited with e-detector (ARL-style
-        # restart) variants when episode logic lands in S5.
+        # Evidence = PEAK wealth fraction (matches latching semantics: a
+        # latched alarm keeps showing the evidence that caused it). Floor
+        # at 0: under health log-wealth drifts negative (a supermartingale
+        # earns nothing on uniform p-values); negative wealth is "no
+        # evidence", not "negative evidence". The known cost - deep
+        # negative wealth delays detection after long healthy runs - is
+        # accepted for S1 and revisited with e-detector (ARL-style restart)
+        # variants when episode logic lands in S5.
         evidence = max(
-            max(0.0, m.log_wealth) / m.threshold_log for m in self.members
+            max(0.0, m.max_log_wealth) / m.threshold_log for m in self.members
         )
         return BankState(
             alarmed=any(m.alarmed for m in self.members),

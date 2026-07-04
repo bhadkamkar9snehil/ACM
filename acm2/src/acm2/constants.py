@@ -38,6 +38,16 @@ REGISTRY: dict[str, Constant] = {
             "exposed dial in ACM2.",
         ),
         Constant(
+            "REANCHORS_PER_YEAR",
+            52,
+            "Weekly rebuild/re-anchor cadence (D3). Converts the yearly "
+            "false-alarm RATE dial into the per-anchor Ville PROBABILITY: "
+            "alarms latch, so each anchor period contributes at most one "
+            "false alarm, with probability <= ALPHA_PER_ASSET_YEAR / "
+            "REANCHORS_PER_YEAR. Expected false alarms per year is then "
+            "<= ALPHA_PER_ASSET_YEAR, which is the promised budget.",
+        ),
+        Constant(
             "RECENCY_CAP",
             0.20,
             "Maximum weight the recent window may hold in the definition of "

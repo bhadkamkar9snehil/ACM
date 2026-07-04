@@ -96,7 +96,9 @@ def test_alarm_latches():
 # ------------------------------------------------------------------- bank
 def test_bank_budget_and_multiscale():
     rng = np.random.default_rng(10)
-    bank = EProcessBank(rng.normal(size=3000), alpha=0.05, seed=10)
+    bank = EProcessBank(
+        rng.normal(size=3000), alpha=0.05, block_sizes=(1, 6, 36), seed=10
+    )
     state = bank.update(rng.normal(size=1000))
     assert not state.alarmed
     assert 0.0 <= state.evidence < 1.0
@@ -104,6 +106,31 @@ def test_bank_budget_and_multiscale():
     assert state.alarmed
     assert state.evidence >= 1.0
     assert set(state.member_states) == {1, 6, 36}
+
+
+def test_bank_derives_blocks_from_autocorrelation():
+    """No hardcoded block sizes: an AR(1) calibration must yield a base
+    block larger than its correlation length; iid yields base 1."""
+    rng = np.random.default_rng(20)
+    iid_bank = EProcessBank(rng.normal(size=3000), alpha=0.05, seed=20)
+    assert iid_bank.block_sizes[0] <= 2
+    corr_bank = EProcessBank(ar1(6000, phi=0.9, rng=rng), alpha=0.05, seed=21)
+    assert corr_bank.block_sizes[0] >= 5
+    # derived members always retain >= 30 calibration blocks each
+    for m in corr_bank.members:
+        assert m._calib_sorted.size >= 30
+
+
+def test_derived_bank_holds_ville_bound_on_ar1():
+    """The self-derived block size must itself pass the D12 gate."""
+    alpha, runs, alarms = 0.05, 100, 0
+    for r in range(runs):
+        rng = np.random.default_rng(30_000 + r)
+        calib = ar1(4000, phi=0.85, rng=rng)
+        bank = EProcessBank(calib, alpha=alpha, seed=r)
+        bank.update(ar1(8000, phi=0.85, rng=rng))
+        alarms += bank.state().alarmed
+    assert alarms / runs <= 2 * alpha, f"{alarms}/{runs} false alarms"
 
 
 def test_calibration_too_small_rejected():
