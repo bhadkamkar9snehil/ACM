@@ -50,7 +50,7 @@ def test_e2e_healthy_stays_healthy_and_fault_alarms():
     assert faulty.state == V.STATE_ALARM
     assert faulty.evidence >= 1.0
     assert "temp" in faulty.attribution[:2]  # right channel blamed
-    assert faulty.model_epoch.startswith("s1-robustz")
+    assert faulty.model_epoch.startswith("s4-condsurprise")
     assert faulty.falsifiable_by
 
 

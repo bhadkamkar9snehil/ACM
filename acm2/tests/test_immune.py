@@ -60,12 +60,20 @@ def test_profile_detects_canonical_faults():
     assert report.floors["step"] <= 2.0
 
 
-def test_placeholder_scorer_is_blind_to_correlation_break():
-    """HONEST FINDING, pinned as a test: a per-channel marginal scorer
-    cannot see a correlation break (marginal preserved by construction).
-    When the S4 surprise substrate lands, this test MUST start failing -
-    that failure is the acceptance signal for S4's conditional modeling."""
-    report = sensitivity_profile("synt/blind", healthy_frame())
+def test_marginal_scorer_is_blind_to_correlation_break():
+    """HONEST FINDING, pinned: a per-channel MARGINAL scorer cannot see a
+    correlation break (marginal preserved by construction). Kept as the
+    permanent record of why S4's conditional substrate exists. The flip -
+    the DEFAULT (conditional) monitor detecting the break - is asserted in
+    test_surprise.py::test_s4_flip_correlation_break_detected."""
+    from acm2.scoring import RobustZScorer
+
+    def robustz_monitor(key):
+        return AssetMonitor(key, scorer_cls=RobustZScorer)
+
+    report = sensitivity_profile(
+        "synt/blind", healthy_frame(), monitor_cls=robustz_monitor
+    )
     assert report.floors["correlation_break"] is None
 
 

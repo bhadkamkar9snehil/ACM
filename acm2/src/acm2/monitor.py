@@ -17,16 +17,25 @@ from acm2 import verdict as V
 from acm2.constants import get as const
 from acm2.decision.eprocess import EProcessBank
 from acm2.scoring import RobustZScorer
+from acm2.scoring.surprise import ConditionalSurpriseScorer
 from acm2.store.raw import TIMESTAMP_COL
 
 FIT_FRACTION = 0.6
-MODEL_EPOCH_FMT = "s1-robustz-{fit_rows}r-{calib_rows}c"
+MODEL_EPOCH_FMT = "{tag}-{fit_rows}r-{calib_rows}c"
+
+
+def _scorer_tag(scorer_cls) -> str:
+    return {
+        RobustZScorer: "s1-robustz",
+        ConditionalSurpriseScorer: "s4-condsurprise",
+    }.get(scorer_cls, scorer_cls.__name__.lower())
 
 
 @dataclass
 class AssetMonitor:
     asset_key: str
-    scorer: RobustZScorer | None = None
+    scorer_cls: type = ConditionalSurpriseScorer  # S4 primary; robust-z auxiliary
+    scorer: object | None = None
     bank: EProcessBank | None = None
     model_epoch: str = ""
     calib_rows: int = 0
@@ -41,7 +50,7 @@ class AssetMonitor:
         split = int(n * FIT_FRACTION)
         fit, held_out = calib_frame.head(split), calib_frame.slice(split)
         try:
-            self.scorer = RobustZScorer().fit(fit)
+            self.scorer = self.scorer_cls().fit(fit)
             calib_scores = self.scorer.score(held_out)
             # Rate dial -> per-anchor Ville probability (see
             # REANCHORS_PER_YEAR rationale in the constants registry).
@@ -55,7 +64,7 @@ class AssetMonitor:
             return False
         self.calib_rows = n
         self.model_epoch = MODEL_EPOCH_FMT.format(
-            fit_rows=split, calib_rows=n - split
+            tag=_scorer_tag(self.scorer_cls), fit_rows=split, calib_rows=n - split
         )
         return True
 
@@ -77,10 +86,17 @@ class AssetMonitor:
             base = LifetimeBaseline.build(
                 store, self.asset_key, ledger=ledger, cache_root=cache_root
             )
-            scorer = RobustZScorer()
-            scorer.medians, scorer.scales = base.medians, base.scales
             sample = base.calibration_sample(store, ledger=ledger)
-            calib_scores = scorer.score(sample)
+            if self.scorer_cls is RobustZScorer:
+                scorer = RobustZScorer()
+                scorer.medians, scorer.scales = base.medians, base.scales
+                calib_scores = scorer.score(sample)
+            else:
+                # conditional scorer: FIT on the older 60% of the lifetime
+                # sample, calibrate on the held-out rest (in-sample-bias law)
+                split = int(sample.height * FIT_FRACTION)
+                scorer = self.scorer_cls().fit(sample.head(split))
+                calib_scores = scorer.score(sample.slice(split))
             alpha = float(const("ALPHA_PER_ASSET_YEAR")) / float(
                 const("REANCHORS_PER_YEAR")
             )
