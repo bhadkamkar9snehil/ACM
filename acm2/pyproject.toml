@@ -30,3 +30,6 @@ testpaths = ["tests"]
 # (stale pytest-of-Admin, undeletable); a repo-local basetemp avoids it
 # everywhere and is gitignored.
 addopts = "-q --basetemp=.pytest_tmp"
+markers = [
+    "statistical: statistical-acceptance lane (immune harness, conformance gates)",
+]
