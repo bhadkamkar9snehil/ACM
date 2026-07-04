@@ -4,6 +4,32 @@ ACM watches industrial assets and tells you when something is wrong - **with no 
 
 ---
 
+## ACM2 (the successor - active development)
+
+The `acm2/` package is the ground-up successor built on lifetime memory,
+conditional surprise scoring, and anytime-valid e-process detection with a
+mathematically guaranteed false-alarm budget (one dial: alpha per
+asset-year). Design: `docs/acm-gem-plan.md`; build guide:
+`docs/acm2-implementation-plan.md`; factory: `docs/acm2-factory.md`.
+
+```bash
+cd acm2
+uv sync                                   # environment (lockfile committed)
+uv run pytest tests                       # full suite incl. statistical lane
+uv run python -m acm2.service --root ../acm2_data --port 8899 --tick-seconds 300
+# self-ticking fleet service + UI: open http://127.0.0.1:8899
+```
+
+API: `GET /api/fleet`, `GET /api/asset/{key}`, `POST /api/tick`,
+`GET /api/immune/{key}`, `POST /api/immune-pass/{key}`.
+Verdicts: healthy | insufficient-history | watch | alarm | escalating
+(with self-gated failure-time horizon) | change-not-fault. Every verdict
+carries confidence, evidence trail, attribution, model epoch, and a
+falsifiability statement. ACM2 never imports the legacy pipeline
+(CI-enforced); the sections below describe legacy ACM.
+
+---
+
 ## Quick Start
 
 ### Windows
@@ -99,6 +125,21 @@ ACM doesn't alert on every spike. The fused score is routed through four cadence
 
 All thresholds are self-tuned from the history. No human configuration required.
 
+### Fused score versus alarm
+
+`fused >= alert_z` means ACM's detector stack found anomaly evidence at that timestamp. It is the model saying "this point looks abnormal relative to this asset's learned history." `alarm = 1` is a stricter operational decision: the high fused evidence must also satisfy ACM's alarm rules, such as sustained duration, 24-hour abnormal-rate, 7-day per-detector/head rate, availability, and self-distrust gating.
+
+Use both signals when diagnosing ACM:
+
+| Signal | Meaning | Inference |
+|---|---|---|
+| Fused crosses `alert_z`, no alarm | Detectors saw abnormal evidence, but the decision layer did not promote it | Investigate alarm-rule shape, cadence normalization, persistence/rate windows, episode construction, or suppression gates |
+| Fused stays below `alert_z`, no alarm | Detectors did not separate the event from learned normal behavior | Investigate features, calibration, detector sensitivity, data quality, or whether the label maps to sensor behavior |
+| Alarm overlaps known event | ACM produced an actionable detection | Measure lag, duration, peak, and whether the alarm is specific or too broad |
+| Alarm outside known event | ACM found abnormal behavior not covered by labels, or produced a false alarm | Inspect raw timeline before calling it false positive |
+
+For public validation datasets, this distinction matters. In the event-aligned benchmark run, alarm recall was lower than fused-threshold indication: SMD had 89 alarm hits out of 136 labelled events, but 133/136 events crossed `alert_z`; BATADAL had 4 alarm hits out of 12 events, but 10/12 crossed `alert_z`; MetroPT-3 had 3 alarm hits out of 4 events, but all 4 crossed `alert_z`. That means many misses are not detector blindness. They are decision-layer misses where ACM saw the event but did not convert it into an operational alarm.
+
 ---
 
 ## Simulator Guide
@@ -193,6 +234,14 @@ KPI: **PASS** requires event-level recall >= 0.80 and F1 >= 0.75. Output: `resul
 ordinary ACM CSV inputs: one `timestamp` column plus numeric channels. Labels and event windows are
 kept outside the model input as `labels*.csv` and `known_events.csv`.
 
+Before adding or recommending any new public dataset, check ACM fit first. A valid benchmark needs at least 14 days of mature baseline before the first scored event, labelled events that occur after that baseline, enough rows after feature construction for calibration, and continuous multivariate telemetry rather than isolated tabular snapshots. Datasets that fail this gate can still be adapter tests or stress tests, but they are not evidence that ACM's ML failed.
+
+Use the repeatable investigation harness for this gate and for per-dataset root-cause evidence:
+
+```bash
+python scripts/public_dataset_benchmark.py --datasets all --workers 2 --force --out results/public_dataset_benchmark
+```
+
 ```bash
 python scripts/download_validation_datasets.py --dataset metropt3
 python scripts/download_validation_datasets.py --dataset batadal
@@ -248,12 +297,17 @@ without a component, diff the resulting `summary.json`.
 | GMM | `{"models": {"gmm": {"enabled": false}}}` |
 | OMR | `{"models": {"omr": {"enabled": false}}}` |
 | Contamination-aware calibration filter | `{"thresholds": {"contamination_filter": {"enabled": false}}}` |
-| Self-distrust gate (broken-baseline discard) | `{"alarm_rules": {"distrust_coverage": 2.0}}` |
+| Sustained alarm rule | `{"alarm_rules": {"sustained": {"enabled": false}}}` |
+| 24-hour rate alarm rule | `{"alarm_rules": {"rate": {"enabled": false}}}` |
+| Per-head 7-day alarm rule | `{"alarm_rules": {"per_head": {"enabled": false}}}` |
+| Availability alarm rule | `{"alarm_rules": {"availability": {"enabled": false}}}` |
+| Self-distrust gate (broken-baseline discard) | `{"alarm_rules": {"self_distrust": {"enabled": false}}}` |
 | Fusion auto-tuning | `{"fusion": {"auto_tune": {"enabled": false}}}` |
 | Equal detector weights, no auto-tune | `{"fusion": {"auto_tune": {"enabled": false}, "weights": {"ar1_z": 0.1667, "pca_spe_z": 0.1667, "pca_t2_z": 0.1667, "iforest_z": 0.1667, "gmm_z": 0.1667, "omr_z": 0.1667}}}` |
 
 Combine any rows by merging their JSON objects into one override - e.g. disable OMR and the
-contamination filter together in a single run.
+contamination filter together in a single run. Rule switches are diagnostic ablations; production defaults
+leave every rule enabled.
 
 **Windows (PowerShell)** - single-quoted strings are literal here too, so the JSON needs no
 escaping; use a trailing backtick for line continuation:
@@ -267,7 +321,7 @@ python scripts\care_benchmark.py --data-dir "care_data\Wind Farm A" --out result
   --override '{"models": {"omr": {"enabled": false}}}'
 
 python scripts\care_benchmark.py --data-dir "care_data\Wind Farm A" --out results\no_distrust --workers 2 `
-  --override '{"alarm_rules": {"distrust_coverage": 2.0}}'
+  --override '{"alarm_rules": {"self_distrust": {"enabled": false}}}'
 
 python scripts\care_benchmark.py --data-dir "care_data\Wind Farm A" --out results\equal_weights --workers 2 `
   --override '{"fusion": {"auto_tune": {"enabled": false}, "weights": {"ar1_z": 0.1667, "pca_spe_z": 0.1667, "pca_t2_z": 0.1667, "iforest_z": 0.1667, "gmm_z": 0.1667, "omr_z": 0.1667}}}'
@@ -354,6 +408,7 @@ ACM/
 |   +-- acm_mqtt_bridge.py   daemon thread subscribing MQTT -> mqtt_buffer.db
 |   +-- download_care_dataset.py  partial Zenodo zip download via remotezip
 |   +-- download_validation_datasets.py  public dataset adapters for ACM smoke testing
+|   +-- public_dataset_benchmark.py  repeatable public dataset stress-test investigation
 |   +-- care_benchmark.py    CARE wind-farm benchmark against ground-truth labels
 |   +-- generate_fault_dataset.py  generates 10 labeled fault CSVs
 |   `-- robustness_matrix.py       sensitivity / false-alarm matrix across fault types

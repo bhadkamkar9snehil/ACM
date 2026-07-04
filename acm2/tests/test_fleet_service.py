@@ -144,3 +144,15 @@ def test_immune_endpoints(runtime):
     r = client.post("/api/immune-pass/f/ok1").json()
     assert "sick" in r and "floors" in r
     assert client.get("/api/immune/f/ok1").status_code == 200
+
+
+def test_self_ticking_service(runtime):
+    """The service ticks itself - implement and forget."""
+    import time as _t
+
+    app = create_app(runtime, tick_seconds=0.2)
+    before = dict(runtime._tick_counts)
+    with TestClient(app):
+        _t.sleep(0.7)
+    after = runtime._tick_counts
+    assert any(after[k] > before.get(k, 0) for k in after), (before, after)

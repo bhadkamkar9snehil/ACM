@@ -2887,6 +2887,10 @@ assuming conversion can run unattended.
 attempt produced only `manifest.json` and an empty `known_events.csv` because no asset CSVs were
 found from the current ZIP-entry matching rule. Treat bearing as adapter-fix-needed before scoring.
 
+Future public-dataset searches must pass ACM's maturity gate before being treated as benchmark evidence. The candidate needs at least 14 days of normal baseline before the first scored labelled event, labelled events after that baseline, enough rows after feature construction for calibration, and continuous multivariate telemetry rather than isolated tabular snapshots. If a dataset fails this gate, classify it as adapter-only, protocol-mismatch, or stress-test material. Do not report it as an ACM ML failure.
+
+Use `scripts/public_dataset_benchmark.py` for repeatable gating and diagnosis. It imports `MIN_TRAIN_DAYS` from `scripts.acm_feed`, runs existing `acm_run.py`, analyzes the canonical SQLite store, and classifies misses as score-window, detector-separation, decision-layer, or run-error causes.
+
 `scripts/acm_report.py` now auto-discovers `data/public_datasets/adapted/*/known_events.csv` and
 adds validation evidence to generated HTML reports when asset names match public validation
 datasets. The report now shows:
@@ -2993,3 +2997,37 @@ it's still a decision, not a sunk cost.
 - Willing to break ACM's own established principles/architecture if it demonstrably achieves the
   end goal  but wants to be warned first when a suggestion crosses one (see "Standing Rule: Flag
   Architecture-Violating Suggestions" above)
+
+---
+
+## ACM2 - Successor System Status (2026-07-04)
+
+ACM2 lives in `acm2/` (src-layout, uv-locked, own CI lanes). Built by the
+agent factory (docs/acm2-factory.md) under autonomous mode. Governing docs:
+docs/acm-rethink-plan.md, docs/acm-gem-plan.md, docs/acm2-implementation-plan.md.
+Task board: Hermes kanban board `acm2`. Tag v2.0.0 = complete at Tier 0.
+
+Phases S0-S6 + S8 COMPLETE; S7 (world-model tier) OPEN pending GPU (the
+RTX 4060 is the remote LM Studio box, this machine probes Tier 0); Koopman
+dynamics-drift channel OPEN (research spike, never a dependency).
+
+Key invariants (CI-enforced, do not violate):
+- acm2/ never imports core/, scripts/, sim/, static/ (test_import_boundary).
+- No trim/retention windows, no threshold rules, no distrust gate, no
+  fusion auto-tune, no kurt/skew features (never-built list, impl plan S5).
+- Config = ALPHA_PER_ASSET_YEAR + rationale-carrying constants registry only.
+- Timestamps timezone-aware UTC only; labels never enter the raw store.
+- Alpha is a probability per anchor (rate dial / REANCHORS_PER_YEAR);
+  EProcess rejects alpha outside (0,1).
+- Verdict contract v1 fields are FROZEN (verdict.py).
+
+Hard-won ACM2 lessons (found by tests/pilots during the build):
+- Block sizes for the e-process are DERIVED from calibration autocorrelation
+  (fixed sizes false-alarmed real pilots at 1s cadence).
+- Z-normalized novelty is amplitude-blind; novelty = max(shape, level).
+- Shape alone cannot separate constant-severity faults from setpoint
+  changes; change-not-fault requires low normalized attribution
+  concentration as corroboration.
+- The immune harness profiles the RECIPE; a dead LIVE scorer needs the
+  separate live-instance degeneracy check (fleet.immune_pass does both).
+- PIT distortion classification is an immune signal ONLY while not alarmed.

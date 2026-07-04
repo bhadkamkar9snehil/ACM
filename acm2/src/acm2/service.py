@@ -11,12 +11,16 @@ Run: uv run python -m acm2.service [--root <data_root>] [--port 8899]
 
 from __future__ import annotations
 
+import asyncio
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from acm2.fleet import FleetRuntime
+
+DEFAULT_TICK_SECONDS = 300.0
 
 PAGE = """<!DOCTYPE html>
 <html><head><meta charset="ascii"><title>ACM2 Fleet</title>
@@ -63,8 +67,28 @@ refresh(); setInterval(refresh, 5000);
 </script></body></html>"""
 
 
-def create_app(runtime: FleetRuntime) -> FastAPI:
-    app = FastAPI(title="ACM2", version="2.0.0a0")
+def create_app(
+    runtime: FleetRuntime, tick_seconds: float | None = None
+) -> FastAPI:
+    """tick_seconds=None disables the built-in loop (tests drive ticks
+    explicitly); any positive value makes the service self-ticking -
+    implement and forget."""
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        task = None
+        if tick_seconds:
+            async def loop() -> None:
+                while True:
+                    await asyncio.to_thread(runtime.tick_all)
+                    await asyncio.sleep(tick_seconds)
+
+            task = asyncio.create_task(loop())
+        yield
+        if task is not None:
+            task.cancel()
+
+    app = FastAPI(title="ACM2", version="2.0.0a0", lifespan=lifespan)
 
     @app.get("/", response_class=HTMLResponse)
     def index() -> str:
@@ -115,12 +139,15 @@ def main() -> None:  # pragma: no cover - manual entrypoint
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", default="../acm2_data")
     parser.add_argument("--port", type=int, default=8899)
+    parser.add_argument(
+        "--tick-seconds", type=float, default=DEFAULT_TICK_SECONDS
+    )
     args = parser.parse_args()
     root = Path(args.root).resolve()
     runtime = FleetRuntime(store=RawStore(root / "raw"), data_root=root)
     runtime.onboard_all()
     runtime.tick_all()
-    app = create_app(runtime)
+    app = create_app(runtime, tick_seconds=args.tick_seconds)
     uvicorn.run(app, host="127.0.0.1", port=args.port)
 
 
