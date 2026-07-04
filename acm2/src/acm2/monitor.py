@@ -59,6 +59,43 @@ class AssetMonitor:
         )
         return True
 
+    def calibrate_from_lifetime(
+        self,
+        store,
+        ledger=None,
+        cache_root=None,
+        seed: int = 0,
+    ) -> bool:
+        """S3 calibration path: the scorer's reference comes from the
+        recency-capped, ledger-masked LIFETIME baseline; the e-process
+        calibration scores come from a healthy sample of the OLDER life
+        (recent periods excluded - a developing fault can never sit inside
+        its own calibration reference)."""
+        from acm2.memory.baseline import LifetimeBaseline
+
+        try:
+            base = LifetimeBaseline.build(
+                store, self.asset_key, ledger=ledger, cache_root=cache_root
+            )
+            scorer = RobustZScorer()
+            scorer.medians, scorer.scales = base.medians, base.scales
+            sample = base.calibration_sample(store, ledger=ledger)
+            calib_scores = scorer.score(sample)
+            alpha = float(const("ALPHA_PER_ASSET_YEAR")) / float(
+                const("REANCHORS_PER_YEAR")
+            )
+            self.bank = EProcessBank(calib_scores, alpha=alpha, seed=seed)
+            self.scorer = scorer
+        except ValueError as exc:
+            self.scorer, self.bank = None, None
+            self.insufficient_reason = str(exc)
+            return False
+        self.calib_rows = base.rows_total
+        self.model_epoch = (
+            f"s3-lifetime-{len(base.periods_used)}p-{base.rows_total}r"
+        )
+        return True
+
     def process(self, frame: pl.DataFrame) -> V.Verdict:
         if not frame.is_empty():
             self.last_ts = str(frame.get_column(TIMESTAMP_COL).max())
