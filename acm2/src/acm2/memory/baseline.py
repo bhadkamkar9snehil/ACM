@@ -59,11 +59,22 @@ class LifetimeBaseline:
             raise ValueError(f"no stored history for {asset_key}")
         periods = [p.stem for p in part_files]
 
+        # Cache entries are keyed by the LEDGER STATE for this asset: a
+        # summary is computed from ledger-masked rows, so a ledger that
+        # grows later (bootstrap passes, new episodes) must invalidate the
+        # cache - found while wiring the detect->mask->re-detect loop.
+        if ledger is not None:
+            lhash = f"{abs(hash(tuple(ledger.windows(asset_key)))):x}"[:12]
+        else:
+            lhash = "nl"
+
         summaries: list[PeriodSummary] = []
         for path, period in zip(part_files, periods):
             is_open = period == periods[-1]
             cached = (
-                cache_dir / f"{period}.pkl" if cache_dir is not None else None
+                cache_dir / f"{period}-{lhash}.pkl"
+                if cache_dir is not None
+                else None
             )
             if not is_open and cached is not None and cached.exists():
                 summaries.append(pickle.loads(cached.read_bytes()))

@@ -1,4 +1,4 @@
-"""Fleet runtime (S6): 1 to 1000 assets, each an island, one machine.
+"""Service runtime: hosts any number of independent per-asset monitors.
 
 Ties the spine together per asset - episodic monitor over lifetime memory,
 verdict cache, governed rebuild scheduling - and keeps the multi-asset
@@ -27,7 +27,7 @@ IMMUNE_SAMPLE_ROWS = 12000  # recent healthy rows used per immune pass
 
 
 @dataclass
-class FleetRuntime:
+class Runtime:
     store: RawStore
     data_root: Path
     governor: Governor | None = None
@@ -100,6 +100,140 @@ class FleetRuntime:
                 moved += 1
         return moved
 
+    # -------------------------------------------------------- bootstrap
+    @staticmethod
+    def _scan_contamination(
+        ts_col, scores, window: int = 256, mads: float = 4.0
+    ) -> list[tuple[str, str]]:
+        """Contiguous elevated blocks in the lifetime score trace.
+
+        The e-process cannot detect contamination sitting INSIDE its own
+        calibration reference. The discriminator (inherited from the lab's
+        contamination-filter post-mortem): genuine contamination is a
+        CONTIGUOUS block of elevated surprise; legitimate rare operation is
+        scattered tail values. Percentile trimming is banned (it deletes
+        healthy variance); block scanning flags only sustained runs.
+        """
+        import numpy as np
+
+        s = np.asarray(scores, dtype=np.float64)
+        n = s.size
+        if n < 4 * window:
+            return []
+        k = n // window
+        wm = s[: k * window].reshape(k, window).mean(axis=1)
+        med = float(np.median(wm))
+        mad = 1.4826 * float(np.median(np.abs(wm - med)))
+        mad = max(mad, 1e-9)
+        hot = wm > med + mads * mad
+        regions, start = [], None
+        for i, h in enumerate(hot):
+            if h and start is None:
+                start = i
+            elif not h and start is not None:
+                regions.append((start, i))
+                start = None
+        if start is not None:
+            regions.append((start, k))
+        out = []
+        for a, b in regions:
+            t0 = str(ts_col[a * window])
+            t1 = str(ts_col[min(b * window, n - 1)])
+            out.append((t0, t1))
+        return out
+
+    def bootstrap(self, asset_key: str, max_iters: int = 4) -> dict:
+        """First contact with an asset's history: DETECT -> MASK ->
+        RE-DETECT to convergence (rethink plan bootstrap requirement).
+
+        Pass 1 calibrates on raw lifetime (possibly contaminated), replays
+        the whole history, and ledgers any episodes found. Each further
+        pass recalibrates on the ledger-MASKED lifetime - the baseline the
+        previous pass could not have (its contamination is now excluded) -
+        and replays again. Converged when a pass finds no new episodes.
+        Every pass analyses the same data against a cleaner definition of
+        normal; this is the multiple-run-throughs mechanism.
+        """
+        em = self.monitors[asset_key]
+        history = self.store.read(asset_key)
+        passes = []
+        for it in range(max_iters):
+            ok = em.monitor.calibrate_from_lifetime(
+                self.store, ledger=self.ledger, cache_root=self.cache_root
+            )
+            if not ok:
+                passes.append({"pass": it + 1, "status": "insufficient"})
+                break
+            em.open_episode_start = ""
+            em._episode_scores = []
+            episodes_before = len(self.ledger.episodes)
+
+            # each pass analyses only the not-yet-explained life: rows
+            # already inside ledger windows are excluded, so a pass can
+            # only find NEW structure (this is what makes the loop
+            # converge instead of re-finding the same fault forever)
+            unexplained = self.ledger.mask(asset_key, history)
+            if unexplained.is_empty():
+                passes.append({"pass": it + 1, "new_episodes": 0})
+                break
+
+            # DETECT part 1 - contamination scan of the score trace
+            # (catches faults sitting inside the calibration reference,
+            # which the e-process structurally cannot)
+            scores_full = em.monitor.scorer.score(unexplained)
+            ts_col = unexplained.get_column(TIMESTAMP_COL).to_list()
+            existing = self.ledger.windows(asset_key)
+            for t0, t1 in self._scan_contamination(ts_col, scores_full):
+                overlaps = any(
+                    not (t1 < w0 or t0 > w1) for w0, w1 in existing
+                )
+                if not overlaps:
+                    from acm2.memory.ledger import Episode
+
+                    self.ledger.add(
+                        Episode(
+                            asset_key=asset_key,
+                            start=t0,
+                            end=t1,
+                            state="alarm",
+                            note='{"source": "bootstrap-scan"}',
+                        )
+                    )
+
+            # DETECT part 2 - e-process replay of the unexplained life
+            last_verdict = None
+            for chunk_start in range(0, unexplained.height, 4000):
+                chunk = unexplained.slice(chunk_start, 4000)
+                v = em.process(chunk)
+                if v.state in (
+                    V.STATE_ALARM,
+                    V.STATE_ESCALATING,
+                    V.STATE_CHANGE,
+                ):
+                    last_verdict = v
+                elif em.open_episode_start and last_verdict is not None:
+                    # evidence latched but state recovered -> close episode
+                    em.reanchor(store=self.store, last_verdict=last_verdict,
+                                cache_root=self.cache_root)
+                    last_verdict = None
+            if em.open_episode_start and last_verdict is not None:
+                em.reanchor(store=self.store, last_verdict=last_verdict,
+                            cache_root=self.cache_root)
+            found = len(self.ledger.episodes) - episodes_before
+            passes.append({"pass": it + 1, "new_episodes": found})
+            if found == 0:
+                break
+        # leave the monitor calibrated on the final masked baseline
+        em.monitor.calibrate_from_lifetime(
+            self.store, ledger=self.ledger, cache_root=self.cache_root
+        )
+        self._last_seen[asset_key] = (
+            history.get_column(TIMESTAMP_COL).max()
+            if not history.is_empty()
+            else None
+        )
+        return {"asset": asset_key, "passes": passes}
+
     # ----------------------------------------------------- immune path
     def immune_pass(self, asset_key: str) -> dict:
         """Scheduled self-validation (S2 harness + PIT conformance), the
@@ -161,7 +295,7 @@ class FleetRuntime:
         return result
 
     # -------------------------------------------------------- aggregates
-    def fleet_summary(self) -> dict:
+    def summary(self) -> dict:
         counts: dict[str, int] = {}
         for v in self.verdicts.values():
             counts[v.state] = counts.get(v.state, 0) + 1

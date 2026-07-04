@@ -9,7 +9,7 @@ import polars as pl
 import pytest
 from fastapi.testclient import TestClient
 
-from acm2.fleet import FleetRuntime
+from acm2.runtime import Runtime
 from acm2.service import create_app
 from acm2.store.raw import TIMESTAMP_COL, RawStore
 
@@ -47,14 +47,14 @@ def runtime(tmp_path):
     seed_asset(store, "f/ok1", seed=1)
     seed_asset(store, "f/ok2", seed=2)
     seed_asset(store, "f/bad", seed=3, fault_last=True)
-    rt = FleetRuntime(store=store, data_root=tmp_path)
+    rt = Runtime(store=store, data_root=tmp_path)
     rt.onboard_all()
     rt.tick_all()
     return rt
 
 
 def test_fleet_verdicts_and_ordering(runtime):
-    s = runtime.fleet_summary()
+    s = runtime.summary()
     assert s["assets"] == 3
     assert sum(s["counts"].values()) == 3
     # worst-first: the faulted asset leads
@@ -64,8 +64,8 @@ def test_fleet_verdicts_and_ordering(runtime):
 
 def test_service_endpoints_carry_the_contract(runtime):
     client = TestClient(create_app(runtime))
-    assert "ACM2 Fleet" in client.get("/").text
-    fleet = client.get("/api/fleet").json()
+    assert "ACM2 Assets" in client.get("/").text
+    fleet = client.get("/api/assets").json()
     assert fleet["assets"] == 3 and "tier" in fleet
     detail = client.get("/api/asset/f/bad").json()
     for field in (
@@ -100,14 +100,14 @@ def test_fleet_scale_smoke(tmp_path):
     store = RawStore(tmp_path / "raw")
     for i in range(40):
         seed_asset(store, f"s/{i:03d}", months=3, n=400, seed=i)
-    rt = FleetRuntime(store=store, data_root=tmp_path)
+    rt = Runtime(store=store, data_root=tmp_path)
     t0 = time.monotonic()
     rt.onboard_all()
     onboard_s = time.monotonic() - t0
     t0 = time.monotonic()
     rt.tick_all()
     tick_s = time.monotonic() - t0
-    s = rt.fleet_summary()
+    s = rt.summary()
     assert s["assets"] == 40
     assert len(s["rows"]) == 40
     assert onboard_s < 120 and tick_s < 60, (onboard_s, tick_s)
@@ -119,7 +119,7 @@ def test_immune_pass_healthy(runtime):
     assert r["conformance_ok"] and not r["sick"]
     assert r["action"] == "none"
     assert r["pit"] in ("ok", "channels", "n/a")
-    s = runtime.fleet_summary()
+    s = runtime.summary()
     assert s["immune"]["checked"] >= 1 and s["immune"]["sick"] == 0
 
 
@@ -156,3 +156,68 @@ def test_self_ticking_service(runtime):
         _t.sleep(0.7)
     after = runtime._tick_counts
     assert any(after[k] > before.get(k, 0) for k in after), (before, after)
+
+
+# ------------------------------------------------------- the bootstrap
+def test_bootstrap_detect_mask_redetect_converges(tmp_path):
+    """First contact with contaminated history: pass 1 finds the fault and
+    ledgers it; the next pass, calibrated on the masked lifetime, finds no
+    new episodes (convergence). The multiple-run-throughs mechanism."""
+    from datetime import datetime, timedelta, timezone
+
+    import numpy as np
+    import polars as pl
+
+    from acm2.store.raw import TIMESTAMP_COL
+
+    UTC = timezone.utc
+    store = RawStore(tmp_path / "raw")
+    rng = np.random.default_rng(42)
+    start = datetime(2025, 1, 1, tzinfo=UTC)
+    for m in range(10):
+        n = 1200
+        fault = 5.0 if m == 6 else 0.0  # one contaminated month mid-history
+        ts0 = start + timedelta(days=30 * m)
+        ts = [ts0 + timedelta(minutes=10 * i) for i in range(n)]
+        temp = rng.normal(size=n)
+        vib = 0.8 * temp + 0.3 * rng.normal(size=n)
+        if fault:
+            vib = vib + fault * np.concatenate(
+                [np.linspace(0, 1, n // 2), np.ones(n - n // 2)]
+            )
+        press = rng.normal(size=n)
+        flow = rng.normal(size=n)
+        store.append(
+            "bs/1",
+            pl.DataFrame(
+                {
+                    TIMESTAMP_COL: pl.Series(ts, dtype=pl.Datetime("us", "UTC")),
+                    "temp": temp, "vib": vib, "press": press, "flow": flow,
+                }
+            ),
+        )
+
+    rt = Runtime(store=store, data_root=tmp_path)
+    rt.onboard("bs/1")
+    result = rt.bootstrap("bs/1")
+    passes = result["passes"]
+    assert passes[0]["new_episodes"] >= 1, passes  # the fault was found
+    assert passes[-1]["new_episodes"] == 0, passes  # and convergence reached
+    assert len(rt.ledger.episodes) >= 1
+    # post-bootstrap: fresh healthy data scores healthy on the clean baseline
+    n = 800
+    ts0 = start + timedelta(days=330)
+    ts = [ts0 + timedelta(minutes=10 * i) for i in range(n)]
+    temp = rng.normal(size=n)
+    fresh = pl.DataFrame(
+        {
+            TIMESTAMP_COL: pl.Series(ts, dtype=pl.Datetime("us", "UTC")),
+            "temp": temp,
+            "vib": 0.8 * temp + 0.3 * rng.normal(size=n),
+            "press": rng.normal(size=n),
+            "flow": rng.normal(size=n),
+        }
+    )
+    store.append("bs/1", fresh)
+    v = rt.tick("bs/1")
+    assert v is not None and v.state == "healthy", v

@@ -18,12 +18,12 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from acm2.fleet import FleetRuntime
+from acm2.runtime import Runtime
 
 DEFAULT_TICK_SECONDS = 300.0
 
 PAGE = """<!DOCTYPE html>
-<html><head><meta charset="ascii"><title>ACM2 Fleet</title>
+<html><head><meta charset="ascii"><title>ACM2 Assets</title>
 <style>
  body{font-family:Consolas,monospace;background:#101418;color:#d8dee6;margin:24px}
  h1{font-size:18px} .pill{display:inline-block;padding:2px 10px;margin:0 6px 0 0;
@@ -37,7 +37,7 @@ PAGE = """<!DOCTYPE html>
  border:1px solid #22303c;font-size:12px;display:none}
  .muted{color:#7c8894;font-size:12px}
 </style></head><body>
-<h1>ACM2 Fleet <span class="muted" id="meta"></span></h1>
+<h1>ACM2 Assets <span class="muted" id="meta"></span></h1>
 <div id="pills"></div>
 <table><thead><tr><th>asset</th><th>state</th><th>evidence</th>
 <th>confidence</th><th>attribution</th><th>model epoch</th></tr></thead>
@@ -45,7 +45,7 @@ PAGE = """<!DOCTYPE html>
 <div id="detail"></div>
 <script>
 async function refresh(){
- const r = await fetch('/api/fleet'); const f = await r.json();
+ const r = await fetch('/api/assets'); const f = await r.json();
  document.getElementById('meta').textContent =
    f.assets + ' assets | tier ' + f.tier;
  document.getElementById('pills').innerHTML = Object.entries(f.counts)
@@ -68,7 +68,7 @@ refresh(); setInterval(refresh, 5000);
 
 
 def create_app(
-    runtime: FleetRuntime, tick_seconds: float | None = None
+    runtime: Runtime, tick_seconds: float | None = None
 ) -> FastAPI:
     """tick_seconds=None disables the built-in loop (tests drive ticks
     explicitly); any positive value makes the service self-ticking -
@@ -94,9 +94,9 @@ def create_app(
     def index() -> str:
         return PAGE
 
-    @app.get("/api/fleet")
-    def fleet() -> JSONResponse:
-        return JSONResponse(runtime.fleet_summary())
+    @app.get("/api/assets")
+    def assets_view() -> JSONResponse:
+        return JSONResponse(runtime.summary())
 
     @app.get("/api/asset/{asset_key:path}")
     def asset(asset_key: str) -> JSONResponse:
@@ -144,7 +144,7 @@ def main() -> None:  # pragma: no cover - manual entrypoint
     )
     args = parser.parse_args()
     root = Path(args.root).resolve()
-    runtime = FleetRuntime(store=RawStore(root / "raw"), data_root=root)
+    runtime = Runtime(store=RawStore(root / "raw"), data_root=root)
     runtime.onboard_all()
     runtime.tick_all()
     app = create_app(runtime, tick_seconds=args.tick_seconds)
