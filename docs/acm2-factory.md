@@ -5,11 +5,19 @@
 > Companion to docs/acm2-implementation-plan.md Section 10 (agent-native
 > development model). Adopted 2026-07-04. ASCII only.
 
+> AUTONOMOUS MODE (2026-07-04, user directive): "No human intervention till
+> final product." Human merge approval is suspended; merge authority = CI
+> green (fast lane; statistical lane once it exists at S2) + a logged review.
+> Reviews remain mandatory but advisory-in-timing: a build does not block on
+> a reviewer profile; findings are addressed when they land. Claude Code
+> holds conductor authority: it may take over, reassign, or implement any
+> stalled task to keep the line moving. The human returns at final product.
+
 ## 1. The Factory Floor
 
 ```
-HUMAN (architect/approver)
-  |  approves merges, sets direction, resolves escalations
+HUMAN (returns at final product)
+  |  (suspended - see AUTONOMOUS MODE above)
   v
 TASK BOARD: hermes kanban, board "acm2"
   (workdir: C:\Users\Admin\Documents\ACM - every task is a brief:
