@@ -274,6 +274,14 @@ Done when: 500 simulated assets tick within budget on a Tier 0 machine with flat
 memory; UI renders the 500-asset matrix inside the lab's established latency
 budgets; a single asset's page shows the complete verdict contract.
 
+> ORDER CHANGE (2026-07-04, conductor decision under autonomous mode): S8
+> was built BEFORE S7. Rationale: the build box probes Tier 0 (the RTX 4060
+> lives in the remote LM Studio PC, not this machine), so S7's Tier-2 spike
+> has no local hardware, while S8 is pure CPU mathematics and completes the
+> detect-before-failure promise. S7 remains open: its spike can target the
+> remote GPU box or wait for local hardware; the system is complete at
+> Tier 0 without it, by design.
+
 ### S7 - World Model Tier (Tier 2 power)
 
 Build:

@@ -38,6 +38,7 @@ from acm2.store.raw import TIMESTAMP_COL
 
 SIGNATURE_MATCH_MIN = 0.34  # Jaccard floor below which a match is not reported
 CHANGE_CONCENTRATION_MAX = 0.4  # normalized; above = channel-local = fault
+HEALTH_INDEX_CHUNK = 128  # rows per health-index sample (prognosis, S8)
 
 
 def _jaccard(a: set[str], b: set[str]) -> float:
@@ -52,6 +53,7 @@ class EpisodicMonitor:
     open_episode_start: str = ""
     _episode_scores: list[np.ndarray] = field(default_factory=list)
     _episode_first_frame_ts: str = ""
+    _health_index: list[float] = field(default_factory=list)
 
     @property
     def asset_key(self) -> str:
@@ -63,6 +65,13 @@ class EpisodicMonitor:
             if self.monitor.scorer is not None
             else np.array([])
         )
+        if scores.size:
+            # health index: windowed-mean-surprise samples (chunked so the
+            # prognosis trajectory has resolution regardless of frame size)
+            for i in range(0, scores.size, HEALTH_INDEX_CHUNK):
+                chunk = scores[i : i + HEALTH_INDEX_CHUNK]
+                if chunk.size >= HEALTH_INDEX_CHUNK // 2:
+                    self._health_index.append(float(np.mean(chunk)))
         verdict = self.monitor.process(frame)
 
         if verdict.state == V.STATE_ALARM:
@@ -120,6 +129,7 @@ class EpisodicMonitor:
                 "surprise trend flattening (Kendall tau below the drift "
                 "threshold) downgrades this to a plain alarm"
             )
+            trail["horizon"] = self._compute_horizon().to_dict()
         return V.Verdict(
             asset_key=verdict.asset_key,
             at=verdict.at,
@@ -131,6 +141,36 @@ class EpisodicMonitor:
             model_epoch=verdict.model_epoch,
             coverage=verdict.coverage,
             falsifiable_by=falsifiable,
+        )
+
+    def _compute_horizon(self):
+        """Failure-time distribution from the health-index trajectory (S8).
+        Healthy center/spread come from the bank's own calibration score
+        distribution; critical level prefers the asset's own past episode
+        onset levels (self-deriving), provisional structural default until
+        the first episode exists."""
+        from acm2.prognosis import Horizon, horizon
+
+        bank = self.monitor.bank
+        if bank is None or not self._health_index:
+            return Horizon(False, "no calibration or trajectory")
+        calib = bank.members[0]._calib_sorted
+        center = float(np.median(calib))
+        spread = 1.4826 * float(np.median(np.abs(calib - center)))
+        onset_levels = []
+        for ep in self.ledger.episodes:
+            if ep.asset_key == self.asset_key and ep.state == "alarm" and ep.note:
+                try:
+                    lvl = json.loads(ep.note).get("onset_level")
+                    if lvl is not None:
+                        onset_levels.append(float(lvl))
+                except json.JSONDecodeError:
+                    pass
+        return horizon(
+            np.asarray(self._health_index),
+            center,
+            spread,
+            ledger_onset_levels=onset_levels or None,
         )
 
     def _signature_match(
@@ -177,6 +217,13 @@ class EpisodicMonitor:
                             "channels": list(last_verdict.attribution),
                             "shape": classify_shape(seg) if seg.size else "noisy",
                             "peak_evidence": last_verdict.evidence,
+                            # health-index level at episode onset: calibrates
+                            # this asset's critical level for future horizons
+                            "onset_level": (
+                                float(np.mean(seg[: HEALTH_INDEX_CHUNK]))
+                                if seg.size
+                                else None
+                            ),
                         }
                     ),
                 )
