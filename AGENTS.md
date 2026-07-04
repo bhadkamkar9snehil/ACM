@@ -2298,6 +2298,10 @@ assuming conversion can run unattended.
 attempt produced only `manifest.json` and an empty `known_events.csv` because no asset CSVs were
 found from the current ZIP-entry matching rule. Treat bearing as adapter-fix-needed before scoring.
 
+Future public-dataset searches must pass ACM's maturity gate before being treated as benchmark evidence. The candidate needs at least 14 days of normal baseline before the first scored labelled event, labelled events after that baseline, enough rows after feature construction for calibration, and continuous multivariate telemetry rather than isolated tabular snapshots. If a dataset fails this gate, classify it as adapter-only, protocol-mismatch, or stress-test material. Do not report it as an ACM ML failure.
+
+Use `scripts/public_dataset_benchmark.py` for repeatable gating and diagnosis. It imports `MIN_TRAIN_DAYS` from `scripts.acm_feed`, runs existing `acm_run.py`, analyzes the canonical SQLite store, and classifies misses as score-window, detector-separation, decision-layer, or run-error causes.
+
 `scripts/acm_report.py` now auto-discovers `data/public_datasets/adapted/*/known_events.csv` and
 adds validation evidence to generated HTML reports when asset names match public validation
 datasets. The report now shows:
@@ -2404,3 +2408,39 @@ it's still a decision, not a sunk cost.
 - Willing to break ACM's own established principles/architecture if it demonstrably achieves the
   end goal  but wants to be warned first when a suggestion crosses one (see "Standing Rule: Flag
   Architecture-Violating Suggestions" above)
+
+---
+
+## ACM2 - Agent Contract (2026-07-04)
+
+ACM2 is the successor system being built in the acm2/ package by an
+agent-only workforce. If you are an agent working on anything under acm2/,
+this section is binding.
+
+**Governing documents (read before coding):**
+- docs/acm-rethink-plan.md - conceptual map (what is removed and why)
+- docs/acm-gem-plan.md - the design (10 components, assumption audit)
+- docs/acm2-implementation-plan.md - build guide (S0-S8, decisions D1-D16)
+- docs/acm2-factory.md - the workforce contract (roles, briefs, review rules)
+
+**Hard rules:**
+- Import boundary: nothing in acm2/ imports core/, scripts/, sim/, or
+  static/. Salvage = copy with attribution in the commit message.
+  CI-enforced by acm2/tests/test_import_boundary.py.
+- Never-built list (implementation plan Section 5): no trim/retention
+  windows, no train/score split, no threshold rules, no self-distrust gate,
+  no fusion auto-tune, no kurt/skew features, no binary maturity gate.
+  Anything resembling one fails review.
+- Config: ALPHA_PER_ASSET_YEAR plus the documented registry in
+  acm2/src/acm2/constants.py. There is no other config surface.
+- Timestamps: timezone-aware UTC only; naive timestamps are rejected,
+  never guessed.
+- Labels never enter the raw store or model input.
+- ASCII only, everywhere (CI-enforced).
+- Author != reviewer. CI green is merge authority (autonomous mode);
+  reviews are logged on the Hermes board acm2.
+- Every task = a brief on Hermes kanban board acm2 with EXECUTOR, BUILD,
+  ACCEPTANCE, OUT OF SCOPE.
+
+**Status ledger:** the Hermes board acm2 is the live task state; phase
+evidence summaries go in this file's future ACM2 sections and the board.
