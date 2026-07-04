@@ -22,6 +22,11 @@ from acm2.store.raw import TIMESTAMP_COL
 
 FIT_FRACTION = 0.6
 MODEL_EPOCH_FMT = "{tag}-{fit_rows}r-{calib_rows}c"
+# alpha split across the two evidence domains (union bound keeps the total
+# budget exact): magnitude carries most faults; availability events are
+# rarer and structurally distinct.
+MAGNITUDE_ALPHA_SHARE = 0.75
+AVAILABILITY_ALPHA_SHARE = 0.25
 
 
 def _scorer_tag(scorer_cls) -> str:
@@ -37,6 +42,8 @@ class AssetMonitor:
     scorer_cls: type = ConditionalSurpriseScorer  # S4 primary; robust-z auxiliary
     scorer: object | None = None
     bank: EProcessBank | None = None
+    avail_bank: EProcessBank | None = None
+    avail_scorer: object | None = None
     model_epoch: str = ""
     calib_rows: int = 0
     scored_rows: int = 0
@@ -57,7 +64,10 @@ class AssetMonitor:
             alpha = float(const("ALPHA_PER_ASSET_YEAR")) / float(
                 const("REANCHORS_PER_YEAR")
             )
-            self.bank = EProcessBank(calib_scores, alpha=alpha, seed=seed)
+            self.bank = EProcessBank(
+                calib_scores, alpha=alpha * MAGNITUDE_ALPHA_SHARE, seed=seed
+            )
+            self.avail_bank = self._build_avail_bank(held_out, alpha, seed)
         except ValueError as exc:
             self.scorer, self.bank = None, None
             self.insufficient_reason = str(exc)
@@ -100,7 +110,10 @@ class AssetMonitor:
             alpha = float(const("ALPHA_PER_ASSET_YEAR")) / float(
                 const("REANCHORS_PER_YEAR")
             )
-            self.bank = EProcessBank(calib_scores, alpha=alpha, seed=seed)
+            self.bank = EProcessBank(
+                calib_scores, alpha=alpha * MAGNITUDE_ALPHA_SHARE, seed=seed
+            )
+            self.avail_bank = self._build_avail_bank(sample, alpha, seed)
             self.scorer = scorer
         except ValueError as exc:
             self.scorer, self.bank = None, None
@@ -111,6 +124,27 @@ class AssetMonitor:
             f"s3-lifetime-{len(base.periods_used)}p-{base.rows_total}r"
         )
         return True
+
+    def _build_avail_bank(
+        self, calib_frame: pl.DataFrame, alpha: float, seed: int
+    ):
+        """Availability stream gets its own fitted scorer (live scales come
+        from calibration, NEVER from the frame being scored), its own bank
+        and budget share; a thin calibration disables it rather than
+        guessing."""
+        from acm2.scoring.availability import AvailabilityScorer
+
+        try:
+            self.avail_scorer = AvailabilityScorer().fit(calib_frame)
+            avail_calib = self.avail_scorer.score(calib_frame)
+            return EProcessBank(
+                avail_calib,
+                alpha=alpha * AVAILABILITY_ALPHA_SHARE,
+                seed=seed + 1000,
+            )
+        except ValueError:
+            self.avail_scorer = None
+            return None
 
     def process(self, frame: pl.DataFrame) -> V.Verdict:
         if not frame.is_empty():
@@ -131,6 +165,38 @@ class AssetMonitor:
         self.scored_rows += frame.height
         state_now = self.bank.update(scores)
 
+        avail_alarmed = False
+        avail_evidence = 0.0
+        if (
+            self.avail_bank is not None
+            and self.avail_scorer is not None
+            and not frame.is_empty()
+        ):
+            avail_state = self.avail_bank.update(
+                self.avail_scorer.score(frame)
+            )
+            avail_alarmed = avail_state.alarmed
+            avail_evidence = avail_state.evidence
+
+        if avail_alarmed and not state_now.alarmed:
+            return V.Verdict(
+                asset_key=self.asset_key,
+                at=self.last_ts,
+                state=V.STATE_ALARM,
+                confidence=V.confidence_from(self.calib_rows, avail_evidence),
+                evidence=round(avail_evidence, 4),
+                evidence_trail={"domain": "availability"},
+                attribution=("availability",),
+                model_epoch=self.model_epoch,
+                coverage={
+                    "calib_rows": self.calib_rows,
+                    "scored_rows": self.scored_rows,
+                },
+                falsifiable_by=(
+                    "telemetry variance returning to the asset's live "
+                    "envelope; episode close + re-anchor"
+                ),
+            )
         if state_now.alarmed:
             state = V.STATE_ALARM
             falsifiable = (

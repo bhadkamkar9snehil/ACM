@@ -159,3 +159,52 @@ def test_scheduler_records_costs(tmp_path):
 
     asyncio.run(scenario())
     assert "c1" in MEASURED_COSTS
+
+
+# ------------------------------------------- availability stream (R4 job)
+def test_availability_standstill_alarms():
+    """A parked machine (flat telemetry) must alarm via the availability
+    stream with attribution 'availability' - even though its magnitude
+    surprise is quiet."""
+    import numpy as np
+
+    from acm2.monitor import AssetMonitor
+
+    rng = np.random.default_rng(21)
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+
+    def live(n, off=0):
+        ts = [base + timedelta(minutes=10 * (off + i)) for i in range(n)]
+        t = rng.normal(size=n)
+        return pl.DataFrame(
+            {
+                TIMESTAMP_COL: pl.Series(ts, dtype=pl.Datetime("us", "UTC")),
+                "temp": t,
+                "vib": 0.8 * t + 0.3 * rng.normal(size=n),
+                "press": rng.normal(size=n),
+                "flow": rng.normal(size=n),
+            }
+        )
+
+    mon = AssetMonitor("av/1")
+    assert mon.calibrate(live(5000))
+    v = mon.process(live(1200, off=6000))
+    assert v.state != "alarm"
+
+    # standstill: every channel freezes at its last value
+    frozen = live(1, off=8000)
+    n = 1500
+    ts = [base + timedelta(minutes=10 * (8001 + i)) for i in range(n)]
+    flat = pl.DataFrame(
+        {
+            TIMESTAMP_COL: pl.Series(ts, dtype=pl.Datetime("us", "UTC")),
+            "temp": [float(frozen["temp"][0])] * n,
+            "vib": [float(frozen["vib"][0])] * n,
+            "press": [float(frozen["press"][0])] * n,
+            "flow": [float(frozen["flow"][0])] * n,
+        }
+    )
+    v = mon.process(flat)
+    assert v.state == "alarm", v.state
+    assert v.attribution == ("availability",)
+    assert v.evidence_trail.get("domain") == "availability"
