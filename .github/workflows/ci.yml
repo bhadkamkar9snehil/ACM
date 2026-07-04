@@ -6,6 +6,28 @@ on:
     branches: [main]
 
 jobs:
+  acm2-fast:
+    name: ACM2 fast lane (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    defaults:
+      run:
+        working-directory: acm2
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "acm2/uv.lock"
+      - name: Sync environment
+        run: uv sync
+      - name: Run acm2 tests (unit + import boundary + ASCII scan)
+        run: uv run pytest tests --tb=short
+
   fast-tests:
     name: Tests (fast)
     runs-on: ubuntu-latest
