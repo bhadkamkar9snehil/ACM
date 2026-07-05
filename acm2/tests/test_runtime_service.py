@@ -64,7 +64,7 @@ def test_fleet_verdicts_and_ordering(runtime):
 
 def test_service_endpoints_carry_the_contract(runtime):
     client = TestClient(create_app(runtime))
-    assert "ACM2 Assets" in client.get("/").text
+    assert "ACM2" in client.get("/").text
     fleet = client.get("/api/assets").json()
     assert fleet["assets"] == 3 and "tier" in fleet
     detail = client.get("/api/asset/f/bad").json()
@@ -282,3 +282,37 @@ def test_live_buffer_source_streams_into_ticks(tmp_path):
     assert "state" not in store.read("live/1").columns
     # draining again adds nothing (resumable + idempotent)
     assert rt.live_sources["live/1"].drain(store) == 0
+
+
+def test_immune_pass_defers_conformance_during_active_episode(runtime):
+    """An actively-alarmed asset must NOT be rebuilt for conformance
+    failure - the fault in its tail is not model sickness (found by
+    review on a live pilot)."""
+    assert runtime.verdicts["f/bad"].state in ("alarm", "escalating")
+    em = runtime.monitors["f/bad"]
+    epoch_before = em.monitor.model_epoch
+    r = runtime.immune_pass("f/bad")
+    if not r["conformance_ok"]:
+        assert not r["sick"], r
+        assert r["action"] == "none"
+        assert "conformance_note" in r
+    assert em.monitor.model_epoch == epoch_before  # no mid-episode rebuild
+
+
+def test_ui_and_control_endpoints(runtime):
+    client = TestClient(create_app(runtime))
+    page = client.get("/").text
+    assert "Evidence domains" in page and "Re-anchor" in page
+    assert client.post("/api/tick/f/ok1").status_code == 200
+    d = client.get("/api/domains/f/ok1").json()
+    assert d["magnitude"]["enabled"] and "evidence" in d["magnitude"]
+    assert set(d) == {
+        "magnitude", "availability", "horizon-gap",
+        "predictability-band", "transient-response", "dynamics-drift",
+    }
+    h = client.get("/api/health/f/ok1").json()
+    assert isinstance(h["series"], list) and len(h["series"]) > 0
+    assert client.post("/api/reanchor/f/bad").json()["ok"]
+    b = client.post("/api/bootstrap/f/ok2").json()
+    assert b["passes"][-1]["new_episodes"] == 0  # clean asset converges fast
+    assert client.get("/api/domains/nope").status_code == 404

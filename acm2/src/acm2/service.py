@@ -1,9 +1,9 @@
-"""ACM2 service (S6): verdict-first fleet UI + JSON API.
+"""ACM2 service: verdict-first assets UI + JSON API.
 
 Zero-build vanilla UI by decision (Section 7 of the implementation plan):
 one HTML page, no bundler, no framework - a genuine virtue for air-gapped
-industrial deployment. The fleet view is the ONLY view; one asset renders
-as a fleet of one. Every verdict field of the frozen contract is shown on
+industrial deployment. The assets view is the ONLY view; one asset is
+simply a list of one. Every verdict field of the frozen contract is shown on
 drill-down; nothing is a bare number.
 
 Run: uv run python -m acm2.service [--root <data_root>] [--port 8899]
@@ -21,55 +21,9 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from acm2.runtime import Runtime
 
 DEFAULT_TICK_SECONDS = 300.0
+UI_PATH = Path(__file__).with_name("ui.html")
 
-PAGE = """<!DOCTYPE html>
-<html><head><meta charset="ascii"><title>ACM2 Assets</title>
-<style>
- body{font-family:Consolas,monospace;background:#101418;color:#d8dee6;margin:24px}
- h1{font-size:18px} .pill{display:inline-block;padding:2px 10px;margin:0 6px 0 0;
- border-radius:10px;font-size:12px;background:#22303c}
- .escalating,.alarm{background:#7c2d2d}.change-not-fault{background:#7c5c2d}
- .watch{background:#6b6b2d}.healthy{background:#2d5c3c}.insufficient-history{background:#3c4450}
- table{border-collapse:collapse;width:100%;margin-top:14px;font-size:13px}
- td,th{padding:6px 10px;border-bottom:1px solid #22303c;text-align:left}
- tr:hover{background:#182028;cursor:pointer}
- #detail{white-space:pre-wrap;background:#0b0e12;padding:12px;margin-top:14px;
- border:1px solid #22303c;font-size:12px;display:none}
- .muted{color:#7c8894;font-size:12px}
-</style></head><body>
-<h1>ACM2 Assets <span class="muted" id="meta"></span></h1>
-<div id="pills"></div>
-<table><thead><tr><th>asset</th><th>state</th><th>evidence</th>
-<th>confidence</th><th>attribution</th><th>model epoch</th></tr></thead>
-<tbody id="rows"></tbody></table>
-<div id="detail"></div>
-<script>
-async function refresh(){
- const r = await fetch('/api/assets'); const f = await r.json();
- document.getElementById('meta').textContent =
-   f.assets + ' assets | tier ' + f.tier;
- document.getElementById('pills').innerHTML = Object.entries(f.counts)
-  .map(([s,n]) => '<span class="pill '+s+'">'+s+': '+n+'</span>').join('');
- document.getElementById('rows').innerHTML = f.rows.map(v =>
-  '<tr onclick="detail(\\''+encodeURIComponent(v.asset_key)+'\\')">'+
-  '<td>'+v.asset_key+'</td><td><span class="pill '+v.state+'">'+v.state+
-  '</span></td><td>'+v.evidence+'</td><td>'+v.confidence+'</td><td>'+
-  (v.attribution||[]).slice(0,3).join(', ')+'</td><td>'+v.model_epoch+
-  '</td></tr>').join('');
-}
-async function detail(key){
- const r = await fetch('/api/asset/'+key); const d = await r.json();
- const n = await fetch('/api/narrative/'+key); const nd = await n.json();
- const el = document.getElementById('detail');
- el.style.display = 'block';
- el.textContent = (nd.narrative || '') + '
 
---- evidence ---
-' +
-   JSON.stringify(d, null, 1);
-}
-refresh(); setInterval(refresh, 5000);
-</script></body></html>"""
 
 
 def create_app(
@@ -84,6 +38,11 @@ def create_app(
         task = None
         if tick_seconds:
             async def loop() -> None:
+                # first-contact cleaning runs IN the loop, not before the
+                # server binds: a multi-pass bootstrap over deep histories
+                # must never block the UI from coming up (found by review -
+                # the page was black for minutes on a fresh data root)
+                await asyncio.to_thread(runtime.bootstrap_virgin)
                 while True:
                     await asyncio.to_thread(runtime.tick_all)
                     await asyncio.sleep(tick_seconds)
@@ -97,7 +56,7 @@ def create_app(
 
     @app.get("/", response_class=HTMLResponse)
     def index() -> str:
-        return PAGE
+        return UI_PATH.read_text(encoding="utf-8")
 
     @app.get("/api/assets")
     def assets_view() -> JSONResponse:
@@ -120,6 +79,38 @@ def create_app(
     @app.post("/api/tick")
     def tick() -> JSONResponse:
         return JSONResponse({"assets_moved": runtime.tick_all()})
+
+    @app.post("/api/tick/{asset_key:path}")
+    def tick_one(asset_key: str) -> JSONResponse:
+        if asset_key not in runtime.monitors:
+            return JSONResponse({"error": "unknown asset"}, status_code=404)
+        v = runtime.tick(asset_key)
+        return JSONResponse({"moved": v is not None,
+                             "state": v.state if v else None})
+
+    @app.post("/api/reanchor/{asset_key:path}")
+    def reanchor(asset_key: str) -> JSONResponse:
+        if asset_key not in runtime.monitors:
+            return JSONResponse({"error": "unknown asset"}, status_code=404)
+        return JSONResponse({"ok": runtime.reanchor(asset_key)})
+
+    @app.post("/api/bootstrap/{asset_key:path}")
+    def bootstrap(asset_key: str) -> JSONResponse:
+        if asset_key not in runtime.monitors:
+            return JSONResponse({"error": "unknown asset"}, status_code=404)
+        return JSONResponse(runtime.bootstrap(asset_key))
+
+    @app.get("/api/health/{asset_key:path}")
+    def health(asset_key: str) -> JSONResponse:
+        if asset_key not in runtime.monitors:
+            return JSONResponse({"error": "unknown asset"}, status_code=404)
+        return JSONResponse({"series": runtime.health_series(asset_key)})
+
+    @app.get("/api/domains/{asset_key:path}")
+    def domains(asset_key: str) -> JSONResponse:
+        if asset_key not in runtime.monitors:
+            return JSONResponse({"error": "unknown asset"}, status_code=404)
+        return JSONResponse(runtime.domains(asset_key))
 
     @app.get("/api/immune/{asset_key:path}")
     def immune(asset_key: str) -> JSONResponse:
@@ -157,8 +148,7 @@ def main() -> None:  # pragma: no cover - manual entrypoint
     args = parser.parse_args()
     root = Path(args.root).resolve()
     runtime = Runtime(store=RawStore(root / "raw"), data_root=root)
-    runtime.onboard_all()
-    runtime.tick_all()
+    runtime.onboard_all()  # fast; bootstrap + scoring run in the lifespan loop
     app = create_app(runtime, tick_seconds=args.tick_seconds)
     uvicorn.run(app, host="127.0.0.1", port=args.port)
 

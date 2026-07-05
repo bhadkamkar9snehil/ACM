@@ -81,6 +81,56 @@ class Runtime:
     def onboard_all(self) -> dict[str, bool]:
         return {key: self.onboard(key) for key in self.store.assets()}
 
+    def bootstrap_virgin(self) -> dict[str, dict]:
+        """First-contact cleaning for every asset with NO ledger history:
+        the detect->mask->re-detect loop (H1 fix: bootstrap existed but was
+        never wired into the service path - contaminated first contact
+        would never have been cleaned in production)."""
+        out = {}
+        for key in self.monitors:
+            if not self.ledger.windows(key):
+                out[key] = self.bootstrap(key)
+        return out
+
+    def reanchor(self, asset_key: str) -> bool:
+        """Governed episode close + recalibration, exposed for the UI."""
+        em = self.monitors[asset_key]
+        v = self.verdicts.get(asset_key)
+        if v is None:
+            return False
+        ok = em.reanchor(self.store, v, cache_root=self.cache_root)
+        if ok:
+            self.previous_verdicts[asset_key] = v
+        return ok
+
+    def health_series(self, asset_key: str) -> list[float]:
+        em = self.monitors.get(asset_key)
+        return list(em._health_index) if em is not None else []
+
+    def domains(self, asset_key: str) -> dict:
+        """Per-domain bank states for the UI evidence panel."""
+        m = self.monitors[asset_key].monitor
+        out = {}
+        pairs = [
+            ("magnitude", m.bank),
+            ("availability", m.avail_bank),
+            ("horizon-gap", m.gap_bank),
+            ("predictability-band", m.band_bank),
+            ("transient-response", m.trans_bank),
+            ("dynamics-drift", m.dyn_bank),
+        ]
+        for name, bank in pairs:
+            if bank is None:
+                out[name] = {"enabled": False}
+            else:
+                st = bank.state()
+                out[name] = {
+                    "enabled": True,
+                    "alarmed": st.alarmed,
+                    "evidence": round(st.evidence, 4),
+                }
+        return out
+
     def attach_live_source(self, asset_key: str, db_path) -> None:
         """Attach a SQLite buffer (bridge/sim-fed) to an asset; drained
         on every tick before scoring."""
@@ -340,13 +390,24 @@ class Runtime:
                 "scope": rmap.scope,
             }
 
-        sick = (
-            report.scorer_dead
-            or live_dead
-            or not report.conformance_ok
-            or pit_verdict == "model"
+        # Conformance (like PIT) is an immune signal ONLY while the asset
+        # is not alarmed: during an active episode the 'recent healthy
+        # tail' assumption is violated by the fault itself, and a rebuild
+        # here would move the definition of normal DURING accumulating
+        # evidence - the exact thing the tick-path rebuild gate forbids.
+        # Found by review: an actively-faulted pilot was being flagged
+        # 'model sick' and rebuilt mid-episode.
+        sick = report.scorer_dead or live_dead or (
+            not_alarmed
+            and (not report.conformance_ok or pit_verdict == "model")
         )
         result["sick"] = sick
+        if not not_alarmed and (not report.conformance_ok):
+            result["conformance_note"] = (
+                "conformance failure observed during an ACTIVE episode - "
+                "expected (the fault is in the sample); deferred to the "
+                "post-reanchor pass"
+            )
         result["action"] = "rebuild" if sick else "none"
         if sick:
             em.monitor.calibrate_from_lifetime(

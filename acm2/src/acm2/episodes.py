@@ -39,6 +39,7 @@ from acm2.store.raw import TIMESTAMP_COL
 SIGNATURE_MATCH_MIN = 0.34  # Jaccard floor below which a match is not reported
 CHANGE_CONCENTRATION_MAX = 0.4  # normalized; above = channel-local = fault
 HEALTH_INDEX_CHUNK = 128  # rows per health-index sample (prognosis, S8)
+HEALTH_INDEX_MAX = 4096  # cap: implement-and-forget must not leak memory
 
 
 def _jaccard(a: set[str], b: set[str]) -> float:
@@ -72,11 +73,13 @@ class EpisodicMonitor:
                 chunk = scores[i : i + HEALTH_INDEX_CHUNK]
                 if chunk.size >= HEALTH_INDEX_CHUNK // 2:
                     self._health_index.append(float(np.mean(chunk)))
+            if len(self._health_index) > HEALTH_INDEX_MAX:
+                self._health_index = self._health_index[-HEALTH_INDEX_MAX:]
         verdict = self.monitor.process(frame)
 
         if verdict.state == V.STATE_ALARM:
             if not self.open_episode_start:
-                self.open_episode_start = self._first_ts(frame)
+                self.open_episode_start = self._onset_ts(frame, scores)
             self._episode_scores.append(scores)
             verdict = self._enrich_alarm(verdict, frame)
         else:
@@ -312,6 +315,28 @@ class EpisodicMonitor:
         return self.monitor.calibrate_from_lifetime(
             store, ledger=self.ledger, cache_root=cache_root
         )
+
+    @staticmethod
+    def _onset_ts(frame: pl.DataFrame, scores: np.ndarray) -> str:
+        """Episode start = where the surprise ONSET is, not where the frame
+        begins. Found by review: a first full-history tick opened the
+        episode at row zero, so a later re-anchor masked the asset's
+        ENTIRE life out of its own baseline. Onset = first sustained
+        window above the frame's own robust bar; falls back to the frame
+        start when the whole frame is hot."""
+        if frame.is_empty():
+            return ""
+        ts = frame.get_column(TIMESTAMP_COL)
+        if scores.size >= 128:
+            w = 64
+            k = scores.size // w
+            wm = scores[: k * w].reshape(k, w).mean(axis=1)
+            med = float(np.median(wm))
+            mad = 1.4826 * float(np.median(np.abs(wm - med)))
+            hot = np.nonzero(wm > med + 4.0 * max(mad, 1e-9))[0]
+            if hot.size and hot[0] > 0:
+                return str(ts[int(hot[0]) * w])
+        return str(ts.min())
 
     @staticmethod
     def _first_ts(frame: pl.DataFrame) -> str:

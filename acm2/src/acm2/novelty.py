@@ -65,12 +65,17 @@ class NoveltyEngine:
         self._history: list[np.ndarray] = []
         self._n = 0
 
+    HISTORY_MAX = 200_000  # cap: long-running service must not leak;
+    # the immortal store keeps the full life - this is working memory
+
     def extend(self, scores: np.ndarray) -> None:
         s = np.asarray(scores, dtype=np.float64)
         s = s[np.isfinite(s)]
         if s.size:
             self._history.append(s)
             self._n += s.size
+            while self._n > self.HISTORY_MAX and len(self._history) > 1:
+                self._n -= self._history.pop(0).size
 
     @property
     def history(self) -> np.ndarray:
