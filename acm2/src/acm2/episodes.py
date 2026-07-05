@@ -92,6 +92,26 @@ class EpisodicMonitor:
             set(verdict.attribution), shape
         )
         trail = dict(verdict.evidence_trail)
+        mon = self.monitor
+        if (
+            mon.anatomy is not None
+            and hasattr(mon.scorer, "_residual_z")
+            and not frame.is_empty()
+        ):
+            trail["anatomy"] = {
+                "organ_surprise": {
+                    ",".join(o): round(v, 2)
+                    for o, v in mon.anatomy.organ_surprise(
+                        mon.scorer, frame
+                    ).items()
+                },
+                **mon.anatomy.origin(mon.scorer, frame),
+            }
+            trail["anatomy"]["origin"] = (
+                ",".join(trail["anatomy"]["origin"])
+                if trail["anatomy"]["origin"]
+                else None
+            )
         trail.update(
             {
                 "episode_start": self.open_episode_start,

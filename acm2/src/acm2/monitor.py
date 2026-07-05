@@ -25,8 +25,12 @@ MODEL_EPOCH_FMT = "{tag}-{fit_rows}r-{calib_rows}c"
 # alpha split across the two evidence domains (union bound keeps the total
 # budget exact): magnitude carries most faults; availability events are
 # rarer and structurally distinct.
-MAGNITUDE_ALPHA_SHARE = 0.75
-AVAILABILITY_ALPHA_SHARE = 0.25
+# union bound keeps the total budget exact across the four domains
+MAGNITUDE_ALPHA_SHARE = 0.55
+AVAILABILITY_ALPHA_SHARE = 0.15
+HORIZON_GAP_ALPHA_SHARE = 0.1
+BAND_ALPHA_SHARE = 0.1
+TRANSIENT_ALPHA_SHARE = 0.1
 
 
 def _scorer_tag(scorer_cls) -> str:
@@ -44,6 +48,12 @@ class AssetMonitor:
     bank: EProcessBank | None = None
     avail_bank: EProcessBank | None = None
     avail_scorer: object | None = None
+    mh_scorer: object | None = None
+    gap_bank: EProcessBank | None = None
+    band_bank: EProcessBank | None = None
+    trans_catalogue: object | None = None
+    trans_bank: EProcessBank | None = None
+    anatomy: object | None = None
     model_epoch: str = ""
     calib_rows: int = 0
     scored_rows: int = 0
@@ -68,6 +78,9 @@ class AssetMonitor:
                 calib_scores, alpha=alpha * MAGNITUDE_ALPHA_SHARE, seed=seed
             )
             self.avail_bank = self._build_avail_bank(held_out, alpha, seed)
+            self._build_horizon_banks(fit, held_out, alpha, seed)
+            self._build_transient_bank(calib_frame, alpha, seed)
+            self._learn_anatomy(calib_frame, seed)
         except ValueError as exc:
             self.scorer, self.bank = None, None
             self.insufficient_reason = str(exc)
@@ -114,6 +127,12 @@ class AssetMonitor:
                 calib_scores, alpha=alpha * MAGNITUDE_ALPHA_SHARE, seed=seed
             )
             self.avail_bank = self._build_avail_bank(sample, alpha, seed)
+            split_mh = int(sample.height * FIT_FRACTION)
+            self._build_horizon_banks(
+                sample.head(split_mh), sample.slice(split_mh), alpha, seed
+            )
+            self._build_transient_bank(sample, alpha, seed)
+            self._learn_anatomy(sample, seed)
             self.scorer = scorer
         except ValueError as exc:
             self.scorer, self.bank = None, None
@@ -145,6 +164,55 @@ class AssetMonitor:
         except ValueError:
             self.avail_scorer = None
             return None
+
+    def _build_horizon_banks(self, fit_frame, held_out, alpha, seed):
+        """C9: multi-horizon gap + two-sided predictability band, each with
+        its own bank and budget share. Thin data disables (None), never
+        guesses. Fit/calibration split preserved (in-sample-bias law)."""
+        from acm2.scoring.horizons import MultiHorizonScorer
+
+        try:
+            self.mh_scorer = MultiHorizonScorer().fit(fit_frame)
+            gap_calib = self.mh_scorer.gap_stream(held_out)
+            band_calib = self.mh_scorer.bilateral_stream(held_out)
+            self.gap_bank = EProcessBank(
+                gap_calib, alpha=alpha * HORIZON_GAP_ALPHA_SHARE,
+                seed=seed + 2000,
+            )
+            self.band_bank = EProcessBank(
+                band_calib, alpha=alpha * BAND_ALPHA_SHARE, seed=seed + 3000,
+            )
+        except ValueError:
+            self.mh_scorer = None
+            self.gap_bank = None
+            self.band_bank = None
+
+    def _build_transient_bank(self, calib_frame, alpha, seed):
+        """C7: the lifetime transient catalogue; leave-one-out distances of
+        healthy transients from their nearest sibling ARE the calibration.
+        Too few healthy transients disables the stream, never guesses."""
+        from acm2.scoring.transients import TransientCatalogue
+
+        try:
+            self.trans_catalogue = TransientCatalogue().fit(calib_frame)
+            self.trans_bank = EProcessBank(
+                self.trans_catalogue.calibration_scores(),
+                alpha=alpha * TRANSIENT_ALPHA_SHARE,
+                seed=seed + 4000,
+            )
+        except ValueError:
+            self.trans_catalogue = None
+            self.trans_bank = None
+
+    def _learn_anatomy(self, calib_frame, seed):
+        """C6: the machine's functional anatomy, stability-selected; a thin
+        or unstable calibration leaves it None (no anatomical claims)."""
+        from acm2.anatomy import Anatomy
+
+        try:
+            self.anatomy = Anatomy.learn(calib_frame, seed=seed)
+        except (ValueError, AssertionError):
+            self.anatomy = None
 
     def process(self, frame: pl.DataFrame) -> V.Verdict:
         if not frame.is_empty():
@@ -178,6 +246,51 @@ class AssetMonitor:
             avail_alarmed = avail_state.alarmed
             avail_evidence = avail_state.evidence
 
+        aux_domain = None
+        aux_evidence = 0.0
+        if self.trans_catalogue is not None and not frame.is_empty():
+            t_scores = self.trans_catalogue.score_new(frame)
+            if t_scores.size:
+                t_state = self.trans_bank.update(t_scores)
+                if t_state.alarmed:
+                    aux_domain = "transient-response"
+                    aux_evidence = t_state.evidence
+        if (
+            aux_domain is None
+            and self.mh_scorer is not None
+            and not frame.is_empty()
+        ):
+            gap_state = self.gap_bank.update(self.mh_scorer.gap_stream(frame))
+            band_state = self.band_bank.update(
+                self.mh_scorer.bilateral_stream(frame)
+            )
+            if gap_state.alarmed:
+                aux_domain, aux_evidence = "horizon-gap", gap_state.evidence
+            elif band_state.alarmed:
+                aux_domain, aux_evidence = (
+                    "predictability-band",
+                    band_state.evidence,
+                )
+
+        if aux_domain is not None and not state_now.alarmed and not avail_alarmed:
+            return V.Verdict(
+                asset_key=self.asset_key,
+                at=self.last_ts,
+                state=V.STATE_ALARM,
+                confidence=V.confidence_from(self.calib_rows, aux_evidence),
+                evidence=round(aux_evidence, 4),
+                evidence_trail={"domain": aux_domain},
+                attribution=(aux_domain,),
+                model_epoch=self.model_epoch,
+                coverage={
+                    "calib_rows": self.calib_rows,
+                    "scored_rows": self.scored_rows,
+                },
+                falsifiable_by=(
+                    "the stream returning inside its healthy band; episode "
+                    "close + re-anchor"
+                ),
+            )
         if avail_alarmed and not state_now.alarmed:
             return V.Verdict(
                 asset_key=self.asset_key,
