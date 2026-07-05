@@ -271,42 +271,43 @@ class AssetMonitor:
             avail_alarmed = avail_state.alarmed
             avail_evidence = avail_state.evidence
 
-        aux_domain = None
-        aux_evidence = 0.0
+        # EVERY bank ingests EVERY frame - evidence must never be lost to
+        # attribution ordering (found by test: a dynamics alarm was
+        # starving the band bank of the very data that proved the fault).
+        # Only the DOMAIN LABEL is chosen by priority afterwards.
+        aux_states: list[tuple[str, object]] = []
         if self.dyn_drift is not None and not frame.is_empty():
             d_stream = self.dyn_drift.drift_stream(frame)
             if d_stream.size:
-                d_state = self.dyn_bank.update(d_stream)
-                if d_state.alarmed:
-                    aux_domain = "dynamics-drift"
-                    aux_evidence = d_state.evidence
-        if (
-            aux_domain is None
-            and self.trans_catalogue is not None
-            and not frame.is_empty()
-        ):
+                aux_states.append(
+                    ("dynamics-drift", self.dyn_bank.update(d_stream))
+                )
+        if self.trans_catalogue is not None and not frame.is_empty():
             t_scores = self.trans_catalogue.score_new(frame)
             if t_scores.size:
-                t_state = self.trans_bank.update(t_scores)
-                if t_state.alarmed:
-                    aux_domain = "transient-response"
-                    aux_evidence = t_state.evidence
-        if (
-            aux_domain is None
-            and self.mh_scorer is not None
-            and not frame.is_empty()
-        ):
-            gap_state = self.gap_bank.update(self.mh_scorer.gap_stream(frame))
-            band_state = self.band_bank.update(
-                self.mh_scorer.bilateral_stream(frame)
-            )
-            if gap_state.alarmed:
-                aux_domain, aux_evidence = "horizon-gap", gap_state.evidence
-            elif band_state.alarmed:
-                aux_domain, aux_evidence = (
-                    "predictability-band",
-                    band_state.evidence,
+                aux_states.append(
+                    ("transient-response", self.trans_bank.update(t_scores))
                 )
+        if self.mh_scorer is not None and not frame.is_empty():
+            aux_states.append(
+                (
+                    "horizon-gap",
+                    self.gap_bank.update(self.mh_scorer.gap_stream(frame)),
+                )
+            )
+            aux_states.append(
+                (
+                    "predictability-band",
+                    self.band_bank.update(
+                        self.mh_scorer.bilateral_stream(frame)
+                    ),
+                )
+            )
+        aux_domain = None
+        aux_evidence = 0.0
+        for name, st in aux_states:
+            if st.alarmed and st.evidence > aux_evidence:
+                aux_domain, aux_evidence = name, st.evidence
 
         if aux_domain is not None and not state_now.alarmed and not avail_alarmed:
             return V.Verdict(

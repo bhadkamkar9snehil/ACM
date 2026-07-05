@@ -93,8 +93,13 @@ def test_monitor_alarms_via_predictability_band_end_to_end():
     assert ok.state != "alarm"
     v = mon.process(ar_frame(4000, seed=9, damp=0.05))
     assert v.state == "alarm", v.state
-    assert v.attribution[0] in ("predictability-band", "horizon-gap")
-    assert v.evidence_trail.get("domain") in (
+    # a damping change is an operator change too, so the dynamics-drift
+    # domain may (correctly) win the attribution race; the meaningful
+    # checks are: a non-magnitude domain carried the alarm, and the band
+    # bank INDEPENDENTLY crossed its own threshold
+    assert v.attribution[0] in (
         "predictability-band",
         "horizon-gap",
+        "dynamics-drift",
     )
+    assert mon.band_bank.state().alarmed
