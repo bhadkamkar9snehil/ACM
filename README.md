@@ -22,8 +22,8 @@ uv run python -m acm2.service --root ../acm2_data --port 8899 --tick-seconds 300
 # self-ticking fleet service + UI: open http://127.0.0.1:8899
 ```
 
-API: `GET /api/fleet`, `GET /api/asset/{key}`, `POST /api/tick`,
-`GET /api/immune/{key}`, `POST /api/immune-pass/{key}`.
+API: `GET /api/assets`, `GET /api/asset/{key}`, `GET /api/narrative/{key}`,
+`POST /api/tick`, `GET /api/immune/{key}`, `POST /api/immune-pass/{key}`.
 Verdicts: healthy | insufficient-history | watch | alarm | escalating
 (with self-gated failure-time horizon) | change-not-fault. Every verdict
 carries confidence, evidence trail, attribution, model epoch, and a
