@@ -59,9 +59,14 @@ async function refresh(){
 }
 async function detail(key){
  const r = await fetch('/api/asset/'+key); const d = await r.json();
+ const n = await fetch('/api/narrative/'+key); const nd = await n.json();
  const el = document.getElementById('detail');
  el.style.display = 'block';
- el.textContent = JSON.stringify(d, null, 1);
+ el.textContent = (nd.narrative || '') + '
+
+--- evidence ---
+' +
+   JSON.stringify(d, null, 1);
 }
 refresh(); setInterval(refresh, 5000);
 </script></body></html>"""
@@ -104,6 +109,13 @@ def create_app(
         if v is None:
             return JSONResponse({"error": "unknown asset"}, status_code=404)
         return JSONResponse(v.to_dict())
+
+    @app.get("/api/narrative/{asset_key:path}")
+    def narrative(asset_key: str) -> JSONResponse:
+        text = runtime.narrative(asset_key)
+        if text is None:
+            return JSONResponse({"error": "unknown asset"}, status_code=404)
+        return JSONResponse({"asset_key": asset_key, "narrative": text})
 
     @app.post("/api/tick")
     def tick() -> JSONResponse:

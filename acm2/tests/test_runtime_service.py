@@ -221,3 +221,14 @@ def test_bootstrap_detect_mask_redetect_converges(tmp_path):
     store.append("bs/1", fresh)
     v = rt.tick("bs/1")
     assert v is not None and v.state == "healthy", v
+
+
+def test_narrative_endpoint_tells_the_story(runtime):
+    client = TestClient(create_app(runtime))
+    r = client.get("/api/narrative/f/bad").json()
+    text = r["narrative"]
+    assert "f/bad" in text
+    assert "falsifiable by" in text
+    assert "operating point" in text
+    # the faulted asset's story names its evidence carriers
+    assert "carried by" in text

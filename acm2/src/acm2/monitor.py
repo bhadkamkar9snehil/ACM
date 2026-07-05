@@ -326,11 +326,20 @@ class AssetMonitor:
             state = V.STATE_HEALTHY
             falsifiable = "evidence accumulating across any bank timescale"
 
+        familiarity = (
+            self.scorer.coverage(frame)
+            if hasattr(self.scorer, "coverage") and not frame.is_empty()
+            else 1.0
+        )
         return V.Verdict(
             asset_key=self.asset_key,
             at=self.last_ts,
             state=state,
-            confidence=V.confidence_from(self.calib_rows, state_now.evidence),
+            confidence=round(
+                V.confidence_from(self.calib_rows, state_now.evidence)
+                * (0.5 + 0.5 * familiarity),
+                3,
+            ),
             evidence=round(state_now.evidence, 4),
             evidence_trail={
                 "members": {
@@ -343,6 +352,7 @@ class AssetMonitor:
             coverage={
                 "calib_rows": self.calib_rows,
                 "scored_rows": self.scored_rows,
+                "operating_point_familiarity": round(familiarity, 3),
             },
             falsifiable_by=falsifiable,
         )

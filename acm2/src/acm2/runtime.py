@@ -33,6 +33,7 @@ class Runtime:
     governor: Governor | None = None
     monitors: dict[str, EpisodicMonitor] = field(default_factory=dict)
     verdicts: dict[str, V.Verdict] = field(default_factory=dict)
+    previous_verdicts: dict[str, V.Verdict] = field(default_factory=dict)
     immune_results: dict[str, dict] = field(default_factory=dict)
     _last_seen: dict[str, object] = field(default_factory=dict)
     _tick_counts: dict[str, int] = field(default_factory=dict)
@@ -73,6 +74,8 @@ class Runtime:
         if not frame.is_empty():
             self._last_seen[asset_key] = frame.get_column(TIMESTAMP_COL).max()
             verdict = em.process(frame)
+            if asset_key in self.verdicts:
+                self.previous_verdicts[asset_key] = self.verdicts[asset_key]
             self.verdicts[asset_key] = verdict
         self._tick_counts[asset_key] += 1
         stagger = hash(asset_key) % REBUILD_EVERY_TICKS
@@ -293,6 +296,18 @@ class Runtime:
             )
         self.immune_results[asset_key] = result
         return result
+
+    def narrative(self, asset_key: str) -> str | None:
+        from acm2.narrative import build_narrative
+
+        v = self.verdicts.get(asset_key)
+        if v is None:
+            return None
+        return build_narrative(
+            v,
+            previous=self.previous_verdicts.get(asset_key),
+            immune=self.immune_results.get(asset_key),
+        )
 
     # -------------------------------------------------------- aggregates
     def summary(self) -> dict:

@@ -42,6 +42,8 @@ class ConditionalSurpriseScorer:
     betas: np.ndarray | None = None  # (d, d) row j: weights over channels, diag 0
     resid_scales: np.ndarray | None = None
     resid_grids: np.ndarray | None = None  # (d, PIT_GRID_K) sorted fit residuals
+    _fit_sample: np.ndarray | None = None
+    _fit_nn_scale: float = 1.0
 
     # ------------------------------------------------------------- fit
     def fit(self, frame: pl.DataFrame) -> "ConditionalSurpriseScorer":
@@ -84,6 +86,16 @@ class ConditionalSurpriseScorer:
         self.betas = betas
         self.resid_scales = resid_scales
         self.resid_grids = resid_grids
+        # coverage reference: a subsample of fit rows + their own
+        # nearest-neighbor spacing (the yardstick for 'familiar')
+        step = max(1, n // 512)
+        self._fit_sample = z[::step][:512]
+        m = self._fit_sample.shape[0]
+        dd = np.sqrt(
+            ((self._fit_sample[:, None, :] - self._fit_sample[None, :, :]) ** 2).sum(-1)
+        )
+        np.fill_diagonal(dd, np.inf)
+        self._fit_nn_scale = float(np.median(dd.min(axis=1)))
         return self
 
     # ----------------------------------------------------------- score
@@ -117,6 +129,24 @@ class ConditionalSurpriseScorer:
                 right=1.0,
             )
         return pits
+
+    def coverage(self, frame: pl.DataFrame) -> float:
+        """Operating-point familiarity in [0,1]: how close the frame's
+        recent operating points sit to the FIT sample, in units of the fit
+        sample's own nearest-neighbor spacing (Layer 8: 'I know high-load
+        well; I have seen cold starts twice'). 1 = deeply familiar
+        territory; near 0 = a regime the model has barely seen - verdicts
+        there carry less confidence REGARDLESS of what the scores say."""
+        assert self._fit_sample is not None
+        tail = self._standardize(self._aligned_matrix(frame.tail(128)))
+        tail = np.nan_to_num(tail)
+        # distance of each recent row to its nearest fit-sample row
+        d = np.sqrt(
+            ((tail[:, None, :] - self._fit_sample[None, :, :]) ** 2).sum(-1)
+        ).min(axis=1)
+        med_d = float(np.median(d))
+        return float(np.exp(-max(0.0, med_d - self._fit_nn_scale)
+                            / max(self._fit_nn_scale, 1e-9)))
 
     def concentration(self, frame: pl.DataFrame, top_k: int = 2) -> float:
         """Share of total surprise carried by the top_k channels (recent
