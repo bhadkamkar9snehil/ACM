@@ -14,6 +14,8 @@ asset-year). Design: `docs/acm-gem-plan.md`; build guide:
 
 ```bash
 cd acm2
+./install.sh          # or: .\install.ps1 on Windows (installs uv, syncs, self-tests)
+# manual equivalent:
 uv sync                                   # environment (lockfile committed)
 uv run pytest tests                       # full suite incl. statistical lane
 uv run python -m acm2.service --root ../acm2_data --port 8899 --tick-seconds 300
