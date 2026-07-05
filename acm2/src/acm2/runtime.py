@@ -35,6 +35,7 @@ class Runtime:
     verdicts: dict[str, V.Verdict] = field(default_factory=dict)
     previous_verdicts: dict[str, V.Verdict] = field(default_factory=dict)
     immune_results: dict[str, dict] = field(default_factory=dict)
+    live_sources: dict[str, object] = field(default_factory=dict)
     _last_seen: dict[str, object] = field(default_factory=dict)
     _tick_counts: dict[str, int] = field(default_factory=dict)
 
@@ -59,6 +60,15 @@ class Runtime:
     def onboard_all(self) -> dict[str, bool]:
         return {key: self.onboard(key) for key in self.store.assets()}
 
+    def attach_live_source(self, asset_key: str, db_path) -> None:
+        """Attach a SQLite buffer (bridge/sim-fed) to an asset; drained
+        on every tick before scoring."""
+        from acm2.ingest.buffer_source import BufferSource
+
+        self.live_sources[asset_key] = BufferSource(
+            db_path=db_path, asset_key=asset_key
+        )
+
     # ------------------------------------------------------------ ticks
     def tick(self, asset_key: str) -> V.Verdict | None:
         """Score any new rows for one asset; returns the verdict if new
@@ -66,6 +76,9 @@ class Runtime:
         fleet never rebuilds at once."""
         em = self.monitors[asset_key]
         started = time.monotonic()
+        src = self.live_sources.get(asset_key)
+        if src is not None:
+            src.drain(self.store)  # live buffer -> immortal store, then read
         since = self._last_seen.get(asset_key)
         frame = self.store.read(asset_key, start=since)
         if since is not None and not frame.is_empty():

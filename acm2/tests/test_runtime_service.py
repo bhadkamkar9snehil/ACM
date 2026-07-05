@@ -232,3 +232,53 @@ def test_narrative_endpoint_tells_the_story(runtime):
     assert "operating point" in text
     # the faulted asset's story names its evidence carriers
     assert "carried by" in text
+
+
+# ------------------------------------------------- live buffer ingestion
+def test_live_buffer_source_streams_into_ticks(tmp_path):
+    """A bridge/sim writes the SQLite buffer; the runtime drains it on
+    tick and the asset scores the new rows - the live path end to end."""
+    import json
+    import sqlite3
+    from datetime import datetime, timedelta, timezone
+
+    import numpy as np
+
+    UTC = timezone.utc
+    store = RawStore(tmp_path / "raw")
+    seed_asset(store, "live/1", seed=30)
+    rt = Runtime(store=store, data_root=tmp_path)
+    rt.onboard_all()
+    rt.tick_all()
+
+    # a publisher (simulated) writes new rows into the buffer db
+    db = tmp_path / "mqtt_buffer.db"
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE mqtt_buffer (ts TEXT NOT NULL, payload_json TEXT NOT NULL)")
+    rng = np.random.default_rng(31)
+    base = datetime(2025, 7, 1, tzinfo=UTC)
+    for i in range(300):
+        ts = (base + timedelta(minutes=10 * i)).isoformat()
+        t = float(rng.normal())
+        payload = {
+            "published_at": ts,
+            "temp": t,
+            "vib": 0.8 * t + 0.3 * float(rng.normal()),
+            "press": float(rng.normal()),
+            "flow": float(rng.normal()),
+            "state": "NORMAL",  # label: must be dropped at the door
+        }
+        con.execute(
+            "INSERT INTO mqtt_buffer VALUES (?, ?)", (ts, json.dumps(payload))
+        )
+    con.commit(); con.close()
+
+    rt.attach_live_source("live/1", db)
+    before = store.row_count("live/1")
+    v = rt.tick("live/1")
+    assert store.row_count("live/1") == before + 300
+    assert v is not None  # the drained rows were scored this tick
+    # labels never entered the store
+    assert "state" not in store.read("live/1").columns
+    # draining again adds nothing (resumable + idempotent)
+    assert rt.live_sources["live/1"].drain(store) == 0

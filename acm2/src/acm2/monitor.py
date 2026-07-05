@@ -26,11 +26,12 @@ MODEL_EPOCH_FMT = "{tag}-{fit_rows}r-{calib_rows}c"
 # budget exact): magnitude carries most faults; availability events are
 # rarer and structurally distinct.
 # union bound keeps the total budget exact across the four domains
-MAGNITUDE_ALPHA_SHARE = 0.55
+MAGNITUDE_ALPHA_SHARE = 0.5
 AVAILABILITY_ALPHA_SHARE = 0.15
 HORIZON_GAP_ALPHA_SHARE = 0.1
-BAND_ALPHA_SHARE = 0.1
+BAND_ALPHA_SHARE = 0.05
 TRANSIENT_ALPHA_SHARE = 0.1
+DYNAMICS_ALPHA_SHARE = 0.1
 
 
 def _scorer_tag(scorer_cls) -> str:
@@ -53,6 +54,8 @@ class AssetMonitor:
     band_bank: EProcessBank | None = None
     trans_catalogue: object | None = None
     trans_bank: EProcessBank | None = None
+    dyn_drift: object | None = None
+    dyn_bank: EProcessBank | None = None
     anatomy: object | None = None
     model_epoch: str = ""
     calib_rows: int = 0
@@ -80,6 +83,7 @@ class AssetMonitor:
             self.avail_bank = self._build_avail_bank(held_out, alpha, seed)
             self._build_horizon_banks(fit, held_out, alpha, seed)
             self._build_transient_bank(calib_frame, alpha, seed)
+            self._build_dynamics_bank(fit, held_out, alpha, seed)
             self._learn_anatomy(calib_frame, seed)
         except ValueError as exc:
             self.scorer, self.bank = None, None
@@ -132,6 +136,10 @@ class AssetMonitor:
                 sample.head(split_mh), sample.slice(split_mh), alpha, seed
             )
             self._build_transient_bank(sample, alpha, seed)
+            split_dd = int(sample.height * FIT_FRACTION)
+            self._build_dynamics_bank(
+                sample.head(split_dd), sample.slice(split_dd), alpha, seed
+            )
             self._learn_anatomy(sample, seed)
             self.scorer = scorer
         except ValueError as exc:
@@ -204,6 +212,23 @@ class AssetMonitor:
             self.trans_catalogue = None
             self.trans_bank = None
 
+    def _build_dynamics_bank(self, fit_frame, held_out, alpha, seed):
+        """Koopman-flavored dynamics drift (spike passed GO): the operator
+        the machine forces us to learn, re-identified per window; drift
+        from the healthy reference is its own evidence stream. Thin data
+        disables, never guesses."""
+        from acm2.scoring.dynamics import DynamicsDrift
+
+        try:
+            self.dyn_drift = DynamicsDrift().fit(fit_frame)
+            calib = self.dyn_drift.calibration_stream(held_out)
+            self.dyn_bank = EProcessBank(
+                calib, alpha=alpha * DYNAMICS_ALPHA_SHARE, seed=seed + 5000
+            )
+        except ValueError:
+            self.dyn_drift = None
+            self.dyn_bank = None
+
     def _learn_anatomy(self, calib_frame, seed):
         """C6: the machine's functional anatomy, stability-selected; a thin
         or unstable calibration leaves it None (no anatomical claims)."""
@@ -248,7 +273,18 @@ class AssetMonitor:
 
         aux_domain = None
         aux_evidence = 0.0
-        if self.trans_catalogue is not None and not frame.is_empty():
+        if self.dyn_drift is not None and not frame.is_empty():
+            d_stream = self.dyn_drift.drift_stream(frame)
+            if d_stream.size:
+                d_state = self.dyn_bank.update(d_stream)
+                if d_state.alarmed:
+                    aux_domain = "dynamics-drift"
+                    aux_evidence = d_state.evidence
+        if (
+            aux_domain is None
+            and self.trans_catalogue is not None
+            and not frame.is_empty()
+        ):
             t_scores = self.trans_catalogue.score_new(frame)
             if t_scores.size:
                 t_state = self.trans_bank.update(t_scores)
