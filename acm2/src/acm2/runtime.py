@@ -46,8 +46,29 @@ class Runtime:
         self.cache_root = Path(self.data_root) / "memcache"
 
     # ----------------------------------------------------------- assets
+    def _select_scorer_cls(self):
+        """Tier-aware scorer selection (implementation plan 1.1): the
+        world model at T2/T2-S when torch is importable; the conditional
+        ridge everywhere else. Verdict semantics identical across tiers -
+        only power differs; the guarantee is tier-free."""
+        if self.governor.tier in ("T2", "T2-S"):
+            try:
+                from acm2.scoring.worldmodel import TorchWorldModel
+
+                import torch  # noqa: F401
+
+                return TorchWorldModel
+            except ImportError:
+                pass
+        from acm2.scoring.surprise import ConditionalSurpriseScorer
+
+        return ConditionalSurpriseScorer
+
     def onboard(self, asset_key: str) -> bool:
-        em = EpisodicMonitor(AssetMonitor(asset_key), self.ledger)
+        em = EpisodicMonitor(
+            AssetMonitor(asset_key, scorer_cls=self._select_scorer_cls()),
+            self.ledger,
+        )
         ok = em.monitor.calibrate_from_lifetime(
             self.store, ledger=self.ledger, cache_root=self.cache_root
         )
@@ -294,6 +315,30 @@ class Runtime:
             pits = scorer.pit(tail)
             pit_verdict, _ks = classify_pit_distortion(pits, scorer.channels)
         result["pit"] = pit_verdict
+
+        # C8: rehearse the LIVE pipeline against self-imagined coherent
+        # faults - the measured sensitivity floor, refreshed weekly
+        live = self.monitors[asset_key].monitor.scorer
+        bank = self.monitors[asset_key].monitor.bank
+        if (
+            live is not None
+            and bank is not None
+            and hasattr(live, "betas")
+            and frame.height > 1000
+        ):
+            from acm2.immune.rehearsal import rehearse
+
+            rmap = rehearse(
+                live,
+                frame.tail(min(frame.height, 2500)),
+                bank.members[0]._calib_sorted,
+            )
+            result["rehearsal"] = {
+                "floors": rmap.floors,
+                "overall_floor": rmap.overall_floor,
+                "detected_fraction": round(rmap.detected_fraction, 3),
+                "scope": rmap.scope,
+            }
 
         sick = (
             report.scorer_dead

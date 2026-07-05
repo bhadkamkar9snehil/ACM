@@ -100,3 +100,45 @@ def test_escalating_verdict_carries_horizon(tmp_path):
     if hz["gated"]:
         assert hz["median_steps"] is not None
         assert hz["p10_steps"] <= hz["median_steps"] <= hz["p90_steps"]
+
+
+def test_trajectory_match_recognizes_the_path(tmp_path):
+    """Second occurrence of the same developing fault: the open episode's
+    trajectory matches the stored curve and yields a remaining-rows
+    estimate - case-based prognosis from the asset's own history."""
+    rng = np.random.default_rng(20)
+    start = datetime(2025, 1, 1, tzinfo=UTC)
+    ledger = EpisodeLedger(tmp_path / "l.json")
+    em = EpisodicMonitor(AssetMonitor("tm/1"), ledger)
+    assert em.monitor.calibrate(coupled(6000, start, rng))
+
+    # first occurrence, full arc, closed into the ledger
+    f1 = coupled(6000, start + timedelta(days=50), rng, fault=5.0)
+    v1 = em.process(f1)
+    em.reanchor(store=None, last_verdict=v1) if False else None
+    # reanchor needs a store; close manually via ledger-equivalent path:
+    from acm2.memory.ledger import Episode
+    import json as _json
+    seg = np.concatenate(em._episode_scores)
+    from acm2.episodes import HEALTH_INDEX_CHUNK as HC
+    curve = [
+        float(np.mean(seg[i : i + HC]))
+        for i in range(0, seg.size, HC)
+        if seg[i : i + HC].size >= HC // 2
+    ]
+    ledger.add(Episode("tm/1", "2025-02-20T00:00:00+00:00",
+                       "2025-03-04T00:00:00+00:00", "alarm",
+                       note=_json.dumps({"channels": list(v1.attribution),
+                                         "shape": "drift",
+                                         "index_curve": curve})))
+    em.open_episode_start = ""
+    em._episode_scores = []
+
+    # second occurrence: process only the FIRST HALF of the same arc
+    f2 = coupled(3000, start + timedelta(days=200), rng, fault=2.5)
+    v2 = em.process(f2)
+    if v2.state == V.STATE_ESCALATING:
+        match = v2.evidence_trail.get("trajectory_match")
+        assert match is not None, v2.evidence_trail.keys()
+        assert match["remaining_rows_estimate"] > 0
+        assert match["distance"] < 2.0

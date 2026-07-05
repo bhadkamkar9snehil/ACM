@@ -150,6 +150,9 @@ class EpisodicMonitor:
                 "threshold) downgrades this to a plain alarm"
             )
             trail["horizon"] = self._compute_horizon().to_dict()
+            match = self._trajectory_match()
+            if match is not None:
+                trail["trajectory_match"] = match
         return V.Verdict(
             asset_key=verdict.asset_key,
             at=verdict.at,
@@ -192,6 +195,51 @@ class EpisodicMonitor:
             spread,
             ledger_onset_levels=onset_levels or None,
         )
+
+    def _trajectory_match(self) -> dict | None:
+        """Manifold prognosis (G4 ceiling): match the open episode's
+        surprise TRAJECTORY against past episodes' stored curves - "you
+        are N chunks along a path that took M chunks to its peak". The IG
+        horizon is the model-based floor; this is the case-based estimate,
+        reported alongside, never instead."""
+        seg = (
+            np.concatenate(self._episode_scores)
+            if self._episode_scores
+            else np.array([])
+        )
+        cur = [
+            float(np.mean(seg[i : i + HEALTH_INDEX_CHUNK]))
+            for i in range(0, seg.size, HEALTH_INDEX_CHUNK)
+            if seg[i : i + HEALTH_INDEX_CHUNK].size >= HEALTH_INDEX_CHUNK // 2
+        ]
+        if len(cur) < 3:
+            return None
+        best = None
+        for ep in self.ledger.episodes:
+            if ep.asset_key != self.asset_key or not ep.note:
+                continue
+            try:
+                curve = json.loads(ep.note).get("index_curve") or []
+            except json.JSONDecodeError:
+                continue
+            if len(curve) <= len(cur):
+                continue  # only past episodes we are PART-WAY along
+            ref = np.array(curve[: len(cur)])
+            c = np.array(cur)
+            scale = max(float(np.std(ref)), 1e-9)
+            dist = float(np.sqrt(np.mean((ref - c) ** 2))) / scale
+            if best is None or dist < best["distance"]:
+                best = {
+                    "episode": ep.start,
+                    "distance": round(dist, 3),
+                    "position_chunks": len(cur),
+                    "matched_length_chunks": len(curve),
+                    "remaining_rows_estimate": (len(curve) - len(cur))
+                    * HEALTH_INDEX_CHUNK,
+                }
+        if best is not None and best["distance"] < 2.0:
+            return best
+        return None
 
     def _signature_match(
         self, channels: set[str], shape: str
@@ -244,6 +292,17 @@ class EpisodicMonitor:
                                 if seg.size
                                 else None
                             ),
+                            # trajectory memory (manifold prognosis): the
+                            # episode's chunked surprise curve, capped
+                            "index_curve": [
+                                round(float(np.mean(seg[i : i + HEALTH_INDEX_CHUNK])), 4)
+                                for i in range(
+                                    0, min(seg.size, 64 * HEALTH_INDEX_CHUNK),
+                                    HEALTH_INDEX_CHUNK,
+                                )
+                                if seg[i : i + HEALTH_INDEX_CHUNK].size
+                                >= HEALTH_INDEX_CHUNK // 2
+                            ],
                         }
                     ),
                 )
