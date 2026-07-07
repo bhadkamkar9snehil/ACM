@@ -8,8 +8,10 @@ One asset is a fleet of one; there is no single-asset mode.
 
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 
 import polars as pl
@@ -44,6 +46,17 @@ class Runtime:
             self.governor = Governor.from_probe(probe())
         self.ledger = EpisodeLedger(Path(self.data_root) / "ledger.json")
         self.cache_root = Path(self.data_root) / "memcache"
+        # durable first-contact record: {asset_key: iso_utc_completed_at}.
+        # "Virgin" means "never bootstrapped", NOT "no ledger windows" -
+        # a clean asset never gains windows, so a windows-based test would
+        # re-run the full multi-pass bootstrap on EVERY service start
+        # (found by test: the tick loop sat behind a redundant bootstrap).
+        self._bootstrapped_path = Path(self.data_root) / "bootstrapped.json"
+        self._bootstrapped: dict[str, str] = {}
+        if self._bootstrapped_path.exists():
+            self._bootstrapped = json.loads(
+                self._bootstrapped_path.read_text(encoding="utf-8")
+            )
 
     # ----------------------------------------------------------- assets
     def _select_scorer_cls(self):
@@ -82,15 +95,33 @@ class Runtime:
         return {key: self.onboard(key) for key in self.store.assets()}
 
     def bootstrap_virgin(self) -> dict[str, dict]:
-        """First-contact cleaning for every asset with NO ledger history:
+        """First-contact cleaning for every never-bootstrapped asset:
         the detect->mask->re-detect loop (H1 fix: bootstrap existed but was
         never wired into the service path - contaminated first contact
-        would never have been cleaned in production)."""
+        would never have been cleaned in production).
+
+        Runs ONCE per asset lifetime, recorded in bootstrapped.json.
+        Pre-marker data roots: existing ledger windows are accepted as
+        evidence of a prior first contact (and back-filled into the
+        marker), so old deployments are not re-bootstrapped either."""
         out = {}
         for key in self.monitors:
-            if not self.ledger.windows(key):
-                out[key] = self.bootstrap(key)
+            if key in self._bootstrapped:
+                continue
+            if self.ledger.windows(key):
+                self._mark_bootstrapped(key)
+                continue
+            out[key] = self.bootstrap(key)
         return out
+
+    def _mark_bootstrapped(self, asset_key: str) -> None:
+        self._bootstrapped[asset_key] = datetime.now(timezone.utc).isoformat()
+        self._bootstrapped_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self._bootstrapped_path.with_suffix(".tmp")
+        tmp.write_text(
+            json.dumps(self._bootstrapped, indent=1), encoding="utf-8"
+        )
+        tmp.replace(self._bootstrapped_path)
 
     def reanchor(self, asset_key: str) -> bool:
         """Governed episode close + recalibration, exposed for the UI."""
@@ -319,6 +350,7 @@ class Runtime:
             if not history.is_empty()
             else None
         )
+        self._mark_bootstrapped(asset_key)
         return {"asset": asset_key, "passes": passes}
 
     # ----------------------------------------------------- immune path

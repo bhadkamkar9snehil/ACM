@@ -147,15 +147,58 @@ def test_immune_endpoints(runtime):
 
 
 def test_self_ticking_service(runtime):
-    """The service ticks itself - implement and forget."""
+    """The service ticks itself - implement and forget. Restart case:
+    an already-bootstrapped fleet must tick promptly, not sit behind a
+    redundant first-contact bootstrap (the marker regression)."""
     import time as _t
 
+    for key in runtime.monitors:
+        runtime._mark_bootstrapped(key)
     app = create_app(runtime, tick_seconds=0.2)
     before = dict(runtime._tick_counts)
     with TestClient(app):
         _t.sleep(0.7)
     after = runtime._tick_counts
     assert any(after[k] > before.get(k, 0) for k in after), (before, after)
+
+
+def test_bootstrap_virgin_runs_once_per_asset_lifetime(tmp_path):
+    """First contact happens exactly once: bootstrap_virgin marks the
+    asset durably and never re-runs - including across a service restart
+    (a NEW Runtime over the same data root). A clean asset gains no
+    ledger windows, so 'no windows' must NOT mean 'virgin'."""
+    store = RawStore(tmp_path / "raw")
+    seed_asset(store, "v/clean", seed=11)
+    rt = Runtime(store=store, data_root=tmp_path)
+    rt.onboard_all()
+
+    out = rt.bootstrap_virgin()
+    assert "v/clean" in out  # first contact ran
+    assert not rt.ledger.windows("v/clean")  # clean: nothing ledgered
+    assert rt.bootstrap_virgin() == {}  # same process: no re-run
+
+    rt2 = Runtime(store=store, data_root=tmp_path)  # service restart
+    rt2.onboard_all()
+    assert rt2.bootstrap_virgin() == {}  # marker survived the restart
+
+    # pre-marker data roots: existing ledger windows count as evidence of
+    # a prior first contact and are back-filled into the marker
+    from acm2.memory.ledger import Episode
+
+    seed_asset(store, "v/old", seed=12)
+    rt3 = Runtime(store=store, data_root=tmp_path)
+    rt3.ledger.add(
+        Episode(
+            asset_key="v/old",
+            start="2025-02-01T00:00:00+00:00",
+            end="2025-02-03T00:00:00+00:00",
+            state="alarm",
+        )
+    )
+    rt3.onboard("v/old")
+    out3 = rt3.bootstrap_virgin()
+    assert "v/old" not in out3  # windows -> treated as already contacted
+    assert "v/old" in rt3._bootstrapped  # and back-filled durably
 
 
 # ------------------------------------------------------- the bootstrap
