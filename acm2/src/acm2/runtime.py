@@ -341,8 +341,9 @@ class Runtime:
             passes.append({"pass": it + 1, "new_episodes": found})
             if found == 0:
                 break
-        # leave the monitor calibrated on the final masked baseline
-        em.monitor.calibrate_from_lifetime(
+        # leave the monitor calibrated on the final masked baseline; a
+        # failure here means a DEAD monitor, so it is reported, not dropped
+        final_ok = em.monitor.calibrate_from_lifetime(
             self.store, ledger=self.ledger, cache_root=self.cache_root
         )
         self._last_seen[asset_key] = (
@@ -351,7 +352,11 @@ class Runtime:
             else None
         )
         self._mark_bootstrapped(asset_key)
-        return {"asset": asset_key, "passes": passes}
+        return {
+            "asset": asset_key,
+            "passes": passes,
+            "final_calibration": bool(final_ok),
+        }
 
     # ----------------------------------------------------- immune path
     def immune_pass(self, asset_key: str) -> dict:
@@ -360,7 +365,13 @@ class Runtime:
         first-class events: the finding is recorded, and a rebuild is
         triggered immediately (the governed response to a sick model)."""
         em = self.monitors[asset_key]
-        frame = self.ledger.mask(asset_key, self.store.read(asset_key))
+        # "healthy" here matches the baseline's definition: fault windows
+        # excluded, absorbed change-not-fault regimes kept
+        from acm2.memory.ledger import FAULT_STATES
+
+        frame = self.ledger.mask(
+            asset_key, self.store.read(asset_key), states=FAULT_STATES
+        )
         if frame.height > IMMUNE_SAMPLE_ROWS:
             frame = frame.tail(IMMUNE_SAMPLE_ROWS)
 

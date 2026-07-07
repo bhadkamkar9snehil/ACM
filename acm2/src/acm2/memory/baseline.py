@@ -21,7 +21,7 @@ import numpy as np
 import polars as pl
 
 from acm2.constants import get as const
-from acm2.memory.ledger import EpisodeLedger
+from acm2.memory.ledger import FAULT_STATES, EpisodeLedger
 from acm2.memory.summaries import (
     PeriodSummary,
     build_period_summary,
@@ -64,7 +64,7 @@ class LifetimeBaseline:
         # grows later (bootstrap passes, new episodes) must invalidate the
         # cache - found while wiring the detect->mask->re-detect loop.
         if ledger is not None:
-            lhash = f"{abs(hash(tuple(ledger.windows(asset_key)))):x}"[:12]
+            lhash = f"{abs(hash(tuple(ledger.windows(asset_key, states=FAULT_STATES)))):x}"[:12]
         else:
             lhash = "nl"
 
@@ -81,7 +81,7 @@ class LifetimeBaseline:
                 continue
             frame = pl.read_parquet(path)
             if ledger is not None:
-                frame = ledger.mask(asset_key, frame)
+                frame = ledger.mask(asset_key, frame, states=FAULT_STATES)
             summary = build_period_summary(period, frame)
             summaries.append(summary)
             if not is_open and cached is not None:
@@ -145,7 +145,7 @@ class LifetimeBaseline:
         for path in use:
             f = pl.read_parquet(path)
             if ledger is not None:
-                f = ledger.mask(self.asset_key, f)
+                f = ledger.mask(self.asset_key, f, states=FAULT_STATES)
             frames.append(f)
         full = pl.concat(frames, how="vertical_relaxed").sort(TIMESTAMP_COL)
         if full.height > max_rows:

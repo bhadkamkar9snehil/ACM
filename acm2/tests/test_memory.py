@@ -184,3 +184,47 @@ def test_ledger_masked_baseline_ignores_fault_period(tmp_path):
         "masking must pull the baseline back toward healthy"
     )
     assert abs(clean.medians["temp"]) < 0.15
+
+
+def test_change_not_fault_episode_is_absorbed_not_masked(tmp_path):
+    """A change-not-fault episode is a regime move the baseline ABSORBS
+    (its own falsifiability text says re-anchoring absorbs the plateau).
+    Found on real CARE data: a change-not-fault episode spanning the
+    WHOLE life masked 100% of history and left the monitor permanently
+    insufficient-history. Fault windows mask; change windows must not."""
+    store = RawStore(tmp_path / "raw")
+    for m in range(1, 7):
+        store.append("c1", month_frame(2025, m, seed=m))
+    ledger = EpisodeLedger(tmp_path / "ledger.json")
+    ledger.add(
+        Episode(
+            asset_key="c1",
+            start="2025-01-01T00:00:00+00:00",
+            end="2025-12-31T00:00:00+00:00",  # spans the entire life
+            state="change-not-fault",
+        )
+    )
+    # the baseline still builds - the change window is absorbed
+    base = LifetimeBaseline.build(store, "c1", ledger=ledger)
+    assert base.rows_total > 0 and "temp" in base.medians
+    # and the full path stays alive: a monitor calibrates fine
+    mon = AssetMonitor("c1")
+    assert mon.calibrate_from_lifetime(store, ledger=ledger), (
+        mon.insufficient_reason
+    )
+    # the same window as a FAULT episode still masks (hygiene unchanged)
+    ledger2 = EpisodeLedger(tmp_path / "ledger2.json")
+    ledger2.add(
+        Episode(
+            asset_key="c1",
+            start="2025-01-01T00:00:00+00:00",
+            end="2025-12-31T00:00:00+00:00",
+            state="alarm",
+        )
+    )
+    try:
+        LifetimeBaseline.build(store, "c1", ledger=ledger2)
+        built = True
+    except ValueError:
+        built = False
+    assert not built, "a full-life FAULT mask must fail loudly, not build"
