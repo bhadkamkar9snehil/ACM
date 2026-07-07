@@ -3007,9 +3007,14 @@ agent factory (docs/acm2-factory.md) under autonomous mode. Governing docs:
 docs/acm-rethink-plan.md, docs/acm-gem-plan.md, docs/acm2-implementation-plan.md.
 Task board: Hermes kanban board `acm2`. Tag v2.0.0 = complete at Tier 0.
 
-Phases S0-S6 + S8 COMPLETE; S7 (world-model tier) OPEN pending GPU (the
-RTX 4060 is the remote LM Studio box, this machine probes Tier 0); Koopman
-dynamics-drift channel OPEN (research spike, never a dependency).
+Phases S0-S8 COMPLETE as of 2026-07-05 (commits 9a83396 "gem plan is
+BUILT" + 8191be9 review pass with full UI): S7 world model, C8 rehearsal,
+manifold prognosis, Koopman dynamics-drift (6th domain), live buffer
+ingestion, health narrative, and the zero-build vanilla UI all landed. S7
+runs the torch path only where torch imports (Tier 2/2-S); on this Tier 0
+container test_worldmodel.py is skipped (torch not installed) - that skip
+is expected, not a regression. GitHub Actions is billing-locked at the
+account level, so LOCAL suites are the merge gate.
 
 Key invariants (CI-enforced, do not violate):
 - acm2/ never imports core/, scripts/, sim/, static/ (test_import_boundary).
@@ -3031,3 +3036,9 @@ Hard-won ACM2 lessons (found by tests/pilots during the build):
 - The immune harness profiles the RECIPE; a dead LIVE scorer needs the
   separate live-instance degeneracy check (fleet.immune_pass does both).
 - PIT distortion classification is an immune signal ONLY while not alarmed.
+- "Virgin" means "never bootstrapped", NOT "no ledger windows" (#85, fixed
+  2026-07-07): a clean asset never gains ledger windows, so a windows-based
+  virginity test re-ran the full multi-pass first-contact bootstrap on
+  EVERY service start and the tick loop sat behind it. Durable marker:
+  data_root/bootstrapped.json (atomic write); existing ledger windows on
+  pre-marker data roots are back-filled as evidence of prior contact.

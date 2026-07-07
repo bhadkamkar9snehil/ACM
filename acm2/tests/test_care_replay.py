@@ -50,7 +50,7 @@ def _write_event_csv(
             "sensor_3_avg": rng.normal(size=n),
         }
     )
-    frame.write_csv(path)
+    frame.write_csv(path, separator=";")  # real CARE is semicolon-delimited
 
 
 def _make_farm(tmp_path: Path) -> Path:
@@ -70,7 +70,7 @@ def _make_farm(tmp_path: Path) -> Path:
             ]
             * 2,
         }
-    ).write_csv(farm / "event_info.csv")
+    ).write_csv(farm / "event_info.csv", separator=";")
     _write_event_csv(farm / "datasets" / "1.csv", seed=1, fault=5.0)
     _write_event_csv(farm / "datasets" / "2.csv", seed=2, fault=0.0)
     return farm

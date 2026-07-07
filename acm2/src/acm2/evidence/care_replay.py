@@ -49,18 +49,24 @@ DEFAULT_CHUNK_ROWS = 288
 ALARMING = (V.STATE_ALARM, V.STATE_ESCALATING)
 
 
+def _read_care_csv(path: Path) -> pl.DataFrame:
+    """CARE ships semicolon-delimited CSVs (event_info AND datasets);
+    sniff the header so comma-shaped fixtures work identically."""
+    with open(path, encoding="utf-8") as fh:
+        header = fh.readline()
+    sep = ";" if header.count(";") > header.count(",") else ","
+    return pl.read_csv(path, separator=sep, infer_schema_length=2000)
+
+
 def load_event_info(farm_dir: Path) -> list[dict]:
-    info = pl.read_csv(farm_dir / "event_info.csv")
-    return info.to_dicts()
+    return _read_care_csv(farm_dir / "event_info.csv").to_dicts()
 
 
 def load_event_frames(
     farm_dir: Path, event_id: object
 ) -> tuple[pl.DataFrame, pl.DataFrame]:
     """Read one event CSV, adapt to store shape, split train/prediction."""
-    raw = pl.read_csv(
-        farm_dir / "datasets" / f"{event_id}.csv", infer_schema_length=2000
-    )
+    raw = _read_care_csv(farm_dir / "datasets" / f"{event_id}.csv")
     if "train_test" not in raw.columns:
         raise ValueError(f"event {event_id}: no train_test column")
     raw = raw.with_columns(
