@@ -3042,3 +3042,41 @@ Hard-won ACM2 lessons (found by tests/pilots during the build):
   EVERY service start and the tick loop sat behind it. Durable marker:
   data_root/bootstrapped.json (atomic write); existing ledger windows on
   pre-marker data roots are back-filled as evidence of prior contact.
+- Change-not-fault episodes are ABSORBED by the baseline, never masked
+  (#87, fixed 2026-07-07): ledger.mask() excluded every episode state, so
+  a full-life change-not-fault episode (bootstrap replay + latching
+  alarms = episode can only close at end-of-replay) masked 100% of
+  history and left a silently dead monitor. Baseline/immune consumers
+  now mask states=FAULT_STATES only; the bootstrap convergence mask
+  keeps all states; bootstrap reports final_calibration.
+- Fit-side NaN imputation must match score-side (#88, fixed 2026-07-07):
+  3 null rows in 52k poisoned ConditionalSurpriseScorer.fit's gram
+  matrix -> every score non-finite -> dead monitor. fit() now imputes at
+  the standardized median exactly as score() does.
+
+### ACM2 evidence lane - first real-data results (2026-07-07)
+
+`acm2/src/acm2/evidence/care_replay.py` (#86) replays CARE farm events
+through the PRODUCTION path (adapter -> train ingest -> onboard ->
+first-contact bootstrap -> chunked ticks) and evaluates against
+event_info.csv. Real CARE files are SEMICOLON-delimited (adapter sniffs);
+labels/meta (status_type_id, train_test, id, asset_id) never enter the
+store; naive CARE timestamps are declared UTC by the adapter (ingest
+still rejects naive - the caller declares, ingest never guesses).
+
+First pass over 8 Farm A events (3 anomaly / 5 normal, ~52k train rows
+each) found and fixed 3 real bugs within hours (#87, #88, plus the
+delimiter). Final result (results/acm2_care_A, gitignored):
+- 0/5 normals false-alarmed - the alpha guarantee held on real SCADA.
+- 1/3 anomalies hit: event 0 (generator bearing failure), lag 240h.
+- Event 22 (hydraulic group) MISSED BY CLASSIFICATION: the e-process
+  alarmed (evidence 1.37 >= 1.0) but the episode classified as
+  change-not-fault - step shape + concentration below
+  CHANGE_CONCENTRATION_MAX voted "coordinated move" on a real fault.
+  Open observation: the concentration corroboration failed on real
+  hydraulic-fault data. Documented, NOT tuned (standing methodology).
+- Event 10 (gearbox failure) missed: monitor alive and evidence
+  accumulating (0 -> 0.24) but the 8-day/1269-row prediction runway is
+  short for Tier 0 detection power. Genuine power result, not a bug.
+CARE prediction windows are 8-20 days - the e-process has limited
+runway per event; lag/hit numbers must be read against that.
