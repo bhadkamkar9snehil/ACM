@@ -177,7 +177,13 @@ def replay_farm(
         if not info:
             raise ValueError(f"no events matched {sorted(wanted)}")
     records = []
+    skipped = []
     for event in info:
+        if not (farm_dir / "datasets" / f"{event['event_id']}.csv").exists():
+            # partial downloads are the norm (--count); absent CSVs are
+            # skipped and reported, never an error
+            skipped.append(event["event_id"])
+            continue
         rec = replay_event(
             farm_dir, event, out_dir / "state", chunk_rows=chunk_rows
         )
@@ -196,6 +202,7 @@ def replay_farm(
         "farm_dir": str(farm_dir),
         "chunk_rows": chunk_rows,
         "events": len(records),
+        "skipped_no_csv": skipped,
         "anomalies": len(anomalies),
         "hits": sum(r["outcome"] == "hit" for r in anomalies),
         "misses": sum(r["outcome"] == "miss" for r in anomalies),
