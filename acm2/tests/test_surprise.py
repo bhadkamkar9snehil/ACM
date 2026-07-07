@@ -137,3 +137,22 @@ def test_conditional_beats_marginal_on_coupled_drift():
         np.mean(marg.score(tail)) / np.mean(marg.score(rest.head(2000)))
     )
     assert cond_ratio > marg_ratio, (cond_ratio, marg_ratio)
+
+
+def test_fit_survives_null_rows():
+    """Fit-side NaN imputation must match score-side: a handful of null
+    rows in an otherwise-healthy history previously turned the gram
+    matrix (and thus every beta and every score) NaN - a permanently
+    dead monitor. Found on real CARE data: 3 null rows in 52k rows
+    killed event 10's calibration entirely."""
+    frame = correlated_frame(n=4000, seed=7)
+    # poison 3 scattered rows in one channel, CARE-style
+    vib = frame.get_column("vib").to_numpy().copy()
+    vib[100] = np.nan
+    vib[2000] = np.nan
+    vib[3500] = np.nan
+    frame = frame.with_columns(pl.Series("vib", vib))
+    scorer = ConditionalSurpriseScorer().fit(frame.head(2400))
+    scores = scorer.score(frame.tail(1600))
+    assert np.isfinite(scores).all(), "scores must stay finite"
+    assert float(scores.std()) > 0, "scorer must be alive, not degenerate"

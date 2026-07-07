@@ -68,6 +68,11 @@ class ConditionalSurpriseScorer:
         self.scales = np.array(scales)
 
         z = self._standardize(x[:, keep])
+        # impute at the standardized median, exactly as score() does: a
+        # single NaN row otherwise poisons the whole gram matrix -> NaN
+        # betas -> every score non-finite -> a permanently dead monitor
+        # (found on real CARE data: 3 null rows in 52k killed event 10)
+        z = np.nan_to_num(z, nan=0.0)
         n, d = z.shape
         gram = z.T @ z + RIDGE_LAMBDA * n * np.eye(d)
         betas = np.zeros((d, d))
