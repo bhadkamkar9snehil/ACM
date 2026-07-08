@@ -10,7 +10,7 @@ row per `--rows-per-second` wall second, so a 90-minute soak covers
 about 37 asset-days.
 
 Run:
-    uv run python -m acm2.evidence.soak --root ../results/soak1 --minutes 90
+    uv run python -m acm2.evidence.soak --root results/soak1 --minutes 90
 
 Phases (fractions of the fed rows):
     0.00-0.28  healthy continuation

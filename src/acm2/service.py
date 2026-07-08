@@ -173,7 +173,7 @@ def main() -> None:  # pragma: no cover - manual entrypoint
 
     set_thread_caps(1)
     parser = argparse.ArgumentParser()
-    parser.add_argument("--root", default="../acm2_data")
+    parser.add_argument("--root", default="acm2_data")
     parser.add_argument("--port", type=int, default=8899)
     parser.add_argument(
         "--tick-seconds", type=float, default=DEFAULT_TICK_SECONDS

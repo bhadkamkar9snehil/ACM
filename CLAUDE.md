@@ -18,6 +18,14 @@ run legacy commands FROM the `lab/` directory. `acm2/`, `docs/`,
 sections below are NOT rewritten - apply this translation when reading
 them.
 
+Part 2 (#94, same day): the repo root IS the ACM2 project - the old
+`acm2/` folder is gone. `acm2/src/acm2` -> `src/acm2`, `acm2/tests` ->
+`tests`, and `acm2/pyproject.toml`, `acm2/uv.lock`, `acm2/install.*`
+are at the root. The import/package name stays `acm2` (that is
+versioning: `python -m acm2.service`, `uv run` from the repo root). The
+service's default data root is now `acm2_data` under the repo root
+(gitignored).
+
 ---
 
 ## ASCII-Only Rule

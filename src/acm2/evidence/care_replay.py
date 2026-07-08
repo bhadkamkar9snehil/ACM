@@ -12,8 +12,8 @@ Input layout (scripts/download_care_benchmark.py output, unchanged):
 
 Run:
     uv run python -m acm2.evidence.care_replay \
-        --farm-dir "../care_data/Wind Farm A" --events 40 68 \
-        --out ../results/acm2_care_A
+        --farm-dir "care_data/Wind Farm A" --events 40 68 \
+        --out results/acm2_care_A
 
 Adapter rules (the lab's hard-won ones, enforced here):
 - CARE timestamps are naive strings; the DATASET's documentation defines

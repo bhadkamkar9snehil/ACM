@@ -13,16 +13,13 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-    defaults:
-      run:
-        working-directory: acm2
     steps:
       - uses: actions/checkout@v4
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-          cache-dependency-glob: "acm2/uv.lock"
+          cache-dependency-glob: "uv.lock"
       - name: Sync environment
         run: uv sync
       - name: Run acm2 tests (unit + import boundary + ASCII scan)
@@ -31,16 +28,13 @@ jobs:
   acm2-statistical:
     name: ACM2 statistical acceptance lane
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: acm2
     steps:
       - uses: actions/checkout@v4
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-          cache-dependency-glob: "acm2/uv.lock"
+          cache-dependency-glob: "uv.lock"
       - name: Sync environment
         run: uv sync
       - name: Statistical acceptance (immune harness, conformance gates)

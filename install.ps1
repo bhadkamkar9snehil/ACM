@@ -29,5 +29,5 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host ""
 Write-Host "ACM2 ready. Start the service:" -ForegroundColor Green
 Write-Host "  cd $here"
-Write-Host "  uv run python -m acm2.service --root ../acm2_data --port 8899"
+Write-Host "  uv run python -m acm2.service --root acm2_data --port 8899"
 Write-Host "  -> http://127.0.0.1:8899"

@@ -6,19 +6,21 @@ ACM watches industrial assets and tells you when something is wrong - **with no 
 
 ## ACM2 (the successor - active development)
 
-The `acm2/` package is the ground-up successor built on lifetime memory,
+ACM2 is the ground-up successor built on lifetime memory,
 conditional surprise scoring, and anytime-valid e-process detection with a
 mathematically guaranteed false-alarm budget (one dial: alpha per
 asset-year). Design: `docs/acm-gem-plan.md`; build guide:
 `docs/acm2-implementation-plan.md`; factory: `docs/acm2-factory.md`.
 
+The repo root IS the ACM2 project (`src/acm2`, src-layout, uv-locked);
+the pre-rewrite lab lives under `lab/`.
+
 ```bash
-cd acm2
 ./install.sh          # or: .\install.ps1 on Windows (installs uv, syncs, self-tests)
 # manual equivalent:
 uv sync                                   # environment (lockfile committed)
 uv run pytest tests                       # full suite incl. statistical lane
-uv run python -m acm2.service --root ../acm2_data --port 8899 --tick-seconds 300
+uv run python -m acm2.service --root acm2_data --port 8899 --tick-seconds 300
 # self-ticking fleet service + UI: open http://127.0.0.1:8899
 ```
 
@@ -26,10 +28,9 @@ Evidence lane (CARE replays through the production runtime path; results
 are gitignored regression evidence, never tuning):
 
 ```bash
-cd acm2
 uv run python -m acm2.evidence.care_replay \
-    --farm-dir "../care_data/Wind Farm A" --events 40 68 \
-    --out ../results/acm2_care_A
+    --farm-dir "care_data/Wind Farm A" --events 40 68 \
+    --out results/acm2_care_A
 # omit --events to replay every event in the farm's event_info.csv;
 # --chunk-rows 288 (default) = one tick per 2 days at 10-min cadence;
 # --scorer worldmodel|tier0|auto forces a cross-tier comparison run
@@ -41,8 +42,7 @@ change -> fault phases, checks auto-absorption and detection, exits
 non-zero on any failed criterion):
 
 ```bash
-cd acm2
-uv run python -m acm2.evidence.soak --root ../results/soak1 --minutes 90
+uv run python -m acm2.evidence.soak --root results/soak1 --minutes 90
 ```
 
 Live sources on the service itself: `--live "asset/key=buffer.db"`
@@ -50,8 +50,8 @@ Live sources on the service itself: `--live "asset/key=buffer.db"`
 every tick:
 
 ```bash
-uv run python -m acm2.service --root ../acm2_data --port 8899 \
-    --tick-seconds 300 --live "plant/pump1=../data_cache/mqtt_buffer.db"
+uv run python -m acm2.service --root acm2_data --port 8899 \
+    --tick-seconds 300 --live "plant/pump1=lab/data_cache/mqtt_buffer.db"
 ```
 
 API: `GET /api/assets`, `GET /api/asset/{key}`, `GET /api/narrative/{key}`,
