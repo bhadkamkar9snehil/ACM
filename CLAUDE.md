@@ -3112,3 +3112,35 @@ delimiter). Final result (results/acm2_care_A, gitignored):
   short for Tier 0 detection power. Genuine power result, not a bug.
 CARE prediction windows are 8-20 days - the e-process has limited
 runway per event; lag/hit numbers must be read against that.
+
+### ACM2 operational soak - PASSED, 5 defects found on the way (2026-07-08)
+
+`acm2/src/acm2/evidence/soak.py` (#90) is the implement-and-forget gate:
+it runs the REAL `python -m acm2.service` entrypoint against a
+continuously-fed live buffer (time-compressed asset clock: 1 row/s at
+10-min cadence = 600x) through healthy -> coordinated setpoint change ->
+local fault phases, sampling API + RSS, and exits nonzero on any failed
+criterion. The 90-minute run (37.5 asset-days) PASSED ALL 8 CRITERIA:
+service alive, API reachable, healthy stayed healthy, change declared,
+AUTO-ABSORBED at exactly one anchor period (#89 observed live,
+unattended), post-absorb plateau healthy, fault alarmed on the absorbed
+baseline, RSS flat (~178MB). Zero tick failures.
+
+Getting there surfaced 5 production defects, all fixed + test-pinned:
+1. --live CLI wiring did not exist - the live path was unreachable from
+   the service entrypoint (unknown key now fails loudly).
+2. RawStore.append was column-ORDER-sensitive - the first drained buffer
+   batch (JSON key order != seed order) killed the tick.
+3. RawStore.read too - a partition written from a live source could not
+   be read together with seeded partitions.
+4. The self-tick loop was an unsupervised create_task - ONE exception
+   killed monitoring SILENTLY while the API kept serving. Now guarded:
+   log + retry next interval.
+5. calibration_sample had the last order-sensitive concat - governed
+   auto-absorption crashed mid-reanchor at exactly the anchor-period
+   moment (episode ledgered, bank left latched). All three concat sites
+   now diagonal_relaxed (match by name); grep-verified none remain.
+
+Standing lesson: column order is NOT part of the store's contract -
+any new concat over store frames must be diagonal_relaxed. And any
+unsupervised asyncio task in the service is a silent-death hazard.
