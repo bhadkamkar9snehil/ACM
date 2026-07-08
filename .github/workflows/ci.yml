@@ -47,9 +47,12 @@ jobs:
         run: uv run pytest tests -m statistical --tb=short
         timeout-minutes: 15
 
-  fast-tests:
-    name: Tests (fast)
+  lab-fast-tests:
+    name: Legacy lab tests (fast)
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: lab
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -64,10 +67,13 @@ jobs:
       - name: Run fast tests
         run: python -m pytest tests/ -m "not slow" -v --tb=short
 
-  slow-tests:
-    name: Tests (slow)
+  lab-slow-tests:
+    name: Legacy lab tests (slow)
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    defaults:
+      run:
+        working-directory: lab
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

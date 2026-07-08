@@ -60,7 +60,9 @@ Verdicts: healthy | insufficient-history | watch | alarm | escalating
 (with self-gated failure-time horizon) | change-not-fault. Every verdict
 carries confidence, evidence trail, attribution, model epoch, and a
 falsifiability statement. ACM2 never imports the legacy pipeline
-(CI-enforced); the sections below describe legacy ACM.
+(CI-enforced); the sections below describe legacy ACM, which lives
+entirely under `lab/` - every legacy command below runs from the
+`lab/` directory of the checkout (`cd ~/ACM/lab`).
 
 ---
 
@@ -69,13 +71,13 @@ falsifiability statement. ACM2 never imports the legacy pipeline
 ### Windows
 
 ```powershell
-irm https://raw.githubusercontent.com/bhadkamkar9snehil/ACM/main/setup_acm.ps1 | iex
+irm https://raw.githubusercontent.com/bhadkamkar9snehil/ACM/main/lab/setup_acm.ps1 | iex
 ```
 
 ### Linux / macOS
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/bhadkamkar9snehil/ACM/main/setup.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/bhadkamkar9snehil/ACM/main/lab/setup.sh)
 ```
 
 Both scripts are interactive and handle everything automatically:
@@ -92,7 +94,8 @@ Both scripts are interactive and handle everything automatically:
 After setup:
 
 ```bash
-# Start the service
+# Start the service (from the lab directory)
+cd ~/ACM/lab
 python scripts/acm_service.py
 # Open http://localhost:8765  ->  Admin  ->  Onboard assets
 ```

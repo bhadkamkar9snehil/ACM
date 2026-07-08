@@ -553,7 +553,16 @@ def create_app(backend: str = "sqlite", db: Optional[str] = "acm_results.db",
         return FileResponse(STATIC_DIR / "index.html")
 
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
-    app.mount("/docs", StaticFiles(directory=str(ROOT / "docs")), name="docs")
+    # docs/ lives at the REPO root since the 2026-07-08 restructure (#93,
+    # the lab moved under lab/); prefer a lab-local docs/ if one exists,
+    # fall back to the repo root's, and skip the mount when neither does
+    # (the lab must run standalone)
+    for _docs_dir in (ROOT / "docs", ROOT.parent / "docs"):
+        if _docs_dir.is_dir():
+            app.mount(
+                "/docs", StaticFiles(directory=str(_docs_dir)), name="docs"
+            )
+            break
     try:
         from scripts.acm_sim_routes import router as sim_router
         app.include_router(sim_router)

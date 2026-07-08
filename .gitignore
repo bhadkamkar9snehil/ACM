@@ -35,7 +35,7 @@ data/
 !docs/screenshots/*.png
 
 ## Local configs with credentials
-configs/sql_connection.ini
+lab/configs/sql_connection.ini
 
 ## Nested artifact dirs and backups
 **/artifacts/
@@ -65,13 +65,13 @@ data_cache/
 *.db
 
 ## Simulator generated / uploaded files (runtime artifacts)
-sim_data/generated/
-sim_data/uploads/
-## sim_data/sample/ is intentionally tracked (seeded CSVs)
+lab/sim_data/generated/
+lab/sim_data/uploads/
+## lab/sim_data/sample/ is intentionally tracked (seeded CSVs)
 
 # Local data / runtime files
-sim_data/sample/care_farmA_*.csv
-sim_data/sample_old/
+lab/sim_data/sample/care_farmA_*.csv
+lab/sim_data/sample_old/
 test.csv
 care_data/
 results/

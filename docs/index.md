@@ -19,16 +19,16 @@ ACM is a self-tuning anomaly detection service for industrial assets. It ingests
 
 ```bash
 # Linux / macOS
-bash <(curl -fsSL https://raw.githubusercontent.com/bhadkamkar9snehil/ACM/main/setup.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/bhadkamkar9snehil/ACM/main/lab/setup.sh)
 
 # Windows (PowerShell)
-irm https://raw.githubusercontent.com/bhadkamkar9snehil/ACM/main/setup_acm.ps1 | iex
+irm https://raw.githubusercontent.com/bhadkamkar9snehil/ACM/main/lab/setup_acm.ps1 | iex
 ```
 
 Once installed:
 
 ```bash
-cd ~/ACM
+cd ~/ACM/lab
 python scripts/acm_service.py
 # Open http://localhost:8765
 ```

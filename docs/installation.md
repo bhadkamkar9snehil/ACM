@@ -14,13 +14,13 @@
 ### Linux / macOS
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/bhadkamkar9snehil/ACM/main/setup.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/bhadkamkar9snehil/ACM/main/lab/setup.sh)
 ```
 
 ### Windows (PowerShell as Administrator)
 
 ```powershell
-irm https://raw.githubusercontent.com/bhadkamkar9snehil/ACM/main/setup_acm.ps1 | iex
+irm https://raw.githubusercontent.com/bhadkamkar9snehil/ACM/main/lab/setup_acm.ps1 | iex
 ```
 
 ---
@@ -46,7 +46,7 @@ irm https://raw.githubusercontent.com/bhadkamkar9snehil/ACM/main/setup_acm.ps1 |
 ## Starting the service
 
 ```bash
-cd ~/ACM
+cd ~/ACM/lab
 python scripts/acm_service.py
 ```
 
@@ -66,7 +66,7 @@ python scripts/acm_service.py --backend mssql --conn "..."  # SQL Server
 Click **Update ACM** (amber button in the header) from any browser tab, or run:
 
 ```bash
-cd ~/ACM && git pull --ff-only
+cd ~/ACM/lab && git pull --ff-only
 ```
 
 A service restart is required for code changes to take effect.
@@ -76,7 +76,7 @@ A service restart is required for code changes to take effect.
 ## Running tests
 
 ```bash
-cd ~/ACM
+cd ~/ACM/lab
 python -m pytest tests/ -v                    # all tests
 python -m pytest tests/ -m "not slow" -v     # fast tests only (~40s)
 ```

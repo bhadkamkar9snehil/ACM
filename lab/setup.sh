@@ -2,7 +2,7 @@
 # setup.sh — one-command ACM setup for Linux / macOS
 #
 # Usage:
-#   bash <(curl -fsSL https://raw.githubusercontent.com/bhadkamkar9snehil/ACM/main/setup.sh)
+#   bash <(curl -fsSL https://raw.githubusercontent.com/bhadkamkar9snehil/ACM/main/lab/setup.sh)
 # Or after cloning:
 #   bash setup.sh
 
@@ -70,7 +70,7 @@ else
     step "Clone ACM" git clone --branch "$BRANCH" "$REPO" "$INSTALL_DIR"
 fi
 
-cd "$INSTALL_DIR"
+cd "$INSTALL_DIR/lab"  # the legacy lab lives under lab/ (repo restructure)
 
 # ── Python dependencies ───────────────────────────────────────────────────────
 echo ""
@@ -173,7 +173,7 @@ echo "${YLW}  ╠═════════════════════
 echo "${YLW}  ║                                                          ║${RST}"
 echo "${YLW}  ║  1.  START THE SERVICE                                   ║${RST}"
 echo "${YLW}  ║                                                          ║${RST}"
-printf "${YLW}  ║      ${GRN}python scripts/acm_service.py${YLW}                    ║${RST}\n"
+printf "${YLW}  ║      ${GRN}python scripts/acm_service.py${YLW}   (from ACM/lab)   ║${RST}\n"
 echo "${YLW}  ║                                                          ║${RST}"
 printf "${YLW}  ║      Then open: ${GRN}http://localhost:8765${YLW}                   ║${RST}\n"
 echo "${YLW}  ║                                                          ║${RST}"

@@ -9,7 +9,7 @@
   the console shows one line per step with live status.
 
 .USAGE
-  irm https://raw.githubusercontent.com/bhadkamkar9snehil/ACM/main/setup_acm.ps1 | iex
+  irm https://raw.githubusercontent.com/bhadkamkar9snehil/ACM/main/lab/setup_acm.ps1 | iex
 #>
 param(
     [string]$Repo       = "https://github.com/bhadkamkar9snehil/ACM.git",
@@ -137,7 +137,7 @@ Step "Clone / update" {
         git clone --branch $Branch --single-branch $Repo $InstallDir
     }
 }
-Set-Location $InstallDir
+Set-Location (Join-Path $InstallDir 'lab')  # the legacy lab lives under lab/
 Step "Create directories" {
     python -c "
 from pathlib import Path

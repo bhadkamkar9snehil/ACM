@@ -5,6 +5,21 @@
 
 ---
 
+## PATH TRANSLATION - repo restructure 2026-07-08 (#93) - READ FIRST
+
+The entire legacy ACM1 lab moved wholesale into `lab/`: every reference
+in this file to `core/`, `scripts/`, `sim/`, `static/`, `tests/`,
+`utils/`, `configs/`, `sim_data/`, `setup.sh`, `setup_acm.ps1`,
+`pyproject.toml`, or `AGENTS.md` now lives under `lab/` (e.g.
+`scripts/acm_run.py` -> `lab/scripts/acm_run.py`). Relative layout
+inside `lab/` is unchanged, so all internal imports/paths still work -
+run legacy commands FROM the `lab/` directory. `acm2/`, `docs/`,
+`paper/`, `README.md`, and this file stay at the root. The historical
+sections below are NOT rewritten - apply this translation when reading
+them.
+
+---
+
 ## ASCII-Only Rule
 
 All future edits to code, docs, comments, CLI output, generated templates, and agent instruction files must use ASCII characters only. Use '-' instead of em dashes, '->' instead of arrows, 'x' instead of multiplication symbols, '+/-' instead of plus-minus, and plain words instead of icons. Before finishing any change, run an ASCII scan on every touched file and remove any non-ASCII character.

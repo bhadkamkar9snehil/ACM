@@ -1,4 +1,9 @@
-# ACM Agent Instructions
+# ACM Agent Instructions (LEGACY LAB - lives under lab/ since 2026-07-08)
+
+> Repo restructure (#93): the legacy ACM1 lab this file describes moved
+> wholesale into `lab/`. All relative paths below are relative to `lab/`,
+> not the repo root. `acm2/` at the root is the successor product.
+
 
 Read this file before non-trivial ACM work. Keep `CLAUDE.md` unchanged unless the user explicitly asks to edit it.
 
