@@ -228,3 +228,23 @@ def test_change_not_fault_episode_is_absorbed_not_masked(tmp_path):
     except ValueError:
         built = False
     assert not built, "a full-life FAULT mask must fail loudly, not build"
+
+
+def test_lifetime_paths_survive_mixed_column_order(tmp_path):
+    """#90 soak: partitions written from differently-ordered sources
+    (seeded frame vs live-buffer payloads) must build a baseline, yield
+    a calibration sample, and calibrate a monitor - the auto-absorption
+    re-anchor crashed on exactly this (calibration_sample concat)."""
+    store = RawStore(tmp_path / "raw")
+    # months 1-6: timestamp LAST (seed style)
+    for m in range(1, 7):
+        store.append("mx/1", month_frame(2025, m, seed=m))
+    # month 7: timestamp FIRST, channels shuffled (live-payload style)
+    f = month_frame(2025, 7, seed=7)
+    store.append("mx/1", f.select(["timestamp", "vib", "temp"]))
+
+    base = LifetimeBaseline.build(store, "mx/1")
+    sample = base.calibration_sample(store)
+    assert sample.height > 0
+    mon = AssetMonitor("mx/1")
+    assert mon.calibrate_from_lifetime(store), mon.insufficient_reason

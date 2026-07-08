@@ -153,7 +153,10 @@ class LifetimeBaseline:
             if ledger is not None:
                 f = ledger.mask(self.asset_key, f, states=FAULT_STATES)
             frames.append(f)
-        full = pl.concat(frames, how="vertical_relaxed").sort(TIMESTAMP_COL)
+        # diagonal = match by name: partitions written from differently-
+        # ordered sources (seed vs live buffer) must sample as one - the
+        # #90 soak's auto-absorption crashed on exactly this concat
+        full = pl.concat(frames, how="diagonal_relaxed").sort(TIMESTAMP_COL)
         if full.height > max_rows:
             stride = full.height // max_rows
             full = full.gather_every(stride)
