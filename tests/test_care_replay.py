@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 import polars as pl
 
-from acm2.evidence.care_replay import (
+from acm.evidence.care_replay import (
     load_event_frames,
     replay_farm,
 )

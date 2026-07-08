@@ -1,6 +1,8 @@
-# ACM2 - Asset Condition Monitor
+# ACM - Asset Condition Monitor
 
-ACM2 watches industrial assets and tells you when something is wrong -
+> Version 2.0 - the ground-up rewrite. The product is ACM; the 2 lives in the version field, not the name.
+
+ACM watches industrial assets and tells you when something is wrong -
 **unattended, with no labels, no training-data preparation, no
 thresholds to tune, and a mathematically guaranteed false-alarm
 budget**. Point it at an asset's raw sensor history and forget it: it
@@ -14,18 +16,18 @@ time-to-failure while a fault develops.
 `ALPHA_PER_ASSET_YEAR` (default 1.0): the promised number of false
 alarms per asset per year. Everything else is derived from the asset's
 own data or is a structural constant with its rationale written next to
-it in the code (`src/acm2/constants.py`). There is no config file, no
+it in the code (`src/acm/constants.py`). There is no config file, no
 per-site table, no threshold sheet.
 
 ```bash
 ./install.sh          # or: .\install.ps1 on Windows (installs uv, syncs, self-tests)
-uv run python -m acm2.service --root acm2_data --port 8899 --tick-seconds 300
+uv run python -m acm.service --root acm_data --port 8899 --tick-seconds 300
 # self-ticking fleet service + zero-build UI: open http://127.0.0.1:8899
 ```
 
 Design docs: `docs/acm-gem-plan.md` (the architecture),
 `docs/acm-rethink-plan.md` (why the rewrite), and
-`docs/acm2-implementation-plan.md` (the build guide). The pre-rewrite
+`docs/acm-implementation-plan.md` (the build guide). The pre-rewrite
 system lives under [`lab/`](lab/README.md) as reference and tooling.
 
 ---
@@ -33,7 +35,7 @@ system lives under [`lab/`](lab/README.md) as reference and tooling.
 ## Why the guarantee is real (and not a threshold)
 
 Classical anomaly detection alerts when a score crosses a line, so its
-false-alarm rate is whatever the data decides it is. ACM2 instead runs
+false-alarm rate is whatever the data decides it is. ACM instead runs
 **anytime-valid e-processes** over its surprise scores: a bank of
 betting processes wagers against the hypothesis "this asset is still
 healthy", and an alarm fires only when accumulated evidence crosses the
@@ -54,7 +56,7 @@ contract, detection power is what improves with tiers and models.
 ## What a verdict looks like
 
 Every asset always has exactly one current verdict, and the contract is
-frozen (v1, `src/acm2/verdict.py`):
+frozen (v1, `src/acm/verdict.py`):
 
 | Field | Meaning |
 |---|---|
@@ -124,7 +126,7 @@ never a trailing window:
 - **Recency cap** (`RECENCY_CAP = 0.20`): recent data can never hold
   more than 20% of the baseline's weight, so a slow drift cannot boil
   the frog - the drift the trailing-window design absorbed is exactly
-  the drift ACM2 alarms on (pinned by test).
+  the drift ACM alarms on (pinned by test).
 - **Episode ledger**: fault windows are masked out of the healthy
   baseline; change-not-fault windows are absorbed into it (each state
   means what it says). A mask that would leave no baseline is
@@ -135,7 +137,7 @@ never a trailing window:
 ## First contact: the bootstrap
 
 Real histories arrive contaminated. On first contact (once per asset
-lifetime, tracked durably), ACM2 runs **detect -> mask -> re-detect to
+lifetime, tracked durably), ACM runs **detect -> mask -> re-detect to
 convergence**: calibrate on the raw life, find episodes (a contiguous
 contamination scan plus a full e-process replay), ledger them, then
 recalibrate on the masked life and look again - each pass sees a
@@ -146,7 +148,7 @@ history.
 ## The immune system
 
 A monitor that silently dies is worse than no monitor. Weekly (per
-asset, staggered), ACM2 validates itself:
+asset, staggered), ACM validates itself:
 
 - **sensitivity profile**: canonical fault injections against the
   pipeline recipe - can this asset's data even carry a detection?
@@ -178,7 +180,7 @@ channels - the GPU box is the intended home.)
 
 ## Service, UI, API
 
-`python -m acm2.service` is the whole deployment: FastAPI + a
+`python -m acm.service` is the whole deployment: FastAPI + a
 self-ticking loop (guarded - a failing tick is logged and retried, the
 loop never dies silently) + a zero-build vanilla-JS UI (one HTML file,
 no bundler - deliberate, for air-gapped plants). Live sources attach
@@ -205,13 +207,13 @@ gitignored `results/`; summaries go to the knowledge base.
 
 ```bash
 # CARE-to-Compare farm replays (adapter declares UTC, labels never enter the store)
-uv run python -m acm2.evidence.care_replay \
-    --farm-dir "care_data/Wind Farm A" --events 40 68 --out results/acm2_care_A
+uv run python -m acm.evidence.care_replay \
+    --farm-dir "care_data/Wind Farm A" --events 40 68 --out results/acm_care_A
 # --scorer worldmodel|tier0|auto forces a cross-tier comparison
 
 # The implement-and-forget gate: real service + continuously-fed live buffer
 # through healthy -> setpoint change -> fault; exits non-zero on any failure
-uv run python -m acm2.evidence.soak --root results/soak1 --minutes 90
+uv run python -m acm.evidence.soak --root results/soak1 --minutes 90
 ```
 
 Current evidence (small samples, honestly labeled as such):
@@ -244,7 +246,7 @@ uv run pytest tests -m statistical        # acceptance lane (immune, conformance
   threshold rules, no distrust gates, no fusion auto-tuning, no
   kurt/skew features. These are lessons, not omissions - the lab
   earned each one.
-- `acm2` never imports the legacy lab (CI-enforced import boundary);
+- `acm` never imports the legacy lab (CI-enforced import boundary);
   ASCII-only in `src/` and `tests/` (CI-enforced).
 - `CLAUDE.md` is the knowledge base - the durable memory of every
   lesson, kept current by rule.
@@ -252,7 +254,7 @@ uv run pytest tests -m statistical        # acceptance lane (immune, conformance
 ## Repository layout
 
 ```
-src/acm2/        the product (src-layout; import name acm2)
+src/acm/        the product (src-layout; import name acm)
 tests/           unit + statistical + evidence-machinery tests
 install.sh|ps1   one-command install (uv-based)
 pyproject.toml   uv-locked project; the ONLY tunable is the alpha dial
@@ -277,7 +279,7 @@ irm https://raw.githubusercontent.com/bhadkamkar9snehil/ACM/main/lab/setup_acm.p
 cd ~/ACM/lab && python scripts/acm_service.py   # -> http://localhost:8765
 ```
 
-Its datasets and harnesses remain ACM2's evidence fuel; its hard-won
+Its datasets and harnesses remain ACM's evidence fuel; its hard-won
 failures (the OMR in-sample bias, the GMM dimensionality collapse, the
 contamination-filter rejection, the empty-rule_fired diagnosis) are why
-ACM2's never-built list exists.
+ACM's never-built list exists.

@@ -1,4 +1,4 @@
-"""ASCII-only rule, CI-enforced for the ACM2-owned trees (standing rule).
+"""ASCII-only rule, CI-enforced for the ACM-owned trees (standing rule).
 
 Scope after the #94 promotion (repo root IS the project): src/, tests/,
 and the root pyproject - NOT lab/ (legacy, has its own history), docs/,
@@ -17,7 +17,7 @@ def _iter_checked():
         yield from tree.rglob("*")
 
 
-def test_acm2_tree_is_ascii():
+def test_acm_tree_is_ascii():
     offenders = []
     for path in _iter_checked():
         if path.suffix not in CHECKED_SUFFIXES or not path.is_file():

@@ -9,9 +9,9 @@ import polars as pl
 import pytest
 from fastapi.testclient import TestClient
 
-from acm2.runtime import Runtime
-from acm2.service import create_app
-from acm2.store.raw import TIMESTAMP_COL, RawStore
+from acm.runtime import Runtime
+from acm.service import create_app
+from acm.store.raw import TIMESTAMP_COL, RawStore
 
 UTC = timezone.utc
 
@@ -64,7 +64,7 @@ def test_fleet_verdicts_and_ordering(runtime):
 
 def test_service_endpoints_carry_the_contract(runtime):
     client = TestClient(create_app(runtime))
-    assert "ACM2" in client.get("/").text
+    assert "ACM" in client.get("/").text
     fleet = client.get("/api/assets").json()
     assert fleet["assets"] == 3 and "tier" in fleet
     detail = client.get("/api/asset/f/bad").json()
@@ -183,7 +183,7 @@ def test_bootstrap_virgin_runs_once_per_asset_lifetime(tmp_path):
 
     # pre-marker data roots: existing ledger windows count as evidence of
     # a prior first contact and are back-filled into the marker
-    from acm2.memory.ledger import Episode
+    from acm.memory.ledger import Episode
 
     seed_asset(store, "v/old", seed=12)
     rt3 = Runtime(store=store, data_root=tmp_path)
@@ -211,7 +211,7 @@ def test_bootstrap_detect_mask_redetect_converges(tmp_path):
     import numpy as np
     import polars as pl
 
-    from acm2.store.raw import TIMESTAMP_COL
+    from acm.store.raw import TIMESTAMP_COL
 
     UTC = timezone.utc
     store = RawStore(tmp_path / "raw")
@@ -365,7 +365,7 @@ def test_attach_live_sources_cli_wiring(runtime, tmp_path):
     """#90: the live path must be reachable from the service CLI, and an
     unknown asset key must fail LOUDLY at startup - a silently
     unattached buffer looks exactly like a healthy quiet asset."""
-    from acm2.service import attach_live_sources
+    from acm.service import attach_live_sources
 
     db = tmp_path / "buf.db"
     attach_live_sources(runtime, [f"f/ok1={db}"])
@@ -411,7 +411,7 @@ def test_bootstrap_drops_self_refuting_fault_mask(tmp_path):
     store = RawStore(tmp_path / "raw")
     seed_asset(store, "sr/1", seed=13)
     rt = Runtime(store=store, data_root=tmp_path)
-    from acm2.memory.ledger import Episode
+    from acm.memory.ledger import Episode
 
     rt.ledger.add(
         Episode(

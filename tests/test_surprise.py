@@ -10,14 +10,14 @@ import numpy as np
 import polars as pl
 import pytest
 
-from acm2.immune import sensitivity_profile
-from acm2.monitor import AssetMonitor
-from acm2.scoring.surprise import (
+from acm.immune import sensitivity_profile
+from acm.monitor import AssetMonitor
+from acm.scoring.surprise import (
     ConditionalSurpriseScorer,
     classify_pit_distortion,
     ks_uniform,
 )
-from acm2.store.raw import TIMESTAMP_COL
+from acm.store.raw import TIMESTAMP_COL
 
 UTC = timezone.utc
 pytestmark = pytest.mark.statistical
@@ -118,7 +118,7 @@ def test_conditional_beats_marginal_on_coupled_drift():
     magnitude where the raw marginal barely moves: the conditional model
     subtracts the explained variance, so the same absolute deviation is
     more sigmas of surprise."""
-    from acm2.scoring import RobustZScorer
+    from acm.scoring import RobustZScorer
 
     frame = correlated_frame(n=12000, seed=3)
     fit, rest = frame.head(6000), frame.slice(6000)

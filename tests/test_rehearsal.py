@@ -8,9 +8,9 @@ import numpy as np
 import polars as pl
 import pytest
 
-from acm2.immune.rehearsal import rehearse
-from acm2.scoring.surprise import ConditionalSurpriseScorer
-from acm2.store.raw import TIMESTAMP_COL
+from acm.immune.rehearsal import rehearse
+from acm.scoring.surprise import ConditionalSurpriseScorer
+from acm.store.raw import TIMESTAMP_COL
 
 UTC = timezone.utc
 pytestmark = pytest.mark.statistical

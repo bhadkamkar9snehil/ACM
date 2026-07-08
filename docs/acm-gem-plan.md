@@ -5,7 +5,7 @@
 > existed, optimizing purely for the stated goals. It is a SEPARATE plan from
 > docs/acm-rethink-plan.md: that document is the classical, buildable-now floor;
 > this document is the target ceiling. Section 9 defines how the two relate.
-> Build guide: docs/acm2-implementation-plan.md (adopted 2026-07-02) - all open
+> Build guide: docs/acm-implementation-plan.md (adopted 2026-07-02) - all open
 > decisions resolved there; hardware adaptation and multi-asset scale folded in.
 > Status: ADOPTED as the design basis for the ACM2 build.
 
@@ -458,7 +458,7 @@ not just asserted), and labelled benchmarks as design-time regression evidence o
 
 All previously-open decisions are resolved (2026-07-02, per the directive that the
 system decides for itself and nothing is delegated). Full rationale lives in
-docs/acm2-implementation-plan.md Section 2.
+docs/acm-implementation-plan.md Section 2.
 
 1. Alpha: one false alarm per asset-year, per asset, spent hierarchically across
    the e-process bank. Single exposed dial; sane default; never per-site tuned.

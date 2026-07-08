@@ -1,7 +1,7 @@
-"""D9 import boundary: acm2 may never import the legacy pipeline live.
+"""D9 import boundary: acm may never import the legacy pipeline live.
 
 Salvage means COPY, never import. This test is the CI enforcement of that
-rule (docs/acm2-implementation-plan.md Section 6).
+rule (docs/acm-implementation-plan.md Section 6).
 """
 
 import re

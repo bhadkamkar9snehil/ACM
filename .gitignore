@@ -77,6 +77,7 @@ care_data/
 results/
 external_benchmarks/
 acm2_data/
+acm_data/
 
 ## ACM2 build/test artifacts (promoted to root, #94)
 .pytest_tmp/

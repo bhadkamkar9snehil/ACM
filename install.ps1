@@ -1,11 +1,11 @@
-# ACM2 one-command install + start (Windows).
+# ACM one-command install + start (Windows).
 # Resilient by inheritance: warn on non-critical failures, never abort a
 # working install. Air-gapped installs: bring uv + a wheel cache; the
 # committed uv.lock pins everything.
 $ErrorActionPreference = "Stop"
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 
-Write-Host "ACM2 install" -ForegroundColor Cyan
+Write-Host "ACM install" -ForegroundColor Cyan
 
 # 1) uv (the only bootstrap dependency)
 if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
@@ -27,7 +27,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host ""
-Write-Host "ACM2 ready. Start the service:" -ForegroundColor Green
+Write-Host "ACM ready. Start the service:" -ForegroundColor Green
 Write-Host "  cd $here"
-Write-Host "  uv run python -m acm2.service --root acm2_data --port 8899"
+Write-Host "  uv run python -m acm.service --root acm_data --port 8899"
 Write-Host "  -> http://127.0.0.1:8899"

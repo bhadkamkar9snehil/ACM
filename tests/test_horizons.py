@@ -7,8 +7,8 @@ import numpy as np
 import polars as pl
 import pytest
 
-from acm2.scoring.horizons import MultiHorizonScorer
-from acm2.store.raw import TIMESTAMP_COL
+from acm.scoring.horizons import MultiHorizonScorer
+from acm.store.raw import TIMESTAMP_COL
 
 UTC = timezone.utc
 pytestmark = pytest.mark.statistical
@@ -84,7 +84,7 @@ def test_thin_data_refuses():
 def test_monitor_alarms_via_predictability_band_end_to_end():
     """A machine whose dynamics die (damped, too predictable) alarms via
     the band domain even though magnitude surprise stays quiet."""
-    from acm2.monitor import AssetMonitor
+    from acm.monitor import AssetMonitor
 
     healthy = ar_frame(9000, seed=7)
     mon = AssetMonitor("hz/1")

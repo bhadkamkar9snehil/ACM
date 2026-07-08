@@ -7,9 +7,9 @@ import numpy as np
 import polars as pl
 import pytest
 
-from acm2.anatomy import Anatomy
-from acm2.scoring.surprise import ConditionalSurpriseScorer
-from acm2.store.raw import TIMESTAMP_COL
+from acm.anatomy import Anatomy
+from acm.scoring.surprise import ConditionalSurpriseScorer
+from acm.store.raw import TIMESTAMP_COL
 
 UTC = timezone.utc
 pytestmark = pytest.mark.statistical
@@ -78,9 +78,9 @@ def test_origin_is_the_earliest_organ():
 
 
 def test_alarm_verdict_carries_anatomical_root_cause():
-    from acm2.episodes import EpisodicMonitor
-    from acm2.memory.ledger import EpisodeLedger
-    from acm2.monitor import AssetMonitor
+    from acm.episodes import EpisodicMonitor
+    from acm.memory.ledger import EpisodeLedger
+    from acm.monitor import AssetMonitor
     import tempfile
     from pathlib import Path
 

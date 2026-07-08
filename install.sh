@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# ACM2 one-command install + start (Linux/macOS). Mirror of install.ps1.
+# ACM one-command install + start (Linux/macOS). Mirror of install.ps1.
 set -e
 here="$(cd "$(dirname "$0")" && pwd)"
 
-echo "ACM2 install"
+echo "ACM install"
 
 # 1) uv (the only bootstrap dependency)
 if ! command -v uv >/dev/null 2>&1; then
@@ -22,7 +22,7 @@ if ! uv run pytest tests -m "not statistical" -q --tb=no > /dev/null 2>&1; then
 fi
 
 echo ""
-echo "ACM2 ready. Start the service:"
+echo "ACM ready. Start the service:"
 echo "  cd $here"
-echo "  uv run python -m acm2.service --root acm2_data --port 8899"
+echo "  uv run python -m acm.service --root acm_data --port 8899"
 echo "  -> http://127.0.0.1:8899"

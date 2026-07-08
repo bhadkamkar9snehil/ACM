@@ -8,7 +8,7 @@ with block aggregation - this is the one gate nothing may pass in parallel
 import numpy as np
 import pytest
 
-from acm2.decision import EProcess, EProcessBank
+from acm.decision import EProcess, EProcessBank
 
 RNG = np.random.default_rng(42)
 

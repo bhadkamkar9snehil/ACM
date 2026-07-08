@@ -480,7 +480,7 @@ synthetic test suite equivalents, (c) CARE A/B/C as design-time regression evide
 ## 11. Open Decisions - RESOLVED
 
 > All six decisions below are RESOLVED as of 2026-07-02. Authoritative answers and
-> rationale: docs/acm2-implementation-plan.md Section 2. Summary: (1) ARL/alpha =
+> rationale: docs/acm-implementation-plan.md Section 2. Summary: (1) ARL/alpha =
 > one false alarm per asset-year; (2) recency cap = 20% maximum weight for the
 > recent window; (3) rebuilds weekly scheduled plus event-triggered; (4) covariate
 > designation superseded by learned conditioning (gem Component 1); (5) fusion

@@ -6,15 +6,15 @@ from datetime import datetime, timedelta, timezone
 import numpy as np
 import polars as pl
 
-from acm2.memory import (
+from acm.memory import (
     Episode,
     EpisodeLedger,
     LifetimeBaseline,
     build_period_summary,
     merge_summaries,
 )
-from acm2.monitor import AssetMonitor
-from acm2.store.raw import TIMESTAMP_COL, RawStore
+from acm.monitor import AssetMonitor
+from acm.store.raw import TIMESTAMP_COL, RawStore
 
 UTC = timezone.utc
 

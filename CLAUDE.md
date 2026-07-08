@@ -26,6 +26,15 @@ versioning: `python -m acm2.service`, `uv run` from the repo root). The
 service's default data root is now `acm2_data` under the repo root
 (gitignored).
 
+Part 3 (#95, same day): the PACKAGE is renamed `acm2` -> `acm` - the
+product is ACM, the 2 lives in the version field (2.0.0a0). So:
+`src/acm2` -> `src/acm`, every `acm2.*` import -> `acm.*`,
+`python -m acm.service`, pyproject name `acm`, default data root
+`acm_data`, and the plan docs are `docs/acm-implementation-plan.md` /
+`docs/acm-factory.md` (were acm2-*). Every `acm2` module path in the
+historical sections below reads as `acm` now. "ACM2" as a NAME in
+prose below = the v2 rewrite that now simply is ACM.
+
 ---
 
 ## ASCII-Only Rule

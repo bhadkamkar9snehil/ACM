@@ -8,8 +8,8 @@ from pathlib import Path
 import polars as pl
 import pytest
 
-from acm2 import constants
-from acm2.hardware import (
+from acm import constants
+from acm.hardware import (
     TIER_T0,
     TIER_T1,
     TIER_T2,
@@ -19,9 +19,9 @@ from acm2.hardware import (
     select_tier,
     set_thread_caps,
 )
-from acm2.ingest import ingest_csv
-from acm2.scheduler import FleetScheduler
-from acm2.store.raw import TIMESTAMP_COL, RawStore
+from acm.ingest import ingest_csv
+from acm.scheduler import FleetScheduler
+from acm.store.raw import TIMESTAMP_COL, RawStore
 
 UTC = timezone.utc
 
@@ -133,7 +133,7 @@ def test_scheduler_staggers_and_sees_only_new_rows(tmp_path):
 
 
 def test_scheduler_records_costs(tmp_path):
-    from acm2.hardware import MEASURED_COSTS
+    from acm.hardware import MEASURED_COSTS
 
     store = RawStore(tmp_path / "raw")
     base = datetime(2026, 1, 1, tzinfo=UTC)
@@ -168,7 +168,7 @@ def test_availability_standstill_alarms():
     surprise is quiet."""
     import numpy as np
 
-    from acm2.monitor import AssetMonitor
+    from acm.monitor import AssetMonitor
 
     rng = np.random.default_rng(21)
     base = datetime(2026, 1, 1, tzinfo=UTC)

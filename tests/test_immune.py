@@ -10,9 +10,9 @@ import numpy as np
 import polars as pl
 import pytest
 
-from acm2.immune import degeneracy_check, inject, sensitivity_profile
-from acm2.monitor import AssetMonitor
-from acm2.store.raw import TIMESTAMP_COL
+from acm.immune import degeneracy_check, inject, sensitivity_profile
+from acm.monitor import AssetMonitor
+from acm.store.raw import TIMESTAMP_COL
 
 UTC = timezone.utc
 pytestmark = pytest.mark.statistical
@@ -66,7 +66,7 @@ def test_marginal_scorer_is_blind_to_correlation_break():
     permanent record of why S4's conditional substrate exists. The flip -
     the DEFAULT (conditional) monitor detecting the break - is asserted in
     test_surprise.py::test_s4_flip_correlation_break_detected."""
-    from acm2.scoring import RobustZScorer
+    from acm.scoring import RobustZScorer
 
     def robustz_monitor(key):
         return AssetMonitor(key, scorer_cls=RobustZScorer)
