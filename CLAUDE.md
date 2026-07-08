@@ -3053,6 +3053,18 @@ Hard-won ACM2 lessons (found by tests/pilots during the build):
   3 null rows in 52k poisoned ConditionalSurpriseScorer.fit's gram
   matrix -> every score non-finite -> dead monitor. fit() now imputes at
   the standardized median exactly as score() does.
+- Change-not-fault plateaus ABSORB AUTOMATICALLY after one anchor period
+  (#89, built 2026-07-08): reanchor was UI-only, so unattended operation
+  left change episodes open forever - weekly rebuild blocked, the
+  verdict's re-baseline proposal dead text. Runtime.tick now re-anchors
+  a change episode whose plateau held 1 anchor period (registry constant
+  CHANGE_ABSORB_ANCHOR_PERIODS; an absorb IS an anchor, so the alpha
+  budget holds); drift-shaped episodes never absorb. Absorption is only
+  real with calibrate_from_lifetime(include_recent=True) - the governed
+  exception (change-closures only) that lets the adjudicated plateau
+  into the calibration reference; without it the older-life-only rule
+  re-opened the same episode forever. Fault closures keep the strict
+  older-life reference.
 
 ### ACM2 evidence lane - first real-data results (2026-07-07)
 
