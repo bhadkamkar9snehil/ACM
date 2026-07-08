@@ -3176,3 +3176,37 @@ Getting there surfaced 5 production defects, all fixed + test-pinned:
 Standing lesson: column order is NOT part of the store's contract -
 any new concat over store frames must be diagonal_relaxed. And any
 unsupervised asyncio task in the service is a silent-death hazard.
+
+### S7 world model - first execution + first real-data result (2026-07-08)
+
+#91: torch had never been importable anywhere the suite ran; the S7
+path had literally never executed. CPU torch (uv pip install torch
+--index-url .../whl/cpu into the synced env; NOT in default uv sync -
+tier2 group only, reinstall after every sync) unskipped
+test_worldmodel.py: 4/4 pass. Exercising it on real CARE Farm A data
+(--scorer worldmodel on the evidence runner; Runtime.scorer_cls_override
+added for cross-tier comparison) found TWO defects, both fixed +
+pinned (#92):
+- TorchWorldModel had no concentration() -> the hasattr fallback made
+  change-not-fault STRUCTURALLY UNREACHABLE at Tier 2 (every step read
+  channel-local). Cross-tier parity now pinned: both scorers read a
+  local fault as more concentrated than a coordinated move.
+- Consequently its bootstrap ledgered a full-life availability ALARM
+  window -> masked 100% of history -> permanently dead monitor. The
+  SELF-REFUTING MASK guard now repairs bootstrap: if the final
+  calibration fails, drop the widest bootstrap-created fault window
+  and recalibrate until it succeeds (a baseline must exist for
+  "unhealthy" to mean anything - the #87 lesson generalized).
+- Plus an EVALUATION bug in the runner the WM trace exposed: detection
+  was scored from the FIRST alarming tick only; the WM alarmed 10 min
+  pre-event, absorbed it as change, re-alarmed INSIDE the window - and
+  was scored a miss. Detection = any alarm at/after event_start now;
+  early alarms recorded as early_alarm_pre_event.
+
+Result (results/acm2_care_A_wm*, gitignored): event 0 (generator
+bearing failure) HIT at lag 48h vs Tier 0's 240h - 5x earlier, through
+the full loop (early alarm -> change-not-fault via concentration ->
+auto-absorb -> surprise resumed -> re-alarm). Event 25 (normal): clean,
+healthy throughout. CPU cost: ~19 min per calibration / ~90 min per
+event replay at 82 channels - the GPU box is the intended Tier 2 home;
+these numbers are the Tier 2-S lower bound.
