@@ -912,7 +912,27 @@ Requires: `pip install playwright && playwright install chromium`
 ---
 
 ## Git & GitHub Workflow
-> *Added: 2026-06-14  Last updated: 2026-06-17*
+> *Added: 2026-06-14  Last updated: 2026-07-08*
+
+### Repo layout after the 2026-07-08 cleanup (READ FIRST)
+
+- **`main` IS the ACM2 line and the working branch.** Not in production;
+  work lands directly on main (still issue-first, still full local suite
+  before push). The old pre-ACM2 main is an ancestor of the new main -
+  nothing was lost, no history rewritten (pure fast-forward).
+- **`archive/<old-branch-name>` branches** park every legacy branch head
+  that carried commits not in main (167 of them: copilot audits, the
+  refactor/acm-entrypoint-p4 swarm, old feature/fix/chore/claude session
+  branches). They are frozen reference material - never build on them.
+- The ORIGINAL legacy branch refs could not be deleted from the sandbox
+  (the git proxy blocks ref deletions and tag pushes; only branch
+  creation and fast-forward pushes are allowed). One-time cleanup from
+  a normal machine with gh:
+  `for b in $(git ls-remote --heads origin | awk '{print $2}' | sed 's#refs/heads/##' | grep -v -e '^main$' -e '^archive/'); do gh api -X DELETE "repos/bhadkamkar9snehil/ACM/git/refs/heads/$b"; done`
+  (keeps main + archive/*; everything it deletes is duplicated under
+  archive/* or contained in main).
+- Remote-session branches (claude/*) may still appear per session; they
+  are working copies of main-bound work, merged via fast-forward.
 
 ### MANDATORY: Issue-First Rule
 **Every piece of work  bug fix, feature, refactor, infra  MUST have a GitHub issue before any code is written.**
