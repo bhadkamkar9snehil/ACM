@@ -93,11 +93,28 @@ def _parse_utc(value: str) -> datetime:
     return dt.astimezone(timezone.utc)
 
 
+def _scorer_cls(name: str) -> type | None:
+    """Evidence-lane scorer selection (#91): 'auto' follows the probed
+    tier; the explicit names force a cross-tier comparison run."""
+    if name == "auto":
+        return None
+    if name == "tier0":
+        from acm2.scoring.surprise import ConditionalSurpriseScorer
+
+        return ConditionalSurpriseScorer
+    if name == "worldmodel":
+        from acm2.scoring.worldmodel import TorchWorldModel
+
+        return TorchWorldModel
+    raise ValueError(f"unknown scorer {name!r}")
+
+
 def replay_event(
     farm_dir: Path,
     event: dict,
     state_root: Path,
     chunk_rows: int = DEFAULT_CHUNK_ROWS,
+    scorer: str = "auto",
 ) -> dict:
     """One event through the production path; returns the evidence record."""
     event_id = event["event_id"]
@@ -109,7 +126,11 @@ def replay_event(
     store = RawStore(data_root / "raw")
     store.append(key, train)
 
-    rt = Runtime(store=store, data_root=data_root)
+    rt = Runtime(
+        store=store,
+        data_root=data_root,
+        scorer_cls_override=_scorer_cls(scorer),
+    )
     rt.onboard(key)
     rt.bootstrap_virgin()  # first contact, exactly as the service does
 
@@ -174,6 +195,7 @@ def replay_farm(
     out_dir: Path,
     events: list[str] | None = None,
     chunk_rows: int = DEFAULT_CHUNK_ROWS,
+    scorer: str = "auto",
 ) -> dict:
     out_dir.mkdir(parents=True, exist_ok=True)
     info = load_event_info(farm_dir)
@@ -191,7 +213,11 @@ def replay_farm(
             skipped.append(event["event_id"])
             continue
         rec = replay_event(
-            farm_dir, event, out_dir / "state", chunk_rows=chunk_rows
+            farm_dir,
+            event,
+            out_dir / "state",
+            chunk_rows=chunk_rows,
+            scorer=scorer,
         )
         (out_dir / f"event_{rec['event_id']}.json").write_text(
             json.dumps(rec, indent=1), encoding="utf-8"
@@ -207,6 +233,7 @@ def replay_farm(
     summary = {
         "farm_dir": str(farm_dir),
         "chunk_rows": chunk_rows,
+        "scorer": scorer,
         "events": len(records),
         "skipped_no_csv": skipped,
         "anomalies": len(anomalies),
@@ -242,12 +269,20 @@ def main() -> int:
     )
     ap.add_argument("--out", required=True, help="output dir (gitignored)")
     ap.add_argument("--chunk-rows", type=int, default=DEFAULT_CHUNK_ROWS)
+    ap.add_argument(
+        "--scorer",
+        choices=("auto", "tier0", "worldmodel"),
+        default="auto",
+        help="force a scorer for cross-tier comparison (#91); "
+        "auto follows the probed hardware tier",
+    )
     args = ap.parse_args()
     replay_farm(
         Path(args.farm_dir),
         Path(args.out),
         events=args.events,
         chunk_rows=args.chunk_rows,
+        scorer=args.scorer,
     )
     return 0
 

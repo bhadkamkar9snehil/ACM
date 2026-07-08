@@ -31,7 +31,27 @@ uv run python -m acm2.evidence.care_replay \
     --farm-dir "../care_data/Wind Farm A" --events 40 68 \
     --out ../results/acm2_care_A
 # omit --events to replay every event in the farm's event_info.csv;
-# --chunk-rows 288 (default) = one tick per 2 days at 10-min cadence
+# --chunk-rows 288 (default) = one tick per 2 days at 10-min cadence;
+# --scorer worldmodel|tier0|auto forces a cross-tier comparison run
+```
+
+Operational soak (the implement-and-forget gate: runs the real service
+against a continuously-fed live buffer through healthy -> setpoint
+change -> fault phases, checks auto-absorption and detection, exits
+non-zero on any failed criterion):
+
+```bash
+cd acm2
+uv run python -m acm2.evidence.soak --root ../results/soak1 --minutes 90
+```
+
+Live sources on the service itself: `--live "asset/key=buffer.db"`
+(repeatable) attaches a SQLite buffer that is drained into the store on
+every tick:
+
+```bash
+uv run python -m acm2.service --root ../acm2_data --port 8899 \
+    --tick-seconds 300 --live "plant/pump1=../data_cache/mqtt_buffer.db"
 ```
 
 API: `GET /api/assets`, `GET /api/asset/{key}`, `GET /api/narrative/{key}`,

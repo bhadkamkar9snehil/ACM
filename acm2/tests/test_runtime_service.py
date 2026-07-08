@@ -359,3 +359,45 @@ def test_ui_and_control_endpoints(runtime):
     b = client.post("/api/bootstrap/f/ok2").json()
     assert b["passes"][-1]["new_episodes"] == 0  # clean asset converges fast
     assert client.get("/api/domains/nope").status_code == 404
+
+
+def test_attach_live_sources_cli_wiring(runtime, tmp_path):
+    """#90: the live path must be reachable from the service CLI, and an
+    unknown asset key must fail LOUDLY at startup - a silently
+    unattached buffer looks exactly like a healthy quiet asset."""
+    from acm2.service import attach_live_sources
+
+    db = tmp_path / "buf.db"
+    attach_live_sources(runtime, [f"f/ok1={db}"])
+    assert "f/ok1" in runtime.live_sources
+
+    with pytest.raises(SystemExit):
+        attach_live_sources(runtime, [f"nope/asset={db}"])
+    with pytest.raises(SystemExit):
+        attach_live_sources(runtime, ["malformed-no-equals"])
+
+
+def test_tick_loop_survives_a_failing_tick(runtime):
+    """#90 soak finding: the self-tick loop was an unsupervised task -
+    one exception killed monitoring silently while the API kept serving.
+    A tick that raises must be logged and RETRIED next interval."""
+    import time as _t
+
+    for key in runtime.monitors:
+        runtime._mark_bootstrapped(key)
+    calls = {"n": 0}
+    real_tick_all = runtime.tick_all
+
+    def flaky():
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("injected tick failure")
+        return real_tick_all()
+
+    runtime.tick_all = flaky
+    app = create_app(runtime, tick_seconds=0.15)
+    with TestClient(app):
+        _t.sleep(0.8)
+    assert calls["n"] >= 2, (
+        f"loop died after the failing tick (calls={calls['n']})"
+    )

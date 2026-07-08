@@ -168,3 +168,52 @@ def test_property_unique_sorted_after_any_replay(tmp_path_factory, offsets):
     out = store.read("p1")
     col = out.get_column(TIMESTAMP_COL).to_list()
     assert col == sorted(set(ts))
+
+
+def test_append_is_column_order_insensitive(tmp_path):
+    """Live bridge payloads carry keys in arbitrary order; an append with
+    a different column order than the stored partition must merge, not
+    crash (found by the #90 soak: the first drained buffer batch killed
+    the tick). Channels missing from a batch land as nulls."""
+    import numpy as np
+
+    from acm2.store.raw import TIMESTAMP_COL, RawStore
+
+    store = RawStore(tmp_path / "raw")
+    ts = pl.Series(
+        TIMESTAMP_COL,
+        [datetime(2025, 1, 1, tzinfo=timezone.utc) + timedelta(minutes=i)
+         for i in range(10)],
+        dtype=pl.Datetime("us", "UTC"),
+    )
+    # timestamp LAST on first append
+    store.append("o/1", pl.DataFrame({"a": np.arange(10.0), "b": np.ones(10)}).with_columns(ts))
+    # timestamp FIRST + shuffled channels + one channel missing
+    ts2 = pl.Series(
+        TIMESTAMP_COL,
+        [datetime(2025, 1, 1, tzinfo=timezone.utc) + timedelta(minutes=10 + i)
+         for i in range(5)],
+        dtype=pl.Datetime("us", "UTC"),
+    )
+    n = store.append(
+        "o/1", pl.DataFrame({TIMESTAMP_COL: ts2, "b": np.zeros(5), "a": np.arange(5.0)})
+    )
+    assert n == 5
+    back = store.read("o/1")
+    assert back.height == 15
+    assert set(back.columns) == {"a", "b", TIMESTAMP_COL}
+
+    # cross-partition: a NEW month written from a differently-ordered
+    # source must still read as one frame (read is also name-matched)
+    ts3 = pl.Series(
+        TIMESTAMP_COL,
+        [datetime(2025, 2, 1, tzinfo=timezone.utc) + timedelta(minutes=i)
+         for i in range(5)],
+        dtype=pl.Datetime("us", "UTC"),
+    )
+    store.append(
+        "o/1", pl.DataFrame({TIMESTAMP_COL: ts3, "b": np.ones(5), "a": np.zeros(5)})
+    )
+    all_rows = store.read("o/1")
+    assert all_rows.height == 20
+    assert set(all_rows.columns) == {"a", "b", TIMESTAMP_COL}

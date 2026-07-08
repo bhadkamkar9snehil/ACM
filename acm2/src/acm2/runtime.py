@@ -33,6 +33,10 @@ class Runtime:
     store: RawStore
     data_root: Path
     governor: Governor | None = None
+    # evidence-lane override (#91): force a scorer class regardless of the
+    # probed tier - verdict semantics are tier-free, so cross-tier
+    # comparisons run the SAME runtime with only this swapped
+    scorer_cls_override: type | None = None
     monitors: dict[str, EpisodicMonitor] = field(default_factory=dict)
     verdicts: dict[str, V.Verdict] = field(default_factory=dict)
     previous_verdicts: dict[str, V.Verdict] = field(default_factory=dict)
@@ -64,6 +68,8 @@ class Runtime:
         world model at T2/T2-S when torch is importable; the conditional
         ridge everywhere else. Verdict semantics identical across tiers -
         only power differs; the guarantee is tier-free."""
+        if self.scorer_cls_override is not None:
+            return self.scorer_cls_override
         if self.governor.tier in ("T2", "T2-S"):
             try:
                 from acm2.scoring.worldmodel import TorchWorldModel

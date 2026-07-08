@@ -42,9 +42,25 @@ def create_app(
                 # server binds: a multi-pass bootstrap over deep histories
                 # must never block the UI from coming up (found by review -
                 # the page was black for minutes on a fresh data root)
-                await asyncio.to_thread(runtime.bootstrap_virgin)
+                #
+                # every step is guarded: an unhandled exception in an
+                # unsupervised create_task dies SILENTLY while the API
+                # keeps serving - monitoring stops and nothing says so
+                # (found by the #90 soak: one bad tick killed the loop
+                # for the whole run). Log, wait, try again - a repeating
+                # failure is visible in the log and in staleness, a dead
+                # loop is visible nowhere.
+                import traceback
+
+                try:
+                    await asyncio.to_thread(runtime.bootstrap_virgin)
+                except Exception:  # noqa: BLE001
+                    print("[acm2] bootstrap failed:\n" + traceback.format_exc())
                 while True:
-                    await asyncio.to_thread(runtime.tick_all)
+                    try:
+                        await asyncio.to_thread(runtime.tick_all)
+                    except Exception:  # noqa: BLE001
+                        print("[acm2] tick failed:\n" + traceback.format_exc())
                     await asyncio.sleep(tick_seconds)
 
             task = asyncio.create_task(loop())
@@ -130,6 +146,23 @@ def create_app(
     return app
 
 
+def attach_live_sources(runtime: Runtime, specs: list[str]) -> None:
+    """Wire `--live ASSET_KEY=BUFFER_DB` specs into the runtime (#90: the
+    live path was Python-only and unreachable from the CLI). An unknown
+    asset key fails loudly at startup - a silently unattached buffer
+    would look exactly like a healthy quiet asset."""
+    for spec in specs:
+        key, sep, db = spec.partition("=")
+        if not sep or not key or not db:
+            raise SystemExit(f"--live expects ASSET_KEY=BUFFER_DB, got: {spec}")
+        if key not in runtime.monitors:
+            raise SystemExit(
+                f"--live: unknown asset key {key!r} (onboarded: "
+                f"{sorted(runtime.monitors)})"
+            )
+        runtime.attach_live_source(key, Path(db).resolve())
+
+
 def main() -> None:  # pragma: no cover - manual entrypoint
     import argparse
 
@@ -145,10 +178,19 @@ def main() -> None:  # pragma: no cover - manual entrypoint
     parser.add_argument(
         "--tick-seconds", type=float, default=DEFAULT_TICK_SECONDS
     )
+    parser.add_argument(
+        "--live",
+        action="append",
+        default=[],
+        metavar="ASSET_KEY=BUFFER_DB",
+        help="attach a live SQLite buffer to an asset (repeatable); "
+        "drained into the store on every tick",
+    )
     args = parser.parse_args()
     root = Path(args.root).resolve()
     runtime = Runtime(store=RawStore(root / "raw"), data_root=root)
     runtime.onboard_all()  # fast; bootstrap + scoring run in the lifespan loop
+    attach_live_sources(runtime, args.live)
     app = create_app(runtime, tick_seconds=args.tick_seconds)
     uvicorn.run(app, host="127.0.0.1", port=args.port)
 

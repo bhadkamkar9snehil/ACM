@@ -87,7 +87,12 @@ class RawStore:
             path = asset_dir / f"{period}.parquet"
             existing = pl.read_parquet(path) if path.exists() else None
             if existing is not None:
-                merged = pl.concat([existing, part], how="vertical_relaxed")
+                # diagonal = match columns by NAME: live payloads (bridge
+                # JSON) carry keys in arbitrary order, and vertical concat
+                # is order-sensitive - one differently-ordered batch would
+                # kill the append (found by the #90 soak within minutes).
+                # Missing channels land as null, new channels are added.
+                merged = pl.concat([existing, part], how="diagonal_relaxed")
             else:
                 merged = part
             merged = merged.unique(subset=TIMESTAMP_COL, keep="first").sort(
@@ -160,8 +165,10 @@ class RawStore:
         paths = sorted(asset_dir.glob("*.parquet")) if asset_dir.exists() else []
         if not paths:
             return pl.DataFrame()
+        # diagonal = match by name: partitions written from differently-
+        # ordered sources (seed vs live buffer) must still read as one
         frame = pl.concat(
-            [pl.read_parquet(p) for p in paths], how="vertical_relaxed"
+            [pl.read_parquet(p) for p in paths], how="diagonal_relaxed"
         ).sort(TIMESTAMP_COL)
         if start is not None:
             frame = frame.filter(pl.col(TIMESTAMP_COL) >= start)
