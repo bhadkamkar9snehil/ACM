@@ -51,6 +51,15 @@ class EpisodeLedger:
 
     def add(self, episode: Episode) -> None:
         self.episodes.append(episode)
+        self._save()
+
+    def remove(self, episode: Episode) -> None:
+        """Drop one episode (bootstrap's self-refuting-mask guard, #92).
+        Episodes are frozen dataclasses, so identity is by value."""
+        self.episodes.remove(episode)
+        self._save()
+
+    def _save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_suffix(".tmp")
         tmp.write_text(

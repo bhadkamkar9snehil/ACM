@@ -383,6 +383,44 @@ class Runtime:
         final_ok = em.monitor.calibrate_from_lifetime(
             self.store, ledger=self.ledger, cache_root=self.cache_root
         )
+        dropped: list[dict] = []
+        if not final_ok:
+            # SELF-REFUTING MASK guard (#92): a ledger mask that leaves
+            # the calibration with nothing cannot be right - a baseline
+            # must exist for "unhealthy" to mean anything (the #87 lesson
+            # generalized to fault windows: the WM bootstrap ledgered a
+            # full-life alarm and killed the monitor). Drop the WIDEST
+            # bootstrap-created fault window and recalibrate, repeating
+            # until calibration succeeds or none remain. Live-path
+            # reanchor is untouched - this is first-contact-only repair.
+            from acm2.memory.ledger import FAULT_STATES
+
+            def _span(e) -> float:
+                try:
+                    t0 = datetime.fromisoformat(e.start)
+                    t1 = datetime.fromisoformat(
+                        e.end or "9999-12-31T00:00:00+00:00"
+                    )
+                    return (t1 - t0).total_seconds()
+                except ValueError:
+                    return 0.0
+
+            while not final_ok:
+                candidates = [
+                    e
+                    for e in self.ledger.episodes
+                    if e.asset_key == asset_key and e.state in FAULT_STATES
+                ]
+                if not candidates:
+                    break  # genuinely thin data: insufficient is honest
+                widest = max(candidates, key=_span)
+                self.ledger.remove(widest)
+                dropped.append(
+                    {"start": widest.start, "end": widest.end}
+                )
+                final_ok = em.monitor.calibrate_from_lifetime(
+                    self.store, ledger=self.ledger, cache_root=self.cache_root
+                )
         self._last_seen[asset_key] = (
             history.get_column(TIMESTAMP_COL).max()
             if not history.is_empty()
@@ -393,6 +431,7 @@ class Runtime:
             "asset": asset_key,
             "passes": passes,
             "final_calibration": bool(final_ok),
+            "dropped_self_refuting_windows": dropped,
         }
 
     # ----------------------------------------------------- immune path

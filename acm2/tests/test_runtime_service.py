@@ -401,3 +401,37 @@ def test_tick_loop_survives_a_failing_tick(runtime):
     assert calls["n"] >= 2, (
         f"loop died after the failing tick (calls={calls['n']})"
     )
+
+
+def test_bootstrap_drops_self_refuting_fault_mask(tmp_path):
+    """#92: a ledger mask that leaves the final calibration with NOTHING
+    is self-refuting (a baseline must exist for 'unhealthy' to mean
+    anything). Bootstrap must drop the widest fault window and
+    recalibrate instead of leaving a permanently dead monitor."""
+    store = RawStore(tmp_path / "raw")
+    seed_asset(store, "sr/1", seed=13)
+    rt = Runtime(store=store, data_root=tmp_path)
+    from acm2.memory.ledger import Episode
+
+    rt.ledger.add(
+        Episode(
+            asset_key="sr/1",
+            start="2024-12-01T00:00:00+00:00",
+            end="2026-01-01T00:00:00+00:00",  # covers the entire life
+            state="alarm",
+        )
+    )
+    rt.onboard("sr/1")
+    out = rt.bootstrap_virgin()
+    # ledger windows normally mean "already contacted" - but this asset
+    # has no marker AND its mask is total, so bootstrap must run and
+    # repair. (bootstrap_virgin skips window-bearing assets; call the
+    # bootstrap directly, as the service would after the marker fix.)
+    if "sr/1" not in out:
+        out = {"sr/1": rt.bootstrap("sr/1")}
+    res = out["sr/1"]
+    assert res["final_calibration"], res
+    assert len(res["dropped_self_refuting_windows"]) == 1
+    assert rt.monitors["sr/1"].monitor.scorer is not None, "monitor alive"
+    # the ledger no longer carries the self-refuting window
+    assert rt.ledger.windows("sr/1") == []

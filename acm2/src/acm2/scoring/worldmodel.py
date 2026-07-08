@@ -215,6 +215,25 @@ class TorchWorldModel:
         order = np.argsort(contrib)[::-1]
         return [self.channels[i] for i in order[:top_k]]
 
+    def concentration(self, frame: pl.DataFrame, top_k: int = 2) -> float:
+        """Share of total surprise carried by the top_k channels -
+        IDENTICAL semantics to the conditional scorer's (cross-tier
+        contract: verdict words must not depend on the tier). Without
+        this, _enrich_alarm's hasattr fallback made change-not-fault
+        structurally unreachable at Tier 2 (#92): a coordinated
+        setpoint step read as a channel-local fault."""
+        rz = np.abs(self._residual_z(frame.tail(min(frame.height, 256 + LAG))))
+        if rz.shape[0] == 0:
+            return 0.0
+        contrib = np.nanmean(rz, axis=0)
+        total = float(contrib.sum())
+        d = contrib.size
+        if total <= 0 or d <= top_k:
+            return 0.0
+        raw = float(np.sort(contrib)[::-1][:top_k].sum()) / total
+        uniform = top_k / d
+        return max(0.0, (raw - uniform) / (1.0 - uniform))
+
     def coverage(self, frame: pl.DataFrame) -> float:
         tail = self._z(frame.tail(128))
         d = np.sqrt(

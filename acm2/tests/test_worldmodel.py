@@ -100,3 +100,53 @@ def test_world_model_drops_into_the_monitor(fitted_pair):
     assert v.state == "alarm", v.state
     assert "vib" in v.attribution[:2]
     assert "operating_point_familiarity" in v.coverage
+
+
+def test_concentration_cross_tier_parity():
+    """#92: change-not-fault was structurally unreachable at Tier 2 -
+    the world model had no concentration(), so the corroboration
+    defaulted to 1.0 (channel-local) for every step episode. Both
+    scorers must agree on the DIRECTION: a coordinated move (all
+    channels shifted) reads low, a channel-local fault reads high."""
+    from datetime import datetime, timedelta, timezone
+
+    UTC2 = timezone.utc
+    rng = np.random.default_rng(5)
+    n = 3000
+
+    def frame(shift_all=0.0, vib_fault=0.0, start_i=0):
+        ts = [
+            datetime(2026, 1, 1, tzinfo=UTC2)
+            + timedelta(minutes=10 * (start_i + i))
+            for i in range(n)
+        ]
+        temp = rng.normal(size=n) + shift_all
+        flow = rng.normal(size=n) + shift_all
+        press = rng.normal(size=n) + shift_all
+        vib = 0.8 * temp + 0.3 * rng.normal(size=n) + vib_fault
+        load = 0.6 * temp + 0.4 * flow + 0.3 * rng.normal(size=n)
+        return pl.DataFrame(
+            {
+                TIMESTAMP_COL: pl.Series(ts, dtype=pl.Datetime("us", "UTC")),
+                "temp": temp,
+                "vib": vib,
+                "press": press,
+                "flow": flow,
+                "load": load,
+            }
+        )
+
+    healthy = frame()
+    coordinated = frame(shift_all=2.5, start_i=n)
+    local = frame(vib_fault=4.0, start_i=2 * n)
+
+    for scorer_cls in (ConditionalSurpriseScorer, TorchWorldModel):
+        scorer = scorer_cls().fit(healthy)
+        assert hasattr(scorer, "concentration"), scorer_cls.__name__
+        c_coord = scorer.concentration(coordinated)
+        c_local = scorer.concentration(local)
+        assert c_local > c_coord, (
+            f"{scorer_cls.__name__}: local fault must read MORE "
+            f"concentrated than a coordinated move "
+            f"(local={c_local:.3f}, coord={c_coord:.3f})"
+        )
