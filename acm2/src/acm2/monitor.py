@@ -101,19 +101,32 @@ class AssetMonitor:
         ledger=None,
         cache_root=None,
         seed: int = 0,
+        include_recent: bool = False,
     ) -> bool:
         """S3 calibration path: the scorer's reference comes from the
         recency-capped, ledger-masked LIFETIME baseline; the e-process
         calibration scores come from a healthy sample of the OLDER life
         (recent periods excluded - a developing fault can never sit inside
-        its own calibration reference)."""
+        its own calibration reference).
+
+        include_recent=True is the governed exception for absorbing a
+        change-not-fault episode (#89): the just-adjudicated plateau IS
+        the new normal and must enter the reference, or absorption would
+        re-open the same episode forever. Safe because the window was
+        explicitly judged not-fault, fault windows stay ledger-masked,
+        and a wrong judgment is caught by the post-absorb falsifiability
+        net (surprise resumes -> fresh episode)."""
         from acm2.memory.baseline import LifetimeBaseline
 
         try:
             base = LifetimeBaseline.build(
                 store, self.asset_key, ledger=ledger, cache_root=cache_root
             )
-            sample = base.calibration_sample(store, ledger=ledger)
+            sample = base.calibration_sample(
+                store,
+                ledger=ledger,
+                exclude_recent=0 if include_recent else None,
+            )
             if self.scorer_cls is RobustZScorer:
                 scorer = RobustZScorer()
                 scorer.medians, scorer.scales = base.medians, base.scales

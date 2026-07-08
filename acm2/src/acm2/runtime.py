@@ -192,6 +192,19 @@ class Runtime:
             if asset_key in self.verdicts:
                 self.previous_verdicts[asset_key] = self.verdicts[asset_key]
             self.verdicts[asset_key] = verdict
+            if self._change_ripe_for_absorption(em, verdict):
+                # governed auto-absorption (#89): the verdict's own
+                # re-baseline proposal, executed - unattended operation
+                # cannot wait for a human to click Re-anchor. Only while
+                # the CURRENT classification is still change-not-fault;
+                # a drift reclassification blocks it (the definition of
+                # normal never moves during accumulating degradation).
+                if em.reanchor(
+                    store=self.store,
+                    last_verdict=verdict,
+                    cache_root=self.cache_root,
+                ):
+                    self.previous_verdicts[asset_key] = verdict
         self._tick_counts[asset_key] += 1
         stagger = hash(asset_key) % REBUILD_EVERY_TICKS
         if (
@@ -210,6 +223,24 @@ class Runtime:
             asset_key, time.monotonic() - started, frame.height
         )
         return verdict
+
+    @staticmethod
+    def _change_ripe_for_absorption(em, verdict: V.Verdict) -> bool:
+        """True when an open change-not-fault episode's plateau has held
+        for CHANGE_ABSORB_ANCHOR_PERIODS anchor periods (#89)."""
+        if verdict.state != V.STATE_CHANGE or not em.open_episode_start:
+            return False
+        from acm2.constants import get as const
+
+        anchor_s = (
+            365.25 * 24 * 3600.0 / float(const("REANCHORS_PER_YEAR"))
+        ) * float(const("CHANGE_ABSORB_ANCHOR_PERIODS"))
+        try:
+            start = datetime.fromisoformat(em.open_episode_start)
+            now = datetime.fromisoformat(str(verdict.at))
+        except ValueError:
+            return False
+        return (now - start).total_seconds() >= anchor_s
 
     def tick_all(self) -> int:
         moved = 0

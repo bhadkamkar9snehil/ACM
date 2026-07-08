@@ -203,3 +203,108 @@ def test_signature_match_recognizes_repeat_fault(tmp_path):
     match = v2.evidence_trail.get("signature_match")
     assert match is not None, "repeat fault must be recognized"
     assert match["confidence"] >= 0.34
+
+
+# ------------------------------------- governed auto-absorption (#89)
+def _absorb_runtime(tmp_path, key, rng):
+    """6 healthy months in the store, onboarded runtime, history ticked."""
+    from acm2.runtime import Runtime
+
+    start = datetime(2025, 1, 1, tzinfo=UTC)
+    store = RawStore(tmp_path / "raw")
+    for m in range(6):
+        store.append(
+            key, coupled_frame(1200, start + timedelta(days=30 * m), rng)
+        )
+    rt = Runtime(store=store, data_root=tmp_path)
+    assert rt.onboard(key)
+    rt.tick(key)  # consume history; healthy data opens no episode
+    assert rt.monitors[key].open_episode_start == ""
+    return rt, store, start
+
+
+def test_change_not_fault_not_absorbed_before_the_period(tmp_path, monkeypatch):
+    """The trigger is TIME-gated: with the period raised, a declared
+    change stays an open episode (no silent early re-anchor)."""
+    from acm2.constants import REGISTRY, Constant
+
+    monkeypatch.setitem(
+        REGISTRY,
+        "CHANGE_ABSORB_ANCHOR_PERIODS",
+        Constant("CHANGE_ABSORB_ANCHOR_PERIODS", 100.0, "test gate"),
+    )
+    rng = np.random.default_rng(11)
+    rt, store, start = _absorb_runtime(tmp_path, "ab/0", rng)
+    em = rt.monitors["ab/0"]
+    store.append(
+        "ab/0",
+        coupled_frame(2500, start + timedelta(days=200), rng, setpoint=2.5),
+    )
+    v = rt.tick("ab/0")
+    assert v.state == V.STATE_CHANGE, v.state
+    assert em.open_episode_start != "", "episode stays open"
+    assert len(rt.ledger.episodes) == 0, "nothing absorbed early"
+
+
+def test_change_not_fault_auto_absorbs_after_anchor_period(tmp_path):
+    """Unattended operation (#89): a coordinated setpoint change that has
+    held past one anchor period (17 days of plateau here) is absorbed
+    automatically - episode ledgered as change-not-fault, baseline
+    recalibrated, the plateau is the new normal, and a later LOCAL fault
+    on that plateau still raises evidence (the falsifiability promise)."""
+    rng = np.random.default_rng(11)
+    rt, store, start = _absorb_runtime(tmp_path, "ab/1", rng)
+    em = rt.monitors["ab/1"]
+
+    epoch_before = em.monitor.model_epoch
+    store.append(
+        "ab/1",
+        coupled_frame(2500, start + timedelta(days=200), rng, setpoint=2.5),
+    )
+    rt.tick("ab/1")
+    assert em.open_episode_start == "", "episode must be closed"
+    assert len(rt.ledger.episodes) == 1
+    assert rt.ledger.episodes[0].state == "change-not-fault"
+    assert em.monitor.model_epoch != epoch_before, "recalibrated"
+
+    # the absorbed plateau is the new normal
+    store.append(
+        "ab/1",
+        coupled_frame(800, start + timedelta(days=220), rng, setpoint=2.5),
+    )
+    v = rt.tick("ab/1")
+    assert v.state == V.STATE_HEALTHY, v.state
+
+    # falsifiability promise is real: a LOCAL fault on the new plateau
+    # still alarms (absorption did not blind the monitor)
+    store.append(
+        "ab/1",
+        coupled_frame(
+            2000,
+            start + timedelta(days=230),
+            rng,
+            setpoint=2.5,
+            fault=4.0,
+        ),
+    )
+    v = rt.tick("ab/1")
+    assert v.state in (V.STATE_ALARM, V.STATE_ESCALATING, V.STATE_CHANGE)
+    assert v.state != V.STATE_HEALTHY
+
+
+def test_drift_episode_never_auto_absorbs(tmp_path):
+    """The guard: accumulating degradation (drift shape -> escalating)
+    must NOT move the definition of normal, no matter how long it runs."""
+    rng = np.random.default_rng(12)
+    rt, store, start = _absorb_runtime(tmp_path, "ab/2", rng)
+    em = rt.monitors["ab/2"]
+
+    # 17+ days of developing LOCAL fault - far past the anchor period
+    store.append(
+        "ab/2",
+        coupled_frame(2500, start + timedelta(days=200), rng, fault=4.0),
+    )
+    v = rt.tick("ab/2")
+    assert v.state in (V.STATE_ALARM, V.STATE_ESCALATING), v.state
+    assert em.open_episode_start != "", "episode stays open"
+    assert len(rt.ledger.episodes) == 0, "nothing absorbed"

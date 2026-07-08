@@ -312,8 +312,14 @@ class EpisodicMonitor:
             )
         self.open_episode_start = ""
         self._episode_scores = []
+        # absorbing a CHANGE: the adjudicated plateau must enter the
+        # calibration reference or the same episode re-opens forever;
+        # closing a FAULT keeps the strict older-life-only reference
         return self.monitor.calibrate_from_lifetime(
-            store, ledger=self.ledger, cache_root=cache_root
+            store,
+            ledger=self.ledger,
+            cache_root=cache_root,
+            include_recent=last_verdict.state == V.STATE_CHANGE,
         )
 
     @staticmethod

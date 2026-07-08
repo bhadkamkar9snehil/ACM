@@ -68,6 +68,22 @@ REGISTRY: dict[str, Constant] = {
             "workers with BLAS caps: the lab's measured OOM/fork-deadlock "
             "envelope on 15-16GB machines (CLAUDE.md mistakes #42/#44).",
         ),
+        Constant(
+            "CHANGE_ABSORB_ANCHOR_PERIODS",
+            1.0,
+            "A change-not-fault plateau that has held for this many ANCHOR "
+            "periods (365.25d / REANCHORS_PER_YEAR each, about a week) is "
+            "absorbed automatically - the governed execution of the "
+            "verdict's own re-baseline proposal, required for unattended "
+            "operation (#89). One anchor period is the system's own "
+            "granularity of how long a definition of normal holds, and it "
+            "spaces absorptions to at most one per anchor period per "
+            "asset, keeping the alpha-per-anchor Ville accounting inside "
+            "the declared budget: an absorb IS an anchor. Drift-shaped "
+            "(escalating) episodes never absorb - the definition of "
+            "normal does not move during accumulating evidence of "
+            "degradation.",
+        ),
     ]
 }
 

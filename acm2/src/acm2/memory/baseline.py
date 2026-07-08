@@ -133,14 +133,20 @@ class LifetimeBaseline:
         store: RawStore,
         ledger: EpisodeLedger | None = None,
         max_rows: int = 20000,
-        exclude_recent: int = RECENT_PERIODS,
+        exclude_recent: int | None = None,
     ) -> pl.DataFrame:
         """Healthy rows for e-process calibration: stride-sampled across the
         OLDER life (recent periods excluded so a developing fault cannot sit
         inside its own calibration reference), ledger-masked."""
+        if exclude_recent is None:
+            exclude_recent = RECENT_PERIODS
         asset_dir = store.root / _safe_key(self.asset_key)
         part_files = sorted(asset_dir.glob("*.parquet"))
-        use = part_files[:-exclude_recent] if len(part_files) > exclude_recent else part_files
+        use = (
+            part_files[:-exclude_recent]
+            if 0 < exclude_recent < len(part_files)
+            else part_files
+        )
         frames = []
         for path in use:
             f = pl.read_parquet(path)
