@@ -90,6 +90,7 @@ class AssetMonitor:
             self.insufficient_reason = str(exc)
             return False
         self.calib_rows = n
+        self.insufficient_reason = ""
         self.model_epoch = MODEL_EPOCH_FMT.format(
             tag=_scorer_tag(self.scorer_cls), fit_rows=split, calib_rows=n - split
         )
@@ -160,6 +161,7 @@ class AssetMonitor:
             self.insufficient_reason = str(exc)
             return False
         self.calib_rows = base.rows_total
+        self.insufficient_reason = ""
         self.model_epoch = (
             f"s3-lifetime-{len(base.periods_used)}p-{base.rows_total}r"
         )

@@ -153,15 +153,29 @@ def replay_event(
     first_alarm = next(
         (t for t in ticks if t["state"] in ALARMING), None
     )
-    detected = False
-    lag_h = None
-    if first_alarm is not None:
-        first_at = _parse_utc(first_alarm["at"])
-        # the tick's `at` is the chunk end; an alarm in the chunk that
-        # CONTAINS event_start is a detection with ~zero lag, not early
-        detected = first_at >= event_start
-        if detected:
-            lag_h = (first_at - event_start).total_seconds() / 3600.0
+    # detection = ANY alarming tick at/after event_start - NOT "the
+    # first alarming tick is". Found on the #91 world-model run: an
+    # early pre-event alarm was absorbed as change-not-fault, surprise
+    # resumed and re-alarmed INSIDE the event window, and the old rule
+    # scored the event a miss without ever looking past the first alarm.
+    first_in_window = next(
+        (
+            t
+            for t in ticks
+            if t["state"] in ALARMING and _parse_utc(t["at"]) >= event_start
+        ),
+        None,
+    )
+    detected = first_in_window is not None
+    lag_h = (
+        (_parse_utc(first_in_window["at"]) - event_start).total_seconds()
+        / 3600.0
+        if detected
+        else None
+    )
+    early_alarm = first_alarm is not None and (
+        _parse_utc(first_alarm["at"]) < event_start
+    )
     record = {
         "event_id": event_id,
         "label": label,
@@ -181,6 +195,10 @@ def replay_event(
         "detected": detected,
         "lag_h": lag_h,
         "alarmed_at_all": first_alarm is not None,
+        # alarmed before event_start (anomaly events: possible early
+        # degradation signal, CARE labels the window conservatively;
+        # normal events: this is what makes them false alarms)
+        "early_alarm_pre_event": early_alarm,
         "change_not_fault_ticks": states.count(V.STATE_CHANGE),
         "tick_trace": ticks,
     }
