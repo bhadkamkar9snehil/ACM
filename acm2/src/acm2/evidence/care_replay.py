@@ -173,6 +173,9 @@ def replay_event(
         "insufficient": all(s == V.STATE_INSUFFICIENT for s in states)
         if states
         else True,
+        # WHY a dead monitor is dead - without this, an insufficient
+        # replay is undiagnosable after the process exits (#91 WM run)
+        "insufficient_reason": rt.monitors[key].monitor.insufficient_reason,
         "first_alarm_at": first_alarm["at"] if first_alarm else None,
         "event_start": str(event["event_start"]),
         "detected": detected,
