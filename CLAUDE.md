@@ -944,7 +944,37 @@ Requires: `pip install playwright && playwright install chromium`
 ---
 
 ## Git & GitHub Workflow
-> *Added: 2026-06-14  Last updated: 2026-07-08*
+> *Added: 2026-06-14  Last updated: 2026-07-09*
+
+### Local development handoff (2026-07-09)
+
+Development is moving from the cloud sandbox to the user's local
+Windows machine (RTX 4060 GPU, the intended Tier 2/2-S reference box
+per the implementation plan's Section 10.5). Same repo, same rules -
+only the machine changes:
+
+- Clone the real GitHub URL directly:
+  `git clone https://github.com/bhadkamkar9snehil/ACM.git`. The
+  sandbox's `origin` (`http://local_proxy@127.0.0.1:.../git/...`) is a
+  local-only proxy and does not apply outside it - do not copy it.
+- **Push to `main` only** - explicit, repeated user instruction. No
+  feature branches or PRs unless asked.
+- `.\install.ps1` for setup; `uv pip install torch --index-url
+  https://download.pytorch.org/whl/cu126` (or whatever CUDA index
+  matches the installed driver) for GPU torch, since it is a
+  `tier2` dependency-group extra excluded from default `uv sync` -
+  reinstall after every sync. The hardware governor probes for CUDA
+  automatically and switches to `TorchWorldModel`; no code/config
+  change needed.
+- If the GitHub MCP connector needs re-authorization on the new
+  machine/session, that happens via claude.ai connector settings (or
+  `claude mcp` / `/mcp` in an interactive session) - it cannot be done
+  from within a non-interactive session. While disconnected, issue-
+  first cannot be followed literally; note the deviation in the commit
+  message instead of blocking, and file the issue retroactively once
+  reconnected (done once already for #97/#98 - same pattern applies).
+- See `MEMORY.md`'s "READ THIS FIRST IF YOU ARE A NEW SESSION ON THE
+  LOCAL GPU BOX" banner for the fuller checklist.
 
 ### Repo layout after the 2026-07-08 cleanup (READ FIRST)
 
