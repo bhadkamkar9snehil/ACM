@@ -435,3 +435,41 @@ def test_bootstrap_drops_self_refuting_fault_mask(tmp_path):
     assert rt.monitors["sr/1"].monitor.scorer is not None, "monitor alive"
     # the ledger no longer carries the self-refuting window
     assert rt.ledger.windows("sr/1") == []
+
+
+def test_episodes_report_and_live_flag_endpoints(runtime, tmp_path):
+    """UI contract completeness: the episode ledger (absorbed changes
+    included) is queryable, the S6 fleet report is exposed, and
+    live-fed assets are flagged in the fleet summary."""
+    from acm.memory.ledger import Episode
+
+    runtime.ledger.add(
+        Episode(
+            asset_key="f/ok1",
+            start="2025-03-01T00:00:00+00:00",
+            end="2025-03-08T00:00:00+00:00",
+            state="change-not-fault",
+            note='{"channels": ["temp"], "shape": "step", "peak_evidence": 2.1}',
+        )
+    )
+    runtime.attach_live_source("f/ok2", tmp_path / "buf.db")
+    client = TestClient(create_app(runtime))
+
+    eph = client.get("/api/episodes/f/ok1").json()
+    assert eph["episodes"] and eph["episodes"][0]["state"] == "change-not-fault"
+    assert eph["episodes"][0]["channels"] == ["temp"]
+    assert "open_since" in eph
+    assert client.get("/api/episodes/nope").status_code == 404
+
+    rep = client.get("/api/report")
+    assert rep.status_code == 200
+    assert "ACM Fleet Report" in rep.text and "f/bad" in rep.text
+
+    rows = client.get("/api/assets").json()["rows"]
+    by_key = {r["asset_key"]: r for r in rows}
+    assert by_key["f/ok2"]["live"] is True
+    assert by_key["f/ok1"]["live"] is False
+
+    page = client.get("/").text
+    assert "Episode history" in page and "/api/report" in page
+    assert "Evidence trail" in page

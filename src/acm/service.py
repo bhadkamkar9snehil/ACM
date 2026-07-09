@@ -16,7 +16,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 
 from acm.runtime import Runtime
 
@@ -115,6 +115,57 @@ def create_app(
         if asset_key not in runtime.monitors:
             return JSONResponse({"error": "unknown asset"}, status_code=404)
         return JSONResponse(runtime.bootstrap(asset_key))
+
+    @app.get("/api/episodes/{asset_key:path}")
+    def episodes(asset_key: str) -> JSONResponse:
+        """The asset's case history: every ledgered episode - faults AND
+        absorbed changes (#89 absorptions must be visible, not silent) -
+        plus the currently open episode, if any."""
+        import json as _json
+
+        em = runtime.monitors.get(asset_key)
+        if em is None:
+            return JSONResponse({"error": "unknown asset"}, status_code=404)
+        eps = []
+        for e in runtime.ledger.episodes:
+            if e.asset_key != asset_key:
+                continue
+            note = {}
+            if e.note:
+                try:
+                    note = _json.loads(e.note)
+                except _json.JSONDecodeError:
+                    pass
+            eps.append(
+                {
+                    "start": e.start,
+                    "end": e.end,
+                    "state": e.state,
+                    "channels": note.get("channels"),
+                    "shape": note.get("shape"),
+                    "peak_evidence": note.get("peak_evidence"),
+                    "source": note.get("source"),
+                }
+            )
+        return JSONResponse(
+            {"episodes": eps, "open_since": em.open_episode_start}
+        )
+
+    @app.get("/api/report")
+    def report() -> PlainTextResponse:
+        """Fleet report (markdown), worst-first - the S6 report flow;
+        render_report existed since S1 but was never exposed."""
+        from acm.monitor import render_report
+
+        rows = runtime.summary()["rows"]
+        ordered = [
+            runtime.verdicts[r["asset_key"]]
+            for r in rows
+            if r["asset_key"] in runtime.verdicts
+        ]
+        return PlainTextResponse(
+            render_report(ordered), media_type="text/markdown; charset=utf-8"
+        )
 
     @app.get("/api/health/{asset_key:path}")
     def health(asset_key: str) -> JSONResponse:

@@ -199,6 +199,8 @@ every tick.
 | `POST /api/tick` / `POST /api/tick/{key}` | tick the fleet / one asset |
 | `POST /api/reanchor/{key}` | governed episode close + recalibration |
 | `POST /api/bootstrap/{key}` | first-contact cleaning on demand |
+| `GET /api/episodes/{key}` | the asset's case history: ledgered faults AND absorbed changes, plus the open episode |
+| `GET /api/report` | fleet report (markdown), worst-first |
 
 ## Evidence lane (regression evidence, never tuning)
 

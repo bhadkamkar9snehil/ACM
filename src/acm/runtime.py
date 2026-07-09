@@ -562,7 +562,16 @@ class Runtime:
         ]
         rank = {s: i for i, s in enumerate(worst_order)}
         rows = sorted(
-            (v.to_dict() for v in self.verdicts.values()),
+            (
+                {
+                    **v.to_dict(),
+                    # a live-fed asset must be recognizable in the fleet
+                    # view - a silent buffer otherwise looks exactly like
+                    # a healthy quiet asset (#90 lesson)
+                    "live": key in self.live_sources,
+                }
+                for key, v in self.verdicts.items()
+            ),
             key=lambda d: (rank.get(d["state"], 99), -d["evidence"]),
         )
         immune_sick = sum(

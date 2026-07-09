@@ -73,6 +73,7 @@ th{color:var(--mut);font-weight:normal}
  <h1>ACM</h1><span class="meta" id="meta"></span>
  <span class="spacer"></span>
  <span class="meta" id="immune-meta"></span>
+ <button onclick="window.open('/api/report','_blank')">Report</button>
  <button onclick="act('tick','', 'Scoring all assets')">Tick all</button>
 </header>
 <div id="bar">
@@ -89,6 +90,12 @@ th{color:var(--mut);font-weight:normal}
 let FLEET=null, SEL=null, FILTER=null, HEALTH={};
 const $=(s)=>document.querySelector(s);
 const esc=encodeURIComponent;
+function stale(at){
+ if(!at)return '';
+ const t=Date.parse(String(at).replace(' ','T'));
+ if(isNaN(t))return '';
+ const h=(Date.now()-t)/3.6e6;
+ return h>48?` <span style="color:var(--warn)">(stale ${Math.round(h)}h - asset clock may lag wall clock)</span>`:'';}
 function toast(m){const d=document.createElement('div');d.textContent=m;
  $('#toast').appendChild(d);setTimeout(()=>d.remove(),4200);}
 async function jget(u){const r=await fetch(u);if(!r.ok)throw new Error(u+' '+r.status);return r.json();}
@@ -132,7 +139,7 @@ function render(){
  const rows=FLEET.rows.filter(v=>(!FILTER||v.state===FILTER)&&v.asset_key.toLowerCase().includes(q));
  $('#list').innerHTML=rows.map(v=>`
   <div class="row ${SEL===v.asset_key?'sel':''}" onclick="select('${esc(v.asset_key)}')">
-   <span class="key">${v.asset_key}</span>
+   <span class="key">${v.asset_key}${v.live?' <span class="pill" style="font-size:10px" title="live buffer attached">LIVE</span>':''}</span>
    <span class="pill st-${v.state}">${v.state}</span>
    <span class="sub">
     <span>ev ${v.evidence}</span>
@@ -151,9 +158,10 @@ function domBar(name,d){
   <span class="bar"><i style="width:${pct}%;background:${col}"></i></span>
   <span>${d.evidence}</span></div>`;}
 async function detail(key){
- const [v,narr,doms,health]=await Promise.all([
+ const [v,narr,doms,health,eph]=await Promise.all([
   jget('/api/asset/'+esc(key)),jget('/api/narrative/'+esc(key)),
-  jget('/api/domains/'+esc(key)),jget('/api/health/'+esc(key))]);
+  jget('/api/domains/'+esc(key)),jget('/api/health/'+esc(key)),
+  jget('/api/episodes/'+esc(key))]);
  HEALTH[key]=health.series;
  let immune=null;try{immune=await jget('/api/immune/'+esc(key));}catch(e){}
  const t=v.evidence_trail||{},anat=t.anatomy,hz=t.horizon,tm=t.trajectory_match;
@@ -162,6 +170,8 @@ async function detail(key){
   <h2>${v.asset_key}</h2>
   <span class="pill st-${v.state}">${v.state}</span>
   <span class="muted">evidence ${v.evidence} | confidence ${v.confidence} | ${v.model_epoch}</span>
+  <span class="muted" title="verdict timestamp (frozen contract field: at)">at ${v.at||'-'}${stale(v.at)}</span>
+  ${(FLEET&&(FLEET.rows.find(r=>r.asset_key===v.asset_key)||{}).live)?'<span class="pill" title="live buffer attached">LIVE</span>':''}
   <span class="spacer" style="flex:1"></span>
   <button onclick="act('tick','${esc(key)}','Scoring')">Score now</button>
   <button onclick="act('immune-pass','${esc(key)}','Immune pass (slow)')">Immune pass</button>
@@ -178,6 +188,22 @@ async function detail(key){
    <b>scored rows</b><span>${(v.coverage||{}).scored_rows??'-'}</span>
    <b>attribution</b><span>${(v.attribution||[]).join(', ')||'-'}</span>
    <b>falsifiable by</b><span>${v.falsifiable_by}</span></div></div>
+  <div class="card"><h3>Evidence trail</h3><div class="kv">
+   ${t.reason?`<b>insufficient because</b><span>${t.reason}</span>`:''}
+   ${t.shape?`<b>surprise shape</b><span>${t.shape}</span>`:''}
+   ${t.novelty!==undefined?`<b>novelty</b><span>${t.novelty}</span>`:''}
+   ${t.concentration!==undefined?`<b>attribution concentration</b><span>${t.concentration} ${t.concentration<0.4?'(coordinated move)':'(channel-local)'}</span>`:''}
+   ${eph.open_since?`<b>episode open since</b><span>${eph.open_since}</span>`:''}
+   ${t.signature_match?`<b>signature match</b><span>episode ${t.signature_match.episode} (confidence ${t.signature_match.confidence})</span>`:''}
+   ${!t.reason&&!t.shape&&!eph.open_since?'<b>state</b><span class="muted">no active episode - nothing accumulating</span>':''}
+  </div></div>
+  ${eph.episodes.length?`<div class="card wide"><h3>Episode history (the ledger - absorbed changes included)</h3>
+   <table><tr><th>state</th><th>start</th><th>end</th><th>channels</th><th>shape</th><th>peak evidence</th></tr>
+   ${eph.episodes.map(e=>`<tr><td><span class="pill st-${e.state==='alarm'?'alarm':'change-not-fault'}">${e.state}</span></td>
+    <td>${e.start}</td><td>${e.end||'open'}</td>
+    <td>${(e.channels||[]).slice(0,4).join(', ')||(e.source||'-')}</td>
+    <td>${e.shape||'-'}</td><td>${e.peak_evidence??'-'}</td></tr>`).join('')}
+   </table></div>`:''}
   <div class="card wide"><h3>Health index trajectory (windowed mean surprise)</h3>
    <canvas id="hchart"></canvas></div>
   ${anat?`<div class="card"><h3>Anatomy (origin highlighted)</h3>
