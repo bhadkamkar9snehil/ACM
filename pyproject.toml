@@ -11,6 +11,8 @@ dependencies = [
     # Windows ships no IANA tz database; polars timezone ops need it there.
     "tzdata>=2024.1; sys_platform == 'win32'",
     "uvicorn>=0.50.0",
+    # WebSocket protocol support for the real-time UI stream (/api/ws)
+    "websockets>=13.0",
 ]
 
 [dependency-groups]

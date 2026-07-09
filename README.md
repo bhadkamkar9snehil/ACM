@@ -182,8 +182,16 @@ channels - the GPU box is the intended home.)
 
 `python -m acm.service` is the whole deployment: FastAPI + a
 self-ticking loop (guarded - a failing tick is logged and retried, the
-loop never dies silently) + a zero-build vanilla-JS UI (one HTML file,
-no bundler - deliberate, for air-gapped plants). Live sources attach
+loop never dies silently) + a zero-build UI (one HTML file, no bundler,
+Apache ECharts vendored and served locally - deliberate, for air-gapped
+plants). The UI is REAL-TIME: a WebSocket (`/api/ws`) pushes the fleet
+state after every tick and every action, with automatic reconnect and a
+polling fallback; renders are skipped when nothing changed. Fleet
+dashboard (state donut, worst-first evidence bars, confidence-vs-
+evidence scatter - click a dot to open the asset) plus per-asset charts:
+health-index trajectory with zoom, evidence-domain bars against the
+alarm line, coverage gauge, anatomy organ-surprise bars, failure-time
+distribution, episode timeline over real time, and immune floors. Live sources attach
 with `--live "asset/key=buffer.db"` (repeatable): any bridge that
 writes the SQLite buffer shape `(ts, payload_json)` feeds the store on
 every tick.

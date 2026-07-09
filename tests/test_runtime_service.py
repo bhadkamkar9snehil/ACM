@@ -473,3 +473,21 @@ def test_episodes_report_and_live_flag_endpoints(runtime, tmp_path):
     page = client.get("/").text
     assert "Episode history" in page and "/api/report" in page
     assert "Evidence trail" in page
+
+
+def test_websocket_stream_and_vendored_echarts(runtime):
+    """Real-time UI: a fleet snapshot arrives on connect and after a
+    tick-triggering action; ECharts is served locally (air-gapped rule -
+    never a CDN)."""
+    client = TestClient(create_app(runtime))
+    with client.websocket_connect("/api/ws") as ws:
+        snap = ws.receive_json()
+        assert snap["type"] == "fleet" and snap["data"]["assets"] == 3
+        client.post("/api/tick")  # action -> push
+        pushed = ws.receive_json()
+        assert pushed["type"] == "fleet"
+    r = client.get("/vendor/echarts.min.js")
+    assert r.status_code == 200 and "Apache" in r.text[:300]
+    assert client.get("/vendor/../pyproject.toml").status_code in (404, 400)
+    page = client.get("/").text
+    assert "/vendor/echarts.min.js" in page and "/api/ws" in page
