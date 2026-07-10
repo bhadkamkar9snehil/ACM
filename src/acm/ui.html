@@ -57,17 +57,17 @@ button:disabled{opacity:.4;cursor:wait}
 #kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;
  padding:14px 24px 0;background:var(--bg2)}
 .kpi{background:var(--bg);border:1px solid var(--line);border-radius:8px;
- padding:10px 14px;box-shadow:var(--shadow)}
+ padding:7px 14px;box-shadow:var(--shadow)}
 :root[data-theme="light"] .kpi{background:var(--bg2)}
-.kpi b{display:block;font-size:10.5px;letter-spacing:1.5px;color:var(--mut);
- text-transform:uppercase;margin-bottom:2px;font-weight:normal}
-.kpi span{font-size:21px;font-weight:bold;line-height:1.3}
+.kpi b{display:block;font-size:10px;letter-spacing:1.5px;color:var(--mut);
+ text-transform:uppercase;margin-bottom:1px;font-weight:normal}
+.kpi span{font-size:19px;font-weight:bold;line-height:1.25}
 .kpi small{color:var(--mut);font-size:11px;margin-left:6px}
 .kpi.bad span{color:var(--bad)}.kpi.warn span{color:var(--warn)}
 .kpi.ok span{color:var(--ok)}.kpi.acc span{color:var(--acc)}
 #dash{display:grid;grid-template-columns:300px 1.2fr 1fr;gap:14px;padding:14px 24px;
  border-bottom:1px solid var(--line);background:var(--bg2)}
-#dash .dchart{height:190px;background:var(--bg);border:1px solid var(--line);border-radius:8px;
+#dash .dchart{height:158px;background:var(--bg);border:1px solid var(--line);border-radius:8px;
  box-shadow:var(--shadow)}
 :root[data-theme="light"] #dash .dchart{background:var(--bg2)}
 #bar{display:flex;gap:12px;align-items:center;padding:10px 24px;border-bottom:1px solid var(--line);flex-wrap:wrap}
@@ -75,7 +75,7 @@ button:disabled{opacity:.4;cursor:wait}
  border:1px solid var(--line);border-radius:6px;padding:6px 12px;width:260px}
 #pills{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 main{display:grid;grid-template-columns:minmax(380px,30%) 1fr;min-height:0}
-#act{height:170px;background:var(--bg2);
+#act{height:148px;background:var(--bg2);
  border-top:1px solid var(--line);display:flex;flex-direction:column;z-index:5}
 #act.min{height:28px}
 #act-hdr{display:flex;gap:12px;align-items:center;padding:5px 24px;font-size:11px;
@@ -251,13 +251,13 @@ function dashboard(){
     fontFamily:'Consolas,Menlo,monospace',align:'center'}}]
    :[{type:'text',left:'center',top:'middle',
    style:{text:'no assets yet',fill:'#5b6b7d',fontSize:12,fontFamily:'Consolas,Menlo,monospace'}}],
-  series:[{type:'pie',radius:['46%','72%'],center:['50%','58%'],
-   label:{color:CH.text,fontSize:10,formatter:'{b}: {c}'},
+  series:[{type:'pie',radius:['52%','78%'],center:['50%','58%'],
+   label:{show:false},emphasis:{label:{show:false}},
    itemStyle:{borderColor:CH.border,borderWidth:2},
    data:Object.entries(counts).map(([s,n])=>({name:s,value:n,itemStyle:{color:SC[s]||'#888'}}))}]});
  const top=rows.slice(0,12);
  ec('d-evidence',{title:{text:'evidence - worst first (alarm at 1.0)',left:8,top:6,textStyle:{fontSize:11,color:CH.axis}},
-  grid:{left:8,right:20,top:30,bottom:6,containLabel:true},
+  grid:{left:8,right:52,top:30,bottom:6,containLabel:true},
   tooltip:{trigger:'axis',axisPointer:{type:'shadow'}},
   xAxis:{type:'value',axisLabel:{color:CH.axis,fontSize:10},splitLine:{lineStyle:{color:CH.grid}}},
   yAxis:{type:'category',inverse:true,data:top.map(r=>r.asset_key),
@@ -309,7 +309,8 @@ function render(){
  $('#meta').innerHTML=`${FLEET.assets} assets | tier ${FLEET.tier}`+
   (FLEET.scorer?` | ${degraded?`<span style="color:var(--bad);font-weight:bold" title="tier implies ${tierScorer[FLEET.tier]} but the service fell back">${FLEET.scorer} (DEGRADED)</span>`:FLEET.scorer}`:'')+
   ` | alpha=1/asset-year`;
- $('#immune-meta').textContent=`immune: ${FLEET.immune.checked} checked, ${FLEET.immune.sick} sick`;
+ $('#immune-meta').innerHTML=`immune: ${FLEET.immune.checked} checked, `+
+  (FLEET.immune.sick?`<span style="color:var(--bad);font-weight:bold">${FLEET.immune.sick} sick</span>`:'0 sick');
  renderKpis();
  pillbar(FLEET.counts);
  dashboard();

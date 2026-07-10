@@ -194,63 +194,103 @@ class TorchWorldModel:
             for p in (w1, bb1, w2, bb2):
                 p.requires_grad_(True)
             opt = torch.optim.Adam((w1, bb1, w2, bb2), lr=2e-3)
+            mask3_full = mask3
 
-            def forward(xb, a=w1, b=bb1, c=w2, e=bb2, m=mask3):
-                h = gelu(torch.einsum("nf,gfh->gnh", xb, a * m) + b)
-                return torch.einsum("gnh,ghq->gnq", h, c) + e
+            def forward(xb, W, m):
+                h = gelu(torch.einsum("nf,gfh->gnh", xb, W[0] * m) + W[1])
+                return torch.einsum("gnh,ghq->gnq", h, W[2]) + W[3]
 
-            def eval_val(*weights):
+            def eval_chunked(W, m, targets):
                 """Chunked held-out eval: bounds activation memory to
                 EVAL_CHUNK rows regardless of validation size."""
                 tot, seen = None, 0
                 with torch.no_grad():
                     for a in range(0, len(xv), EVAL_CHUNK):
-                        xb, yb = xv[a : a + EVAL_CHUNK], yv_g[a : a + EVAL_CHUNK]
+                        xb = xv[a : a + EVAL_CHUNK]
                         part = pinball_pc(
-                            forward(xb, *weights) if weights else forward(xb),
-                            yb,
+                            forward(xb, W, m), targets[a : a + EVAL_CHUNK]
                         ) * len(xb)
                         tot = part if tot is None else tot + part
                         seen += len(xb)
                 return (tot / seen).cpu()
 
+            # live[i] = original group row of the i-th row still training.
+            # Early-stopped channels are COMPACTED out of the tensors so
+            # a group where 90% converged stops paying 100% of the FLOPs
+            # (their final weights are already frozen in best_w).
+            live = list(range(g))
+            yt_live, yv_live = yt_g, yv_g
             best = torch.full((g,), float("inf"))
             patience = np.full(g, PATIENCE)
             active = np.ones(g, dtype=bool)
-            best_w = None
+            best_w = [t.detach().clone() for t in (w1, bb1, w2, bb2)]
             for epoch in range(MAX_EPOCHS):
                 if on_progress is not None and epoch % 20 == 0:
                     on_progress(gi * MAX_EPOCHS + epoch,
                                 n_groups * MAX_EPOCHS)
-                act = torch.tensor(active, device=dev, dtype=torch.float32)
+                W = (w1, bb1, w2, bb2)
+                act = torch.tensor(active[live], device=dev,
+                                   dtype=torch.float32)
                 perm = torch.randperm(len(xt), device=dev)
                 for a in range(0, len(xt), BATCH):
                     idx = perm[a : a + BATCH]
                     opt.zero_grad()
-                    losses = pinball_pc(forward(xt[idx]), yt_g[idx])
+                    losses = pinball_pc(forward(xt[idx], W, mask3),
+                                        yt_live[idx])
                     (losses * act).sum().backward()
                     opt.step()
-                val = eval_val()
-                improved = (val < best - 1e-5).numpy() & active
-                if best_w is None:
-                    best_w = [t.detach().clone()
-                              for t in (w1, bb1, w2, bb2)]
-                elif improved.any():
-                    imp = torch.tensor(improved, device=dev)
-                    for bw, cur in zip(best_w, (w1, bb1, w2, bb2)):
-                        bw[imp] = cur.detach()[imp]
-                best = torch.where(torch.tensor(improved), val, best)
-                patience[improved] = PATIENCE
-                patience[active & ~improved] -= 1
-                active = active & (patience > 0)
+                val_live = eval_chunked(W, mask3, yv_live)
+                lv = np.asarray(live)
+                improved_l = (val_live.numpy() < best.numpy()[lv] - 1e-5) \
+                    & active[lv]
+                if improved_l.any():
+                    imp_l = torch.tensor(improved_l, device=dev)
+                    imp_g = torch.tensor(lv[improved_l])
+                    for bw, cur in zip(best_w, W):
+                        bw[imp_g] = cur.detach()[imp_l]
+                    best[imp_g] = val_live[torch.tensor(improved_l)]
+                patience[lv[improved_l]] = PATIENCE
+                stalled = lv[active[lv] & ~improved_l]
+                patience[stalled] -= 1
+                active[stalled] = patience[stalled] > 0
                 if not active.any():
                     break
+                # compact when enough channels have stopped to matter
+                dead_l = [i for i, o in enumerate(live) if not active[o]]
+                if len(dead_l) >= max(8, len(live) // 4):
+                    keep_l = [i for i, o in enumerate(live)
+                              if active[o]]
+                    kt = torch.tensor(keep_l, device=dev)
+                    new_params, states = [], []
+                    for p in (w1, bb1, w2, bb2):
+                        st = opt.state.get(p, {})
+                        states.append({
+                            k: (v[kt].clone()
+                                if torch.is_tensor(v) and v.dim()
+                                and v.shape[0] == p.shape[0] else v)
+                            for k, v in st.items()
+                        })
+                        new_params.append(
+                            p.detach()[kt].clone().requires_grad_(True)
+                        )
+                    w1, bb1, w2, bb2 = new_params
+                    # Adam moments move WITH the surviving channels, so
+                    # their trajectory is identical to the uncompacted run
+                    opt = torch.optim.Adam((w1, bb1, w2, bb2), lr=2e-3)
+                    for p, st in zip(new_params, states):
+                        if st:
+                            opt.state[p] = st
+                    mask3 = mask3[kt]
+                    ktc = torch.tensor(keep_l, device=dev)
+                    yt_live = yt_live[:, ktc]
+                    yv_live = yv_live[:, ktc]
+                    live = [live[i] for i in keep_l]
 
             with torch.no_grad():
                 for a in range(0, len(xv), EVAL_CHUNK):
                     xb = xv[a : a + EVAL_CHUNK]
                     val_preds[a : a + EVAL_CHUNK, js] = (
-                        forward(xb, *best_w)[:, :, 1]
+                        forward(xb, best_w, mask3_full)[:, :, 1]
                         .T.to("cpu", torch.float64).numpy()
                     )
 
@@ -259,7 +299,7 @@ class TorchWorldModel:
             # cross-machine loading are untouched (nets live on CPU - a
             # tick scores a few thousand rows, and a CPU net loads
             # anywhere, including a machine without a GPU)
-            bw1 = (best_w[0] * mask3).cpu()
+            bw1 = (best_w[0] * mask3_full).cpu()
             bbb1, bw2, bbb2 = [t.cpu() for t in best_w[1:]]
             for i, j in enumerate(js):
                 keep = [
@@ -281,7 +321,7 @@ class TorchWorldModel:
                 net.eval()
                 self._nets[j] = net
             # free this group's training state before the next allocates
-            del w1, bb1, w2, bb2, best_w, opt, mask, mask3
+            del w1, bb1, w2, bb2, best_w, opt, mask, mask3, mask3_full
             if dev.type == "cuda":
                 torch.cuda.empty_cache()
 
