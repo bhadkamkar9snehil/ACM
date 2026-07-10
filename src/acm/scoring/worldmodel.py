@@ -40,11 +40,50 @@ PATIENCE = 20
 BATCH = 256
 PIT_GRID_K = 257
 
+EVAL_CHUNK = 4096  # rows per held-out eval batch (bounds activations)
+
+# optional observer called as on_progress(steps_done, steps_total) from
+# inside fit() - training takes minutes on wide assets and MUST be
+# observable from the outside (set by the runtime, surfaced in the
+# service activity stream)
+on_progress = None
+
+
+def _group_size(torch, dev, f_all: int, x_bytes: int) -> int:
+    """Channels per parallel training group, sized to device memory.
+
+    Per-channel training cost is dominated by the [f_all, HIDDEN] weight
+    slice times 4 (weights + grads + Adam m and v) plus the best-state
+    clone. The feature tensor is already resident, so it is subtracted
+    from the budget. Narrow assets get one group (full parallelism);
+    a 957-channel Farm C asset lands at whatever count fits - grouped
+    training is O(group) memory, not O(d^2)."""
+    per_channel = f_all * HIDDEN * 4 * 5  # w1 x (self+grad+m+v+best)
+    if dev.type == "cuda":
+        free, _total = torch.cuda.mem_get_info(dev)
+        budget = int(free * 0.6)
+    else:
+        budget = max(1_000_000_000, 4_000_000_000 - x_bytes)
+    return max(1, min(1024, budget // per_channel))
+
+
+def _device(torch):
+    """CUDA when available - the whole point of the T2-S tier. Training
+    79+ small nets sequentially on CPU leaves the probed GPU idle (found
+    live: RTX 4060 at 0% through a 10-minute onboard)."""
+    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 
 def _torch():
     try:
         import torch
 
+        # TF32 on Ampere+ tensor cores: ~2x matmul throughput at a
+        # precision (10-bit mantissa) far beyond what a quantile net
+        # trained on MAD-scaled SCADA data can even express. Off by
+        # default in torch; pure waste to leave it off here.
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
         return torch
     except ImportError as exc:  # pragma: no cover
         raise ValueError(
@@ -96,55 +135,155 @@ class TorchWorldModel:
 
         ys = z[LAG:].astype(np.float32)
         split = int(len(ys) * 0.8)
-        qs = torch.tensor(QUANTILES, dtype=torch.float32)
+        dev = _device(torch)
+        qs = torch.tensor(QUANTILES, dtype=torch.float32, device=dev)
         torch.manual_seed(0)
 
-        def pinball(pred, target):
-            err = target.unsqueeze(-1) - pred
-            return torch.maximum(qs * err, (qs - 1) * err).mean()
+        # ---- grouped-batch training: channels train in PARALLEL GROUPS
+        # sized to the device's free memory, instead of d sequential nets
+        # (kernel-launch-bound, GPU idle) or one all-channel batch (O(d^2)
+        # weight memory - a 957-channel Farm C asset would not fit in
+        # 8 GB VRAM). Group size adapts: small assets train in one group,
+        # wide assets in however many fit. Own-history exclusion is a hard
+        # input mask (masked inputs get exactly-0 gradients - equivalent
+        # to excluding them). Per-channel early stopping and best-state
+        # restore are preserved.
+        H, Q = HIDDEN, len(QUANTILES)
+        nz = z.shape[0]
+        blocks = [z[LAG:]]
+        for k in range(1, LAG + 1):
+            blocks.append(z[LAG - k : nz - k])
+        feat_all = np.concatenate(blocks, axis=1).astype(np.float32)
+        f_all = feat_all.shape[1]  # d * (LAG + 1)
 
-        self._nets = []
+        X = torch.tensor(feat_all, dtype=torch.float32, device=dev)
+        Y = torch.tensor(ys, dtype=torch.float32, device=dev)
+        xt, yt = X[:split], Y[:split]
+        xv, yv = X[split:], Y[split:]
+
+        group = _group_size(torch, dev, f_all, X.nbytes)
+        n_groups = (d + group - 1) // group
+        fan_in = (d - 1) * (LAG + 1)
+        b1sc, b2sc = fan_in**-0.5, float(H) ** -0.5
+        gelu = torch.nn.functional.gelu
+        own = torch.arange(LAG + 1, device=dev) * d
+
+        def pinball_pc(pred, target):
+            """Per-channel pinball: pred [g,n,Q], target [n,g] -> [g]."""
+            err = target.T.unsqueeze(-1) - pred
+            return torch.maximum(qs * err, (qs - 1) * err).mean(dim=(1, 2))
+
+        self._nets = [None] * d
         val_preds = np.empty((len(ys) - split, d), dtype=np.float64)
-        for j in range(d):
-            feats = self._features_for(z, j)
-            xt = torch.tensor(feats[:split], dtype=torch.float32)
-            yt = torch.tensor(ys[:split, j], dtype=torch.float32)
-            xv = torch.tensor(feats[split:], dtype=torch.float32)
-            yv = torch.tensor(ys[split:, j], dtype=torch.float32)
-            net = torch.nn.Sequential(
-                torch.nn.Linear(feats.shape[1], HIDDEN),
-                torch.nn.GELU(),
-                torch.nn.Linear(HIDDEN, len(QUANTILES)),
-            )
-            opt = torch.optim.Adam(net.parameters(), lr=2e-3)
-            best, best_state, patience = float("inf"), None, PATIENCE
-            for _epoch in range(MAX_EPOCHS):
-                net.train()
-                perm = torch.randperm(len(xt))
+        for gi in range(n_groups):
+            js = list(range(gi * group, min(d, (gi + 1) * group)))
+            g = len(js)
+            yt_g, yv_g = yt[:, js], yv[:, js]
+
+            mask = torch.ones((g, f_all), device=dev)
+            for i, j in enumerate(js):
+                mask[i, own + j] = 0.0
+            mask3 = mask.unsqueeze(-1)
+
+            # init mirrors nn.Linear defaults with the EFFECTIVE fan-in
+            # (the (d-1)*(LAG+1) unmasked inputs)
+            w1 = (torch.rand(g, f_all, H, device=dev) * 2 - 1) * b1sc
+            bb1 = (torch.rand(g, 1, H, device=dev) * 2 - 1) * b1sc
+            w2 = (torch.rand(g, H, Q, device=dev) * 2 - 1) * b2sc
+            bb2 = (torch.rand(g, 1, Q, device=dev) * 2 - 1) * b2sc
+            for p in (w1, bb1, w2, bb2):
+                p.requires_grad_(True)
+            opt = torch.optim.Adam((w1, bb1, w2, bb2), lr=2e-3)
+
+            def forward(xb, a=w1, b=bb1, c=w2, e=bb2, m=mask3):
+                h = gelu(torch.einsum("nf,gfh->gnh", xb, a * m) + b)
+                return torch.einsum("gnh,ghq->gnq", h, c) + e
+
+            def eval_val(*weights):
+                """Chunked held-out eval: bounds activation memory to
+                EVAL_CHUNK rows regardless of validation size."""
+                tot, seen = None, 0
+                with torch.no_grad():
+                    for a in range(0, len(xv), EVAL_CHUNK):
+                        xb, yb = xv[a : a + EVAL_CHUNK], yv_g[a : a + EVAL_CHUNK]
+                        part = pinball_pc(
+                            forward(xb, *weights) if weights else forward(xb),
+                            yb,
+                        ) * len(xb)
+                        tot = part if tot is None else tot + part
+                        seen += len(xb)
+                return (tot / seen).cpu()
+
+            best = torch.full((g,), float("inf"))
+            patience = np.full(g, PATIENCE)
+            active = np.ones(g, dtype=bool)
+            best_w = None
+            for epoch in range(MAX_EPOCHS):
+                if on_progress is not None and epoch % 20 == 0:
+                    on_progress(gi * MAX_EPOCHS + epoch,
+                                n_groups * MAX_EPOCHS)
+                act = torch.tensor(active, device=dev, dtype=torch.float32)
+                perm = torch.randperm(len(xt), device=dev)
                 for a in range(0, len(xt), BATCH):
                     idx = perm[a : a + BATCH]
                     opt.zero_grad()
-                    loss = pinball(net(xt[idx]), yt[idx])
-                    loss.backward()
+                    losses = pinball_pc(forward(xt[idx]), yt_g[idx])
+                    (losses * act).sum().backward()
                     opt.step()
-                net.eval()
-                with torch.no_grad():
-                    val = float(pinball(net(xv), yv))
-                if val < best - 1e-5:
-                    best, patience = val, PATIENCE
-                    best_state = {
-                        k: v.clone() for k, v in net.state_dict().items()
-                    }
-                else:
-                    patience -= 1
-                    if patience <= 0:
-                        break
-            if best_state is not None:
-                net.load_state_dict(best_state)
-            net.eval()
-            self._nets.append(net)
+                val = eval_val()
+                improved = (val < best - 1e-5).numpy() & active
+                if best_w is None:
+                    best_w = [t.detach().clone()
+                              for t in (w1, bb1, w2, bb2)]
+                elif improved.any():
+                    imp = torch.tensor(improved, device=dev)
+                    for bw, cur in zip(best_w, (w1, bb1, w2, bb2)):
+                        bw[imp] = cur.detach()[imp]
+                best = torch.where(torch.tensor(improved), val, best)
+                patience[improved] = PATIENCE
+                patience[active & ~improved] -= 1
+                active = active & (patience > 0)
+                if not active.any():
+                    break
+
             with torch.no_grad():
-                val_preds[:, j] = net(xv)[:, 1].numpy()
+                for a in range(0, len(xv), EVAL_CHUNK):
+                    xb = xv[a : a + EVAL_CHUNK]
+                    val_preds[a : a + EVAL_CHUNK, js] = (
+                        forward(xb, *best_w)[:, :, 1]
+                        .T.to("cpu", torch.float64).numpy()
+                    )
+
+            # unpack this group's weights into the same per-channel
+            # Sequential nets as before: scoring, pickling, and
+            # cross-machine loading are untouched (nets live on CPU - a
+            # tick scores a few thousand rows, and a CPU net loads
+            # anywhere, including a machine without a GPU)
+            bw1 = (best_w[0] * mask3).cpu()
+            bbb1, bw2, bbb2 = [t.cpu() for t in best_w[1:]]
+            for i, j in enumerate(js):
+                keep = [
+                    b * d + c
+                    for b in range(LAG + 1)
+                    for c in range(d)
+                    if c != j
+                ]
+                net = torch.nn.Sequential(
+                    torch.nn.Linear(fan_in, H),
+                    torch.nn.GELU(),
+                    torch.nn.Linear(H, Q),
+                )
+                with torch.no_grad():
+                    net[0].weight.copy_(bw1[i][keep, :].T)
+                    net[0].bias.copy_(bbb1[i, 0])
+                    net[2].weight.copy_(bw2[i].T)
+                    net[2].bias.copy_(bbb2[i, 0])
+                net.eval()
+                self._nets[j] = net
+            # free this group's training state before the next allocates
+            del w1, bb1, w2, bb2, best_w, opt, mask, mask3
+            if dev.type == "cuda":
+                torch.cuda.empty_cache()
 
         # residual calibration on the held-out fold (in-sample-bias law)
         resid = ys[split:] - val_preds
@@ -182,6 +321,13 @@ class TorchWorldModel:
             return np.zeros((0, len(self.channels)))
         ys = z[LAG:]
         d = len(self.channels)
+        dev = _device(torch)
+        # batched GPU inference for anything beyond a trivial tick: the
+        # per-net CPU loop rebuilds a feature matrix d times and runs d
+        # sequential forwards - a first tick over a 54k-row lifetime took
+        # ~2 minutes that way; one grouped einsum does it in seconds
+        if dev.type == "cuda" and len(ys) * d > 100_000:
+            return self._residual_z_batched(torch, dev, z, ys, d)
         pred = np.empty((len(ys), d), dtype=np.float64)
         with torch.no_grad():
             for j, net in enumerate(self._nets):
@@ -189,6 +335,53 @@ class TorchWorldModel:
                     self._features_for(z, j), dtype=torch.float32
                 )
                 pred[:, j] = net(feats)[:, 1].numpy()
+        return (ys - pred) / self.resid_scales
+
+    def _residual_z_batched(self, torch, dev, z, ys, d: int) -> np.ndarray:
+        """Grouped-einsum inference: stack the per-channel nets into
+        [d, f_all, H] weights (own-channel rows stay zero - the exact
+        mask geometry training used) and score every channel of every
+        row in one chunked GPU pass. Same weights, same math, same
+        output as the sequential loop."""
+        H = self._nets[0][0].weight.shape[0]
+        Q = self._nets[0][2].weight.shape[0]
+        nz = z.shape[0]
+        blocks = [z[LAG:]]
+        for k in range(1, LAG + 1):
+            blocks.append(z[LAG - k : nz - k])
+        feat_all = np.concatenate(blocks, axis=1).astype(np.float32)
+        f_all = feat_all.shape[1]
+
+        w1 = torch.zeros(d, f_all, H)
+        b1 = torch.empty(d, 1, H)
+        w2 = torch.empty(d, H, Q)
+        b2 = torch.empty(d, 1, Q)
+        with torch.no_grad():
+            for j, net in enumerate(self._nets):
+                keep = [
+                    b * d + c
+                    for b in range(LAG + 1)
+                    for c in range(d)
+                    if c != j
+                ]
+                w1[j, keep, :] = net[0].weight.T
+                b1[j, 0] = net[0].bias
+                w2[j] = net[2].weight.T
+                b2[j, 0] = net[2].bias
+        w1, b1, w2, b2 = (t.to(dev) for t in (w1, b1, w2, b2))
+        gelu = torch.nn.functional.gelu
+
+        pred = np.empty((len(ys), d), dtype=np.float64)
+        with torch.no_grad():
+            for a in range(0, len(feat_all), EVAL_CHUNK):
+                xb = torch.tensor(
+                    feat_all[a : a + EVAL_CHUNK], device=dev
+                )
+                h = gelu(torch.einsum("nf,dfh->dnh", xb, w1) + b1)
+                out = torch.einsum("dnh,dhq->dnq", h, w2) + b2
+                pred[a : a + EVAL_CHUNK] = (
+                    out[:, :, 1].T.to("cpu", torch.float64).numpy()
+                )
         return (ys - pred) / self.resid_scales
 
     def score(self, frame: pl.DataFrame) -> np.ndarray:

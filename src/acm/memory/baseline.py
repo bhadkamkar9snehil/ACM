@@ -63,8 +63,14 @@ class LifetimeBaseline:
         # summary is computed from ledger-masked rows, so a ledger that
         # grows later (bootstrap passes, new episodes) must invalidate the
         # cache - found while wiring the detect->mask->re-detect loop.
+        # hashlib, NEVER hash(): builtin hash is salted per process, so a
+        # hash()-keyed entry could never be found after a restart - every
+        # service start silently recomputed every period summary
         if ledger is not None:
-            lhash = f"{abs(hash(tuple(ledger.windows(asset_key, states=FAULT_STATES)))):x}"[:12]
+            import hashlib
+
+            windows = tuple(ledger.windows(asset_key, states=FAULT_STATES))
+            lhash = hashlib.sha1(repr(windows).encode()).hexdigest()[:12]
         else:
             lhash = "nl"
 

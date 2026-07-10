@@ -44,8 +44,19 @@ class Runtime:
     live_sources: dict[str, object] = field(default_factory=dict)
     _last_seen: dict[str, object] = field(default_factory=dict)
     _tick_counts: dict[str, int] = field(default_factory=dict)
+    # asset_key -> current background activity ("bootstrapping"): an asset
+    # being worked on must be visible in the fleet view, not silently absent
+    busy: dict[str, str] = field(default_factory=dict)
+    # rolling activity stream: WHAT the service is doing, step by step -
+    # a status pill says "onboarding", this says "training channel 40/81".
+    # on_activity (set by the service) pushes each event to the UI live.
+    activity: object = None
+    on_activity: object = None
 
     def __post_init__(self) -> None:
+        from collections import deque
+
+        self.activity = deque(maxlen=500)
         if self.governor is None:
             self.governor = Governor.from_probe(probe())
         self.ledger = EpisodeLedger(Path(self.data_root) / "ledger.json")
@@ -78,29 +89,197 @@ class Runtime:
 
                 return TorchWorldModel
             except ImportError:
-                pass
+                # a GPU-tier deployment silently degrading to the ridge
+                # scorer must be VISIBLE - the tier badge alone would
+                # keep claiming T2 while every asset scores at Tier 0
+                if not getattr(self, "_fallback_logged", False):
+                    self._fallback_logged = True
+                    self.log(
+                        "-", "service",
+                        f"tier {self.governor.tier} but torch is not "
+                        f"importable - FALLING BACK to "
+                        f"ConditionalSurpriseScorer for all assets",
+                    )
         from acm.scoring.surprise import ConditionalSurpriseScorer
 
         return ConditionalSurpriseScorer
 
+    def log(self, asset_key: str, kind: str, msg: str) -> None:
+        """Append one activity event and push it to any live observer.
+        kind is a short slug (onboard/bootstrap/tick/train/...) the UI
+        colors by; msg is the human-readable step."""
+        event = {
+            "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "asset_key": asset_key,
+            "kind": kind,
+            "msg": msg,
+        }
+        self.activity.append(event)
+        if self.on_activity is not None:
+            try:
+                self.on_activity(event)
+            except Exception:  # noqa: BLE001 - observer must never break work
+                pass
+
+    def _train_observer(self, asset_key: str):
+        """Progress hook for the world-model training loop - logs
+        periodically so a minutes-long fit is visibly alive."""
+
+        def hook(done: int, total: int) -> None:
+            self.log(
+                asset_key,
+                "train",
+                f"world model: epoch {done}/{total} "
+                f"(all channels batched)",
+            )
+
+        return hook
+
+    # ---------------------------------------- calibrated-monitor cache
+    # A service restart (or PC reboot) must never redo minutes of GPU
+    # training: the fitted monitor is pickled to memcache, keyed by
+    # everything that would change the fit - store content, ledger fault
+    # windows, scorer class. Any mismatch = silent recalibration.
+    def _monitor_fingerprint(self, asset_key: str, scorer_cls) -> str:
+        import hashlib
+
+        from acm.memory.ledger import FAULT_STATES
+
+        from acm import __version__ as _ver
+
+        windows = tuple(self.ledger.windows(asset_key, states=FAULT_STATES))
+        span = self.store.span(asset_key)
+        raw = (
+            self.store.row_count(asset_key),
+            str(span[1]) if span else "",
+            windows,
+            scorer_cls.__name__,
+            # code version: a monitor pickled by different code must never
+            # be trusted - AssetMonitor's structure can change between
+            # releases and unpickle would not complain
+            _ver,
+        )
+        # hashlib, NEVER hash(): builtin hash is salted per process, so a
+        # hash()-based fingerprint can never match across a restart -
+        # which is the only time this cache matters
+        return hashlib.sha1(repr(raw).encode()).hexdigest()[:16]
+
+    def _monitor_cache_path(self, asset_key: str, scorer_cls) -> Path:
+        from acm.store.raw import _safe_key
+
+        d = self.cache_root / _safe_key(asset_key)
+        d.mkdir(parents=True, exist_ok=True)
+        return d / (
+            f"monitor-{self._monitor_fingerprint(asset_key, scorer_cls)}.pkl"
+        )
+
+    def _save_monitor_cache(self, asset_key: str) -> None:
+        import pickle
+
+        em = self.monitors[asset_key]
+        try:
+            path = self._monitor_cache_path(
+                asset_key, em.monitor.scorer_cls
+            )
+            tmp = path.with_suffix(".tmp")
+            tmp.write_bytes(pickle.dumps(em.monitor))
+            tmp.replace(path)
+            # stale fingerprints of this asset are dead weight
+            for old in path.parent.glob("monitor-*.pkl"):
+                if old != path:
+                    old.unlink(missing_ok=True)
+        except Exception as exc:  # noqa: BLE001 - cache is an optimization
+            self.log(asset_key, "service",
+                     f"monitor cache save failed ({exc}) - will recalibrate "
+                     f"on next start")
+
+    def _load_monitor_cache(self, asset_key: str, scorer_cls):
+        import pickle
+
+        path = self._monitor_cache_path(asset_key, scorer_cls)
+        if not path.exists():
+            return None
+        try:
+            monitor = pickle.loads(path.read_bytes())
+            if monitor.asset_key != asset_key:
+                return None
+            return monitor
+        except Exception:  # noqa: BLE001 - a bad cache is just a miss
+            return None
+
     def onboard(self, asset_key: str) -> bool:
+        scorer_cls = self._select_scorer_cls()
+        cached = self._load_monitor_cache(asset_key, scorer_cls)
+        if cached is not None:
+            self.monitors[asset_key] = EpisodicMonitor(cached, self.ledger)
+            self._tick_counts[asset_key] = 0
+            self.log(
+                asset_key,
+                "onboard",
+                "restored calibrated monitor from cache (store and ledger "
+                "unchanged since last calibration)",
+            )
+            return True
+        self.log(
+            asset_key,
+            "onboard",
+            f"calibrating from lifetime history (scorer {scorer_cls.__name__})",
+        )
+        t0 = time.monotonic()
         em = EpisodicMonitor(
-            AssetMonitor(asset_key, scorer_cls=self._select_scorer_cls()),
+            AssetMonitor(asset_key, scorer_cls=scorer_cls),
             self.ledger,
         )
-        ok = em.monitor.calibrate_from_lifetime(
-            self.store, ledger=self.ledger, cache_root=self.cache_root
-        )
+        from acm.scoring import worldmodel as _wm
+
+        _wm.on_progress = self._train_observer(asset_key)
+        try:
+            ok = em.monitor.calibrate_from_lifetime(
+                self.store, ledger=self.ledger, cache_root=self.cache_root
+            )
+        finally:
+            _wm.on_progress = None
         self.monitors[asset_key] = em
         self._tick_counts[asset_key] = 0
         if not ok:
             self.verdicts[asset_key] = em.process(pl.DataFrame())
+        else:
+            self._save_monitor_cache(asset_key)
+        self.log(
+            asset_key,
+            "onboard",
+            f"{'calibrated' if ok else 'insufficient history'} "
+            f"in {time.monotonic() - t0:.0f}s",
+        )
         return ok
 
-    def onboard_all(self) -> dict[str, bool]:
-        return {key: self.onboard(key) for key in self.store.assets()}
+    def onboard_all(self, on_progress=None) -> dict[str, bool]:
+        keys = list(self.store.assets())
+        self.log(
+            "-", "service",
+            f"discovered {len(keys)} asset(s) in the raw store",
+        )
+        # every discovered asset is visible from the first moment: a
+        # fleet being calibrated must never render as an empty fleet
+        for key in keys:
+            if key not in self.monitors:
+                self.busy.setdefault(key, "queued")
+        if on_progress is not None:
+            on_progress()
+        out = {}
+        for key in keys:
+            self.busy[key] = "onboarding"
+            if on_progress is not None:
+                on_progress()
+            try:
+                out[key] = self.onboard(key)
+            finally:
+                self.busy.pop(key, None)
+            if on_progress is not None:
+                on_progress()
+        return out
 
-    def bootstrap_virgin(self) -> dict[str, dict]:
+    def bootstrap_virgin(self, on_progress=None) -> dict[str, dict]:
         """First-contact cleaning for every never-bootstrapped asset:
         the detect->mask->re-detect loop (H1 fix: bootstrap existed but was
         never wired into the service path - contaminated first contact
@@ -117,7 +296,15 @@ class Runtime:
             if self.ledger.windows(key):
                 self._mark_bootstrapped(key)
                 continue
-            out[key] = self.bootstrap(key)
+            self.busy[key] = "bootstrapping"
+            if on_progress is not None:
+                on_progress()
+            try:
+                out[key] = self.bootstrap(key)
+            finally:
+                self.busy.pop(key, None)
+                if on_progress is not None:
+                    on_progress()
         return out
 
     def _mark_bootstrapped(self, asset_key: str) -> None:
@@ -138,6 +325,9 @@ class Runtime:
         ok = em.reanchor(self.store, v, cache_root=self.cache_root)
         if ok:
             self.previous_verdicts[asset_key] = v
+            self.log(asset_key, "service",
+                     "re-anchored: episode closed, baseline recalibrated")
+            self._save_monitor_cache(asset_key)
         return ok
 
     def health_series(self, asset_key: str) -> list[float]:
@@ -198,6 +388,18 @@ class Runtime:
             if asset_key in self.verdicts:
                 self.previous_verdicts[asset_key] = self.verdicts[asset_key]
             self.verdicts[asset_key] = verdict
+            prev = self.previous_verdicts.get(asset_key)
+            self.log(
+                asset_key,
+                "tick",
+                f"scored {frame.height} new rows -> {verdict.state} "
+                f"(evidence {verdict.evidence:.2f})"
+                + (
+                    f" [was {prev.state}]"
+                    if prev is not None and prev.state != verdict.state
+                    else ""
+                ),
+            )
             if self._change_ripe_for_absorption(em, verdict):
                 # governed auto-absorption (#89): the verdict's own
                 # re-baseline proposal, executed - unattended operation
@@ -211,6 +413,11 @@ class Runtime:
                     cache_root=self.cache_root,
                 ):
                     self.previous_verdicts[asset_key] = verdict
+                    self.log(
+                        asset_key, "service",
+                        "change-not-fault absorbed: baseline re-anchored",
+                    )
+                    self._save_monitor_cache(asset_key)
         self._tick_counts[asset_key] += 1
         stagger = hash(asset_key) % REBUILD_EVERY_TICKS
         if (
@@ -219,9 +426,12 @@ class Runtime:
             # governed rebuild: never while an episode is open (the
             # definition of normal does not move during accumulating
             # evidence of degradation)
+            self.log(asset_key, "service",
+                     "scheduled rebuild: recalibrating from lifetime")
             em.monitor.calibrate_from_lifetime(
                 self.store, ledger=self.ledger, cache_root=self.cache_root
             )
+            self._save_monitor_cache(asset_key)
         stagger_i = (hash(asset_key) // 7) % IMMUNE_EVERY_TICKS
         if (self._tick_counts[asset_key] + stagger_i) % IMMUNE_EVERY_TICKS == 0:
             self.immune_pass(asset_key)
@@ -250,9 +460,17 @@ class Runtime:
 
     def tick_all(self) -> int:
         moved = 0
+        t0 = time.monotonic()
         for key in list(self.monitors):
             if self.tick(key) is not None:
                 moved += 1
+        # heartbeat: a pass where nothing had new data is still a pass -
+        # a silent loop is indistinguishable from a dead one
+        self.log(
+            "-", "tick",
+            f"fleet pass: {moved}/{len(self.monitors)} asset(s) had new "
+            f"data ({time.monotonic() - t0:.1f}s)",
+        )
         return moved
 
     # -------------------------------------------------------- bootstrap
@@ -311,13 +529,32 @@ class Runtime:
         """
         em = self.monitors[asset_key]
         history = self.store.read(asset_key)
+        self.log(
+            asset_key,
+            "bootstrap",
+            f"first contact: detect->mask->re-detect over {history.height} "
+            f"rows (max {max_iters} passes)",
+        )
         passes = []
         for it in range(max_iters):
-            ok = em.monitor.calibrate_from_lifetime(
-                self.store, ledger=self.ledger, cache_root=self.cache_root
+            self.log(
+                asset_key,
+                "bootstrap",
+                f"pass {it + 1}: recalibrating on ledger-masked lifetime",
             )
+            from acm.scoring import worldmodel as _wm
+
+            _wm.on_progress = self._train_observer(asset_key)
+            try:
+                ok = em.monitor.calibrate_from_lifetime(
+                    self.store, ledger=self.ledger, cache_root=self.cache_root
+                )
+            finally:
+                _wm.on_progress = None
             if not ok:
                 passes.append({"pass": it + 1, "status": "insufficient"})
+                self.log(asset_key, "bootstrap",
+                         f"pass {it + 1}: insufficient history - stopping")
                 break
             em.open_episode_start = ""
             em._episode_scores = []
@@ -330,7 +567,15 @@ class Runtime:
             unexplained = self.ledger.mask(asset_key, history)
             if unexplained.is_empty():
                 passes.append({"pass": it + 1, "new_episodes": 0})
+                self.log(asset_key, "bootstrap",
+                         f"pass {it + 1}: whole life explained - converged")
                 break
+            self.log(
+                asset_key,
+                "bootstrap",
+                f"pass {it + 1}: contamination scan + e-process replay of "
+                f"{unexplained.height} unexplained rows",
+            )
 
             # DETECT part 1 - contamination scan of the score trace
             # (catches faults sitting inside the calibration reference,
@@ -358,6 +603,13 @@ class Runtime:
             # DETECT part 2 - e-process replay of the unexplained life
             last_verdict = None
             for chunk_start in range(0, unexplained.height, 4000):
+                if chunk_start and chunk_start % 20000 == 0:
+                    self.log(
+                        asset_key,
+                        "bootstrap",
+                        f"pass {it + 1}: replayed "
+                        f"{chunk_start}/{unexplained.height} rows",
+                    )
                 chunk = unexplained.slice(chunk_start, 4000)
                 v = em.process(chunk)
                 if v.state in (
@@ -376,6 +628,12 @@ class Runtime:
                             cache_root=self.cache_root)
             found = len(self.ledger.episodes) - episodes_before
             passes.append({"pass": it + 1, "new_episodes": found})
+            self.log(
+                asset_key,
+                "bootstrap",
+                f"pass {it + 1} done: {found} new episode(s) ledgered"
+                + ("" if found else " - converged"),
+            )
             if found == 0:
                 break
         # leave the monitor calibrated on the final masked baseline; a
@@ -427,6 +685,17 @@ class Runtime:
             else None
         )
         self._mark_bootstrapped(asset_key)
+        if final_ok:
+            # the ledger grew during bootstrap, so the pre-bootstrap cache
+            # fingerprint is stale - persist the final calibrated monitor
+            self._save_monitor_cache(asset_key)
+        self.log(
+            asset_key,
+            "bootstrap",
+            f"first contact complete: {len(passes)} pass(es), "
+            f"{sum(p.get('new_episodes', 0) for p in passes)} episode(s), "
+            f"final calibration {'ok' if final_ok else 'FAILED'}",
+        )
         return {
             "asset": asset_key,
             "passes": passes,
@@ -552,6 +821,21 @@ class Runtime:
         counts: dict[str, int] = {}
         for v in self.verdicts.values():
             counts[v.state] = counts.get(v.state, 0) + 1
+        # onboarded assets with no verdict yet: background work in progress.
+        # They MUST appear in the fleet view - an invisible asset looks
+        # exactly like a missing one (same lesson as the live-buffer pill)
+        pending = {
+            key: self.busy.get(key, "queued")
+            for key in self.monitors
+            if key not in self.verdicts
+        }
+        # assets still being onboarded have no monitor yet - they are
+        # visible via the busy map alone
+        for key, state in self.busy.items():
+            if key not in self.monitors:
+                pending[key] = state
+        for state in pending.values():
+            counts[state] = counts.get(state, 0) + 1
         worst_order = [
             V.STATE_ESCALATING,
             V.STATE_ALARM,
@@ -574,13 +858,28 @@ class Runtime:
             ),
             key=lambda d: (rank.get(d["state"], 99), -d["evidence"]),
         )
+        rows += [
+            {
+                "asset_key": key,
+                "state": state,
+                "evidence": 0.0,
+                "confidence": 0.0,
+                "at": None,
+                "live": key in self.live_sources,
+            }
+            for key, state in sorted(pending.items())
+        ]
         immune_sick = sum(
             1 for r in self.immune_results.values() if r.get("sick")
         )
         return {
-            "assets": len(self.monitors),
+            "assets": len(set(self.monitors) | set(self.busy)),
             "counts": counts,
             "tier": self.governor.tier,
+            # the SCORER ACTUALLY IN USE, not what the tier implies - a
+            # torch import failure at T2 silently degrades to the ridge
+            # scorer, and that mismatch must be visible in the UI
+            "scorer": self._select_scorer_cls().__name__,
             "immune": {
                 "checked": len(self.immune_results),
                 "sick": immune_sick,

@@ -53,11 +53,17 @@ class _WsHub:
 
 
 def create_app(
-    runtime: Runtime, tick_seconds: float | None = None
+    runtime: Runtime, tick_seconds: float | None = None,
+    deferred_setup=None,
 ) -> FastAPI:
     """tick_seconds=None disables the built-in loop (tests drive ticks
     explicitly); any positive value makes the service self-ticking -
-    implement and forget."""
+    implement and forget.
+
+    deferred_setup: optional callable run in the loop BEFORE bootstrap -
+    onboarding deep histories takes minutes and must never keep the
+    port unbound (the browser sees connection-refused, which looks like
+    a dead service, not a busy one)."""
 
     hub = _WsHub()
 
@@ -84,8 +90,40 @@ def create_app(
                 # loop is visible nowhere.
                 import traceback
 
+                # background work runs in worker threads; progress pushes
+                # hop back to the event loop so the UI always shows WHICH
+                # asset is being worked on instead of an empty fleet
+                ev_loop = asyncio.get_running_loop()
+
+                def _progress() -> None:
+                    asyncio.run_coroutine_threadsafe(push_fleet(), ev_loop)
+
+                # live activity stream: every runtime.log() event lands in
+                # connected UIs immediately, whatever thread produced it
+                def _push_activity(event: dict) -> None:
+                    if hub.clients:
+                        asyncio.run_coroutine_threadsafe(
+                            hub.broadcast(
+                                {"type": "activity", "data": event}
+                            ),
+                            ev_loop,
+                        )
+
+                runtime.on_activity = _push_activity
+
+                if deferred_setup is not None:
+                    try:
+                        await asyncio.to_thread(deferred_setup, _progress)
+                        await push_fleet()
+                    except Exception:  # noqa: BLE001
+                        print(
+                            "[acm] deferred setup failed:\n"
+                            + traceback.format_exc()
+                        )
                 try:
-                    await asyncio.to_thread(runtime.bootstrap_virgin)
+                    await asyncio.to_thread(
+                        runtime.bootstrap_virgin, on_progress=_progress
+                    )
                 except Exception:  # noqa: BLE001
                     print("[acm] bootstrap failed:\n" + traceback.format_exc())
                 await push_fleet()
@@ -111,6 +149,13 @@ def create_app(
     @app.get("/api/assets")
     def assets_view() -> JSONResponse:
         return JSONResponse(runtime.summary())
+
+    @app.get("/api/activity")
+    def activity_view() -> JSONResponse:
+        """Rolling activity stream (last 500 events) - everything the
+        service is doing or has done, newest last. The WS pushes the
+        same events live; this endpoint backfills on page load."""
+        return JSONResponse({"events": list(runtime.activity)})
 
     @app.get("/api/asset/{asset_key:path}")
     def asset(asset_key: str) -> JSONResponse:
@@ -307,9 +352,24 @@ def main() -> None:  # pragma: no cover - manual entrypoint
     args = parser.parse_args()
     root = Path(args.root).resolve()
     runtime = Runtime(store=RawStore(root / "raw"), data_root=root)
-    runtime.onboard_all()  # fast; bootstrap + scoring run in the lifespan loop
-    attach_live_sources(runtime, args.live)
-    app = create_app(runtime, tick_seconds=args.tick_seconds)
+
+    def deferred_setup(on_progress=None) -> None:
+        # onboarding calibrates every asset from its lifetime history -
+        # minutes on deep histories - so it runs in the tick loop, after
+        # the port binds. The UI comes up instantly and watches assets
+        # appear instead of staring at connection-refused.
+        runtime.onboard_all(on_progress=on_progress)
+        attach_live_sources(runtime, args.live)
+
+    if args.tick_seconds:
+        app = create_app(
+            runtime,
+            tick_seconds=args.tick_seconds,
+            deferred_setup=deferred_setup,
+        )
+    else:  # no loop to defer into - set up synchronously
+        deferred_setup()
+        app = create_app(runtime, tick_seconds=args.tick_seconds)
     uvicorn.run(app, host="127.0.0.1", port=args.port)
 
 

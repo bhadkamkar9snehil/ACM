@@ -337,6 +337,19 @@ Mirror of the PowerShell script for Linux/macOS:
 **`step` helper**  prints `  name`, runs command, overwrites with `` (green) or `` (red) + exits.
 **`warn_step` helper**  same but prints `!` (yellow) + continues on failure.
 
+### GPU torch (Tier 2, not in default sync)
+> *Added: 2026-07-09*
+
+`torch` with CUDA is NOT part of the default `uv sync` / pip install list above. Install separately after every `uv sync`:
+```
+uv pip install torch --index-url https://download.pytorch.org/whl/cu126
+```
+
+### GitHub CLI (`gh`)
+> *Added: 2026-07-09*
+
+`gh` is installed and authenticated on the dev machine (`C:\Users\bhadk\ACM`, remote `github.com/bhadkamkar9snehil/ACM.git`) for issue/PR workflows alongside plain `git` push/pull. If a fresh shell can't find `gh` on PATH right after install, call it by full path: `C:\Program Files\GitHub CLI\gh.exe`.
+
 ---
 
 ## CARE-to-Compare Dataset
