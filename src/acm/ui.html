@@ -19,20 +19,45 @@
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%}
 body{font:14px/1.5 Consolas,Menlo,monospace;background:var(--bg);color:var(--txt);
- display:grid;grid-template-rows:auto auto auto auto minmax(0,1fr) auto;overflow:hidden}
-@media (max-width:900px){body{display:block;min-height:100%;overflow:auto}}
-header{display:flex;align-items:center;gap:18px;padding:13px 24px;
- background:var(--bg2);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5}
-header h1{font-size:18px;letter-spacing:2px}
-header .meta{color:var(--mut);font-size:12.5px}
-header .spacer{flex:1}
+ display:grid;grid-template-columns:200px minmax(0,1fr);overflow:hidden}
+
+/* ---------------------------------------------------- sidebar */
+#nav{background:var(--bg2);border-right:1px solid var(--line);display:flex;
+ flex-direction:column;padding:18px 0 14px}
+#nav .brand{font-size:20px;font-weight:bold;letter-spacing:3px;padding:0 22px 4px}
+#nav .brand small{display:block;font-size:10px;color:var(--mut);letter-spacing:1px;
+ font-weight:normal}
+#nav .navsec{margin-top:22px;flex:1}
+#nav a{display:flex;align-items:center;gap:10px;padding:11px 22px;color:var(--mut);
+ text-decoration:none;font-size:13.5px;border-left:3px solid transparent;cursor:pointer}
+#nav a:hover{color:var(--txt);background:var(--bg3)}
+#nav a.on{color:var(--txt);border-left-color:var(--acc);background:var(--bg3);font-weight:bold}
+#nav a .badge{margin-left:auto;font-size:10.5px;padding:0 7px;border-radius:8px;
+ background:var(--bad);color:#fff;font-weight:bold}
+#nav .foot{padding:0 22px;display:flex;flex-direction:column;gap:8px}
+#nav .foot .meta{color:var(--mut);font-size:11px;line-height:1.6}
+
+/* ---------------------------------------------------- main column */
+#main{display:grid;grid-template-rows:auto minmax(0,1fr);min-width:0}
+#topbar{display:flex;align-items:center;gap:16px;padding:12px 26px;
+ background:var(--bg2);border-bottom:1px solid var(--line)}
+#topbar h1{font-size:16px;letter-spacing:1px;text-transform:capitalize}
+#topbar .meta{color:var(--mut);font-size:12.5px}
+#topbar .spacer{flex:1}
 #wsdot{width:9px;height:9px;border-radius:50%;background:var(--ins);display:inline-block}
 #wsdot.on{background:var(--ok)}
 button{font:inherit;font-size:12px;color:var(--txt);background:var(--bg3);
  border:1px solid var(--line);border-radius:4px;padding:5px 12px;cursor:pointer}
-button:hover{border-color:var(--acc);color:#fff}
+button:hover{border-color:var(--acc)}
 button.danger:hover{border-color:var(--bad)}
 button:disabled{opacity:.4;cursor:wait}
+
+.page{display:none;min-height:0;overflow-y:auto}
+.page.on{display:block}
+.page.grid{display:none}
+.page.grid.on{display:grid}
+
+/* ---------------------------------------------------- shared bits */
 .pill{display:inline-block;padding:1px 9px;border-radius:9px;font-size:11px;
  border:1px solid var(--line);background:var(--bg3);cursor:pointer;white-space:nowrap}
 .pill.on{outline:1px solid var(--acc)}
@@ -54,39 +79,87 @@ button:disabled{opacity:.4;cursor:wait}
 :root[data-theme="light"] .st-bootstrapping{background:#ddebfa;color:#1b5e9e;border-color:#a9cdef}
 :root[data-theme="light"] .st-onboarding{background:#e8e3f8;color:#4f3ba8;border-color:#c8bdec}
 :root[data-theme="light"] .st-queued{background:#e9edf3;color:#5a6c80;border-color:#cfd8e2}
-#kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;
- padding:14px 24px 0;background:var(--bg2)}
-.kpi{background:var(--bg);border:1px solid var(--line);border-radius:8px;
- padding:7px 14px;box-shadow:var(--shadow)}
-:root[data-theme="light"] .kpi{background:var(--bg2)}
+.card{background:var(--bg2);border:1px solid var(--line);border-radius:8px;
+ padding:16px 18px;min-width:0;box-shadow:var(--shadow)}
+.card h3{font-size:11px;letter-spacing:1.5px;color:var(--mut);text-transform:uppercase;
+ margin-bottom:12px}
+pre{white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;
+ font-size:12.5px;line-height:1.65}
+table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:12px}
+td,th{text-align:left;padding:6px 10px;border-bottom:1px solid var(--line)}
+th{color:var(--mut);font-weight:normal;font-size:11px;letter-spacing:1px;
+ text-transform:uppercase}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 16px;font-size:12.5px}
+.kv b{color:var(--mut);font-weight:normal}
+.kv span,td,th{overflow-wrap:anywhere;word-break:break-word}
+.muted{color:var(--mut)}
+.chart{width:100%}
+
+/* ---------------------------------------------------- fleet page */
+#page-fleet{padding:20px 26px 28px}
+#kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;
+ margin-bottom:18px}
+.kpi{background:var(--bg2);border:1px solid var(--line);border-radius:8px;
+ padding:12px 16px;box-shadow:var(--shadow)}
 .kpi b{display:block;font-size:10px;letter-spacing:1.5px;color:var(--mut);
- text-transform:uppercase;margin-bottom:1px;font-weight:normal}
-.kpi span{font-size:19px;font-weight:bold;line-height:1.25}
+ text-transform:uppercase;margin-bottom:3px;font-weight:normal}
+.kpi span{font-size:23px;font-weight:bold;line-height:1.25}
 .kpi small{color:var(--mut);font-size:11px;margin-left:6px}
 .kpi.bad span{color:var(--bad)}.kpi.warn span{color:var(--warn)}
 .kpi.ok span{color:var(--ok)}.kpi.acc span{color:var(--acc)}
-#dash{display:grid;grid-template-columns:300px 1.2fr 1fr;gap:14px;padding:14px 24px;
- border-bottom:1px solid var(--line);background:var(--bg2)}
-#dash .dchart{height:158px;background:var(--bg);border:1px solid var(--line);border-radius:8px;
- box-shadow:var(--shadow)}
-:root[data-theme="light"] #dash .dchart{background:var(--bg2)}
-#bar{display:flex;gap:12px;align-items:center;padding:10px 24px;border-bottom:1px solid var(--line);flex-wrap:wrap}
-#bar input{font:inherit;font-size:12.5px;background:var(--bg3);color:var(--txt);
- border:1px solid var(--line);border-radius:6px;padding:6px 12px;width:260px}
-#pills{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-main{display:grid;grid-template-columns:minmax(380px,30%) 1fr;min-height:0}
-#act{height:148px;background:var(--bg2);
- border-top:1px solid var(--line);display:flex;flex-direction:column;z-index:5}
-#act.min{height:28px}
-#act-hdr{display:flex;gap:12px;align-items:center;padding:5px 24px;font-size:11px;
- color:var(--mut);border-bottom:1px solid var(--line);cursor:pointer;user-select:none;
- letter-spacing:1px;text-transform:uppercase}
-#act-hdr .dotlive{width:7px;height:7px;border-radius:50%;background:#37b26c;
+#fcharts{display:grid;grid-template-columns:360px minmax(0,1fr);gap:16px;margin-bottom:16px}
+#fcharts .dchart{height:280px;background:var(--bg2);border:1px solid var(--line);
+ border-radius:8px;box-shadow:var(--shadow)}
+#fcharts2{display:grid;grid-template-columns:minmax(0,1fr);gap:16px;margin-bottom:16px}
+#fcharts2 .dchart{height:250px;background:var(--bg2);border:1px solid var(--line);
+ border-radius:8px;box-shadow:var(--shadow)}
+#ftable tr{cursor:pointer}
+#ftable tbody tr:hover{background:var(--bg3)}
+
+/* ---------------------------------------------------- assets page */
+#page-assets{grid-template-columns:340px minmax(0,1fr)}
+#lcol{display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--line)}
+#lbar{padding:12px 16px;border-bottom:1px solid var(--line);display:flex;
+ flex-direction:column;gap:9px}
+#lbar input{font:inherit;font-size:12.5px;background:var(--bg3);color:var(--txt);
+ border:1px solid var(--line);border-radius:6px;padding:6px 12px;width:100%}
+#pills{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+#list{flex:1;overflow-y:auto;min-height:0}
+.row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:5px 10px;padding:12px 16px;
+ border-bottom:1px solid var(--line);cursor:pointer;border-left:3px solid transparent}
+.row:hover{background:var(--bg2)}
+.row.sel{background:var(--bg3);border-left-color:var(--acc)}
+.row .key{font-weight:bold;font-size:14px;overflow:hidden;text-overflow:ellipsis;
+ align-self:center}
+.row .sub{grid-column:1/3;display:grid;grid-template-columns:auto 1fr auto;
+ gap:10px;color:var(--mut);font-size:11px;align-items:center}
+.evbar{height:6px;background:var(--bg3);border-radius:3px;overflow:hidden;min-width:60px}
+.evbar i{display:block;height:100%;background:var(--acc)}
+.row canvas{grid-column:1/3;width:100%;height:24px}
+#detail{overflow-y:auto;overflow-x:hidden;min-width:0;display:flex;flex-direction:column}
+#dhead{padding:18px 26px 0}
+#dhead .drow{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+#dhead h2{font-size:20px;letter-spacing:0.5px}
+#dtabs{display:flex;gap:2px;padding:0 26px;border-bottom:1px solid var(--line)}
+#dtabs a{padding:9px 18px;font-size:12.5px;color:var(--mut);cursor:pointer;
+ border-bottom:2px solid transparent;text-transform:uppercase;letter-spacing:1px}
+#dtabs a:hover{color:var(--txt)}
+#dtabs a.on{color:var(--txt);border-bottom-color:var(--acc);font-weight:bold}
+.pane{display:none;padding:20px 26px 28px}
+.pane.on{display:block}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(400px,1fr));gap:16px}
+.card.wide{grid-column:1/-1}
+
+/* ---------------------------------------------------- activity page */
+#page-activity{display:none;grid-template-rows:auto minmax(0,1fr)}
+#page-activity.on{display:grid}
+#actbar{display:flex;gap:8px;align-items:center;padding:12px 26px;
+ border-bottom:1px solid var(--line);flex-wrap:wrap}
+#actbar .dotlive{width:8px;height:8px;border-radius:50%;background:#37b26c;
  animation:pulse 1.6s infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.25}}
-#act-log{flex:1;overflow-y:auto;padding:6px 24px;font-size:12px;line-height:1.75}
-#act.min #act-log{display:none}
-#act-log .k{display:inline-block;min-width:66px;font-weight:bold}
+#act-log{overflow-y:auto;padding:12px 26px;font-size:12.5px;line-height:1.9}
+#act-log .k{display:inline-block;min-width:72px;font-weight:bold}
 #act-log .k-onboard{color:#a99bf0}#act-log .k-train{color:#8a76e0}
 #act-log .k-bootstrap{color:#7ab8f0}#act-log .k-tick{color:#7fe0a8}
 #act-log .k-service{color:#e6d87a}
@@ -96,89 +169,101 @@ main{display:grid;grid-template-columns:minmax(380px,30%) 1fr;min-height:0}
 :root[data-theme="light"] #act-log .k-bootstrap{color:#1b5e9e}
 :root[data-theme="light"] #act-log .k-tick{color:#156a3d}
 :root[data-theme="light"] #act-log .k-service{color:#7a6207}
-#list{overflow-y:auto;border-right:1px solid var(--line);min-width:0}
-.row{display:grid;grid-template-columns:1fr auto;gap:6px 12px;padding:13px 20px;
- border-bottom:1px solid var(--line);cursor:pointer;border-left:3px solid transparent}
-.row:hover{background:var(--bg2)}
-.row.sel{background:var(--bg3);border-left-color:var(--acc)}
-.row .key{font-weight:bold;font-size:14.5px;overflow:hidden;text-overflow:ellipsis;
- align-self:center}
-.row .sub{grid-column:1/3;display:grid;grid-template-columns:auto 1fr auto auto;
- gap:12px;color:var(--mut);font-size:11.5px;align-items:center}
-.evbar{height:6px;background:var(--bg3);border-radius:3px;overflow:hidden;min-width:80px}
-.evbar i{display:block;height:100%;background:var(--acc)}
-#detail{overflow-y:auto;overflow-x:hidden;padding:20px 24px 28px;min-width:0}
-#detail .dhead{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:16px;
- padding-bottom:14px;border-bottom:1px solid var(--line)}
-#detail h2{font-size:19px;letter-spacing:0.5px}
-.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:16px}
-.card{background:var(--bg2);border:1px solid var(--line);border-radius:8px;padding:16px 18px;min-width:0;
- box-shadow:var(--shadow)}
-.card h3{font-size:11px;letter-spacing:1.5px;color:var(--mut);text-transform:uppercase;margin-bottom:12px}
-.card.wide{grid-column:1/-1}
-.chart{width:100%}
-pre{white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;font-size:12.5px;line-height:1.65}
-table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:12px}
-td,th{text-align:left;padding:4px 8px;border-bottom:1px solid var(--line)}
-th{color:var(--mut);font-weight:normal}
-.kv{display:grid;grid-template-columns:auto 1fr;gap:3px 14px;font-size:12.5px}
-.kv b{color:var(--mut);font-weight:normal}
-.kv span,td,th{overflow-wrap:anywhere;word-break:break-word}
-@media (max-width:1100px){#dash{grid-template-columns:1fr 1fr}}
-@media (max-width:900px){
- header{flex-wrap:wrap;gap:8px;padding:10px 16px}
- header .spacer{display:none}
- #dash{grid-template-columns:1fr;padding:8px 16px}
- #bar{padding:8px 16px}
- #bar input{width:100%}
- #pills{width:100%}
- main{grid-template-columns:1fr;height:auto}
- #list{max-height:38vh;border-right:none;border-bottom:1px solid var(--line)}
- .row{grid-template-columns:minmax(0,1fr) auto}
- .row .sub{gap:8px;flex-wrap:wrap}
- .evbar{min-width:90px}
+
+/* ---------------------------------------------------- responsive */
+@media (max-width:1100px){
+ body{grid-template-columns:64px minmax(0,1fr)}
+ #nav .brand{padding:0 8px;font-size:14px;text-align:center}
+ #nav .brand small,#nav a .lbl,#nav .foot .meta{display:none}
+ #nav a{justify-content:center;padding:12px 0}
+ #fcharts{grid-template-columns:1fr}
+ #page-assets{grid-template-columns:280px minmax(0,1fr)}}
+@media (max-width:800px){
+ body{display:block;overflow:auto}
+ #nav{flex-direction:row;align-items:center;padding:8px 12px;border-right:none;
+  border-bottom:1px solid var(--line)}
+ #nav .navsec{display:flex;margin:0;flex:1}
+ #nav a{border-left:none;border-bottom:2px solid transparent}
+ #nav a.on{border-bottom-color:var(--acc)}
+ #page-assets{display:block}
+ #lcol{border-right:none;border-bottom:1px solid var(--line);max-height:40vh}
  .cards{grid-template-columns:1fr}}
 #toast{position:fixed;bottom:18px;right:18px;display:flex;flex-direction:column;gap:6px;z-index:9}
 #toast div{background:var(--bg3);border:1px solid var(--acc);border-radius:4px;
  padding:8px 14px;font-size:12px;animation:fade 4s forwards}
 @keyframes fade{0%,80%{opacity:1}100%{opacity:0}}
-.muted{color:var(--mut)}
 </style></head><body>
-<header>
- <h1>ACM</h1><span class="meta" id="meta"></span>
- <span class="spacer"></span>
- <span id="wsdot" title="live stream"></span><span class="meta" id="wsmeta">connecting</span>
- <span class="meta" id="immune-meta"></span>
- <button onclick="toggleTheme()" title="toggle light/dark theme">theme</button>
- <button onclick="window.open('/api/report','_blank')">Report</button>
- <button onclick="act('tick','', 'Scoring all assets')">Tick all</button>
-</header>
-<div id="kpis"></div>
-<div id="dash">
- <div class="dchart" id="d-states"></div>
- <div class="dchart" id="d-evidence"></div>
- <div class="dchart" id="d-scatter"></div>
-</div>
-<div id="bar">
- <input id="q" placeholder="filter assets... ( / )">
- <span id="pills"></span>
-</div>
-<main>
- <div id="list"></div>
- <div id="detail"><p class="muted" style="padding:30px">Select an asset.</p></div>
-</main>
-<div id="act" class="">
- <div id="act-hdr" onclick="document.getElementById('act').classList.toggle('min')">
-  <span class="dotlive"></span><b>activity</b>
-  <span id="act-count"></span>
-  <span style="margin-left:auto">click to collapse/expand</span>
+
+<nav id="nav">
+ <div class="brand">ACM<small>asset condition monitor</small></div>
+ <div class="navsec">
+  <a data-p="fleet" onclick="location.hash='#/fleet'"><span>&#9632;</span><span class="lbl">Fleet</span><span class="badge" id="nb-alarm" style="display:none"></span></a>
+  <a data-p="assets" onclick="location.hash='#/assets'"><span>&#9639;</span><span class="lbl">Assets</span></a>
+  <a data-p="activity" onclick="location.hash='#/activity'"><span>&#9655;</span><span class="lbl">Activity</span></a>
  </div>
- <div id="act-log"></div>
+ <div class="foot">
+  <span class="meta" id="nav-meta"></span>
+  <button onclick="toggleTheme()" title="toggle light/dark theme">theme</button>
+  <button onclick="window.open('/api/report','_blank')">Report</button>
+ </div>
+</nav>
+
+<div id="main">
+ <div id="topbar">
+  <h1 id="pgtitle">fleet</h1>
+  <span class="meta" id="meta"></span>
+  <span class="spacer"></span>
+  <span id="wsdot" title="live stream"></span><span class="meta" id="wsmeta">connecting</span>
+  <span class="meta" id="immune-meta"></span>
+  <button onclick="act('tick','', 'Scoring all assets')">Tick all</button>
+ </div>
+
+ <div id="page-fleet" class="page">
+  <div id="kpis"></div>
+  <div id="fcharts">
+   <div class="dchart" id="d-states"></div>
+   <div class="dchart" id="d-evidence"></div>
+  </div>
+  <div id="fcharts2">
+   <div class="dchart" id="d-scatter"></div>
+  </div>
+  <div class="card" style="padding:0">
+   <table id="ftable">
+    <thead><tr><th style="width:26%">asset</th><th style="width:14%">state</th>
+     <th style="width:12%">evidence</th><th style="width:12%">confidence</th>
+     <th>last verdict</th><th style="width:16%">trend</th></tr></thead>
+    <tbody></tbody>
+   </table>
+  </div>
+ </div>
+
+ <div id="page-assets" class="page grid">
+  <div id="lcol">
+   <div id="lbar">
+    <input id="q" placeholder="filter assets... ( / )">
+    <span id="pills"></span>
+   </div>
+   <div id="list"></div>
+  </div>
+  <div id="detail"><p class="muted" style="padding:30px">Select an asset.</p></div>
+ </div>
+
+ <div id="page-activity" class="page">
+  <div id="actbar">
+   <span class="dotlive"></span><b style="font-size:12px;letter-spacing:1px">LIVE STREAM</b>
+   <span class="muted" id="act-count"></span>
+   <span style="flex:1"></span>
+   <span id="act-pills"></span>
+  </div>
+  <div id="act-log"></div>
+ </div>
 </div>
 <div id="toast"></div>
+
 <script>
 "use strict";
 let FLEET=null, SEL=null, FILTER=null, HEALTH={}, HASH='', DETAIL_AT='';
+let PAGE='fleet', DTAB='overview', DDATA=null;
 const $=(s)=>document.querySelector(s);
 const esc=encodeURIComponent;
 const SC={healthy:'#37b26c',watch:'#d8b636',alarm:'#e05252',escalating:'#ff6b6b',
@@ -204,10 +289,10 @@ function toggleTheme(){
  document.documentElement.dataset.theme=light?'light':'';
  localStorage.setItem('acm-theme',light?'light':'dark');
  reTheme();
- if(FLEET){dashboard();render();}
- if(SEL)detail(SEL,true);}
+ renderPage();
+ if(PAGE==='assets'&&SEL)detail(SEL,true);}
 function ec(id,opt){
- const el=document.getElementById(id);if(!el)return null;
+ const el=document.getElementById(id);if(!el||el.offsetParent===null&&el.clientWidth===0)return null;
  let c=CHARTS[id];
  if(!c||c.getDom()!==el){if(c)c.dispose();c=CHARTS[id]=echarts.init(el,null,{renderer:'canvas'});}
  c.setOption(Object.assign({},BASE,opt),{replaceMerge:['series','xAxis','yAxis']});
@@ -227,7 +312,7 @@ async function act(kind,key,msg){
  const url=kind==='tick'&&!key?'/api/tick':`/api/${kind}/${esc(key)}`;
  try{const r=await fetch(url,{method:'POST'});const d=await r.json();
   toast(msg+': done '+JSON.stringify(d).slice(0,90));
-  if(!WS_ON)await refresh();if(SEL)await detail(SEL,true);}
+  if(!WS_ON)await refresh();if(PAGE==='assets'&&SEL)await detail(SEL,true);}
  catch(e){toast('FAILED: '+e.message);}}
 function spark(cv,data,h){
  const w=cv.width=cv.clientWidth*2,hh=cv.height=h*2,c=cv.getContext('2d');
@@ -238,53 +323,78 @@ function spark(cv,data,h){
   i?c.lineTo(x,y):c.moveTo(x,y);});
  c.stroke();}
 
-/* ------------------------------------------------ fleet dashboard */
+/* ------------------------------------------------ routing */
+function route(){
+ const h=(location.hash||'#/fleet').replace(/^#\/?/,'');
+ const parts=h.split('/');
+ const page=['fleet','assets','activity'].includes(parts[0])?parts[0]:'fleet';
+ PAGE=page;
+ if(page==='assets'&&parts.length>1)
+  SEL=decodeURIComponent(parts.slice(1).join('/'));
+ document.querySelectorAll('.page').forEach(p=>
+  p.classList.toggle('on',p.id==='page-'+PAGE));
+ document.querySelectorAll('#nav a').forEach(a=>
+  a.classList.toggle('on',a.dataset.p===PAGE));
+ $('#pgtitle').textContent=PAGE;
+ requestAnimationFrame(()=>{
+  renderPage();
+  if(PAGE==='assets'&&SEL)detail(SEL,true);
+  if(PAGE==='activity'){const l=$('#act-log');l.scrollTop=l.scrollHeight;}});}
+addEventListener('hashchange',route);
+function select(k){location.hash='#/assets/'+k;}
+
+/* ------------------------------------------------ fleet page */
 function dashboard(){
  const counts=FLEET.counts,rows=FLEET.rows;
- ec('d-states',{title:{text:'fleet states',left:8,top:6,textStyle:{fontSize:11,color:CH.axis}},
+ ec('d-states',{title:{text:'fleet states',left:10,top:8,textStyle:{fontSize:11,color:CH.axis}},
   tooltip:{trigger:'item'},
-  graphic:Object.keys(counts).length?[{type:'text',left:'center',top:'52%',
-   style:{text:String(FLEET.assets),fill:CH.text,fontSize:26,fontWeight:'bold',
+  legend:{bottom:8,left:'center',textStyle:{color:CH.axis,fontSize:11},
+   itemWidth:10,itemHeight:10,icon:'circle'},
+  graphic:Object.keys(counts).length?[{type:'text',left:'center',top:'44%',
+   style:{text:String(FLEET.assets),fill:CH.text,fontSize:34,fontWeight:'bold',
     fontFamily:'Consolas,Menlo,monospace',align:'center'}},
-   {type:'text',left:'center',top:'67%',
-   style:{text:'assets',fill:CH.axis,fontSize:10,
+   {type:'text',left:'center',top:'56%',
+   style:{text:'assets',fill:CH.axis,fontSize:11,
     fontFamily:'Consolas,Menlo,monospace',align:'center'}}]
    :[{type:'text',left:'center',top:'middle',
    style:{text:'no assets yet',fill:'#5b6b7d',fontSize:12,fontFamily:'Consolas,Menlo,monospace'}}],
-  series:[{type:'pie',radius:['52%','78%'],center:['50%','58%'],
+  series:[{type:'pie',radius:['48%','70%'],center:['50%','50%'],
    label:{show:false},emphasis:{label:{show:false}},
    itemStyle:{borderColor:CH.border,borderWidth:2},
    data:Object.entries(counts).map(([s,n])=>({name:s,value:n,itemStyle:{color:SC[s]||'#888'}}))}]});
- const top=rows.slice(0,12);
- ec('d-evidence',{title:{text:'evidence - worst first (alarm at 1.0)',left:8,top:6,textStyle:{fontSize:11,color:CH.axis}},
-  grid:{left:8,right:52,top:30,bottom:6,containLabel:true},
+ const top=rows.slice(0,14);
+ ec('d-evidence',{title:{text:'evidence - worst first (alarm at 1.0)',left:10,top:8,textStyle:{fontSize:11,color:CH.axis}},
+  grid:{left:10,right:56,top:34,bottom:10,containLabel:true},
   tooltip:{trigger:'axis',axisPointer:{type:'shadow'}},
   xAxis:{type:'value',axisLabel:{color:CH.axis,fontSize:10},splitLine:{lineStyle:{color:CH.grid}}},
   yAxis:{type:'category',inverse:true,data:top.map(r=>r.asset_key),
-   axisLabel:{color:CH.text,fontSize:10,width:110,overflow:'truncate'}},
+   axisLabel:{color:CH.text,fontSize:11,width:130,overflow:'truncate'}},
   series:[{type:'bar',data:top.map(r=>({value:r.evidence,itemStyle:{color:SC[r.state]||'#888',borderRadius:[0,3,3,0]}})),
    label:{show:true,position:'right',color:CH.axis,fontSize:10,
     formatter:p=>p.value>=0.005?p.value.toFixed(2):''},
    markLine:{symbol:'none',lineStyle:{color:'#e05252',type:'dashed'},
     label:{color:'#e05252',formatter:'alarm'},data:[{xAxis:1}]},
-   barMaxWidth:12}]});
- const sc=ec('d-scatter',{title:{text:'confidence vs evidence (click = open)',left:8,top:6,textStyle:{fontSize:11,color:CH.axis}},
-  grid:{left:8,right:20,top:30,bottom:6,containLabel:true},
+   barMaxWidth:14}]});
+ const sc=ec('d-scatter',{title:{text:'confidence vs evidence (click a dot to open the asset)',left:10,top:8,textStyle:{fontSize:11,color:CH.axis}},
+  grid:{left:10,right:24,top:34,bottom:10,containLabel:true},
   tooltip:{formatter:p=>`${p.data[3]}<br>evidence ${p.data[1]} | confidence ${p.data[0]}`},
   xAxis:{type:'value',name:'confidence',nameTextStyle:{color:CH.axis,fontSize:10},min:0,max:1,
    axisLabel:{color:CH.axis,fontSize:10},splitLine:{lineStyle:{color:CH.grid}}},
   yAxis:{type:'log',min:0.01,axisLabel:{color:CH.axis,fontSize:10},splitLine:{lineStyle:{color:CH.grid}}},
-  series:[{type:'scatter',symbolSize:d=>8+Math.min(14,d[1]*2),
+  series:[{type:'scatter',symbolSize:d=>10+Math.min(16,d[1]*2),
    data:rows.map(r=>[r.confidence,Math.max(0.01,r.evidence),r.state,r.asset_key]),
    itemStyle:{color:p=>SC[p.data[2]]||'#888',opacity:0.85}}]});
- if(sc&&!sc.__wired){sc.__wired=true;sc.on('click',p=>{if(p.data&&p.data[3])select(esc(p.data[3]));});}}
-
-/* ------------------------------------------------ fleet list */
-function pillbar(counts){
- const order=['escalating','alarm','change-not-fault','watch','insufficient-history','healthy',
-  'bootstrapping','onboarding','queued'];
- $('#pills').innerHTML=order.filter(s=>counts[s]).map(s=>
-  `<span class="pill st-${s} ${FILTER===s?'on':''}" onclick="FILTER=FILTER==='${s}'?null:'${s}';render()">${s}: ${counts[s]}</span>`).join(' ');}
+ if(sc&&!sc.__wired){sc.__wired=true;sc.on('click',p=>{if(p.data&&p.data[3])select(esc(p.data[3]));});}
+ $('#ftable tbody').innerHTML=rows.map(r=>`
+  <tr onclick="select('${esc(r.asset_key)}')">
+   <td style="font-weight:bold">${r.asset_key}${r.live?' <span class="pill" style="font-size:10px">LIVE</span>':''}</td>
+   <td><span class="pill st-${r.state}">${r.state}</span></td>
+   <td>${r.evidence}</td><td>${r.confidence}</td>
+   <td class="muted">${r.at||'-'}</td>
+   <td><canvas data-fk="${r.asset_key}" style="width:100%;height:22px"></canvas></td>
+  </tr>`).join('');
+ rows.forEach(r=>{const cv=document.querySelector(`canvas[data-fk="${CSS.escape(r.asset_key)}"]`);
+  if(cv&&HEALTH[r.asset_key])spark(cv,HEALTH[r.asset_key].slice(-120),11);});}
 function renderKpis(){
  const c=FLEET.counts,rows=FLEET.rows;
  const alarms=(c.alarm||0)+(c.escalating||0);
@@ -301,19 +411,19 @@ function renderKpis(){
   kpi(worst&&worst.evidence>=1?'bad':(worst&&worst.evidence>=0.5?'warn':''),
    'peak evidence',worst?worst.evidence.toFixed(2):'-',
    worst?`alarm at 1.0`:'')+
-  kpi('acc','engine',FLEET.tier,FLEET.scorer||'');}
-function render(){
+  kpi('acc','engine',FLEET.tier,FLEET.scorer||'');
+ const nb=$('#nb-alarm');
+ nb.style.display=alarms?'':'none';nb.textContent=alarms;}
+
+/* ------------------------------------------------ assets page */
+function pillbar(counts){
+ const order=['escalating','alarm','change-not-fault','watch','insufficient-history','healthy',
+  'bootstrapping','onboarding','queued'];
+ $('#pills').innerHTML=order.filter(s=>counts[s]).map(s=>
+  `<span class="pill st-${s} ${FILTER===s?'on':''}" onclick="FILTER=FILTER==='${s}'?null:'${s}';renderList()">${s}: ${counts[s]}</span>`).join(' ');}
+function renderList(){
  if(!FLEET)return;
- const tierScorer={'T2':'TorchWorldModel','T2-S':'TorchWorldModel'};
- const degraded=FLEET.scorer&&tierScorer[FLEET.tier]&&FLEET.scorer!==tierScorer[FLEET.tier];
- $('#meta').innerHTML=`${FLEET.assets} assets | tier ${FLEET.tier}`+
-  (FLEET.scorer?` | ${degraded?`<span style="color:var(--bad);font-weight:bold" title="tier implies ${tierScorer[FLEET.tier]} but the service fell back">${FLEET.scorer} (DEGRADED)</span>`:FLEET.scorer}`:'')+
-  ` | alpha=1/asset-year`;
- $('#immune-meta').innerHTML=`immune: ${FLEET.immune.checked} checked, `+
-  (FLEET.immune.sick?`<span style="color:var(--bad);font-weight:bold">${FLEET.immune.sick} sick</span>`:'0 sick');
- renderKpis();
  pillbar(FLEET.counts);
- dashboard();
  const q=$('#q').value.toLowerCase();
  const rows=FLEET.rows.filter(v=>(!FILTER||v.state===FILTER)&&v.asset_key.toLowerCase().includes(q));
  const shown=rows.slice(0,400);
@@ -330,11 +440,11 @@ function render(){
     <span>ev ${v.evidence}</span>
     <span class="evbar"><i style="width:${Math.min(100,v.evidence*33)}%"></i></span>
     <span>conf ${v.confidence}</span>
-    <canvas data-k="${v.asset_key}" style="width:90px;height:22px"></canvas>
-   </span></div>`).join('')+(rows.length>400?`<p class="muted" style="padding:10px 16px">and ${rows.length-400} more - refine the filter</p>`:'');
+   </span>
+   <canvas data-k="${v.asset_key}"></canvas>
+  </div>`).join('')+(rows.length>400?`<p class="muted" style="padding:10px 16px">and ${rows.length-400} more - refine the filter</p>`:'');
  shown.forEach(v=>{const cv=document.querySelector(`canvas[data-k="${CSS.escape(v.asset_key)}"]`);
-  if(cv&&HEALTH[v.asset_key])spark(cv,HEALTH[v.asset_key].slice(-120),11);});}
-function select(k){SEL=decodeURIComponent(k);render();detail(SEL,true);}
+  if(cv&&HEALTH[v.asset_key])spark(cv,HEALTH[v.asset_key].slice(-120),12);});}
 
 /* ------------------------------------------------ detail charts */
 function domChart(doms){
@@ -356,7 +466,7 @@ function healthChart(series){
  ec('c-health',{grid:{left:10,right:16,top:14,bottom:40,containLabel:true},
   tooltip:{trigger:'axis'},
   dataZoom:[{type:'inside'},{type:'slider',height:16,bottom:6,borderColor:CH.grid,
-   backgroundColor:'#121a22',fillerColor:'rgba(74,163,223,0.15)',textStyle:{color:CH.axis}}],
+   backgroundColor:'transparent',fillerColor:'rgba(74,163,223,0.15)',textStyle:{color:CH.axis}}],
   xAxis:{type:'category',data:series.map((_,i)=>i),axisLabel:{color:CH.axis,fontSize:10}},
   yAxis:{type:'value',axisLabel:{color:CH.axis,fontSize:10},splitLine:{lineStyle:{color:CH.grid}}},
   series:[{type:'line',data:series,showSymbol:false,smooth:0.15,
@@ -434,7 +544,7 @@ function immuneChart(immune){
     itemStyle:{color:f==null?'#5b6b7d':'#37b26c'},
     label:{show:f==null,position:'right',fontSize:10,color:CH.axis,formatter:'not detected'}}))}]});}
 
-/* ------------------------------------------------ detail view */
+/* ------------------------------------------------ detail view (tabbed) */
 async function detail(key,force){
  const row=FLEET&&FLEET.rows.find(r=>r.asset_key===key);
  if(!force&&row&&row.at===DETAIL_AT)return;  // nothing new for this asset
@@ -442,7 +552,7 @@ async function detail(key,force){
   const why={queued:'waiting its turn',
    onboarding:'calibrating from its lifetime history',
    bootstrapping:'first-contact cleaning of its history'};
-  $('#detail').innerHTML=`<p class="muted" style="padding:24px;line-height:1.7">${row.asset_key} is <span class="pill st-${row.state}">${row.state}</span> - ${why[row.state]}.<br>Its first verdict lands here automatically when that finishes.</p>`;
+  $('#detail').innerHTML=`<p class="muted" style="padding:28px;line-height:1.7">${row.asset_key} is <span class="pill st-${row.state}">${row.state}</span> - ${why[row.state]}.<br>Its first verdict lands here automatically when that finishes.</p>`;
   return;}
  const [v,narr,doms,health,eph]=await Promise.all([
   jget('/api/asset/'+esc(key)),jget('/api/narrative/'+esc(key)),
@@ -451,73 +561,122 @@ async function detail(key,force){
  DETAIL_AT=v.at;
  HEALTH[key]=health.series;
  let immune=null;try{immune=await jget('/api/immune/'+esc(key));}catch(e){}
- const t=v.evidence_trail||{},anat=t.anatomy,hz=t.horizon,tm=t.trajectory_match;
- const fam=(v.coverage||{}).operating_point_familiarity;
+ DDATA={v,narr,doms,health,eph,immune,row,key};
+ const t=v.evidence_trail||{};
+ const tabs=[['overview','Overview'],['evidence','Evidence'],
+  ['anatomy','Anatomy & Prognosis'],['episodes','Episodes & Immune']];
  $('#detail').innerHTML=`
- <div class="dhead">
-  <h2>${v.asset_key}</h2>
-  <span class="pill st-${v.state}">${v.state}</span>
-  <span class="muted">evidence ${v.evidence} | confidence ${v.confidence} | ${v.model_epoch}</span>
-  <span class="muted" title="verdict timestamp (frozen contract field: at)">at ${v.at||'-'}${stale(v.at)}</span>
-  ${row&&row.live?'<span class="pill" title="live buffer attached">LIVE</span>':''}
-  <span class="spacer" style="flex:1"></span>
-  <button onclick="act('tick','${esc(key)}','Scoring')">Score now</button>
-  <button onclick="act('immune-pass','${esc(key)}','Immune pass (slow)')">Immune pass</button>
-  <button onclick="act('bootstrap','${esc(key)}','Bootstrap (multi-pass)')">Bootstrap</button>
-  <button class="danger" onclick="if(confirm('Close the open episode into the ledger and recalibrate from masked lifetime?'))act('reanchor','${esc(key)}','Re-anchor')">Re-anchor</button>
+ <div id="dhead">
+  <div class="drow">
+   <h2>${v.asset_key}</h2>
+   <span class="pill st-${v.state}">${v.state}</span>
+   ${row&&row.live?'<span class="pill" title="live buffer attached">LIVE</span>':''}
+   <span style="flex:1"></span>
+   <button onclick="act('tick','${esc(key)}','Scoring')">Score now</button>
+   <button onclick="act('immune-pass','${esc(key)}','Immune pass (slow)')">Immune pass</button>
+   <button onclick="act('bootstrap','${esc(key)}','Bootstrap (multi-pass)')">Bootstrap</button>
+   <button class="danger" onclick="if(confirm('Close the open episode into the ledger and recalibrate from masked lifetime?'))act('reanchor','${esc(key)}','Re-anchor')">Re-anchor</button>
+  </div>
+  <div class="drow muted" style="font-size:12.5px">
+   evidence ${v.evidence} | confidence ${v.confidence} | ${v.model_epoch}
+   | at ${v.at||'-'}${stale(v.at)}
+  </div>
  </div>
- <div class="cards">
-  <div class="card wide"><h3>Health narrative</h3><pre>${narr.narrative}</pre></div>
-  <div class="card wide"><h3>Health index trajectory (windowed mean surprise)</h3>
-   <div class="chart" id="c-health" style="height:240px"></div></div>
-  <div class="card"><h3>Evidence domains (log-wealth / threshold, alarm at 1.0)</h3>
-   <div class="chart" id="c-domains" style="height:190px"></div></div>
-  <div class="card"><h3>Coverage: operating-point familiarity</h3>
-   <div class="chart" id="c-coverage" style="height:150px"></div>
-   <div class="kv">
-    <b>calibration rows</b><span>${(v.coverage||{}).calib_rows??'-'}</span>
-    <b>scored rows</b><span>${(v.coverage||{}).scored_rows??'-'}</span>
-    <b>attribution</b><span>${(v.attribution||[]).join(', ')||'-'}</span>
-    <b>falsifiable by</b><span>${v.falsifiable_by}</span></div></div>
-  <div class="card"><h3>Evidence trail</h3><div class="kv">
-   ${t.reason?`<b>insufficient because</b><span>${t.reason}</span>`:''}
-   ${t.shape?`<b>surprise shape</b><span>${t.shape}</span>`:''}
-   ${t.novelty!==undefined?`<b>novelty</b><span>${t.novelty}</span>`:''}
-   ${t.concentration!==undefined?`<b>attribution concentration</b><span>${t.concentration} ${t.concentration<0.4?'(coordinated move)':'(channel-local)'}</span>`:''}
-   ${eph.open_since?`<b>episode open since</b><span>${eph.open_since}</span>`:''}
-   ${t.signature_match?`<b>signature match</b><span>episode ${t.signature_match.episode} (confidence ${t.signature_match.confidence})</span>`:''}
-   ${tm?`<b>trajectory match</b><span>episode ${tm.episode} (dist ${tm.distance}) - ~${tm.remaining_rows_estimate} rows to its peak</span>`:''}
-   ${!t.reason&&!t.shape&&!eph.open_since?'<b>state</b><span class="muted">no active episode - nothing accumulating</span>':''}
-  </div></div>
-  ${anat?`<div class="card"><h3>Anatomy: organ surprise (origin in red)</h3>
-   <div class="chart" id="c-anatomy" style="height:170px"></div></div>`:''}
-  ${(hz&&hz.gated)?`<div class="card"><h3>Prognosis: failure-time distribution${hz.provisional_level?' [level provisional]':''}</h3>
-   <div class="chart" id="c-horizon" style="height:120px"></div></div>`
-   :(hz?`<div class="card"><h3>Prognosis</h3><p class="muted">horizon gated: ${hz.reason}</p></div>`:'')}
-  ${(eph.episodes.length||eph.open_since)?`<div class="card wide"><h3>Episode history (the ledger - absorbed changes included)</h3>
-   <div class="chart" id="c-episodes" style="height:110px"></div>
-   <table><tr><th>state</th><th>start</th><th>end</th><th>channels</th><th>shape</th><th>peak evidence</th></tr>
-   ${eph.episodes.map(e=>`<tr><td><span class="pill st-${e.state==='alarm'?'alarm':'change-not-fault'}">${e.state}</span></td>
-    <td>${e.start}</td><td>${e.end||'open'}</td>
-    <td>${(e.channels||[]).slice(0,4).join(', ')||(e.source||'-')}</td>
-    <td>${e.shape||'-'}</td><td>${e.peak_evidence??'-'}</td></tr>`).join('')}
-   </table></div>`:''}
-  ${immune&&!immune.status?`<div class="card wide"><h3>Immune self-test ${immune.sick?'[SICK - rebuild triggered]':'[healthy]'}</h3>
-   <div style="display:grid;grid-template-columns:1fr 200px;gap:10px">
-    <div class="chart" id="c-immune" style="height:170px"></div>
-    <div>${immune.rehearsal?`<div class="chart" id="c-rehearsal" style="height:140px"></div>`:''}
-     <div class="kv"><b>conformance</b><span>${immune.conformance_ok}${immune.conformance_note?' - '+immune.conformance_note:''}</span>
-     <b>pit</b><span>${immune.pit}</span><b>live degenerate</b><span>${immune.live_degenerate}</span></div></div>
-   </div></div>`:'<div class="card"><h3>Immune self-test</h3><p class="muted">not yet run - use the Immune pass button</p></div>'}
+ <div id="dtabs">${tabs.map(([id,lbl])=>
+  `<a data-t="${id}" class="${DTAB===id?'on':''}" onclick="dtab('${id}')">${lbl}</a>`).join('')}</div>
+ <div class="pane ${DTAB==='overview'?'on':''}" id="pane-overview">
+  <div class="cards">
+   <div class="card wide"><h3>Health narrative</h3><pre>${narr.narrative}</pre></div>
+   <div class="card wide"><h3>Health index trajectory (windowed mean surprise)</h3>
+    <div class="chart" id="c-health" style="height:320px"></div></div>
+  </div>
+ </div>
+ <div class="pane ${DTAB==='evidence'?'on':''}" id="pane-evidence">
+  <div class="cards">
+   <div class="card wide"><h3>Evidence domains (log-wealth / threshold, alarm at 1.0)</h3>
+    <div class="chart" id="c-domains" style="height:240px"></div></div>
+   <div class="card"><h3>Coverage: operating-point familiarity</h3>
+    <div class="chart" id="c-coverage" style="height:170px"></div>
+    <div class="kv">
+     <b>calibration rows</b><span>${(v.coverage||{}).calib_rows??'-'}</span>
+     <b>scored rows</b><span>${(v.coverage||{}).scored_rows??'-'}</span>
+     <b>attribution</b><span>${(v.attribution||[]).join(', ')||'-'}</span>
+     <b>falsifiable by</b><span>${v.falsifiable_by}</span></div></div>
+   <div class="card"><h3>Evidence trail</h3><div class="kv">
+    ${t.reason?`<b>insufficient because</b><span>${t.reason}</span>`:''}
+    ${t.shape?`<b>surprise shape</b><span>${t.shape}</span>`:''}
+    ${t.novelty!==undefined?`<b>novelty</b><span>${t.novelty}</span>`:''}
+    ${t.concentration!==undefined?`<b>attribution concentration</b><span>${t.concentration} ${t.concentration<0.4?'(coordinated move)':'(channel-local)'}</span>`:''}
+    ${eph.open_since?`<b>episode open since</b><span>${eph.open_since}</span>`:''}
+    ${t.signature_match?`<b>signature match</b><span>episode ${t.signature_match.episode} (confidence ${t.signature_match.confidence})</span>`:''}
+    ${t.trajectory_match?`<b>trajectory match</b><span>episode ${t.trajectory_match.episode} (dist ${t.trajectory_match.distance}) - ~${t.trajectory_match.remaining_rows_estimate} rows to its peak</span>`:''}
+    ${!t.reason&&!t.shape&&!eph.open_since?'<b>state</b><span class="muted">no active episode - nothing accumulating</span>':''}
+   </div></div>
+  </div>
+ </div>
+ <div class="pane ${DTAB==='anatomy'?'on':''}" id="pane-anatomy">
+  <div class="cards">
+   ${t.anatomy?`<div class="card wide"><h3>Anatomy: organ surprise (origin in red)</h3>
+    <div class="chart" id="c-anatomy" style="height:240px"></div></div>`
+    :'<div class="card"><h3>Anatomy</h3><p class="muted">no organ decomposition for this verdict</p></div>'}
+   ${(t.horizon&&t.horizon.gated)?`<div class="card wide"><h3>Prognosis: failure-time distribution${t.horizon.provisional_level?' [level provisional]':''}</h3>
+    <div class="chart" id="c-horizon" style="height:140px"></div></div>`
+    :(t.horizon?`<div class="card"><h3>Prognosis</h3><p class="muted">horizon gated: ${t.horizon.reason}</p></div>`
+    :'<div class="card"><h3>Prognosis</h3><p class="muted">no failure-time estimate - nothing is accumulating</p></div>')}
+  </div>
+ </div>
+ <div class="pane ${DTAB==='episodes'?'on':''}" id="pane-episodes">
+  <div class="cards">
+   ${(eph.episodes.length||eph.open_since)?`<div class="card wide"><h3>Episode history (the ledger - absorbed changes included)</h3>
+    <div class="chart" id="c-episodes" style="height:130px"></div>
+    <table><tr><th>state</th><th>start</th><th>end</th><th>channels</th><th>shape</th><th>peak evidence</th></tr>
+    ${eph.episodes.map(e=>`<tr><td><span class="pill st-${e.state==='alarm'?'alarm':'change-not-fault'}">${e.state}</span></td>
+     <td>${e.start}</td><td>${e.end||'open'}</td>
+     <td>${(e.channels||[]).slice(0,4).join(', ')||(e.source||'-')}</td>
+     <td>${e.shape||'-'}</td><td>${e.peak_evidence??'-'}</td></tr>`).join('')}
+    </table></div>`:'<div class="card wide"><h3>Episode history</h3><p class="muted">clean ledger - no episodes recorded for this asset</p></div>'}
+   ${immune&&!immune.status?`<div class="card wide"><h3>Immune self-test ${immune.sick?'[SICK - rebuild triggered]':'[healthy]'}</h3>
+    <div style="display:grid;grid-template-columns:1fr 220px;gap:12px">
+     <div class="chart" id="c-immune" style="height:200px"></div>
+     <div>${immune.rehearsal?`<div class="chart" id="c-rehearsal" style="height:150px"></div>`:''}
+      <div class="kv"><b>conformance</b><span>${immune.conformance_ok}${immune.conformance_note?' - '+immune.conformance_note:''}</span>
+      <b>pit</b><span>${immune.pit}</span><b>live degenerate</b><span>${immune.live_degenerate}</span></div></div>
+    </div></div>`:'<div class="card"><h3>Immune self-test</h3><p class="muted">not yet run - use the Immune pass button</p></div>'}
+  </div>
  </div>`;
- healthChart(health.series);
- domChart(doms);
- if(typeof fam==='number')gaugeChart('c-coverage',fam,'familiarity');
- if(anat)anatomyChart(anat);
- if(hz&&hz.gated)horizonChart(hz);
- episodeTimeline(eph);
- if(immune&&!immune.status){immuneChart(immune);
-  if(immune.rehearsal)gaugeChart('c-rehearsal',immune.rehearsal.detected_fraction,'rehearsal detected');}}
+ drawPane(DTAB);}
+function dtab(t){
+ DTAB=t;
+ document.querySelectorAll('#dtabs a').forEach(a=>a.classList.toggle('on',a.dataset.t===t));
+ document.querySelectorAll('.pane').forEach(p=>p.classList.toggle('on',p.id==='pane-'+t));
+ requestAnimationFrame(()=>drawPane(t));}
+function drawPane(tab){
+ if(!DDATA)return;
+ const {v,doms,health,eph,immune}=DDATA;
+ const t=v.evidence_trail||{};
+ const fam=(v.coverage||{}).operating_point_familiarity;
+ if(tab==='overview')healthChart(health.series);
+ if(tab==='evidence'){domChart(doms);
+  if(typeof fam==='number')gaugeChart('c-coverage',fam,'familiarity');}
+ if(tab==='anatomy'){if(t.anatomy)anatomyChart(t.anatomy);
+  if(t.horizon&&t.horizon.gated)horizonChart(t.horizon);}
+ if(tab==='episodes'){episodeTimeline(eph);
+  if(immune&&!immune.status){immuneChart(immune);
+   if(immune.rehearsal)gaugeChart('c-rehearsal',immune.rehearsal.detected_fraction,'rehearsal detected');}}}
+
+/* ------------------------------------------------ page render */
+function renderPage(){
+ if(!FLEET)return;
+ const tierScorer={'T2':'TorchWorldModel','T2-S':'TorchWorldModel'};
+ const degraded=FLEET.scorer&&tierScorer[FLEET.tier]&&FLEET.scorer!==tierScorer[FLEET.tier];
+ $('#meta').innerHTML=`${FLEET.assets} assets | tier ${FLEET.tier}`+
+  (FLEET.scorer?` | ${degraded?`<span style="color:var(--bad);font-weight:bold" title="tier implies ${tierScorer[FLEET.tier]} but the service fell back">${FLEET.scorer} (DEGRADED)</span>`:FLEET.scorer}`:'');
+ $('#immune-meta').innerHTML=`immune: ${FLEET.immune.checked} checked, `+
+  (FLEET.immune.sick?`<span style="color:var(--bad);font-weight:bold">${FLEET.immune.sick} sick</span>`:'0 sick');
+ $('#nav-meta').textContent=`alpha=1/asset-year`;
+ renderKpis();
+ if(PAGE==='fleet')dashboard();
+ if(PAGE==='assets')renderList();}
 
 /* ------------------------------------------------ realtime */
 let WS_ON=false,WS_TRIES=0,POLL=null;
@@ -525,12 +684,13 @@ function wsmeta(s,on){$('#wsmeta').textContent=s;$('#wsdot').classList.toggle('o
 function applyFleet(data){
  const h=JSON.stringify([data.counts,data.rows.map(r=>[r.asset_key,r.state,r.evidence,r.at])]);
  const changed=h!==HASH;HASH=h;FLEET=data;
- if(changed){render();fetchSparks();if(SEL)detail(SEL,false);}}
+ if(changed){renderPage();fetchSparks();
+  if(PAGE==='assets'&&SEL)detail(SEL,false);}}
 async function fetchSparks(){
  const top=FLEET.rows.slice(0,30);
  await Promise.all(top.map(async v=>{
   try{HEALTH[v.asset_key]=(await jget('/api/health/'+esc(v.asset_key))).series;}catch(e){}}));
- render();}
+ renderPage();}
 function connect(){
  const ws=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/api/ws');
  ws.onopen=()=>{WS_ON=true;WS_TRIES=0;wsmeta('live',true);actBackfill();
@@ -547,27 +707,45 @@ function connect(){
 async function refresh(){try{applyFleet(await jget('/api/assets'));}catch(e){}}
 
 /* ------------------------------------------------ activity stream */
-let ACT_N=0;
-function actAppend(ev){
- const log=$('#act-log');if(!log)return;
- const atEnd=log.scrollHeight-log.scrollTop-log.clientHeight<40;
- const line=document.createElement('div');
+let ACT_EVENTS=[],ACT_FILTER=null;
+const ACT_KINDS=['service','onboard','train','bootstrap','tick'];
+function actPills(){
+ $('#act-pills').innerHTML=ACT_KINDS.map(k=>
+  `<span class="pill ${ACT_FILTER===k?'on':''}" onclick="ACT_FILTER=ACT_FILTER==='${k}'?null:'${k}';actRender()">${k}</span>`).join(' ');}
+function actLine(ev){
  const t=(ev.at||'').replace('T',' ').replace(/\+.*$/,'');
- line.innerHTML=`<span class="t">${t.slice(11)}</span> `+
+ return `<div><span class="t">${t.slice(11)}</span> `+
   `<span class="k k-${ev.kind}">${ev.kind}</span> `+
-  `<span class="a">${ev.asset_key}</span> ${ev.msg}`;
- log.appendChild(line);
+  `<span class="a">${ev.asset_key}</span> ${ev.msg}</div>`;}
+function actRender(){
+ actPills();
+ const log=$('#act-log');
+ const evs=ACT_FILTER?ACT_EVENTS.filter(e=>e.kind===ACT_FILTER):ACT_EVENTS;
+ log.innerHTML=evs.map(actLine).join('');
+ $('#act-count').textContent=`${ACT_EVENTS.length} events`;
+ log.scrollTop=log.scrollHeight;}
+function actAppend(ev){
+ ACT_EVENTS.push(ev);
+ if(ACT_EVENTS.length>500)ACT_EVENTS.shift();
+ $('#act-count').textContent=`${ACT_EVENTS.length} events`;
+ if(ACT_FILTER&&ev.kind!==ACT_FILTER)return;
+ const log=$('#act-log');
+ const atEnd=log.scrollHeight-log.scrollTop-log.clientHeight<40;
+ log.insertAdjacentHTML('beforeend',actLine(ev));
  while(log.children.length>500)log.removeChild(log.firstChild);
- ACT_N++;$('#act-count').textContent=`(${ACT_N} events)`;
- if(atEnd)log.scrollTop=log.scrollHeight;   // follow unless user scrolled up
-}
+ if(atEnd)log.scrollTop=log.scrollHeight;}
 async function actBackfill(){
  try{const d=await jget('/api/activity');
-  $('#act-log').innerHTML='';ACT_N=0;
-  d.events.forEach(actAppend);}catch(e){}}
+  ACT_EVENTS=d.events;actRender();}catch(e){}}
+
+/* ------------------------------------------------ boot */
+$('#q').addEventListener('input',renderList);
+document.addEventListener('keydown',e=>{
+ if(e.key==='/'&&PAGE==='assets'&&document.activeElement!==$('#q')){
+  e.preventDefault();$('#q').focus();}});
+actPills();
 actBackfill();
-$('#q').addEventListener('input',render);
-document.addEventListener('keydown',e=>{if(e.key==='/'&&document.activeElement!==$('#q')){e.preventDefault();$('#q').focus();}});
+route();
 refresh().then(fetchSparks);
 connect();
 </script></body></html>
