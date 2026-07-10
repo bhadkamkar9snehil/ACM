@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>ACM</title>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>ACM</title>
 <script src="/vendor/echarts.min.js"></script>
 <style>
 :root{
@@ -107,13 +107,15 @@ th{color:var(--mut);font-weight:normal;font-size:11px;letter-spacing:1px;
 .kpi small{color:var(--mut);font-size:11px;margin-left:6px}
 .kpi.bad span{color:var(--bad)}.kpi.warn span{color:var(--warn)}
 .kpi.ok span{color:var(--ok)}.kpi.acc span{color:var(--acc)}
-#fcharts{display:grid;grid-template-columns:360px minmax(0,1fr);gap:16px;margin-bottom:16px}
-#fcharts .dchart{height:280px;background:var(--bg2);border:1px solid var(--line);
- border-radius:8px;box-shadow:var(--shadow)}
-#fcharts2{display:grid;grid-template-columns:minmax(0,1fr);gap:16px;margin-bottom:16px}
-#fcharts2 .dchart{height:250px;background:var(--bg2);border:1px solid var(--line);
- border-radius:8px;box-shadow:var(--shadow)}
+#fcharts{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;
+ margin-bottom:16px}
+#fcharts .card.wide{grid-column:1/-1}
+#fcharts .dchart{height:280px}
+#ftable{margin-top:12px}
+#ftable td{padding:9px 18px}
+#ftable th{padding:9px 18px}
 #ftable tr{cursor:pointer}
+#ftable tbody tr:nth-child(even){background:rgba(127,142,161,0.05)}
 #ftable tbody tr:hover{background:var(--bg3)}
 
 /* ---------------------------------------------------- assets page */
@@ -151,24 +153,37 @@ th{color:var(--mut);font-weight:normal;font-size:11px;letter-spacing:1px;
 .card.wide{grid-column:1/-1}
 
 /* ---------------------------------------------------- activity page */
-#page-activity{display:none;grid-template-rows:auto minmax(0,1fr)}
-#page-activity.on{display:grid}
-#actbar{display:flex;gap:8px;align-items:center;padding:12px 26px;
- border-bottom:1px solid var(--line);flex-wrap:wrap}
+#page-activity{display:none;padding:20px 26px 28px;overflow-y:auto}
+#page-activity.on{display:block}
+#act-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
+ gap:14px;margin-bottom:18px}
+#actbar{display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap}
 #actbar .dotlive{width:8px;height:8px;border-radius:50%;background:#37b26c;
  animation:pulse 1.6s infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.25}}
-#act-log{overflow-y:auto;padding:12px 26px;font-size:12.5px;line-height:1.9}
-#act-log .k{display:inline-block;min-width:72px;font-weight:bold}
-#act-log .k-onboard{color:#a99bf0}#act-log .k-train{color:#8a76e0}
-#act-log .k-bootstrap{color:#7ab8f0}#act-log .k-tick{color:#7fe0a8}
-#act-log .k-service{color:#e6d87a}
-#act-log .t{color:var(--mut)}#act-log .a{color:var(--txt);font-weight:bold}
-:root[data-theme="light"] #act-log .k-onboard{color:#5a44c0}
-:root[data-theme="light"] #act-log .k-train{color:#6a54cc}
-:root[data-theme="light"] #act-log .k-bootstrap{color:#1b5e9e}
-:root[data-theme="light"] #act-log .k-tick{color:#156a3d}
-:root[data-theme="light"] #act-log .k-service{color:#7a6207}
+#act-log{border:1px solid var(--line);border-radius:8px;background:var(--bg2);
+ box-shadow:var(--shadow);max-height:calc(100vh - 340px);overflow-y:auto}
+.act-row{display:grid;grid-template-columns:88px 100px 140px minmax(0,1fr);
+ gap:14px;align-items:baseline;padding:9px 18px;border-bottom:1px solid var(--line);
+ border-left:3px solid transparent;font-size:12.5px}
+.act-row:last-child{border-bottom:none}
+.act-row:hover{background:var(--bg3)}
+.act-row .t{color:var(--mut);font-size:11.5px}
+.act-row .k{font-weight:bold;text-transform:uppercase;font-size:10.5px;
+ letter-spacing:0.5px}
+.act-row .a{color:var(--txt);font-weight:bold;overflow:hidden;text-overflow:ellipsis;
+ white-space:nowrap}
+.act-row .m{color:var(--txt)}
+.act-onboard{border-left-color:#a99bf0}.act-onboard .k{color:#a99bf0}
+.act-train{border-left-color:#8a76e0}.act-train .k{color:#8a76e0}
+.act-bootstrap{border-left-color:#7ab8f0}.act-bootstrap .k{color:#7ab8f0}
+.act-tick{border-left-color:#7fe0a8}.act-tick .k{color:#7fe0a8}
+.act-service{border-left-color:#e6d87a}.act-service .k{color:#e6d87a}
+:root[data-theme="light"] .act-onboard .k{color:#5a44c0}
+:root[data-theme="light"] .act-train .k{color:#6a54cc}
+:root[data-theme="light"] .act-bootstrap .k{color:#1b5e9e}
+:root[data-theme="light"] .act-tick .k{color:#156a3d}
+:root[data-theme="light"] .act-service .k{color:#7a6207}
 
 /* ---------------------------------------------------- responsive */
 @media (max-width:1100px){
@@ -221,13 +236,12 @@ th{color:var(--mut);font-weight:normal;font-size:11px;letter-spacing:1px;
  <div id="page-fleet" class="page">
   <div id="kpis"></div>
   <div id="fcharts">
-   <div class="dchart" id="d-states"></div>
-   <div class="dchart" id="d-evidence"></div>
-  </div>
-  <div id="fcharts2">
-   <div class="dchart" id="d-scatter"></div>
+   <div class="card"><h3>Fleet states</h3><div class="dchart" id="d-states"></div></div>
+   <div class="card"><h3>Evidence - worst first (alarm at 1.0)</h3><div class="dchart" id="d-evidence"></div></div>
+   <div class="card wide"><h3>Confidence vs evidence (click a dot to open the asset)</h3><div class="dchart" id="d-scatter"></div></div>
   </div>
   <div class="card" style="padding:0">
+   <h3 style="padding:16px 18px 0">Fleet detail</h3>
    <table id="ftable">
     <thead><tr><th style="width:26%">asset</th><th style="width:14%">state</th>
      <th style="width:12%">evidence</th><th style="width:12%">confidence</th>
@@ -249,6 +263,7 @@ th{color:var(--mut);font-weight:normal;font-size:11px;letter-spacing:1px;
  </div>
 
  <div id="page-activity" class="page">
+  <div id="act-stats"></div>
   <div id="actbar">
    <span class="dotlive"></span><b style="font-size:12px;letter-spacing:1px">LIVE STREAM</b>
    <span class="muted" id="act-count"></span>
@@ -338,33 +353,32 @@ function route(){
  $('#pgtitle').textContent=PAGE;
  requestAnimationFrame(()=>{
   renderPage();
-  if(PAGE==='assets'&&SEL)detail(SEL,true);
-  if(PAGE==='activity'){const l=$('#act-log');l.scrollTop=l.scrollHeight;}});}
+  if(PAGE==='assets'&&SEL)detail(SEL,true);});}
 addEventListener('hashchange',route);
 function select(k){location.hash='#/assets/'+k;}
 
 /* ------------------------------------------------ fleet page */
 function dashboard(){
  const counts=FLEET.counts,rows=FLEET.rows;
- ec('d-states',{title:{text:'fleet states',left:10,top:8,textStyle:{fontSize:11,color:CH.axis}},
+ ec('d-states',{
   tooltip:{trigger:'item'},
-  legend:{bottom:8,left:'center',textStyle:{color:CH.axis,fontSize:11},
+  legend:{bottom:4,left:'center',textStyle:{color:CH.axis,fontSize:11},
    itemWidth:10,itemHeight:10,icon:'circle'},
-  graphic:Object.keys(counts).length?[{type:'text',left:'center',top:'44%',
+  graphic:Object.keys(counts).length?[{type:'text',left:'center',top:'38%',
    style:{text:String(FLEET.assets),fill:CH.text,fontSize:34,fontWeight:'bold',
     fontFamily:'Consolas,Menlo,monospace',align:'center'}},
-   {type:'text',left:'center',top:'56%',
+   {type:'text',left:'center',top:'50%',
    style:{text:'assets',fill:CH.axis,fontSize:11,
     fontFamily:'Consolas,Menlo,monospace',align:'center'}}]
    :[{type:'text',left:'center',top:'middle',
    style:{text:'no assets yet',fill:'#5b6b7d',fontSize:12,fontFamily:'Consolas,Menlo,monospace'}}],
-  series:[{type:'pie',radius:['48%','70%'],center:['50%','50%'],
+  series:[{type:'pie',radius:['48%','68%'],center:['50%','42%'],
    label:{show:false},emphasis:{label:{show:false}},
    itemStyle:{borderColor:CH.border,borderWidth:2},
    data:Object.entries(counts).map(([s,n])=>({name:s,value:n,itemStyle:{color:SC[s]||'#888'}}))}]});
  const top=rows.slice(0,14);
- ec('d-evidence',{title:{text:'evidence - worst first (alarm at 1.0)',left:10,top:8,textStyle:{fontSize:11,color:CH.axis}},
-  grid:{left:10,right:56,top:34,bottom:10,containLabel:true},
+ ec('d-evidence',{
+  grid:{left:10,right:56,top:10,bottom:10,containLabel:true},
   tooltip:{trigger:'axis',axisPointer:{type:'shadow'}},
   xAxis:{type:'value',axisLabel:{color:CH.axis,fontSize:10},splitLine:{lineStyle:{color:CH.grid}}},
   yAxis:{type:'category',inverse:true,data:top.map(r=>r.asset_key),
@@ -375,8 +389,8 @@ function dashboard(){
    markLine:{symbol:'none',lineStyle:{color:'#e05252',type:'dashed'},
     label:{color:'#e05252',formatter:'alarm'},data:[{xAxis:1}]},
    barMaxWidth:14}]});
- const sc=ec('d-scatter',{title:{text:'confidence vs evidence (click a dot to open the asset)',left:10,top:8,textStyle:{fontSize:11,color:CH.axis}},
-  grid:{left:10,right:24,top:34,bottom:10,containLabel:true},
+ const sc=ec('d-scatter',{
+  grid:{left:10,right:24,top:16,bottom:10,containLabel:true},
   tooltip:{formatter:p=>`${p.data[3]}<br>evidence ${p.data[1]} | confidence ${p.data[0]}`},
   xAxis:{type:'value',name:'confidence',nameTextStyle:{color:CH.axis,fontSize:10},min:0,max:1,
    axisLabel:{color:CH.axis,fontSize:10},splitLine:{lineStyle:{color:CH.grid}}},
@@ -586,9 +600,9 @@ async function detail(key,force){
   `<a data-t="${id}" class="${DTAB===id?'on':''}" onclick="dtab('${id}')">${lbl}</a>`).join('')}</div>
  <div class="pane ${DTAB==='overview'?'on':''}" id="pane-overview">
   <div class="cards">
-   <div class="card wide"><h3>Health narrative</h3><pre>${narr.narrative}</pre></div>
    <div class="card wide"><h3>Health index trajectory (windowed mean surprise)</h3>
     <div class="chart" id="c-health" style="height:320px"></div></div>
+   <div class="card wide"><h3>Health narrative</h3><pre>${narr.narrative}</pre></div>
   </div>
  </div>
  <div class="pane ${DTAB==='evidence'?'on':''}" id="pane-evidence">
@@ -712,28 +726,37 @@ const ACT_KINDS=['service','onboard','train','bootstrap','tick'];
 function actPills(){
  $('#act-pills').innerHTML=ACT_KINDS.map(k=>
   `<span class="pill ${ACT_FILTER===k?'on':''}" onclick="ACT_FILTER=ACT_FILTER==='${k}'?null:'${k}';actRender()">${k}</span>`).join(' ');}
+function actStats(){
+ const counts={};ACT_KINDS.forEach(k=>counts[k]=0);
+ ACT_EVENTS.forEach(e=>{counts[e.kind]=(counts[e.kind]||0)+1;});
+ const last=ACT_EVENTS[ACT_EVENTS.length-1];
+ const kpi=(cls,label,val,note)=>`<div class="kpi ${cls}"><b>${label}</b>`+
+  `<span>${val}</span>${note?`<small>${note}</small>`:''}</div>`;
+ $('#act-stats').innerHTML=
+  kpi('acc','total events',ACT_EVENTS.length,'last 500')+
+  ACT_KINDS.map(k=>kpi('',k,counts[k],'')).join('')+
+  kpi('','latest',last?last.kind:'-',last?last.asset_key:'');}
 function actLine(ev){
  const t=(ev.at||'').replace('T',' ').replace(/\+.*$/,'');
- return `<div><span class="t">${t.slice(11)}</span> `+
-  `<span class="k k-${ev.kind}">${ev.kind}</span> `+
-  `<span class="a">${ev.asset_key}</span> ${ev.msg}</div>`;}
+ return `<div class="act-row act-${ev.kind}">`+
+  `<span class="t">${t.slice(11)}</span>`+
+  `<span class="k">${ev.kind}</span>`+
+  `<span class="a">${ev.asset_key}</span>`+
+  `<span class="m">${ev.msg}</span></div>`;}
 function actRender(){
- actPills();
+ actPills();actStats();
  const log=$('#act-log');
- const evs=ACT_FILTER?ACT_EVENTS.filter(e=>e.kind===ACT_FILTER):ACT_EVENTS;
- log.innerHTML=evs.map(actLine).join('');
- $('#act-count').textContent=`${ACT_EVENTS.length} events`;
- log.scrollTop=log.scrollHeight;}
+ const evs=(ACT_FILTER?ACT_EVENTS.filter(e=>e.kind===ACT_FILTER):ACT_EVENTS).slice().reverse();
+ log.innerHTML=evs.length?evs.map(actLine).join(''):
+  '<p class="muted" style="padding:24px">No events yet.</p>';}
 function actAppend(ev){
  ACT_EVENTS.push(ev);
  if(ACT_EVENTS.length>500)ACT_EVENTS.shift();
- $('#act-count').textContent=`${ACT_EVENTS.length} events`;
+ actStats();
  if(ACT_FILTER&&ev.kind!==ACT_FILTER)return;
  const log=$('#act-log');
- const atEnd=log.scrollHeight-log.scrollTop-log.clientHeight<40;
- log.insertAdjacentHTML('beforeend',actLine(ev));
- while(log.children.length>500)log.removeChild(log.firstChild);
- if(atEnd)log.scrollTop=log.scrollHeight;}
+ log.insertAdjacentHTML('afterbegin',actLine(ev));
+ while(log.children.length>500)log.removeChild(log.lastChild);}
 async function actBackfill(){
  try{const d=await jget('/api/activity');
   ACT_EVENTS=d.events;actRender();}catch(e){}}
