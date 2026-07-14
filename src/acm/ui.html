@@ -207,7 +207,22 @@ th{color:var(--mut);font-weight:normal;font-size:11px;letter-spacing:1px;
 #toast div{background:var(--bg3);border:1px solid var(--acc);border-radius:4px;
  padding:8px 14px;font-size:12px;animation:fade 4s forwards}
 @keyframes fade{0%,80%{opacity:1}100%{opacity:0}}
+
+/* ---------------------------------------------------- boot skeleton */
+#boot{position:fixed;inset:0;background:var(--bg);color:var(--mut);z-index:20;
+ display:flex;align-items:center;justify-content:center;gap:10px;font-size:13px;
+ transition:opacity .25s ease}
+#boot.gone{opacity:0;pointer-events:none}
+#boot .spin{width:14px;height:14px;border-radius:50%;border:2px solid var(--line);
+ border-top-color:var(--acc);animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ---------------------------------------------------- sortable table */
+#ftable th[data-col]{cursor:pointer;user-select:none}
+#ftable th[data-col]:hover{color:var(--txt)}
+#ftable th[data-col] .arrow{margin-left:4px;color:var(--acc)}
 </style></head><body>
+<div id="boot"><span class="spin"></span><span>connecting to ACM...</span></div>
 
 <nav id="nav">
  <div class="brand">ACM<small>asset condition monitor</small></div>
@@ -230,7 +245,7 @@ th{color:var(--mut);font-weight:normal;font-size:11px;letter-spacing:1px;
   <span class="spacer"></span>
   <span id="wsdot" title="live stream"></span><span class="meta" id="wsmeta">connecting</span>
   <span class="meta" id="immune-meta"></span>
-  <button onclick="act('tick','', 'Scoring all assets')">Tick all</button>
+  <button onclick="act(this,'tick','', 'Scoring all assets')">Tick all</button>
  </div>
 
  <div id="page-fleet" class="page">
@@ -243,9 +258,12 @@ th{color:var(--mut);font-weight:normal;font-size:11px;letter-spacing:1px;
   <div class="card" style="padding:0">
    <h3 style="padding:16px 18px 0">Fleet detail</h3>
    <table id="ftable">
-    <thead><tr><th style="width:26%">asset</th><th style="width:14%">state</th>
-     <th style="width:12%">evidence</th><th style="width:12%">confidence</th>
-     <th>last verdict</th><th style="width:16%">trend</th></tr></thead>
+    <thead><tr>
+     <th style="width:26%" data-col="asset_key">asset</th>
+     <th style="width:14%" data-col="state">state</th>
+     <th style="width:12%" data-col="evidence">evidence</th>
+     <th style="width:12%" data-col="confidence">confidence</th>
+     <th data-col="at">last verdict</th><th style="width:16%">trend</th></tr></thead>
     <tbody></tbody>
    </table>
   </div>
@@ -277,8 +295,8 @@ th{color:var(--mut);font-weight:normal;font-size:11px;letter-spacing:1px;
 
 <script>
 "use strict";
-let FLEET=null, SEL=null, FILTER=null, HEALTH={}, HASH='', DETAIL_AT='';
-let PAGE='fleet', DTAB='overview', DDATA=null;
+let FLEET=null, SEL=null, FILTER=localStorage.getItem('acm-filter')||null, HEALTH={}, HASH='', DETAIL_AT='';
+let PAGE='fleet', DTAB='overview', DDATA=null, SORT_COL=null, SORT_DIR=1;
 const $=(s)=>document.querySelector(s);
 const esc=encodeURIComponent;
 const SC={healthy:'#37b26c',watch:'#d8b636',alarm:'#e05252',escalating:'#ff6b6b',
@@ -322,13 +340,16 @@ function stale(at){
 function toast(m){const d=document.createElement('div');d.textContent=m;
  $('#toast').appendChild(d);setTimeout(()=>d.remove(),4200);}
 async function jget(u){const r=await fetch(u);if(!r.ok)throw new Error(u+' '+r.status);return r.json();}
-async function act(kind,key,msg){
+async function act(btn,kind,key,msg){
+ if(btn&&btn.disabled)return;   // already in flight - ignore the double-click
+ if(btn)btn.disabled=true;
  toast(msg+'...');
  const url=kind==='tick'&&!key?'/api/tick':`/api/${kind}/${esc(key)}`;
  try{const r=await fetch(url,{method:'POST'});const d=await r.json();
   toast(msg+': done '+JSON.stringify(d).slice(0,90));
   if(!WS_ON)await refresh();if(PAGE==='assets'&&SEL)await detail(SEL,true);}
- catch(e){toast('FAILED: '+e.message);}}
+ catch(e){toast('FAILED: '+e.message);}
+ finally{if(btn)btn.disabled=false;}}
 function spark(cv,data,h){
  const w=cv.width=cv.clientWidth*2,hh=cv.height=h*2,c=cv.getContext('2d');
  c.clearRect(0,0,w,hh);if(!data||data.length<2)return;
@@ -399,7 +420,9 @@ function dashboard(){
    data:rows.map(r=>[r.confidence,Math.max(0.01,r.evidence),r.state,r.asset_key]),
    itemStyle:{color:p=>SC[p.data[2]]||'#888',opacity:0.85}}]});
  if(sc&&!sc.__wired){sc.__wired=true;sc.on('click',p=>{if(p.data&&p.data[3])select(esc(p.data[3]));});}
- $('#ftable tbody').innerHTML=rows.map(r=>`
+ wireSortHeaders();
+ const tableRows=sortRows(rows);
+ $('#ftable tbody').innerHTML=tableRows.map(r=>`
   <tr onclick="select('${esc(r.asset_key)}')">
    <td style="font-weight:bold">${r.asset_key}${r.live?' <span class="pill" style="font-size:10px">LIVE</span>':''}</td>
    <td><span class="pill st-${r.state}">${r.state}</span></td>
@@ -407,8 +430,26 @@ function dashboard(){
    <td class="muted">${r.at||'-'}</td>
    <td><canvas data-fk="${r.asset_key}" style="width:100%;height:22px"></canvas></td>
   </tr>`).join('');
- rows.forEach(r=>{const cv=document.querySelector(`canvas[data-fk="${CSS.escape(r.asset_key)}"]`);
-  if(cv&&HEALTH[r.asset_key])spark(cv,HEALTH[r.asset_key].slice(-120),11);});}
+ tableRows.forEach(r=>{const cv=document.querySelector(`canvas[data-fk="${CSS.escape(r.asset_key)}"]`);
+  if(cv&&HEALTH[r.asset_key])spark(cv,HEALTH[r.asset_key].slice(-120),11);});
+ const labels={asset_key:'asset',state:'state',evidence:'evidence',confidence:'confidence',at:'last verdict'};
+ document.querySelectorAll('#ftable th[data-col]').forEach(th=>{
+  const on=th.dataset.col===SORT_COL;
+  th.innerHTML=labels[th.dataset.col]+(on?`<span class="arrow">${SORT_DIR>0?'&#9650;':'&#9660;'}</span>`:'');});}
+function sortRows(rows){
+ if(!SORT_COL)return rows;
+ const c=SORT_COL,dir=SORT_DIR;
+ return rows.slice().sort((a,b)=>{
+  let x=a[c],y=b[c];
+  if(typeof x==='string')return dir*String(x).localeCompare(String(y));
+  return dir*((x??-Infinity)-(y??-Infinity));});}
+function wireSortHeaders(){
+ document.querySelectorAll('#ftable th[data-col]').forEach(th=>{
+  if(th.__wired)return;th.__wired=true;
+  th.addEventListener('click',()=>{
+   const col=th.dataset.col;
+   SORT_DIR=SORT_COL===col?-SORT_DIR:(col==='evidence'?-1:1);
+   SORT_COL=col;dashboard();});});}
 function renderKpis(){
  const c=FLEET.counts,rows=FLEET.rows;
  const alarms=(c.alarm||0)+(c.escalating||0);
@@ -430,16 +471,23 @@ function renderKpis(){
  nb.style.display=alarms?'':'none';nb.textContent=alarms;}
 
 /* ------------------------------------------------ assets page */
+function setFilter(s){
+ FILTER=FILTER===s?null:s;
+ localStorage.setItem('acm-filter',FILTER||'');
+ renderList();}
 function pillbar(counts){
  const order=['escalating','alarm','change-not-fault','watch','insufficient-history','healthy',
   'bootstrapping','onboarding','queued'];
  $('#pills').innerHTML=order.filter(s=>counts[s]).map(s=>
-  `<span class="pill st-${s} ${FILTER===s?'on':''}" onclick="FILTER=FILTER==='${s}'?null:'${s}';renderList()">${s}: ${counts[s]}</span>`).join(' ');}
+  `<span class="pill st-${s} ${FILTER===s?'on':''}" onclick="setFilter('${s}')">${s}: ${counts[s]}</span>`).join(' ');}
+function filteredRows(){
+ if(!FLEET)return [];
+ const q=$('#q').value.toLowerCase();
+ return FLEET.rows.filter(v=>(!FILTER||v.state===FILTER)&&v.asset_key.toLowerCase().includes(q));}
 function renderList(){
  if(!FLEET)return;
  pillbar(FLEET.counts);
- const q=$('#q').value.toLowerCase();
- const rows=FLEET.rows.filter(v=>(!FILTER||v.state===FILTER)&&v.asset_key.toLowerCase().includes(q));
+ const rows=filteredRows();
  const shown=rows.slice(0,400);
  if(!rows.length){
   $('#list').innerHTML=`<p class="muted" style="padding:24px 20px;line-height:1.7">${
@@ -586,10 +634,10 @@ async function detail(key,force){
    <span class="pill st-${v.state}">${v.state}</span>
    ${row&&row.live?'<span class="pill" title="live buffer attached">LIVE</span>':''}
    <span style="flex:1"></span>
-   <button onclick="act('tick','${esc(key)}','Scoring')">Score now</button>
-   <button onclick="act('immune-pass','${esc(key)}','Immune pass (slow)')">Immune pass</button>
-   <button onclick="act('bootstrap','${esc(key)}','Bootstrap (multi-pass)')">Bootstrap</button>
-   <button class="danger" onclick="if(confirm('Close the open episode into the ledger and recalibrate from masked lifetime?'))act('reanchor','${esc(key)}','Re-anchor')">Re-anchor</button>
+   <button onclick="act(this,'tick','${esc(key)}','Scoring')">Score now</button>
+   <button onclick="act(this,'immune-pass','${esc(key)}','Immune pass (slow)')">Immune pass</button>
+   <button onclick="act(this,'bootstrap','${esc(key)}','Bootstrap (multi-pass)')">Bootstrap</button>
+   <button class="danger" onclick="if(confirm('Close the open episode into the ledger and recalibrate from masked lifetime?'))act(this,'reanchor','${esc(key)}','Re-anchor')">Re-anchor</button>
   </div>
   <div class="drow muted" style="font-size:12.5px">
    evidence ${v.evidence} | confidence ${v.confidence} | ${v.model_epoch}
@@ -698,6 +746,7 @@ function wsmeta(s,on){$('#wsmeta').textContent=s;$('#wsdot').classList.toggle('o
 function applyFleet(data){
  const h=JSON.stringify([data.counts,data.rows.map(r=>[r.asset_key,r.state,r.evidence,r.at])]);
  const changed=h!==HASH;HASH=h;FLEET=data;
+ $('#boot').classList.add('gone');
  if(changed){renderPage();fetchSparks();
   if(PAGE==='assets'&&SEL)detail(SEL,false);}}
 async function fetchSparks(){
@@ -762,10 +811,24 @@ async function actBackfill(){
   ACT_EVENTS=d.events;actRender();}catch(e){}}
 
 /* ------------------------------------------------ boot */
-$('#q').addEventListener('input',renderList);
+$('#q').value=localStorage.getItem('acm-query')||'';
+$('#q').addEventListener('input',()=>{
+ localStorage.setItem('acm-query',$('#q').value);renderList();});
 document.addEventListener('keydown',e=>{
- if(e.key==='/'&&PAGE==='assets'&&document.activeElement!==$('#q')){
-  e.preventDefault();$('#q').focus();}});
+ if(PAGE!=='assets')return;
+ if(e.key==='/'&&document.activeElement!==$('#q')){
+  e.preventDefault();$('#q').focus();return;}
+ if(e.key==='Escape'&&document.activeElement===$('#q')&&$('#q').value){
+  $('#q').value='';localStorage.setItem('acm-query','');renderList();return;}
+ if(e.key==='ArrowDown'||e.key==='ArrowUp'){
+  const tag=(document.activeElement||{}).tagName;
+  if(tag==='INPUT'||tag==='TEXTAREA')return;
+  const rows=filteredRows();if(!rows.length)return;
+  e.preventDefault();
+  const i=rows.findIndex(r=>r.asset_key===SEL);
+  const next=e.key==='ArrowDown'?Math.min(rows.length-1,i+1):Math.max(0,i<0?0:i-1);
+  select(esc(rows[next].asset_key));
+  const el=document.querySelector(`.row.sel`);if(el)el.scrollIntoView({block:'nearest'});}});
 actPills();
 actBackfill();
 route();
