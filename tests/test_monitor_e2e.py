@@ -7,10 +7,10 @@ from datetime import datetime, timedelta, timezone
 import numpy as np
 import polars as pl
 
-from acm import verdict as V
-from acm.monitor import AssetMonitor, render_report
-from acm.scheduler import FleetScheduler
-from acm.store.raw import TIMESTAMP_COL, RawStore
+import verdict as V
+from monitor import AssetMonitor, render_report
+from scheduler import FleetScheduler
+from store.raw import TIMESTAMP_COL, RawStore
 
 UTC = timezone.utc
 

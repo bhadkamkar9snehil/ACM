@@ -8,17 +8,17 @@ import numpy as np
 import polars as pl
 import pytest
 
-from acm import verdict as V
-from acm.episodes import EpisodicMonitor
-from acm.memory.ledger import EpisodeLedger
-from acm.monitor import AssetMonitor
-from acm.novelty import (
+import verdict as V
+from episodes import EpisodicMonitor
+from memory.ledger import EpisodeLedger
+from monitor import AssetMonitor
+from novelty import (
     NoveltyEngine,
     classify_shape,
     kendall_tau,
     mass_distance_profile,
 )
-from acm.store.raw import TIMESTAMP_COL, RawStore
+from store.raw import TIMESTAMP_COL, RawStore
 
 UTC = timezone.utc
 pytestmark = pytest.mark.statistical
@@ -208,7 +208,7 @@ def test_signature_match_recognizes_repeat_fault(tmp_path):
 # ------------------------------------- governed auto-absorption (#89)
 def _absorb_runtime(tmp_path, key, rng):
     """6 healthy months in the store, onboarded runtime, history ticked."""
-    from acm.runtime import Runtime
+    from runtime import Runtime
 
     start = datetime(2025, 1, 1, tzinfo=UTC)
     store = RawStore(tmp_path / "raw")
@@ -226,7 +226,7 @@ def _absorb_runtime(tmp_path, key, rng):
 def test_change_not_fault_not_absorbed_before_the_period(tmp_path, monkeypatch):
     """The trigger is TIME-gated: with the period raised, a declared
     change stays an open episode (no silent early re-anchor)."""
-    from acm.constants import REGISTRY, Constant
+    from constants import REGISTRY, Constant
 
     monkeypatch.setitem(
         REGISTRY,

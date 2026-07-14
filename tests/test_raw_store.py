@@ -14,7 +14,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from acm.store.raw import TIMESTAMP_COL, RawStore
+from store.raw import TIMESTAMP_COL, RawStore
 
 UTC = timezone.utc
 
@@ -177,7 +177,7 @@ def test_append_is_column_order_insensitive(tmp_path):
     the tick). Channels missing from a batch land as nulls."""
     import numpy as np
 
-    from acm.store.raw import TIMESTAMP_COL, RawStore
+    from store.raw import TIMESTAMP_COL, RawStore
 
     store = RawStore(tmp_path / "raw")
     ts = pl.Series(

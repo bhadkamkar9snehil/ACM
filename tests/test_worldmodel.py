@@ -10,9 +10,9 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from acm.scoring.surprise import ConditionalSurpriseScorer, ks_uniform
-from acm.scoring.worldmodel import TorchWorldModel
-from acm.store.raw import TIMESTAMP_COL
+from scoring.surprise import ConditionalSurpriseScorer, ks_uniform
+from scoring.worldmodel import TorchWorldModel
+from store.raw import TIMESTAMP_COL
 
 UTC = timezone.utc
 pytestmark = pytest.mark.statistical
@@ -90,7 +90,7 @@ def test_spike_go_beats_ridge_on_nonlinear_coupling(fitted_pair):
 def test_world_model_drops_into_the_monitor(fitted_pair):
     """Interface parity: the world model is a drop-in scorer_cls - same
     spine, same banks, same verdicts (D6/D7: the swap is architectural)."""
-    from acm.monitor import AssetMonitor
+    from monitor import AssetMonitor
 
     mon = AssetMonitor("wm/1", scorer_cls=TorchWorldModel)
     assert mon.calibrate(nonlinear_machine(6000, seed=3))

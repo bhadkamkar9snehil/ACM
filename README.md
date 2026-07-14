@@ -16,12 +16,12 @@ time-to-failure while a fault develops.
 `ALPHA_PER_ASSET_YEAR` (default 1.0): the promised number of false
 alarms per asset per year. Everything else is derived from the asset's
 own data or is a structural constant with its rationale written next to
-it in the code (`src/acm/constants.py`). There is no config file, no
+it in the code (`src/constants.py`). There is no config file, no
 per-site table, no threshold sheet.
 
 ```bash
 ./install.sh          # or: .\install.ps1 on Windows (installs uv, syncs, self-tests)
-uv run python -m acm.service --root acm_data --port 8899 --tick-seconds 300
+uv run python -m service --root acm_data --port 8899 --tick-seconds 300
 # self-ticking fleet service + zero-build UI: open http://127.0.0.1:8899
 ```
 
@@ -56,7 +56,7 @@ contract, detection power is what improves with tiers and models.
 ## What a verdict looks like
 
 Every asset always has exactly one current verdict, and the contract is
-frozen (v1, `src/acm/verdict.py`):
+frozen (v1, `src/verdict.py`):
 
 | Field | Meaning |
 |---|---|
@@ -180,7 +180,7 @@ channels - the GPU box is the intended home.)
 
 ## Service, UI, API
 
-`python -m acm.service` is the whole deployment: FastAPI + a
+`python -m service` is the whole deployment: FastAPI + a
 self-ticking loop (guarded - a failing tick is logged and retried, the
 loop never dies silently) + a zero-build UI (one HTML file, no bundler,
 Apache ECharts vendored and served locally - deliberate, for air-gapped
@@ -217,13 +217,13 @@ gitignored `results/`; summaries go to the knowledge base.
 
 ```bash
 # CARE-to-Compare farm replays (adapter declares UTC, labels never enter the store)
-uv run python -m acm.evidence.care_replay \
+uv run python -m evidence.care_replay \
     --farm-dir "care_data/Wind Farm A" --events 40 68 --out results/acm_care_A
 # --scorer worldmodel|tier0|auto forces a cross-tier comparison
 
 # The implement-and-forget gate: real service + continuously-fed live buffer
 # through healthy -> setpoint change -> fault; exits non-zero on any failure
-uv run python -m acm.evidence.soak --root results/soak1 --minutes 90
+uv run python -m evidence.soak --root results/soak1 --minutes 90
 ```
 
 Current evidence (small samples, honestly labeled as such):
@@ -264,7 +264,8 @@ uv run pytest tests -m statistical        # acceptance lane (immune, conformance
 ## Repository layout
 
 ```
-src/acm/        the product (src-layout; import name acm)
+src/             the product (flat src-layout; no wrapping package -
+                 service/runtime/decision/scoring/... import directly)
 tests/           unit + statistical + evidence-machinery tests
 install.sh|ps1   one-command install (uv-based)
 pyproject.toml   uv-locked project; the ONLY tunable is the alpha dial

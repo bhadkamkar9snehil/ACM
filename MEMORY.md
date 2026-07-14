@@ -47,7 +47,7 @@ self-validating asset condition monitoring with ONE dial
 guarantee. The repo root IS the product:
 
 ```
-src/acm/         the package (import name: acm; python -m acm.service)
+src/             flat src-layout (no wrapping package dir); python -m service
 tests/           unit + statistical lanes (pytest markers)
 install.sh|ps1   uv-based one-command install
 pyproject.toml   name=acm, version carries the 2
@@ -68,7 +68,7 @@ Naming history (all 2026-07-08): #93 moved the legacy lab wholesale to
 the package `acm2` -> `acm` (the 2 lives in the version field only).
 "ACM2" in older docs/KB prose = this product.
 
-`src/acm/vendor/echarts.min.js` (Apache-2.0, ~1MB) is vendored and
+`src/vendor/echarts.min.js` (Apache-2.0, ~1MB) is vendored and
 served at `/vendor/echarts.min.js` by the service itself - the UI is
 zero-build and must work air-gapped, so this is never a CDN reference.
 Re-vendor by re-downloading the same file if it's ever missing; do not
@@ -106,8 +106,8 @@ add a build step to fetch it.
 
 - One dial: ALPHA_PER_ASSET_YEAR. Everything else = derived from the
   asset's own data OR a rationale-carrying constant in
-  `src/acm/constants.py`. No config files, no per-site tuning surface.
-- Verdict contract v1 fields are FROZEN (`src/acm/verdict.py`).
+  `src/constants.py`. No config files, no per-site tuning surface.
+- Verdict contract v1 fields are FROZEN (`src/verdict.py`).
 - `acm` never imports the legacy lab (test_import_boundary).
 - Never-built list (lab lessons, they are the filter): no trailing/trim
   retention windows, no threshold rules, no distrust gate, no fusion
@@ -174,7 +174,7 @@ add a build step to fetch it.
   change declared + auto-absorbed at exactly one anchor period,
   post-absorb plateau healthy, fault alarmed on the absorbed baseline,
   zero tick failures, RSS flat ~178MB. Rerun:
-  `uv run python -m acm.evidence.soak --root results/soak1 --minutes 90`
+  `uv run python -m evidence.soak --root results/soak1 --minutes 90`
 - **CARE Farm A pilot (8 events, Tier 0)**: 0/5 normals false-alarmed;
   event 0 (generator bearing) hit at 240h lag; event 22 (hydraulic)
   alarmed but classified change-not-fault (OPEN observation - do not
@@ -191,7 +191,7 @@ add a build step to fetch it.
 
 ## UI (2026-07-09 overhaul - current state)
 
-`src/acm/ui.html` is a single-file, zero-build UI using vendored
+`src/ui.html` is a single-file, zero-build UI using vendored
 Apache ECharts (see above) plus a real-time WebSocket stream:
 
 - Fleet dashboard strip: state donut, worst-first evidence bars (alarm

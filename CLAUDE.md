@@ -35,6 +35,28 @@ product is ACM, the 2 lives in the version field (2.0.0a0). So:
 historical sections below reads as `acm` now. "ACM2" as a NAME in
 prose below = the v2 rewrite that now simply is ACM.
 
+Part 4 (2026-07-14): `src/acm/` is GONE - the package directory was
+flattened directly into `src/` (user's explicit call: no wrapping
+package folder under `src/`). `src/acm/runtime.py` -> `src/runtime.py`,
+`src/acm/decision/` -> `src/decision/`, etc. for every module and
+subpackage (`decision`, `ingest`, `scoring`, `store`, `immune`,
+`evidence`, `memory`), plus `ui.html` and `vendor/`. Every
+`from acm.X import Y` -> `from X import Y` (and `from acm import X` ->
+`import X`); `src/acm/__init__.py`'s `__version__` moved to a new
+`src/_version.py` (imported as `from _version import __version__`).
+Import name is no longer `acm` at all - modules are top-level
+(`import runtime`, `import service`, ...). The distribution/project
+name in `pyproject.toml` stays `acm` (`name = "acm"`); only the internal
+import layout changed. Run command changed: `python -m acm.service` ->
+`python -m service` (same for `python -m acm.evidence.care_replay` ->
+`python -m evidence.care_replay`, `acm.evidence.soak` ->
+`evidence.soak`). Achieved via hatchling's `sources = ["src"]` +
+explicit `include` globs (NOT `packages = ["src"]`, which keeps the
+`src/` prefix in the wheel - verified empirically with a throwaway
+build before touching the real repo). Every `src/acm/...` path and
+`acm.<module>` import in the historical sections below reads with the
+`acm.`/`src/acm/` prefix simply dropped.
+
 ---
 
 ## ASCII-Only Rule

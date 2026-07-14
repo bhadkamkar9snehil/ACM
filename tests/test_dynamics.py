@@ -11,8 +11,8 @@ import numpy as np
 import polars as pl
 import pytest
 
-from acm.scoring.dynamics import DynamicsDrift
-from acm.store.raw import TIMESTAMP_COL
+from scoring.dynamics import DynamicsDrift
+from store.raw import TIMESTAMP_COL
 
 UTC = timezone.utc
 pytestmark = pytest.mark.statistical
@@ -65,7 +65,7 @@ def test_slow_channel_claim_operator_sees_what_magnitude_misses():
     """A modest coupling change: per-row surprise moves a little; the
     operator distance moves A LOT (relative to its healthy spread). This
     is the spike's GO criterion."""
-    from acm.scoring.surprise import ConditionalSurpriseScorer
+    from scoring.surprise import ConditionalSurpriseScorer
 
     fit_frame = dyn_frame(8000, seed=9)
     dd = DynamicsDrift().fit(fit_frame)
@@ -96,7 +96,7 @@ def test_slow_channel_claim_operator_sees_what_magnitude_misses():
 
 
 def test_monitor_alarms_via_dynamics_drift_end_to_end():
-    from acm.monitor import AssetMonitor
+    from monitor import AssetMonitor
 
     mon = AssetMonitor("dy/1")
     assert mon.calibrate(dyn_frame(10000, seed=12))

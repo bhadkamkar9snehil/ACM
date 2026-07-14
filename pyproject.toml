@@ -30,7 +30,11 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/acm"]
+# Flat src layout: src/*.py and src/<subpkg>/ become top-level importable
+# modules/packages directly (service, runtime, decision, scoring, ...) with
+# no wrapping "acm" package directory.
+sources = ["src"]
+include = ["src/**/*.py", "src/**/*.html", "src/vendor/**"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

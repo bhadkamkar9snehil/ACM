@@ -8,9 +8,9 @@ import numpy as np
 import polars as pl
 import pytest
 
-from acm.scoring.transients import TransientCatalogue
+from scoring.transients import TransientCatalogue
 
-from acm.store.raw import TIMESTAMP_COL
+from store.raw import TIMESTAMP_COL
 
 UTC = timezone.utc
 pytestmark = pytest.mark.statistical
@@ -100,7 +100,7 @@ def test_thin_catalogue_refuses():
 def test_monitor_alarms_on_degraded_starts_end_to_end():
     """The 41st..46th start-ups ramp slow with overshoot: the monitor
     alarms via the transient-response domain."""
-    from acm.monitor import AssetMonitor
+    from monitor import AssetMonitor
 
     mon = AssetMonitor("tr/1")
     assert mon.calibrate(machine_with_starts(40, seed=10))
