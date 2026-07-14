@@ -105,8 +105,10 @@ th{color:var(--mut);font-weight:normal;font-size:11px;letter-spacing:1px;
  padding:10px 14px;box-shadow:var(--shadow)}
 .kpi b{display:block;font-size:10px;letter-spacing:1.5px;color:var(--mut);
  text-transform:uppercase;margin-bottom:3px;font-weight:normal}
-.kpi span{font-size:22px;font-weight:bold;line-height:1.2}
-.kpi small{color:var(--mut);font-size:11px;margin-left:6px}
+.kpi .row{display:flex;align-items:baseline;gap:6px;overflow:hidden;min-width:0}
+.kpi span{font-size:22px;font-weight:bold;line-height:1.2;flex:0 0 auto;white-space:nowrap}
+.kpi small{color:var(--mut);font-size:11px;overflow:hidden;text-overflow:ellipsis;
+ white-space:nowrap;min-width:0}
 .kpi.bad span{color:var(--bad)}.kpi.warn span{color:var(--warn)}
 .kpi.ok span{color:var(--ok)}.kpi.acc span{color:var(--acc)}
 #fcharts{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px;
@@ -467,7 +469,7 @@ function renderKpis(){
  const pending=(c.queued||0)+(c.onboarding||0)+(c.bootstrapping||0);
  const worst=rows.length?rows[0]:null;
  const kpi=(cls,label,val,note)=>`<div class="kpi ${cls}"><b>${label}</b>`+
-  `<span>${val}</span>${note?`<small>${note}</small>`:''}</div>`;
+  `<div class="row"><span>${val}</span>${note?`<small title="${note}">${note}</small>`:''}</div></div>`;
  $('#kpis').innerHTML=
   kpi('','fleet',FLEET.assets,pending?`${pending} pending`:'all verdicted')+
   kpi(alarms?'bad':'ok','alarms',alarms,alarms&&worst?worst.asset_key:'')+
@@ -790,7 +792,7 @@ function actStats(){
  ACT_EVENTS.forEach(e=>{counts[e.kind]=(counts[e.kind]||0)+1;});
  const last=ACT_EVENTS[ACT_EVENTS.length-1];
  const kpi=(cls,label,val,note)=>`<div class="kpi ${cls}"><b>${label}</b>`+
-  `<span>${val}</span>${note?`<small>${note}</small>`:''}</div>`;
+  `<div class="row"><span>${val}</span>${note?`<small title="${note}">${note}</small>`:''}</div></div>`;
  $('#act-stats').innerHTML=
   kpi('acc','total events',ACT_EVENTS.length,'last 500')+
   ACT_KINDS.map(k=>kpi('',k,counts[k],'')).join('')+
