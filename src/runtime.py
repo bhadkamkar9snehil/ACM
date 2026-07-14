@@ -804,13 +804,13 @@ class Runtime:
         self.immune_results[asset_key] = result
         return result
 
-    def narrative(self, asset_key: str) -> str | None:
-        from narrative import build_narrative
+    def narrative_sections(self, asset_key: str) -> list[dict] | None:
+        from narrative import build_narrative_sections
 
         v = self.verdicts.get(asset_key)
         if v is None:
             return None
-        return build_narrative(
+        return build_narrative_sections(
             v,
             previous=self.previous_verdicts.get(asset_key),
             immune=self.immune_results.get(asset_key),

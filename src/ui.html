@@ -124,6 +124,22 @@ th{color:var(--mut);font-weight:normal;font-size:11px;letter-spacing:1px;
 .muted{color:var(--mut)}
 .chart{width:100%}
 
+/* ---------------------------------------------------- health narrative */
+.narr-lead{font-size:14px;font-weight:bold;line-height:1.6;margin-bottom:var(--sp-6)}
+.narr-list{display:flex;flex-direction:column;gap:var(--sp-2)}
+.narr-row{padding:var(--sp-2) 0 var(--sp-2) var(--sp-5);border-left:3px solid var(--line);
+ line-height:1.6;font-size:12.5px}
+.narr-row b{display:block;font-size:10px;letter-spacing:1.5px;color:var(--mut);
+ text-transform:uppercase;font-weight:normal;margin-bottom:2px}
+.narr-row.narr-ok{border-left-color:var(--ok)}
+.narr-row.narr-bad{border-left-color:var(--bad)}
+.narr-row.narr-bad b{color:var(--bad)}
+.narr-falsifiable{margin-top:var(--sp-7);padding:var(--sp-4) var(--sp-5);
+ border:1px dashed var(--line);border-radius:var(--r-control);font-style:italic;
+ color:var(--mut);font-size:12.5px;line-height:1.6}
+.narr-falsifiable b{font-style:normal;color:var(--txt);font-weight:bold;
+ margin-right:var(--sp-2)}
+
 /* ---------------------------------------------------- fleet page */
 #page-fleet{padding:var(--sp-7) var(--sp-10) var(--sp-9)}
 #page-fleet.on{display:flex;flex-direction:column;overflow-y:hidden}
@@ -559,6 +575,23 @@ function renderList(){
  shown.forEach(v=>{const cv=document.querySelector(`canvas[data-k="${CSS.escape(v.asset_key)}"]`);
   if(cv&&HEALTH[v.asset_key])spark(cv,HEALTH[v.asset_key].slice(-120),12);});}
 
+/* ------------------------------------------------ health narrative */
+const NARR_LABEL={change:'change',evidence:'evidence',anatomy:'anatomy',shape:'shape',
+ horizon:'horizon',coverage:'coverage','immune-ok':'self-test','immune-sick':'self-test'};
+function narrativeHtml(sections,state){
+ if(!sections||!sections.length)return '<p class="muted">no narrative available</p>';
+ const rows=[];let lead='',falsifiable='';
+ sections.forEach(s=>{
+  if(s.kind==='judgment'){lead=s.text;return;}
+  if(s.kind==='falsifiable'){
+   falsifiable=s.text.replace(/^This verdict is falsifiable by:\s*/,'');return;}
+  const cls=s.kind==='immune-sick'?'narr-row narr-bad':s.kind==='immune-ok'?'narr-row narr-ok':'narr-row';
+  const style=s.kind==='evidence'?` style="border-left-color:${SC[state]||'var(--line)'}"`:'';
+  rows.push(`<div class="${cls}"${style}><b>${NARR_LABEL[s.kind]||s.kind}</b>${s.text}</div>`);});
+ return (lead?`<p class="narr-lead">${lead}</p>`:'')+
+  (rows.length?`<div class="narr-list">${rows.join('')}</div>`:'')+
+  (falsifiable?`<div class="narr-falsifiable"><b>falsifiable by</b>${falsifiable}</div>`:'');}
+
 /* ------------------------------------------------ detail charts */
 function domChart(doms){
  const names=Object.keys(doms),on=n=>doms[n].enabled;
@@ -701,7 +734,7 @@ async function detail(key,force){
   <div class="cards">
    <div class="card wide"><h3>Health index trajectory (windowed mean surprise)</h3>
     <div class="chart" id="c-health" style="height:260px"></div></div>
-   <div class="card wide"><h3>Health narrative</h3><pre>${narr.narrative}</pre></div>
+   <div class="card wide"><h3>Health narrative</h3>${narrativeHtml(narr.sections,v.state)}</div>
   </div>
  </div>
  <div class="pane ${DTAB==='evidence'?'on':''}" id="pane-evidence">

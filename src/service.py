@@ -166,10 +166,13 @@ def create_app(
 
     @app.get("/api/narrative/{asset_key:path}")
     def narrative(asset_key: str) -> JSONResponse:
-        text = runtime.narrative(asset_key)
-        if text is None:
+        sections = runtime.narrative_sections(asset_key)
+        if sections is None:
             return JSONResponse({"error": "unknown asset"}, status_code=404)
-        return JSONResponse({"asset_key": asset_key, "narrative": text})
+        text = "\n".join(s["text"] for s in sections)
+        return JSONResponse(
+            {"asset_key": asset_key, "sections": sections, "narrative": text}
+        )
 
     @app.post("/api/tick")
     async def tick() -> JSONResponse:
