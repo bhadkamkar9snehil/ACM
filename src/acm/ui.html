@@ -19,7 +19,8 @@
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%}
 body{font:14px/1.5 Consolas,Menlo,monospace;background:var(--bg);color:var(--txt);
- display:grid;grid-template-columns:200px minmax(0,1fr);overflow:hidden}
+ display:grid;grid-template-columns:200px minmax(0,1fr);grid-template-rows:minmax(0,1fr);
+ overflow:hidden}
 
 /* ---------------------------------------------------- sidebar */
 #nav{background:var(--bg2);border-right:1px solid var(--line);display:flex;
@@ -80,9 +81,9 @@ button:disabled{opacity:.4;cursor:wait}
 :root[data-theme="light"] .st-onboarding{background:#e8e3f8;color:#4f3ba8;border-color:#c8bdec}
 :root[data-theme="light"] .st-queued{background:#e9edf3;color:#5a6c80;border-color:#cfd8e2}
 .card{background:var(--bg2);border:1px solid var(--line);border-radius:8px;
- padding:16px 18px;min-width:0;box-shadow:var(--shadow)}
+ padding:13px 16px;min-width:0;box-shadow:var(--shadow)}
 .card h3{font-size:11px;letter-spacing:1.5px;color:var(--mut);text-transform:uppercase;
- margin-bottom:12px}
+ margin-bottom:9px}
 pre{white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;
  font-size:12.5px;line-height:1.65}
 table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:12px}
@@ -96,24 +97,29 @@ th{color:var(--mut);font-weight:normal;font-size:11px;letter-spacing:1px;
 .chart{width:100%}
 
 /* ---------------------------------------------------- fleet page */
-#page-fleet{padding:20px 26px 28px}
-#kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;
- margin-bottom:18px}
+#page-fleet{padding:16px 24px 22px}
+#page-fleet.on{display:flex;flex-direction:column;overflow-y:hidden}
+#kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;
+ margin-bottom:14px}
 .kpi{background:var(--bg2);border:1px solid var(--line);border-radius:8px;
- padding:12px 16px;box-shadow:var(--shadow)}
+ padding:10px 14px;box-shadow:var(--shadow)}
 .kpi b{display:block;font-size:10px;letter-spacing:1.5px;color:var(--mut);
  text-transform:uppercase;margin-bottom:3px;font-weight:normal}
-.kpi span{font-size:23px;font-weight:bold;line-height:1.25}
+.kpi span{font-size:22px;font-weight:bold;line-height:1.2}
 .kpi small{color:var(--mut);font-size:11px;margin-left:6px}
 .kpi.bad span{color:var(--bad)}.kpi.warn span{color:var(--warn)}
 .kpi.ok span{color:var(--ok)}.kpi.acc span{color:var(--acc)}
-#fcharts{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;
- margin-bottom:16px}
+#fcharts{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px;
+ margin-bottom:14px;flex:0 0 auto}
 #fcharts .card.wide{grid-column:1/-1}
-#fcharts .dchart{height:280px}
-#ftable{margin-top:12px}
-#ftable td{padding:9px 18px}
-#ftable th{padding:9px 18px}
+#fcharts .dchart{height:190px}
+#ftable-card{padding:0;display:flex;flex-direction:column;flex:1 1 auto;min-height:220px}
+#ftable-card h3{padding:12px 16px 0;flex:0 0 auto}
+#ftable-scroll{overflow-y:auto;flex:1 1 auto;min-height:0}
+#ftable{margin-top:10px}
+#ftable thead th{position:sticky;top:0;background:var(--bg2);z-index:1}
+#ftable td{padding:8px 18px}
+#ftable th{padding:8px 18px}
 #ftable tr{cursor:pointer}
 #ftable tbody tr:nth-child(even){background:rgba(127,142,161,0.05)}
 #ftable tbody tr:hover{background:var(--bg3)}
@@ -149,7 +155,8 @@ th{color:var(--mut);font-weight:normal;font-size:11px;letter-spacing:1px;
 #dtabs a.on{color:var(--txt);border-bottom-color:var(--acc);font-weight:bold}
 .pane{display:none;padding:20px 26px 28px}
 .pane.on{display:block}
-.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(400px,1fr));gap:16px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:14px;
+ align-items:start}
 .card.wide{grid-column:1/-1}
 
 /* ---------------------------------------------------- activity page */
@@ -253,10 +260,11 @@ th{color:var(--mut);font-weight:normal;font-size:11px;letter-spacing:1px;
   <div id="fcharts">
    <div class="card"><h3>Fleet states</h3><div class="dchart" id="d-states"></div></div>
    <div class="card"><h3>Evidence - worst first (alarm at 1.0)</h3><div class="dchart" id="d-evidence"></div></div>
-   <div class="card wide"><h3>Confidence vs evidence (click a dot to open the asset)</h3><div class="dchart" id="d-scatter"></div></div>
+   <div class="card"><h3>Confidence vs evidence (click a dot to open the asset)</h3><div class="dchart" id="d-scatter"></div></div>
   </div>
-  <div class="card" style="padding:0">
-   <h3 style="padding:16px 18px 0">Fleet detail</h3>
+  <div class="card" id="ftable-card">
+   <h3>Fleet detail</h3>
+   <div id="ftable-scroll">
    <table id="ftable">
     <thead><tr>
      <th style="width:26%" data-col="asset_key">asset</th>
@@ -266,6 +274,7 @@ th{color:var(--mut);font-weight:normal;font-size:11px;letter-spacing:1px;
      <th data-col="at">last verdict</th><th style="width:16%">trend</th></tr></thead>
     <tbody></tbody>
    </table>
+   </div>
   </div>
  </div>
 
@@ -397,7 +406,8 @@ function dashboard(){
    label:{show:false},emphasis:{label:{show:false}},
    itemStyle:{borderColor:CH.border,borderWidth:2},
    data:Object.entries(counts).map(([s,n])=>({name:s,value:n,itemStyle:{color:SC[s]||'#888'}}))}]});
- const top=rows.slice(0,14);
+ const nonzero=rows.filter(r=>r.evidence>0.005);
+ const top=(nonzero.length?nonzero:rows).slice(0,8);
  ec('d-evidence',{
   grid:{left:10,right:56,top:10,bottom:10,containLabel:true},
   tooltip:{trigger:'axis',axisPointer:{type:'shadow'}},
@@ -578,7 +588,7 @@ function gaugeChart(id,val,name){
    formatter:v=>v.toFixed(2)},
   data:[{value:val,name:name}]}]});}
 function horizonChart(hz){
- ec('c-horizon',{grid:{left:10,right:26,top:14,bottom:8,containLabel:true},
+ ec('c-horizon',{grid:{left:60,right:26,top:14,bottom:8,containLabel:true},
   tooltip:{show:false},
   xAxis:{type:'value',name:'steps',nameTextStyle:{color:CH.axis,fontSize:10},
    axisLabel:{color:CH.axis,fontSize:10},splitLine:{lineStyle:{color:CH.grid}}},
@@ -649,16 +659,16 @@ async function detail(key,force){
  <div class="pane ${DTAB==='overview'?'on':''}" id="pane-overview">
   <div class="cards">
    <div class="card wide"><h3>Health index trajectory (windowed mean surprise)</h3>
-    <div class="chart" id="c-health" style="height:320px"></div></div>
+    <div class="chart" id="c-health" style="height:260px"></div></div>
    <div class="card wide"><h3>Health narrative</h3><pre>${narr.narrative}</pre></div>
   </div>
  </div>
  <div class="pane ${DTAB==='evidence'?'on':''}" id="pane-evidence">
   <div class="cards">
    <div class="card wide"><h3>Evidence domains (log-wealth / threshold, alarm at 1.0)</h3>
-    <div class="chart" id="c-domains" style="height:240px"></div></div>
+    <div class="chart" id="c-domains" style="height:210px"></div></div>
    <div class="card"><h3>Coverage: operating-point familiarity</h3>
-    <div class="chart" id="c-coverage" style="height:170px"></div>
+    <div class="chart" id="c-coverage" style="height:160px"></div>
     <div class="kv">
      <b>calibration rows</b><span>${(v.coverage||{}).calib_rows??'-'}</span>
      <b>scored rows</b><span>${(v.coverage||{}).scored_rows??'-'}</span>
@@ -678,11 +688,11 @@ async function detail(key,force){
  </div>
  <div class="pane ${DTAB==='anatomy'?'on':''}" id="pane-anatomy">
   <div class="cards">
-   ${t.anatomy?`<div class="card wide"><h3>Anatomy: organ surprise (origin in red)</h3>
-    <div class="chart" id="c-anatomy" style="height:240px"></div></div>`
+   ${t.anatomy?`<div class="card"><h3>Anatomy: organ surprise (origin in red)</h3>
+    <div class="chart" id="c-anatomy" style="height:220px"></div></div>`
     :'<div class="card"><h3>Anatomy</h3><p class="muted">no organ decomposition for this verdict</p></div>'}
-   ${(t.horizon&&t.horizon.gated)?`<div class="card wide"><h3>Prognosis: failure-time distribution${t.horizon.provisional_level?' [level provisional]':''}</h3>
-    <div class="chart" id="c-horizon" style="height:140px"></div></div>`
+   ${(t.horizon&&t.horizon.gated)?`<div class="card"><h3>Prognosis: failure-time distribution${t.horizon.provisional_level?' [level provisional]':''}</h3>
+    <div class="chart" id="c-horizon" style="height:180px"></div></div>`
     :(t.horizon?`<div class="card"><h3>Prognosis</h3><p class="muted">horizon gated: ${t.horizon.reason}</p></div>`
     :'<div class="card"><h3>Prognosis</h3><p class="muted">no failure-time estimate - nothing is accumulating</p></div>')}
   </div>
