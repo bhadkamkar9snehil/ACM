@@ -1,12 +1,21 @@
 <!DOCTYPE html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>ACM</title>
-<script src="/vendor/echarts.min.js"></script>
 <!-- All vendored, served locally, never a CDN - zero-build UI must
-     work air-gapped. Licenses (verified against npm/GitHub, not just
+     work air-gapped. Licenses (verified against npm registry, not just
      file header comments - clusterize.min.js's own header comment is
      a stale leftover claiming GPLv3, but its package.json and GitHub
-     LICENSE are both MIT): morphdom MIT, marked MIT, clusterize.js MIT. -->
-<script src="/vendor/morphdom.min.js"></script>
+     LICENSE are both MIT): preact MIT, preact/hooks MIT,
+     @preact/signals-core + @preact/signals MIT, htm Apache-2.0,
+     marked MIT, clusterize.js MIT.
+     Load order matters: preact-signals.min.js resolves preact /
+     preactHooks / preactSignalsCore off the global object at UMD
+     fallback time, so it must load after all three. -->
+<script src="/vendor/preact.min.js"></script>
+<script src="/vendor/preact-hooks.min.js"></script>
+<script src="/vendor/preact-signals-core.min.js"></script>
+<script src="/vendor/preact-signals.min.js"></script>
+<script src="/vendor/htm.min.js"></script>
+<script src="/vendor/echarts.min.js"></script>
 <script src="/vendor/marked.min.js"></script>
 <script src="/vendor/clusterize.min.js"></script>
 <style>
@@ -48,6 +57,7 @@ html,body{height:100%}
 body{font:14px/1.5 var(--font-mono);background:var(--bg);color:var(--txt);
  display:grid;grid-template-columns:200px minmax(0,1fr);grid-template-rows:minmax(0,1fr);
  overflow:hidden}
+#app{display:contents}
 
 /* ---------------------------------------------------- sidebar */
 #nav{background:var(--bg2);border-right:1px solid var(--line);display:flex;
@@ -318,138 +328,50 @@ th{color:var(--mut);font-weight:normal;font-size:11px;letter-spacing:1px;
 #ftable th[data-col] .arrow{margin-left:var(--sp-1);color:var(--acc)}
 </style></head><body>
 <div id="boot"><span class="spin"></span><span>connecting to ACM...</span></div>
-
-<nav id="nav">
- <div class="brand">ACM<small>asset condition monitor</small></div>
- <div class="navsec">
-  <a data-p="fleet" onclick="location.hash='#/fleet'"><span>&#9632;</span><span class="lbl">Fleet</span><span class="badge" id="nb-alarm" style="display:none"></span></a>
-  <a data-p="assets" onclick="location.hash='#/assets'"><span>&#9639;</span><span class="lbl">Assets</span></a>
-  <a data-p="activity" onclick="location.hash='#/activity'"><span>&#9655;</span><span class="lbl">Activity</span></a>
- </div>
- <div class="foot">
-  <span class="meta" id="nav-meta"></span>
-  <button onclick="toggleTheme()" title="toggle light/dark theme">theme</button>
-  <button onclick="showReport()">Report</button>
- </div>
-</nav>
-
-<div id="main">
- <div id="topbar">
-  <h1 id="pgtitle">fleet</h1>
-  <span class="meta" id="meta"></span>
-  <span class="spacer"></span>
-  <span id="wsdot" title="live stream"></span><span class="meta" id="wsmeta">connecting</span>
-  <span class="meta" id="immune-meta"></span>
-  <button onclick="act(this,'tick','', 'Scoring all assets')">Tick all</button>
- </div>
-
- <div id="page-fleet" class="page">
-  <div id="kpis"></div>
-  <div id="fcharts">
-   <div class="card"><h3>Fleet states</h3><div class="dchart" id="d-states"></div></div>
-   <div class="card"><h3>Evidence - worst first (alarm at 1.0)</h3><div class="dchart" id="d-evidence"></div></div>
-   <div class="card"><h3>Confidence vs evidence (click a dot to open the asset)</h3><div class="dchart" id="d-scatter"></div></div>
-  </div>
-  <div class="card" id="ftable-card">
-   <h3>Fleet detail</h3>
-   <div id="ftable-scroll">
-   <table id="ftable">
-    <thead><tr>
-     <th style="width:26%" data-col="asset_key">asset</th>
-     <th style="width:14%" data-col="state">state</th>
-     <th style="width:12%" data-col="evidence">evidence</th>
-     <th style="width:12%" data-col="confidence">confidence</th>
-     <th data-col="at">last verdict</th><th style="width:16%">trend</th></tr></thead>
-    <tbody></tbody>
-   </table>
-   </div>
-  </div>
- </div>
-
- <div id="page-assets" class="page grid">
-  <div id="lcol">
-   <div id="lbar">
-    <input id="q" placeholder="filter assets... ( / )">
-    <span id="pills"></span>
-   </div>
-   <div id="list"></div>
-  </div>
-  <div id="detail"><p class="muted" style="padding:30px">Select an asset.</p></div>
- </div>
-
- <div id="page-activity" class="page">
-  <div id="act-stats"></div>
-  <div id="actbar">
-   <span class="dotlive"></span><b style="font-size:12px;letter-spacing:1px">LIVE STREAM</b>
-   <span class="muted" id="act-count"></span>
-   <span style="flex:1"></span>
-   <span id="act-pills"></span>
-  </div>
-  <div id="act-log"></div>
- </div>
-</div>
-<div id="toast"></div>
-<div id="report-modal">
- <div id="report-box">
-  <div id="report-head">
-   <b>Fleet report</b>
-   <span class="spacer"></span>
-   <button onclick="hideReport()">Close</button>
-  </div>
-  <div id="report-body" class="report"><p class="muted" style="padding:20px">Loading...</p></div>
- </div>
-</div>
+<div id="app"></div>
 
 <script>
 "use strict";
-let FLEET=null, SEL=null, FILTER=localStorage.getItem('acm-filter')||null, HEALTH={}, HASH='', DETAIL_AT='';
-let PAGE='fleet', DTAB='overview', DDATA=null, SORT_COL=null, SORT_DIR=1;
+/* ==================================================================
+   Rendering architecture: Preact (vdom/components) + htm (JSX-like
+   tagged-template syntax, no build step - the whole reason this pair
+   works for a zero-build, air-gapped-servable single file) +
+   @preact/signals for global reactive state. Replaces the previous
+   generation's string-template + morphdom-patch architecture: every
+   render function used to build an HTML string and hand it to
+   morphdom for in-place diffing, with a hand-rolled onBeforeElUpdated
+   guard to stop chart containers from being torn down. Preact's own
+   vdom diffing does that correctly by construction (a chart's DOM
+   node is a component-owned ref, never regenerated by re-render), so
+   morphdom is no longer part of this file - the EChart component
+   below is the direct replacement for that whole mechanism.
+   ================================================================== */
+const {h,render,Fragment,createRef}=preact;
+const {useState,useEffect,useRef,useMemo}=preactHooks;
+const {signal,effect}=preactSignalsCore;
+const html=htm.bind(h);
+
+/* ------------------------------------------------ small helpers */
 const $=(s)=>document.querySelector(s);
 // encodeURIComponent deliberately leaves ' ( ) ~ * ! unescaped (they're
-// valid in a URL path segment) - but esc() is also used to embed keys
-// inside single-quoted JS string literals in onclick="..." attributes
-// throughout this file, and an unescaped ' there breaks out of the
-// string literal. %27 is inert in both contexts (a normal path
-// segment unquotes it back to ' server-side; inside an onclick
-// attribute it can no longer terminate the string early), so this one
-// extra replace covers every existing and future esc() call site.
+// valid in a URL path segment). %27 is inert either way; kept for
+// parity with the backend's {asset_key:path} route converter, which
+// accepts both literal and percent-encoded slashes.
 const esc=(s)=>encodeURIComponent(s).replace(/'/g,'%27');
-// asset_key/log-message text is never assumed safe as HTML: keys are
-// unquote()'d straight off raw-store directory names (src/store/raw.py),
-// not a fixed enum, so anything that reaches innerHTML must be escaped.
+// Preact auto-escapes every text child and attribute value that comes
+// from a JS expression (htm never concatenates raw strings into HTML
+// the way the old template-string renderer did), so escHtml() is no
+// longer needed for ordinary UI text - it survives only for the
+// Report modal, which parses server markdown through marked.js and
+// injects the result via dangerouslySetInnerHTML (the one remaining
+// raw-HTML sink in this file). render_report() (monitor.py) embeds
+// asset_key straight into the markdown table text, and marked, like
+// any CommonMark parser, passes raw inline HTML in its source straight
+// through by default - escaping the whole markdown source before
+// parsing neutralizes any literal HTML while leaving markdown syntax
+// (# | * - `) completely untouched (none of it uses & < > " ').
 const escHtml=(s)=>String(s??'').replace(/[&<>"']/g,c=>
  ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-// morphdom patches a container's children in place instead of the old
-// el.innerHTML=html full teardown/rebuild - preserves scroll position,
-// input focus, and (critically) any ECharts instance whose container
-// div morphdom would otherwise nuke and recreate on every poll. A
-// chart's own container is never regenerated by our own templates
-// (they always render as an empty <div class="chart">), so skipping
-// morphdom's update on it entirely is always safe - ECharts owns
-// everything under it and redraws via ec()/echarts.setOption(), not
-// via our HTML strings.
-function keepCharts(fromEl){
- return !(fromEl.classList&&(fromEl.classList.contains('chart')||fromEl.classList.contains('dchart')));}
-// morphdom's childrenOnly:true does NOT mean "diff toNode's top-level
-// siblings against fromNode's children" - when toNode is a string with
-// multiple root siblings, morphdom's string->node conversion keeps only
-// the FIRST one and treats it as the whole toNode, silently discarding
-// every sibling after it. The correct pattern is to wrap the new HTML
-// in an element matching the container's own tag (morphdom replaces
-// the whole node outright if tagName differs, so this must be exact)
-// and let morphdom diff outerHTML against outerHTML with no
-// childrenOnly flag - confirmed against morphdom's actual behavior
-// with a throwaway test page before wiring this in for real.
-function patch(el,html){
- if(!el)return;
- const tag=el.tagName.toLowerCase();
- const id=el.id?` id="${el.id}"`:'';
- const cls=el.className?` class="${el.className}"`:'';
- morphdom(el,`<${tag}${id}${cls}>${html}</${tag}>`,{onBeforeElUpdated:keepCharts});}
-// Intl.NumberFormat is a browser built-in, not a vendored library -
-// fmtInt gives thousand-separated counts (row counts, fleet size),
-// fmtDec gives fixed-precision decimals WITH thousand separators
-// (plain toFixed() doesn't group the integer part).
 const NF_INT=new Intl.NumberFormat();
 const NF_DEC=new Intl.NumberFormat(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
 const fmtInt=(n)=>typeof n==='number'&&isFinite(n)?NF_INT.format(n):(n??'-');
@@ -458,111 +380,128 @@ const SC={healthy:'#37b26c',watch:'#d8b636',alarm:'#e05252',escalating:'#ff6b6b'
  'change-not-fault':'#d88a36','insufficient-history':'#5b6b7d',
  bootstrapping:'#4a90d9',onboarding:'#8a76e0',queued:'#5b6b7d'};
 const PENDING=['bootstrapping','onboarding','queued'];
-const CHARTS={};
+function stale(at){
+ if(!at)return '';
+ const t=Date.parse(String(at).replace(' ','T'));
+ if(isNaN(t))return '';
+ const hh=(Date.now()-t)/3.6e6;
+ return hh>48?` (stale ${Math.round(hh)}h - asset clock may lag wall clock)`:'';}
+async function jget(u){const r=await fetch(u);if(!r.ok)throw new Error(u+' '+r.status);return r.json();}
+
+/* ------------------------------------------------ global reactive store
+   Every piece of state that more than one component reads lives in a
+   signal here. A plain functional component that reads `S.x.value`
+   directly in its render body is auto-subscribed by @preact/signals
+   (it patches Preact's rendering hooks for exactly this) - no
+   useState/useEffect ceremony needed to keep components in sync with
+   a WebSocket push or another component's action. */
+const S={
+ fleet:signal(null),
+ sel:signal(null),
+ filter:signal(localStorage.getItem('acm-filter')||null),
+ query:signal(localStorage.getItem('acm-query')||''),
+ page:signal('fleet'),
+ dtab:signal('overview'),
+ health:signal({}),
+ actEvents:signal([]),
+ actFilter:signal(null),
+ wsOn:signal(false),
+ wsLabel:signal('connecting'),
+ sortCol:signal(null),
+ sortDir:signal(1),
+ toasts:signal([]),
+ reportOpen:signal(false),
+ reportHtml:signal(''),
+ reportErr:signal(''),
+ ddata:signal(null),
+ fleetHash:signal(''),
+};
+let toastId=0;
+function toast(m){
+ const id=++toastId;
+ S.toasts.value=[...S.toasts.value,{id,m}];
+ setTimeout(()=>{S.toasts.value=S.toasts.value.filter(t=>t.id!==id);},4200);}
+
+/* ------------------------------------------------ theme
+   CH mirrors the CSS chart-palette custom properties as a plain
+   object every chart option builder reads - kept outside signals
+   (charts re-read it imperatively inside the EChart component,
+   not via component re-render) since it only changes on an explicit
+   theme toggle, not on a hot path. */
 let CH={};
 function reTheme(){
  const cs=getComputedStyle(document.documentElement);
  CH={text:cs.getPropertyValue('--ch-text').trim(),
   axis:cs.getPropertyValue('--ch-axis').trim(),
   grid:cs.getPropertyValue('--ch-grid').trim(),
-  border:cs.getPropertyValue('--ch-border').trim()};
- BASE.textStyle.color=CH.text;}
-const BASE={backgroundColor:'transparent',textStyle:{color:CH.text,fontFamily:'Consolas,Menlo,monospace'},
- animationDuration:250,animationDurationUpdate:250};
-if(localStorage.getItem('acm-theme')==='light')
- document.documentElement.dataset.theme='light';
+  border:cs.getPropertyValue('--ch-border').trim()};}
+if(localStorage.getItem('acm-theme')==='light')document.documentElement.dataset.theme='light';
 reTheme();
+const themeTick=signal(0);   // bumped on toggle so EChart-consuming components re-render with fresh CH
 function toggleTheme(){
  const light=document.documentElement.dataset.theme!=='light';
  document.documentElement.dataset.theme=light?'light':'';
  localStorage.setItem('acm-theme',light?'light':'dark');
  reTheme();
- renderPage();
- if(PAGE==='assets'&&SEL)detail(SEL,true);}
-function ec(id,opt){
- const el=document.getElementById(id);if(!el||el.offsetParent===null&&el.clientWidth===0)return null;
- let c=CHARTS[id];
- if(!c||c.getDom()!==el){if(c)c.dispose();c=CHARTS[id]=echarts.init(el,null,{renderer:'canvas'});}
- c.setOption(Object.assign({},BASE,opt),{replaceMerge:['series','xAxis','yAxis']});
- return c;}
-addEventListener('resize',()=>Object.values(CHARTS).forEach(c=>c.resize()));
-function stale(at){
- if(!at)return '';
- const t=Date.parse(String(at).replace(' ','T'));
- if(isNaN(t))return '';
- const h=(Date.now()-t)/3.6e6;
- return h>48?` <span style="color:var(--warn)">(stale ${Math.round(h)}h - asset clock may lag wall clock)</span>`:'';}
-function toast(m){const d=document.createElement('div');d.textContent=m;
- $('#toast').appendChild(d);setTimeout(()=>d.remove(),4200);}
-async function showReport(){
- $('#report-modal').classList.add('on');
- $('#report-body').innerHTML='<p class="muted" style="padding:20px">Loading...</p>';
- try{
-  const r=await fetch('/api/report');
-  if(!r.ok)throw new Error('HTTP '+r.status);
-  const md=await r.text();
-  // render_report() (monitor.py) embeds asset_key straight into the
-  // markdown table text - same untrusted-ish provenance escHtml()
-  // guards against everywhere else in this file. marked, like any
-  // CommonMark parser, passes raw inline HTML in the source straight
-  // through by default, so parsing this text unescaped would reopen
-  // that exact injection through a different door. Escaping the whole
-  // markdown source first neutralizes any literal HTML while leaving
-  // markdown syntax (# | * - `) completely untouched (none of it uses
-  // & < > " ').
-  $('#report-body').innerHTML=marked.parse(escHtml(md));
- }catch(e){
-  $('#report-body').innerHTML=`<p class="muted">failed to load report: ${escHtml(e.message)}</p>`;
- }}
-function hideReport(){$('#report-modal').classList.remove('on');}
-async function jget(u){const r=await fetch(u);if(!r.ok)throw new Error(u+' '+r.status);return r.json();}
-async function act(btn,kind,key,msg){
- if(btn&&btn.disabled)return;   // already in flight - ignore the double-click
- if(btn)btn.disabled=true;
- toast(msg+'...');
- const url=kind==='tick'&&!key?'/api/tick':`/api/${kind}/${esc(key)}`;
- try{const r=await fetch(url,{method:'POST'});const d=await r.json();
-  toast(msg+': done '+JSON.stringify(d).slice(0,90));
-  if(!WS_ON)await refresh();if(PAGE==='assets'&&SEL)await detail(SEL,true);}
- catch(e){toast('FAILED: '+e.message);}
- finally{if(btn)btn.disabled=false;}}
-function spark(cv,data,h){
- const w=cv.width=cv.clientWidth*2,hh=cv.height=h*2,c=cv.getContext('2d');
- c.clearRect(0,0,w,hh);if(!data||data.length<2)return;
+ themeTick.value++;}
+function baseOpt(){
+ return {backgroundColor:'transparent',
+  textStyle:{color:CH.text,fontFamily:'Consolas,Menlo,monospace'},
+  animationDuration:250,animationDurationUpdate:250};}
+
+/* ------------------------------------------------ EChart component
+   The direct replacement for the old global CHARTS{} map + ec()
+   function + morphdom keepCharts guard: each chart owns its own DOM
+   node via a ref, created once on mount and disposed on unmount.
+   Re-renders just call setOption - Preact never touches the chart's
+   subtree because the div is a leaf with no vdom children. */
+function EChart({id,height,option,onReady}){
+ const ref=useRef(null);
+ const inst=useRef(null);
+ useEffect(()=>{
+  if(!ref.current)return;
+  const c=echarts.init(ref.current,null,{renderer:'canvas'});
+  inst.current=c;
+  if(onReady)onReady(c);
+  const onResize=()=>c.resize();
+  addEventListener('resize',onResize);
+  return ()=>{removeEventListener('resize',onResize);c.dispose();inst.current=null;};
+ },[]);
+ useEffect(()=>{
+  if(inst.current&&option)
+   inst.current.setOption(Object.assign({},baseOpt(),option),{replaceMerge:['series','xAxis','yAxis']});
+ });
+ const style=height?`height:${height}px`:'';
+ return html`<div class="chart" id=${id} style=${style} ref=${ref}></div>`;}
+
+/* ------------------------------------------------ Sparkline canvas */
+function spark(cv,data,hh){
+ const w=cv.width=cv.clientWidth*2,H=cv.height=hh*2,c=cv.getContext('2d');
+ c.clearRect(0,0,w,H);if(!data||data.length<2)return;
  const mn=Math.min(...data),mx=Math.max(...data),sp=(mx-mn)||1;
  c.beginPath();c.strokeStyle='#4aa3df';c.lineWidth=2;
- data.forEach((v,i)=>{const x=i/(data.length-1)*w,y=hh-4-((v-mn)/sp)*(hh-8);
+ data.forEach((v,i)=>{const x=i/(data.length-1)*w,y=H-4-((v-mn)/sp)*(H-8);
   i?c.lineTo(x,y):c.moveTo(x,y);});
  c.stroke();}
+function Spark({dataKey,h:hh}){
+ const ref=useRef(null);
+ const series=S.health.value[dataKey];
+ useEffect(()=>{
+  if(ref.current&&series)spark(ref.current,series.slice(-120),hh);
+ });
+ return html`<canvas ref=${ref}></canvas>`;}
 
-/* ------------------------------------------------ routing */
-function route(){
- const h=(location.hash||'#/fleet').replace(/^#\/?/,'');
- const parts=h.split('/');
- const page=['fleet','assets','activity'].includes(parts[0])?parts[0]:'fleet';
- PAGE=page;
- if(page==='assets'&&parts.length>1)
-  SEL=decodeURIComponent(parts.slice(1).join('/'));
- document.querySelectorAll('.page').forEach(p=>
-  p.classList.toggle('on',p.id==='page-'+PAGE));
- document.querySelectorAll('#nav a').forEach(a=>
-  a.classList.toggle('on',a.dataset.p===PAGE));
- $('#pgtitle').textContent=PAGE;
- requestAnimationFrame(()=>{
-  renderPage();
-  if(PAGE==='assets'&&SEL)detail(SEL,true);});}
-addEventListener('hashchange',route);
-function select(k){location.hash='#/assets/'+k;}
-
-/* ------------------------------------------------ fleet page */
-function dashboard(){
- const counts=FLEET.counts,rows=FLEET.rows;
- ec('d-states',{
-  tooltip:{trigger:'item'},
+/* ------------------------------------------------ chart option builders
+   Pure functions: data in, ECharts `option` object out. Kept separate
+   from EChart itself so every call site just does
+   html`<${EChart} option=${statesOption(...)}/>` - same shape as the
+   old ec('id', {...}) calls, minus the imperative DOM lookup. */
+function statesOption(counts,assets){
+ return {tooltip:{trigger:'item'},
   legend:{bottom:4,left:'center',textStyle:{color:CH.axis,fontSize:11},
    itemWidth:10,itemHeight:10,icon:'circle'},
   graphic:Object.keys(counts).length?[{type:'text',left:'center',top:'38%',
-   style:{text:String(FLEET.assets),fill:CH.text,fontSize:34,fontWeight:'bold',
+   style:{text:String(assets),fill:CH.text,fontSize:34,fontWeight:'bold',
     fontFamily:'Consolas,Menlo,monospace',align:'center'}},
    {type:'text',left:'center',top:'50%',
    style:{text:'assets',fill:CH.axis,fontSize:11,
@@ -572,11 +511,11 @@ function dashboard(){
   series:[{type:'pie',radius:['48%','68%'],center:['50%','42%'],
    label:{show:false},emphasis:{label:{show:false}},
    itemStyle:{borderColor:CH.border,borderWidth:2},
-   data:Object.entries(counts).map(([s,n])=>({name:s,value:n,itemStyle:{color:SC[s]||'#888'}}))}]});
+   data:Object.entries(counts).map(([s,n])=>({name:s,value:n,itemStyle:{color:SC[s]||'#888'}}))}]};}
+function evidenceOption(rows){
  const nonzero=rows.filter(r=>r.evidence>0.005);
  const top=(nonzero.length?nonzero:rows).slice(0,8);
- ec('d-evidence',{
-  grid:{left:10,right:56,top:10,bottom:10,containLabel:true},
+ return {grid:{left:10,right:56,top:10,bottom:10,containLabel:true},
   tooltip:{trigger:'axis',axisPointer:{type:'shadow'}},
   xAxis:{type:'value',axisLabel:{color:CH.axis,fontSize:10},splitLine:{lineStyle:{color:CH.grid}}},
   yAxis:{type:'category',inverse:true,data:top.map(r=>r.asset_key),
@@ -586,153 +525,19 @@ function dashboard(){
     formatter:p=>p.value>=0.005?p.value.toFixed(2):''},
    markLine:{symbol:'none',lineStyle:{color:'#e05252',type:'dashed'},
     label:{color:'#e05252',formatter:'alarm'},data:[{xAxis:1}]},
-   barMaxWidth:14}]});
- const sc=ec('d-scatter',{
-  grid:{left:10,right:24,top:16,bottom:10,containLabel:true},
+   barMaxWidth:14}]};}
+function scatterOption(rows){
+ return {grid:{left:10,right:24,top:16,bottom:10,containLabel:true},
   tooltip:{formatter:p=>`${p.data[3]}<br>evidence ${p.data[1]} | confidence ${p.data[0]}`},
   xAxis:{type:'value',name:'confidence',nameTextStyle:{color:CH.axis,fontSize:10},min:0,max:1,
    axisLabel:{color:CH.axis,fontSize:10},splitLine:{lineStyle:{color:CH.grid}}},
   yAxis:{type:'log',min:0.01,axisLabel:{color:CH.axis,fontSize:10},splitLine:{lineStyle:{color:CH.grid}}},
   series:[{type:'scatter',symbolSize:d=>10+Math.min(16,d[1]*2),
    data:rows.map(r=>[r.confidence,Math.max(0.01,r.evidence),r.state,r.asset_key]),
-   itemStyle:{color:p=>SC[p.data[2]]||'#888',opacity:0.85}}]});
- if(sc&&!sc.__wired){sc.__wired=true;sc.on('click',p=>{if(p.data&&p.data[3])select(esc(p.data[3]));});}
- wireSortHeaders();
- const tableRows=sortRows(rows);
- patch($('#ftable tbody'),tableRows.map(r=>`
-  <tr onclick="select('${esc(r.asset_key)}')">
-   <td style="font-weight:bold">${escHtml(r.asset_key)}${r.live?' <span class="pill" style="font-size:10px">LIVE</span>':''}</td>
-   <td><span class="pill st-${r.state}">${r.state}</span></td>
-   <td>${fmtDec(r.evidence)}</td><td>${fmtDec(r.confidence)}</td>
-   <td class="muted">${r.at||'-'}</td>
-   <td><canvas data-fk="${escHtml(r.asset_key)}" style="width:100%;height:22px"></canvas></td>
-  </tr>`).join(''));
- tableRows.forEach(r=>{const cv=document.querySelector(`canvas[data-fk="${CSS.escape(r.asset_key)}"]`);
-  if(cv&&HEALTH[r.asset_key])spark(cv,HEALTH[r.asset_key].slice(-120),11);});
- const labels={asset_key:'asset',state:'state',evidence:'evidence',confidence:'confidence',at:'last verdict'};
- document.querySelectorAll('#ftable th[data-col]').forEach(th=>{
-  const on=th.dataset.col===SORT_COL;
-  th.innerHTML=labels[th.dataset.col]+(on?`<span class="arrow">${SORT_DIR>0?'&#9650;':'&#9660;'}</span>`:'');});}
-function sortRows(rows){
- if(!SORT_COL)return rows;
- const c=SORT_COL,dir=SORT_DIR;
- return rows.slice().sort((a,b)=>{
-  let x=a[c],y=b[c];
-  if(typeof x==='string')return dir*String(x).localeCompare(String(y));
-  return dir*((x??-Infinity)-(y??-Infinity));});}
-function wireSortHeaders(){
- document.querySelectorAll('#ftable th[data-col]').forEach(th=>{
-  if(th.__wired)return;th.__wired=true;
-  th.addEventListener('click',()=>{
-   const col=th.dataset.col;
-   SORT_DIR=SORT_COL===col?-SORT_DIR:(col==='evidence'?-1:1);
-   SORT_COL=col;dashboard();});});}
-function renderKpis(){
- const c=FLEET.counts,rows=FLEET.rows;
- const alarms=(c.alarm||0)+(c.escalating||0);
- const watching=(c.watch||0)+(c['change-not-fault']||0);
- const pending=(c.queued||0)+(c.onboarding||0)+(c.bootstrapping||0);
- const worst=rows.length?rows[0]:null;
- const kpi=(cls,label,val,note)=>`<div class="kpi ${cls}"><b>${escHtml(label)}</b>`+
-  `<div class="row"><span>${escHtml(val)}</span>${note?`<small title="${escHtml(note)}">${escHtml(note)}</small>`:''}</div></div>`;
- patch($('#kpis'),
-  kpi('','fleet',fmtInt(FLEET.assets),pending?`${fmtInt(pending)} pending`:'all verdicted')+
-  kpi(alarms?'bad':'ok','alarms',fmtInt(alarms),alarms&&worst?worst.asset_key:'')+
-  kpi(watching?'warn':'','watching',fmtInt(watching),'watch + change')+
-  kpi('ok','healthy',fmtInt(c.healthy||0),'')+
-  kpi(worst&&worst.evidence>=1?'bad':(worst&&worst.evidence>=0.5?'warn':''),
-   'peak evidence',worst?fmtDec(worst.evidence):'-',
-   worst?`alarm at 1.0`:'')+
-  kpi('acc','engine',FLEET.tier,FLEET.scorer||''));
- const nb=$('#nb-alarm');
- nb.style.display=alarms?'':'none';nb.textContent=alarms;}
-
-/* ------------------------------------------------ assets page */
-function setFilter(s){
- FILTER=FILTER===s?null:s;
- localStorage.setItem('acm-filter',FILTER||'');
- renderList();}
-function pillbar(counts){
- const order=['escalating','alarm','change-not-fault','watch','insufficient-history','healthy',
-  'bootstrapping','onboarding','queued'];
- $('#pills').innerHTML=order.filter(s=>counts[s]).map(s=>
-  `<span class="pill st-${s} ${FILTER===s?'on':''}" onclick="setFilter('${s}')">${s}: ${counts[s]}</span>`).join(' ');}
-function filteredRows(){
- if(!FLEET)return [];
- const q=$('#q').value.toLowerCase();
- return FLEET.rows.filter(v=>(!FILTER||v.state===FILTER)&&v.asset_key.toLowerCase().includes(q));}
-// The asset list is virtualized with Clusterize.js instead of a
-// hand-capped "first 400 rows, refine the filter" slice - it renders
-// only the rows scrolled into view (keeping DOM size roughly constant
-// regardless of fleet size) while scrolling still behaves as if every
-// row were present. Rows are still plain HTML strings, same as every
-// other render function in this file - Clusterize just owns painting
-// them into the visible window instead of us setting innerHTML once.
-let LIST_CLUSTER=null;
-function drawListSparks(){
- document.querySelectorAll('#list-content canvas[data-k]').forEach(cv=>{
-  const key=cv.getAttribute('data-k');
-  if(HEALTH[key])spark(cv,HEALTH[key].slice(-120),12);});}
-function scrollListToIndex(idx){
- const list=$('#list'),sample=list&&list.querySelector('.row');
- if(!list||!sample)return;
- const h=sample.getBoundingClientRect().height;
- if(!h)return;
- const top=idx*h,bottom=top+h,viewH=list.clientHeight;
- if(top<list.scrollTop)list.scrollTop=top;
- else if(bottom>list.scrollTop+viewH)list.scrollTop=bottom-viewH;}
-function renderList(){
- if(!FLEET)return;
- pillbar(FLEET.counts);
- const rows=filteredRows();
- if(!rows.length){
-  if(LIST_CLUSTER){LIST_CLUSTER.destroy(true);LIST_CLUSTER=null;}
-  $('#list').innerHTML=`<p class="muted" style="padding:24px 20px;line-height:1.7">${
-   FLEET.rows.length?'No assets match the filter.':
-   'No assets in the store yet.<br>Ingest data into the raw store (acm_data/raw) and the service will discover it on the next start; assets appear here the moment onboarding begins.'}</p>`;
-  return;}
- const html=rows.map(v=>`
-  <div class="row ${SEL===v.asset_key?'sel':''}" onclick="select('${esc(v.asset_key)}')">
-   <span class="key">${escHtml(v.asset_key)}${v.live?' <span class="pill" style="font-size:10px" title="live buffer attached">LIVE</span>':''}</span>
-   <span class="pill st-${v.state}">${v.state}</span>
-   <span class="sub">
-    <span>ev ${fmtDec(v.evidence)}</span>
-    <span class="evbar"><i style="width:${Math.min(100,v.evidence*33)}%"></i></span>
-    <span>conf ${fmtDec(v.confidence)}</span>
-   </span>
-   <canvas data-k="${escHtml(v.asset_key)}"></canvas>
-  </div>`);
- if(!LIST_CLUSTER||!document.getElementById('list-content')){
-  $('#list').innerHTML='<div id="list-content"></div>';
-  LIST_CLUSTER=new Clusterize({rows:html,scrollId:'list',contentId:'list-content',
-   callbacks:{clusterChanged:drawListSparks}});
- }else{
-  LIST_CLUSTER.update(html);
- }
- drawListSparks();}
-
-/* ------------------------------------------------ health narrative */
-const NARR_LABEL={change:'change',evidence:'evidence',anatomy:'anatomy',shape:'shape',
- horizon:'horizon',coverage:'coverage','immune-ok':'self-test','immune-sick':'self-test'};
-function narrativeHtml(sections,state){
- if(!sections||!sections.length)return '<p class="muted">no narrative available</p>';
- const rows=[];let lead='',falsifiable='';
- sections.forEach(s=>{
-  const text=escHtml(s.text);
-  if(s.kind==='judgment'){lead=text;return;}
-  if(s.kind==='falsifiable'){
-   falsifiable=text.replace(/^This verdict is falsifiable by:\s*/,'');return;}
-  const cls=s.kind==='immune-sick'?'narr-row narr-bad':s.kind==='immune-ok'?'narr-row narr-ok':'narr-row';
-  const style=s.kind==='evidence'?` style="border-left-color:${SC[state]||'var(--line)'}"`:'';
-  rows.push(`<div class="${cls}"${style}><b>${NARR_LABEL[s.kind]||s.kind}</b>${text}</div>`);});
- return (lead?`<p class="narr-lead">${lead}</p>`:'')+
-  (rows.length?`<div class="narr-list">${rows.join('')}</div>`:'')+
-  (falsifiable?`<div class="narr-falsifiable"><b>falsifiable by</b>${falsifiable}</div>`:'');}
-
-/* ------------------------------------------------ detail charts */
-function domChart(doms){
+   itemStyle:{color:p=>SC[p.data[2]]||'#888',opacity:0.85}}]};}
+function domOption(doms){
  const names=Object.keys(doms),on=n=>doms[n].enabled;
- ec('c-domains',{grid:{left:8,right:40,top:8,bottom:6,containLabel:true},
+ return {grid:{left:8,right:40,top:8,bottom:6,containLabel:true},
   tooltip:{trigger:'axis',axisPointer:{type:'shadow'}},
   xAxis:{type:'value',max:v=>Math.max(1.2,v.max),axisLabel:{color:CH.axis,fontSize:10},
    splitLine:{lineStyle:{color:CH.grid}}},
@@ -744,9 +549,9 @@ function domChart(doms){
      label:{show:true,position:'right',fontSize:10,color:CH.axis,
       formatter:on(n)?(d.alarmed?'ALARMED':String(d.evidence)):'disabled (thin data)'}};}),
    markLine:{symbol:'none',lineStyle:{color:'#e05252',type:'dashed'},
-    label:{color:'#e05252',formatter:'alarm'},data:[{xAxis:1}]}}]});}
-function healthChart(series){
- ec('c-health',{grid:{left:10,right:16,top:14,bottom:40,containLabel:true},
+    label:{color:'#e05252',formatter:'alarm'},data:[{xAxis:1}]}}]};}
+function healthOption(series){
+ return {grid:{left:10,right:16,top:14,bottom:40,containLabel:true},
   tooltip:{trigger:'axis'},
   dataZoom:[{type:'inside'},{type:'slider',height:16,bottom:6,borderColor:CH.grid,
    backgroundColor:'transparent',fillerColor:'rgba(74,163,223,0.15)',textStyle:{color:CH.axis}}],
@@ -755,15 +560,15 @@ function healthChart(series){
   series:[{type:'line',data:series,showSymbol:false,smooth:0.15,
    lineStyle:{color:'#4aa3df',width:2},
    areaStyle:{color:{type:'linear',x:0,y:0,x2:0,y2:1,
-    colorStops:[{offset:0,color:'rgba(74,163,223,0.30)'},{offset:1,color:'rgba(74,163,223,0.02)'}]}}}]});}
-function episodeTimeline(eph){
+    colorStops:[{offset:0,color:'rgba(74,163,223,0.30)'},{offset:1,color:'rgba(74,163,223,0.02)'}]}}}]};}
+function episodesOption(eph){
  const items=eph.episodes.map(e=>({s:e.start,e:e.end||new Date().toISOString(),st:e.state,
   tip:`${e.state}<br>${e.start} -> ${e.end||'open'}<br>${escHtml((e.channels||[]).join(', ')||e.source||'')}${e.shape?'<br>shape: '+escHtml(e.shape):''}${e.peak_evidence!=null?'<br>peak evidence '+e.peak_evidence:''}`}));
  if(eph.open_since)items.push({s:eph.open_since,e:new Date().toISOString(),st:'open',
   tip:'OPEN episode since '+eph.open_since});
- if(!items.length)return;
+ if(!items.length)return null;
  const col={alarm:'#e05252','change-not-fault':'#d88a36',intervention:'#4aa3df',open:'#ff6b6b'};
- ec('c-episodes',{grid:{left:10,right:16,top:10,bottom:24,containLabel:true},
+ return {grid:{left:10,right:16,top:10,bottom:24,containLabel:true},
   tooltip:{formatter:p=>p.data.tip},
   xAxis:{type:'time',axisLabel:{color:CH.axis,fontSize:10}},
   yAxis:{type:'category',data:['episodes'],axisLabel:{show:false}},
@@ -774,21 +579,21 @@ function episodeTimeline(eph){
     return {type:'rect',shape:{x:x1,y:y-11,width:Math.max(3,x2-x1),height:22},
      style:{fill:api.value(3)}};},
    encode:{x:[0,1]},
-   data:items.map(i=>({value:[Date.parse(i.s.replace(' ','T')),Date.parse(i.e.replace(' ','T')),i.st,col[i.st]||'#888'],tip:i.tip}))}]});}
-function anatomyChart(anat){
+   data:items.map(i=>({value:[Date.parse(i.s.replace(' ','T')),Date.parse(i.e.replace(' ','T')),i.st,col[i.st]||'#888'],tip:i.tip}))}]};}
+function anatomyOption(anat){
  const entries=Object.entries(anat.organ_surprise||{});
- if(!entries.length)return;
+ if(!entries.length)return null;
  const names=entries.map(([o])=>o.split(',').slice(0,2).join(',')+(o.split(',').length>2?'..':''));
- ec('c-anatomy',{grid:{left:8,right:30,top:8,bottom:6,containLabel:true},
+ return {grid:{left:8,right:30,top:8,bottom:6,containLabel:true},
   tooltip:{trigger:'axis',axisPointer:{type:'shadow'},
    formatter:p=>entries[p[0].dataIndex][0]+'<br>surprise '+p[0].value},
   xAxis:{type:'value',axisLabel:{color:CH.axis,fontSize:10},splitLine:{lineStyle:{color:CH.grid}}},
   yAxis:{type:'category',inverse:true,data:names,axisLabel:{color:CH.text,fontSize:10,width:130,overflow:'truncate'}},
   series:[{type:'bar',barMaxWidth:12,
    data:entries.map(([o,s])=>({value:s,
-    itemStyle:{color:(anat.origin&&o.startsWith(anat.origin.split(',')[0]))?'#e05252':'#4aa3df'}}))}]});}
-function gaugeChart(id,val,name){
- ec(id,{series:[{type:'gauge',min:0,max:1,radius:'95%',center:['50%','62%'],
+    itemStyle:{color:(anat.origin&&o.startsWith(anat.origin.split(',')[0]))?'#e05252':'#4aa3df'}}))}]};}
+function gaugeOption(val,name){
+ return {series:[{type:'gauge',min:0,max:1,radius:'95%',center:['50%','62%'],
   startAngle:200,endAngle:-20,
   progress:{show:true,width:10,itemStyle:{color:val>0.66?'#37b26c':val>0.33?'#d8b636':'#e05252'}},
   axisLine:{lineStyle:{width:10,color:[[1,CH.grid]]}},
@@ -797,9 +602,9 @@ function gaugeChart(id,val,name){
   title:{show:true,offsetCenter:[0,'30%'],color:CH.axis,fontSize:11},
   detail:{valueAnimation:true,offsetCenter:[0,'-10%'],fontSize:20,color:CH.text,
    formatter:v=>v.toFixed(2)},
-  data:[{value:val,name:name}]}]});}
-function horizonChart(hz){
- ec('c-horizon',{grid:{left:60,right:26,top:14,bottom:8,containLabel:true},
+  data:[{value:val,name:name}]}]};}
+function horizonOption(hz){
+ return {grid:{left:60,right:26,top:14,bottom:8,containLabel:true},
   tooltip:{show:false},
   xAxis:{type:'value',name:'steps',nameTextStyle:{color:CH.axis,fontSize:10},
    axisLabel:{color:CH.axis,fontSize:10},splitLine:{lineStyle:{color:CH.grid}}},
@@ -812,11 +617,11 @@ function horizonChart(hz){
     label:{show:true,position:'insideLeft',fontSize:10,color:'#f09a9a',
      formatter:()=>`p10 ${hz.p10_steps} | median ${hz.median_steps} | p90 ${hz.p90_steps}`},
     markLine:{symbol:'none',lineStyle:{color:'#e05252',width:2},
-     data:[{xAxis:hz.median_steps}],label:{color:'#e05252',formatter:'median'}}}]});}
-function floorsChart(id,floors){
+     data:[{xAxis:hz.median_steps}],label:{color:'#e05252',formatter:'median'}}}]};}
+function floorsOption(floors){
  const entries=Object.entries(floors||{});
- if(!entries.length)return;
- ec(id,{grid:{left:8,right:36,top:8,bottom:6,containLabel:true},
+ if(!entries.length)return null;
+ return {grid:{left:8,right:36,top:8,bottom:6,containLabel:true},
   tooltip:{trigger:'axis',axisPointer:{type:'shadow'}},
   xAxis:{type:'value',name:'floor (sigma)',nameTextStyle:{color:CH.axis,fontSize:10},
    axisLabel:{color:CH.axis,fontSize:10},splitLine:{lineStyle:{color:CH.grid}}},
@@ -825,11 +630,11 @@ function floorsChart(id,floors){
   series:[{type:'bar',barMaxWidth:12,
    data:entries.map(([,f])=>({value:f??0,
     itemStyle:{color:f==null?'#5b6b7d':'#37b26c'},
-    label:{show:f==null,position:'right',fontSize:10,color:CH.axis,formatter:'not detected'}}))}]});}
-function membersChart(members){
+    label:{show:f==null,position:'right',fontSize:10,color:CH.axis,formatter:'not detected'}}))}]};}
+function membersOption(members){
  const entries=Object.entries(members||{}).sort((a,b)=>Number(a[0])-Number(b[0]));
- if(!entries.length)return;
- ec('c-members',{grid:{left:8,right:70,top:8,bottom:24,containLabel:true},
+ if(!entries.length)return null;
+ return {grid:{left:8,right:70,top:8,bottom:24,containLabel:true},
   tooltip:{trigger:'axis',axisPointer:{type:'shadow'}},
   xAxis:{type:'value',name:'log-wealth',nameTextStyle:{color:CH.axis,fontSize:10},
    axisLabel:{color:CH.axis,fontSize:10},splitLine:{lineStyle:{color:CH.grid}}},
@@ -840,16 +645,15 @@ function membersChart(members){
     itemStyle:{color:m.alarmed?'#e05252':'#4aa3df'},
     label:{show:true,position:'right',fontSize:10,
      color:m.alarmed?'#e05252':CH.axis,
-     formatter:()=>m.alarmed?'ALARMED '+fmtDec(m.log_wealth):fmtDec(m.log_wealth)}}))}]});}
-function immuneProfileChart(profile){
+     formatter:()=>m.alarmed?'ALARMED '+fmtDec(m.log_wealth):fmtDec(m.log_wealth)}}))}]};}
+function immuneProfileOption(profile){
  const faults=Object.keys(profile||{});
- if(!faults.length)return;
+ if(!faults.length)return null;
  const mags=Object.keys(profile[faults[0]]||{});
- if(!mags.length)return;
+ if(!mags.length)return null;
  const data=[];
  faults.forEach((f,fi)=>mags.forEach((m,mi)=>data.push([mi,fi,profile[f][m]?1:0])));
- ec('c-immune-profile',{
-  grid:{left:110,right:16,top:8,bottom:30},
+ return {grid:{left:110,right:16,top:8,bottom:30},
   tooltip:{formatter:p=>`${faults[p.data[1]]} @ ${mags[p.data[0]]} sigma: `+
    (p.data[2]?'detected':'missed')},
   xAxis:{type:'category',data:mags.map(m=>m+'sigma'),axisLabel:{color:CH.axis,fontSize:10},
@@ -858,257 +662,581 @@ function immuneProfileChart(profile){
    splitArea:{show:true}},
   visualMap:{show:false,min:0,max:1,inRange:{color:[CH.grid,'#37b26c']}},
   series:[{type:'heatmap',data,label:{show:false},
-   itemStyle:{borderColor:CH.border,borderWidth:2}}]});}
+   itemStyle:{borderColor:CH.border,borderWidth:2}}]};}
 
-/* ------------------------------------------------ detail view (tabbed) */
-async function detail(key,force){
- const row=FLEET&&FLEET.rows.find(r=>r.asset_key===key);
- if(!force&&row&&row.at===DETAIL_AT)return;  // nothing new for this asset
+/* ------------------------------------------------ routing */
+function parseHash(){
+ const hh=(location.hash||'#/fleet').replace(/^#\/?/,'');
+ const parts=hh.split('/');
+ const page=['fleet','assets','activity'].includes(parts[0])?parts[0]:'fleet';
+ return {page,sel:(page==='assets'&&parts.length>1)?decodeURIComponent(parts.slice(1).join('/')):null};}
+function applyHash(){
+ const {page,sel}=parseHash();
+ S.page.value=page;
+ if(sel)S.sel.value=sel;}
+function select(k){location.hash='#/assets/'+k;}
+
+/* ------------------------------------------------ actions
+   Re-entrancy is guarded by a synchronous Set, not by the (async,
+   Preact-batched) setBusy state: a component's disabled=${busy} render
+   doesn't reach the DOM until the next render flush, so a fast
+   double-click could otherwise slip a second request through before
+   the button visually disables. This module-level lock closes that
+   window regardless of render timing. */
+const ACTIONS_IN_FLIGHT=new Set();
+async function act(kind,key,msg,setBusy){
+ const lockKey=kind+':'+(key||'');
+ if(ACTIONS_IN_FLIGHT.has(lockKey))return;
+ ACTIONS_IN_FLIGHT.add(lockKey);
+ if(setBusy)setBusy(true);
+ toast(msg+'...');
+ const url=kind==='tick'&&!key?'/api/tick':`/api/${kind}/${esc(key)}`;
+ try{const r=await fetch(url,{method:'POST'});const d=await r.json();
+  toast(msg+': done '+JSON.stringify(d).slice(0,90));
+  if(!S.wsOn.value)await refresh();
+  if(S.page.value==='assets'&&S.sel.value)await loadDetail(S.sel.value,true);}
+ catch(e){toast('FAILED: '+e.message);}
+ finally{ACTIONS_IN_FLIGHT.delete(lockKey);if(setBusy)setBusy(false);}}
+
+/* ------------------------------------------------ fleet data + detail fetch */
+function applyFleet(data){
+ const hh=JSON.stringify([data.counts,data.rows.map(r=>[r.asset_key,r.state,r.evidence,r.at])]);
+ const changed=hh!==S.fleetHash.value;
+ S.fleetHash.value=hh;S.fleet.value=data;
+ $('#boot').classList.add('gone');
+ if(changed){
+  fetchSparks();
+  if(S.page.value==='assets'&&S.sel.value)loadDetail(S.sel.value,false);}}
+async function fetchSparks(){
+ if(!S.fleet.value)return;
+ const top=S.fleet.value.rows.slice(0,30);
+ const next={...S.health.value};
+ await Promise.all(top.map(async v=>{
+  try{next[v.asset_key]=(await jget('/api/health/'+esc(v.asset_key))).series;}catch(e){}}));
+ S.health.value=next;}
+async function refresh(){try{applyFleet(await jget('/api/assets'));}catch(e){}}
+let DETAIL_AT='';
+async function loadDetail(key,force){
+ const row=S.fleet.value&&S.fleet.value.rows.find(r=>r.asset_key===key);
+ if(!force&&row&&row.at===DETAIL_AT)return;
  if(row&&PENDING.includes(row.state)){
-  const why={queued:'waiting its turn',
-   onboarding:'calibrating from its lifetime history',
-   bootstrapping:'first-contact cleaning of its history'};
-  $('#detail').innerHTML=`<p class="muted" style="padding:28px;line-height:1.7">${escHtml(row.asset_key)} is <span class="pill st-${row.state}">${row.state}</span> - ${why[row.state]}.<br>Its first verdict lands here automatically when that finishes.</p>`;
+  S.ddata.value={pending:true,row,key};
   return;}
- const [v,narr,doms,health,eph]=await Promise.all([
+ const [v,narr,doms,hlth,eph]=await Promise.all([
   jget('/api/asset/'+esc(key)),jget('/api/narrative/'+esc(key)),
   jget('/api/domains/'+esc(key)),jget('/api/health/'+esc(key)),
   jget('/api/episodes/'+esc(key))]);
  DETAIL_AT=v.at;
- HEALTH[key]=health.series;
+ S.health.value={...S.health.value,[key]:hlth.series};
  let immune=null;try{immune=await jget('/api/immune/'+esc(key));}catch(e){}
- DDATA={v,narr,doms,health,eph,immune,row,key};
- const t=v.evidence_trail||{};
- const tabs=[['overview','Overview'],['evidence','Evidence'],
-  ['anatomy','Anatomy & Prognosis'],['episodes','Episodes & Immune']];
- patch($('#detail'),`
- <div id="dhead">
-  <div class="drow">
-   <h2>${escHtml(v.asset_key)}</h2>
-   <span class="pill st-${v.state}">${v.state}</span>
-   ${row&&row.live?'<span class="pill" title="live buffer attached">LIVE</span>':''}
-   <span style="flex:1"></span>
-   <button onclick="act(this,'tick','${esc(key)}','Scoring')">Score now</button>
-   <button onclick="act(this,'immune-pass','${esc(key)}','Immune pass (slow)')">Immune pass</button>
-   <button onclick="act(this,'bootstrap','${esc(key)}','Bootstrap (multi-pass)')">Bootstrap</button>
-   <button class="danger" onclick="if(confirm('Close the open episode into the ledger and recalibrate from masked lifetime?'))act(this,'reanchor','${esc(key)}','Re-anchor')">Re-anchor</button>
-  </div>
-  <div class="drow muted" style="font-size:12.5px">
-   evidence ${fmtDec(v.evidence)} | confidence ${fmtDec(v.confidence)} | ${v.model_epoch}
-   | at ${v.at||'-'}${stale(v.at)}
-  </div>
- </div>
- <div id="dtabs">${tabs.map(([id,lbl])=>
-  `<a data-t="${id}" class="${DTAB===id?'on':''}" onclick="dtab('${id}')">${lbl}</a>`).join('')}</div>
- <div class="pane ${DTAB==='overview'?'on':''}" id="pane-overview">
-  <div class="cards">
-   <div class="card wide"><h3>Health index trajectory (windowed mean surprise)</h3>
-    <div class="chart" id="c-health" style="height:260px"></div></div>
-   <div class="card wide"><h3>Health narrative</h3>${narrativeHtml(narr.sections,v.state)}</div>
-  </div>
- </div>
- <div class="pane ${DTAB==='evidence'?'on':''}" id="pane-evidence">
-  <div class="cards">
-   <div class="card wide"><h3>Evidence domains (log-wealth / threshold, alarm at 1.0)</h3>
-    <div class="chart" id="c-domains" style="height:210px"></div></div>
-   ${Object.keys(t.members||{}).length?`<div class="card wide">
-    <h3>Evidence by detection timescale (block size, rows - red = that timescale alarmed)</h3>
-    <div class="chart" id="c-members" style="height:170px"></div></div>`:''}
-   <div class="card"><h3>Coverage &amp; attribution</h3>
-    <div style="display:grid;grid-template-columns:1fr 1fr">
-     <div class="chart" id="c-coverage" style="height:140px"></div>
-     ${t.concentration!==undefined?'<div class="chart" id="c-concentration" style="height:140px"></div>':''}
-    </div>
-    <div class="kv">
-     <b>calibration rows</b><span>${fmtInt((v.coverage||{}).calib_rows)}</span>
-     <b>scored rows</b><span>${fmtInt((v.coverage||{}).scored_rows)}</span>
-     <b>attribution</b><span>${escHtml((v.attribution||[]).join(', '))||'-'}</span>
-     <b>falsifiable by</b><span>${escHtml(v.falsifiable_by)}</span></div></div>
-   <div class="card"><h3>Evidence trail</h3><div class="kv">
-    ${t.reason?`<b>insufficient because</b><span>${t.reason}</span>`:''}
-    ${t.shape?`<b>surprise shape</b><span>${t.shape}</span>`:''}
-    ${t.novelty!==undefined?`<b>novelty</b><span>${fmtDec(t.novelty)}</span>`:''}
-    ${t.concentration!==undefined?`<b>attribution concentration</b><span>${fmtDec(t.concentration)} ${t.concentration<0.4?'(coordinated move)':'(channel-local)'}</span>`:''}
-    ${eph.open_since?`<b>episode open since</b><span>${eph.open_since}</span>`:''}
-    ${t.signature_match?`<b>signature match</b><span>episode ${t.signature_match.episode} (confidence ${t.signature_match.confidence})</span>`:''}
-    ${t.trajectory_match?`<b>trajectory match</b><span>episode ${t.trajectory_match.episode} (dist ${t.trajectory_match.distance}) - ~${t.trajectory_match.remaining_rows_estimate} rows to its peak</span>`:''}
-    ${!t.reason&&!t.shape&&!eph.open_since?'<b>state</b><span class="muted">no active episode - nothing accumulating</span>':''}
-   </div></div>
-  </div>
- </div>
- <div class="pane ${DTAB==='anatomy'?'on':''}" id="pane-anatomy">
-  <div class="cards">
-   ${t.anatomy?`<div class="card"><h3>Anatomy: organ surprise (origin in red)</h3>
-    <div class="chart" id="c-anatomy" style="height:220px"></div></div>`
-    :'<div class="card"><h3>Anatomy</h3><p class="muted">no organ decomposition for this verdict</p></div>'}
-   ${(t.horizon&&t.horizon.gated)?`<div class="card"><h3>Prognosis: failure-time distribution${t.horizon.provisional_level?' [level provisional]':''}</h3>
-    <div class="chart" id="c-horizon" style="height:180px"></div></div>`
-    :(t.horizon?`<div class="card"><h3>Prognosis</h3><p class="muted">horizon gated: ${t.horizon.reason}</p></div>`
-    :'<div class="card"><h3>Prognosis</h3><p class="muted">no failure-time estimate - nothing is accumulating</p></div>')}
-  </div>
- </div>
- <div class="pane ${DTAB==='episodes'?'on':''}" id="pane-episodes">
-  <div class="cards">
-   ${(eph.episodes.length||eph.open_since)?`<div class="card wide"><h3>Episode history (the ledger - absorbed changes included)</h3>
-    <div class="chart" id="c-episodes" style="height:130px"></div>
-    <table><tr><th>state</th><th>start</th><th>end</th><th>channels</th><th>shape</th><th>peak evidence</th></tr>
-    ${eph.episodes.map(e=>`<tr><td><span class="pill st-${e.state==='alarm'?'alarm':'change-not-fault'}">${e.state}</span></td>
-     <td>${e.start}</td><td>${e.end||'open'}</td>
-     <td>${escHtml((e.channels||[]).slice(0,4).join(', ')||(e.source||'-'))}</td>
-     <td>${escHtml(e.shape)||'-'}</td><td>${e.peak_evidence??'-'}</td></tr>`).join('')}
-    </table></div>`:'<div class="card wide"><h3>Episode history</h3><p class="muted">clean ledger - no episodes recorded for this asset</p></div>'}
-   ${immune&&!immune.status?`<div class="card wide"><h3>Immune self-test ${immune.sick?'[SICK - rebuild triggered]':'[healthy]'}</h3>
-    <div style="display:grid;grid-template-columns:1fr 220px;gap:12px">
-     <div class="chart" id="c-immune" style="height:200px"></div>
-     <div>${immune.rehearsal?`<div class="chart" id="c-rehearsal" style="height:150px"></div>`:''}
-      <div class="kv"><b>conformance</b><span>${immune.conformance_ok}${immune.conformance_note?' - '+immune.conformance_note:''}</span>
-      <b>pit</b><span>${immune.pit}</span><b>live degenerate</b><span>${immune.live_degenerate}</span></div></div>
-    </div></div>`:'<div class="card"><h3>Immune self-test</h3><p class="muted">not yet run - use the Immune pass button</p></div>'}
-   ${immune&&!immune.status&&immune.profile?`<div class="card"><h3>Detection profile (injected fault x magnitude, sigma)</h3>
-    <div class="chart" id="c-immune-profile" style="height:180px"></div></div>`:''}
-   ${immune&&!immune.status&&immune.rehearsal&&immune.rehearsal.floors?`<div class="card">
-    <h3>Rehearsal floors per channel (sigma - lower is more sensitive)</h3>
-    <div class="chart" id="c-rehearsal-floors" style="height:180px"></div></div>`:''}
-  </div>
- </div>`);
- drawPane(DTAB);}
-function dtab(t){
- DTAB=t;
- document.querySelectorAll('#dtabs a').forEach(a=>a.classList.toggle('on',a.dataset.t===t));
- document.querySelectorAll('.pane').forEach(p=>p.classList.toggle('on',p.id==='pane-'+t));
- requestAnimationFrame(()=>drawPane(t));}
-function drawPane(tab){
- if(!DDATA)return;
- const {v,doms,health,eph,immune}=DDATA;
- const t=v.evidence_trail||{};
- const fam=(v.coverage||{}).operating_point_familiarity;
- if(tab==='overview')healthChart(health.series);
- if(tab==='evidence'){domChart(doms);
-  if(typeof fam==='number')gaugeChart('c-coverage',fam,'familiarity');
-  if(t.concentration!==undefined)gaugeChart('c-concentration',t.concentration,'concentration');
-  if(t.members)membersChart(t.members);}
- if(tab==='anatomy'){if(t.anatomy)anatomyChart(t.anatomy);
-  if(t.horizon&&t.horizon.gated)horizonChart(t.horizon);}
- if(tab==='episodes'){episodeTimeline(eph);
-  if(immune&&!immune.status){floorsChart('c-immune',immune.floors);
-   if(immune.rehearsal){
-    gaugeChart('c-rehearsal',immune.rehearsal.detected_fraction,'rehearsal detected');
-    if(immune.rehearsal.floors)floorsChart('c-rehearsal-floors',immune.rehearsal.floors);}
-   if(immune.profile)immuneProfileChart(immune.profile);}}}
-
-/* ------------------------------------------------ page render */
-function renderPage(){
- if(!FLEET)return;
- const tierScorer={'T2':'TorchWorldModel','T2-S':'TorchWorldModel'};
- const degraded=FLEET.scorer&&tierScorer[FLEET.tier]&&FLEET.scorer!==tierScorer[FLEET.tier];
- $('#meta').innerHTML=`${fmtInt(FLEET.assets)} assets | tier ${FLEET.tier}`+
-  (FLEET.scorer?` | ${degraded?`<span style="color:var(--bad);font-weight:bold" title="tier implies ${tierScorer[FLEET.tier]} but the service fell back">${FLEET.scorer} (DEGRADED)</span>`:FLEET.scorer}`:'');
- $('#immune-meta').innerHTML=`immune: ${FLEET.immune.checked} checked, `+
-  (FLEET.immune.sick?`<span style="color:var(--bad);font-weight:bold">${FLEET.immune.sick} sick</span>`:'0 sick');
- $('#nav-meta').textContent=`alpha=1/asset-year`;
- renderKpis();
- if(PAGE==='fleet')dashboard();
- if(PAGE==='assets')renderList();}
+ S.ddata.value={v,narr,doms,health:hlth,eph,immune,row,key};}
 
 /* ------------------------------------------------ realtime */
-let WS_ON=false,WS_TRIES=0,POLL=null;
-function wsmeta(s,on){$('#wsmeta').textContent=s;$('#wsdot').classList.toggle('on',on);}
-function applyFleet(data){
- const h=JSON.stringify([data.counts,data.rows.map(r=>[r.asset_key,r.state,r.evidence,r.at])]);
- const changed=h!==HASH;HASH=h;FLEET=data;
- $('#boot').classList.add('gone');
- if(changed){renderPage();fetchSparks();
-  if(PAGE==='assets'&&SEL)detail(SEL,false);}}
-async function fetchSparks(){
- const top=FLEET.rows.slice(0,30);
- await Promise.all(top.map(async v=>{
-  try{HEALTH[v.asset_key]=(await jget('/api/health/'+esc(v.asset_key))).series;}catch(e){}}));
- renderPage();}
+let POLL=null,WS_TRIES=0;
 function connect(){
  const ws=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/api/ws');
- ws.onopen=()=>{WS_ON=true;WS_TRIES=0;wsmeta('live',true);actBackfill();
+ ws.onopen=()=>{S.wsOn.value=true;WS_TRIES=0;S.wsLabel.value='live';actBackfill();
   if(POLL){clearInterval(POLL);POLL=null;}
   ws.__ka=setInterval(()=>{try{ws.send('ka');}catch(e){}},25000);};
  ws.onmessage=(m)=>{try{const d=JSON.parse(m.data);
   if(d.type==='fleet')applyFleet(d.data);
   if(d.type==='activity')actAppend(d.data);}catch(e){}};
- ws.onclose=()=>{WS_ON=false;clearInterval(ws.__ka);
-  wsmeta('reconnecting',false);
-  if(!POLL)POLL=setInterval(refresh,6000);   // polling fallback
+ ws.onclose=()=>{S.wsOn.value=false;clearInterval(ws.__ka);
+  S.wsLabel.value='reconnecting';
+  if(!POLL)POLL=setInterval(refresh,6000);
   setTimeout(connect,Math.min(15000,1000*Math.pow(2,WS_TRIES++)));};
  ws.onerror=()=>ws.close();}
-async function refresh(){try{applyFleet(await jget('/api/assets'));}catch(e){}}
 
 /* ------------------------------------------------ activity stream */
-let ACT_EVENTS=[],ACT_FILTER=null;
 const ACT_KINDS=['service','onboard','train','bootstrap','tick'];
-function actPills(){
- $('#act-pills').innerHTML=ACT_KINDS.map(k=>
-  `<span class="pill ${ACT_FILTER===k?'on':''}" onclick="ACT_FILTER=ACT_FILTER==='${k}'?null:'${k}';actRender()">${k}</span>`).join(' ');}
-function actStats(){
- const counts={};ACT_KINDS.forEach(k=>counts[k]=0);
- ACT_EVENTS.forEach(e=>{counts[e.kind]=(counts[e.kind]||0)+1;});
- const last=ACT_EVENTS[ACT_EVENTS.length-1];
- const kpi=(cls,label,val,note)=>`<div class="kpi ${cls}"><b>${escHtml(label)}</b>`+
-  `<div class="row"><span>${escHtml(val)}</span>${note?`<small title="${escHtml(note)}">${escHtml(note)}</small>`:''}</div></div>`;
- patch($('#act-stats'),
-  kpi('acc','total events',fmtInt(ACT_EVENTS.length),'last 500')+
-  ACT_KINDS.map(k=>kpi('',k,fmtInt(counts[k]),'')).join('')+
-  kpi('','latest',last?last.kind:'-',last?last.asset_key:''));}
-function actLine(ev){
- const t=(ev.at||'').replace('T',' ').replace(/\+.*$/,'');
- return `<div class="act-row act-${ev.kind}">`+
-  `<span class="t">${t.slice(11)}</span>`+
-  `<span class="k">${escHtml(ev.kind)}</span>`+
-  `<span class="a">${escHtml(ev.asset_key)}</span>`+
-  `<span class="m">${escHtml(ev.msg)}</span></div>`;}
-function actRender(){
- actPills();actStats();
- const evs=(ACT_FILTER?ACT_EVENTS.filter(e=>e.kind===ACT_FILTER):ACT_EVENTS).slice().reverse();
- patch($('#act-log'),evs.length?evs.map(actLine).join(''):
-  '<p class="muted" style="padding:24px">No events yet.</p>');}
 function actAppend(ev){
- ACT_EVENTS.push(ev);
- if(ACT_EVENTS.length>500)ACT_EVENTS.shift();
- actStats();
- if(ACT_FILTER&&ev.kind!==ACT_FILTER)return;
- const log=$('#act-log');
- log.insertAdjacentHTML('afterbegin',actLine(ev));
- while(log.children.length>500)log.removeChild(log.lastChild);}
+ S.actEvents.value=[...S.actEvents.value,ev].slice(-500);}
 async function actBackfill(){
- try{const d=await jget('/api/activity');
-  ACT_EVENTS=d.events;actRender();}catch(e){}}
+ try{const d=await jget('/api/activity');S.actEvents.value=d.events;}catch(e){}}
 
-/* ------------------------------------------------ boot */
-$('#q').value=localStorage.getItem('acm-query')||'';
-$('#q').addEventListener('input',()=>{
- localStorage.setItem('acm-query',$('#q').value);renderList();});
-$('#report-modal').addEventListener('click',e=>{
- if(e.target.id==='report-modal')hideReport();});
-document.addEventListener('keydown',e=>{
- if(e.key==='Escape'&&$('#report-modal').classList.contains('on')){hideReport();return;}
- if(PAGE!=='assets')return;
- if(e.key==='/'&&document.activeElement!==$('#q')){
-  e.preventDefault();$('#q').focus();return;}
- if(e.key==='Escape'&&document.activeElement===$('#q')&&$('#q').value){
-  $('#q').value='';localStorage.setItem('acm-query','');renderList();return;}
- if(e.key==='ArrowDown'||e.key==='ArrowUp'){
-  const tag=(document.activeElement||{}).tagName;
-  if(tag==='INPUT'||tag==='TEXTAREA')return;
-  const rows=filteredRows();if(!rows.length)return;
-  e.preventDefault();
-  const i=rows.findIndex(r=>r.asset_key===SEL);
-  const next=e.key==='ArrowDown'?Math.min(rows.length-1,i+1):Math.max(0,i<0?0:i-1);
-  // the list is virtualized (Clusterize) - only the scrolled-into-view
-  // rows exist in the DOM, so scrollIntoView on '.row.sel' after
-  // select() would silently no-op for any off-screen target. Scroll
-  // #list to where the target row WILL be first, so Clusterize's
-  // next render (triggered by select()->renderList()) includes it.
-  scrollListToIndex(next);
-  select(esc(rows[next].asset_key));}});
-actPills();
-actBackfill();
-route();
-refresh().then(fetchSparks);
-connect();
-</script></body></html>
+/* ------------------------------------------------ report modal */
+async function showReport(){
+ S.reportOpen.value=true;S.reportHtml.value='';S.reportErr.value='';
+ try{
+  const r=await fetch('/api/report');
+  if(!r.ok)throw new Error('HTTP '+r.status);
+  const md=await r.text();
+  S.reportHtml.value=marked.parse(escHtml(md));
+ }catch(e){S.reportErr.value=e.message;}}
+function hideReport(){S.reportOpen.value=false;}
+
+/* ================================================== components */
+
+function Toasts(){
+ return html`<div id="toast">${S.toasts.value.map(t=>html`<div key=${t.id}>${t.m}</div>`)}</div>`;}
+
+function ReportModal(){
+ const open=S.reportOpen.value;
+ return html`<div id="report-modal" class=${open?'on':''}
+   onClick=${(e)=>{if(e.target.id==='report-modal')hideReport();}}>
+  <div id="report-box">
+   <div id="report-head"><b>Fleet report</b><span class="spacer"></span>
+    <button onClick=${hideReport}>Close</button></div>
+   <div id="report-body" class="report">
+    ${S.reportErr.value
+     ?html`<p class="muted">failed to load report: ${S.reportErr.value}</p>`
+     :S.reportHtml.value
+      ?html`<div dangerouslySetInnerHTML=${{__html:S.reportHtml.value}}/>`
+      :html`<p class="muted" style="padding:20px">Loading...</p>`}
+   </div>
+  </div>
+ </div>`;}
+
+function Nav(){
+ const fleet=S.fleet.value;
+ const alarms=fleet?(fleet.counts.alarm||0)+(fleet.counts.escalating||0):0;
+ const page=S.page.value;
+ const go=(p)=>(e)=>{location.hash='#/'+p;};
+ return html`<nav id="nav">
+  <div class="brand">ACM<small>asset condition monitor</small></div>
+  <div class="navsec">
+   <a class=${page==='fleet'?'on':''} onClick=${go('fleet')}><span>${'\u25A0'}</span><span class="lbl">Fleet</span>
+    ${alarms?html`<span class="badge">${alarms}</span>`:null}</a>
+   <a class=${page==='assets'?'on':''} onClick=${go('assets')}><span>${'\u25A7'}</span><span class="lbl">Assets</span></a>
+   <a class=${page==='activity'?'on':''} onClick=${go('activity')}><span>${'\u25B7'}</span><span class="lbl">Activity</span></a>
+  </div>
+  <div class="foot">
+   <span class="meta">alpha=1/asset-year</span>
+   <button onClick=${toggleTheme} title="toggle light/dark theme">theme</button>
+   <button onClick=${showReport}>Report</button>
+  </div>
+ </nav>`;}
+
+function Topbar(){
+ themeTick.value; // subscribe: re-render (and thus re-derive tierScorer text) on theme flips too, harmless no-op otherwise
+ const fleet=S.fleet.value;
+ const page=S.page.value;
+ const [busy,setBusy]=useState(false);
+ if(!fleet)return html`<div id="topbar"><h1>${page}</h1></div>`;
+ const tierScorer={'T2':'TorchWorldModel','T2-S':'TorchWorldModel'};
+ const degraded=fleet.scorer&&tierScorer[fleet.tier]&&fleet.scorer!==tierScorer[fleet.tier];
+ return html`<div id="topbar">
+  <h1>${page}</h1>
+  <span class="meta">${fmtInt(fleet.assets)} assets | tier ${fleet.tier}${fleet.scorer?html` | ${degraded
+    ?html`<span style="color:var(--bad);font-weight:bold" title=${`tier implies ${tierScorer[fleet.tier]} but the service fell back`}>${fleet.scorer} (DEGRADED)</span>`
+    :fleet.scorer}`:null}</span>
+  <span class="spacer"></span>
+  <span id="wsdot" class=${S.wsOn.value?'on':''} title="live stream"></span>
+  <span class="meta">${S.wsLabel.value}</span>
+  <span class="meta">immune: ${fleet.immune.checked} checked, ${fleet.immune.sick
+   ?html`<span style="color:var(--bad);font-weight:bold">${fleet.immune.sick} sick</span>`
+   :'0 sick'}</span>
+  <button disabled=${busy} onClick=${()=>act('tick','','Scoring all assets',setBusy)}>Tick all</button>
+ </div>`;}
+
+/* ---------------- Fleet page ---------------- */
+function Kpi({cls,label,val,note}){
+ return html`<div class=${'kpi '+(cls||'')}><b>${label}</b>
+  <div class="row"><span>${val}</span>${note?html`<small title=${note}>${note}</small>`:null}</div></div>`;}
+function KpiRow(){
+ const fleet=S.fleet.value;
+ if(!fleet)return html`<div id="kpis"></div>`;
+ const c=fleet.counts,rows=fleet.rows;
+ const alarms=(c.alarm||0)+(c.escalating||0);
+ const watching=(c.watch||0)+(c['change-not-fault']||0);
+ const pending=(c.queued||0)+(c.onboarding||0)+(c.bootstrapping||0);
+ const worst=rows.length?rows[0]:null;
+ return html`<div id="kpis">
+  <${Kpi} label="fleet" val=${fmtInt(fleet.assets)} note=${pending?`${fmtInt(pending)} pending`:'all verdicted'}/>
+  <${Kpi} cls=${alarms?'bad':'ok'} label="alarms" val=${fmtInt(alarms)} note=${alarms&&worst?worst.asset_key:''}/>
+  <${Kpi} cls=${watching?'warn':''} label="watching" val=${fmtInt(watching)} note="watch + change"/>
+  <${Kpi} cls="ok" label="healthy" val=${fmtInt(c.healthy||0)}/>
+  <${Kpi} cls=${worst&&worst.evidence>=1?'bad':(worst&&worst.evidence>=0.5?'warn':'')}
+   label="peak evidence" val=${worst?fmtDec(worst.evidence):'-'} note=${worst?'alarm at 1.0':''}/>
+  <${Kpi} cls="acc" label="engine" val=${fleet.tier} note=${fleet.scorer||''}/>
+ </div>`;}
+
+function FleetCharts(){
+ const fleet=S.fleet.value;
+ themeTick.value;
+ if(!fleet)return html`<div id="fcharts"></div>`;
+ const onScatterReady=(c)=>{if(!c.__wired){c.__wired=true;c.on('click',p=>{if(p.data&&p.data[3])select(esc(p.data[3]));});}};
+ return html`<div id="fcharts">
+  <div class="card"><h3>Fleet states</h3><${EChart} id="d-states" height=190 option=${statesOption(fleet.counts,fleet.assets)}/></div>
+  <div class="card"><h3>Evidence - worst first (alarm at 1.0)</h3><${EChart} id="d-evidence" height=190 option=${evidenceOption(fleet.rows)}/></div>
+  <div class="card"><h3>Confidence vs evidence (click a dot to open the asset)</h3><${EChart} id="d-scatter" height=190 option=${scatterOption(fleet.rows)} onReady=${onScatterReady}/></div>
+ </div>`;}
+
+const FTABLE_LABELS={asset_key:'asset',state:'state',evidence:'evidence',confidence:'confidence',at:'last verdict'};
+function sortRows(rows){
+ const col=S.sortCol.value;
+ if(!col)return rows;
+ const dir=S.sortDir.value;
+ return rows.slice().sort((a,b)=>{
+  let x=a[col],y=b[col];
+  if(typeof x==='string')return dir*String(x).localeCompare(String(y));
+  return dir*((x??-Infinity)-(y??-Infinity));});}
+function sortClick(col){
+ S.sortDir.value=S.sortCol.value===col?-S.sortDir.value:(col==='evidence'?-1:1);
+ S.sortCol.value=col;}
+function FTableHead(){
+ const col=S.sortCol.value,dir=S.sortDir.value;
+ return html`<thead><tr>
+  ${['asset_key','state','evidence','confidence','at'].map(c=>html`
+   <th key=${c} style=${c==='asset_key'?'width:26%':c==='at'?'':'width:12%'} onClick=${()=>sortClick(c)}>
+    ${FTABLE_LABELS[c]}${col===c?html`<span class="arrow">${dir>0?'\u25B2':'\u25BC'}</span>`:null}</th>`)}
+  <th style="width:16%">trend</th></tr></thead>`;}
+function FTableRow({r}){
+ return html`<tr onClick=${()=>select(r.asset_key)}>
+  <td style="font-weight:bold">${r.asset_key}${r.live?html` <span class="pill" style="font-size:10px">LIVE</span>`:null}</td>
+  <td><span class=${'pill st-'+r.state}>${r.state}</span></td>
+  <td>${fmtDec(r.evidence)}</td><td>${fmtDec(r.confidence)}</td>
+  <td class="muted">${r.at||'-'}</td>
+  <td><${Spark} dataKey=${r.asset_key} h=${11}/></td>
+ </tr>`;}
+function FleetTable(){
+ const fleet=S.fleet.value;
+ S.health.value; // subscribe so sparklines redraw when health data arrives
+ if(!fleet)return null;
+ const rows=sortRows(fleet.rows);
+ return html`<div class="card" id="ftable-card">
+  <h3>Fleet detail</h3>
+  <div id="ftable-scroll">
+   <table id="ftable"><${FTableHead}/>
+    <tbody>${rows.map(r=>html`<${FTableRow} key=${r.asset_key} r=${r}/>`)}</tbody>
+   </table>
+  </div>
+ </div>`;}
+
+function FleetPage(){
+ return html`<div id="page-fleet" class="page on">
+  <${KpiRow}/><${FleetCharts}/><${FleetTable}/>
+ </div>`;}
+
+/* ---------------- Assets page ---------------- */
+function setFilter(s){
+ S.filter.value=S.filter.value===s?null:s;
+ localStorage.setItem('acm-filter',S.filter.value||'');}
+const PILL_ORDER=['escalating','alarm','change-not-fault','watch','insufficient-history','healthy',
+ 'bootstrapping','onboarding','queued'];
+function PillBar(){
+ const fleet=S.fleet.value;
+ if(!fleet)return html`<span id="pills"></span>`;
+ const counts=fleet.counts,filt=S.filter.value;
+ return html`<span id="pills">${PILL_ORDER.filter(s=>counts[s]).map(s=>html`
+  <span key=${s} class=${'pill st-'+s+(filt===s?' on':'')} onClick=${()=>setFilter(s)}>${s}: ${counts[s]}</span>`)}</span>`;}
+function filteredRows(){
+ const fleet=S.fleet.value;
+ if(!fleet)return [];
+ const q=S.query.value.toLowerCase(),filt=S.filter.value;
+ return fleet.rows.filter(v=>(!filt||v.state===filt)&&v.asset_key.toLowerCase().includes(q));}
+function scrollListToIndex(idx){
+ const list=$('#list'),sample=list&&list.querySelector('.row');
+ if(!list||!sample)return;
+ const hh=sample.getBoundingClientRect().height;
+ if(!hh)return;
+ const top=idx*hh,bottom=top+hh,viewH=list.clientHeight;
+ if(top<list.scrollTop)list.scrollTop=top;
+ else if(bottom>list.scrollTop+viewH)list.scrollTop=bottom-viewH;}
+function rowHtml(v,sel){
+ return `<div class="row ${sel===v.asset_key?'sel':''}" data-k="${escHtml(v.asset_key)}">
+  <span class="key">${escHtml(v.asset_key)}${v.live?' <span class="pill" style="font-size:10px" title="live buffer attached">LIVE</span>':''}</span>
+  <span class="pill st-${v.state}">${v.state}</span>
+  <span class="sub">
+   <span>ev ${fmtDec(v.evidence)}</span>
+   <span class="evbar"><i style="width:${Math.min(100,v.evidence*33)}%"></i></span>
+   <span>conf ${fmtDec(v.confidence)}</span>
+  </span>
+  <canvas data-k="${escHtml(v.asset_key)}"></canvas>
+ </div>`;}
+// The asset list is virtualized with Clusterize.js instead of rendering
+// every row through Preact - Clusterize owns painting only the rows
+// scrolled into view (DOM size stays roughly constant regardless of
+// fleet size). It's a foreign-managed DOM subtree (same pattern as
+// EChart's canvas), so it's wrapped in its own component: a ref div
+// Clusterize is bound to, event delegation for clicks (rows are plain
+// strings, not vdom, so no onClick prop exists on them), and a
+// MutationObserver-free redraw of sparkline canvases driven by
+// Clusterize's own clusterChanged callback.
+function AssetList(){
+ const fleet=S.fleet.value;
+ const sel=S.sel.value;
+ S.filter.value;S.query.value;S.health.value; // subscribe
+ const holderRef=useRef(null);
+ const clusterRef=useRef(null);
+ const rows=useMemo(()=>filteredRows(),[fleet,S.filter.value,S.query.value,sel]);
+ const drawSparks=()=>{
+  if(!holderRef.current)return;
+  holderRef.current.querySelectorAll('canvas[data-k]').forEach(cv=>{
+   const key=cv.getAttribute('data-k');
+   const series=S.health.value[key];
+   if(series)spark(cv,series.slice(-120),12);});};
+ useEffect(()=>{
+  const onClick=(e)=>{
+   const row=e.target.closest('.row[data-k]');
+   if(row)select(row.getAttribute('data-k'));};
+  const list=$('#list');
+  list.addEventListener('click',onClick);
+  return ()=>list.removeEventListener('click',onClick);
+ },[]);
+ useEffect(()=>{
+  if(!fleet)return;
+  if(!rows.length){
+   if(clusterRef.current){clusterRef.current.destroy(true);clusterRef.current=null;}
+   return;}
+  const htmlRows=rows.map(v=>rowHtml(v,sel));
+  if(!clusterRef.current||!document.getElementById('list-content')){
+   clusterRef.current=new Clusterize({rows:htmlRows,scrollId:'list',contentId:'list-content',
+    callbacks:{clusterChanged:drawSparks}});
+  }else{
+   clusterRef.current.update(htmlRows);
+  }
+  drawSparks();
+ },[rows,sel]);
+ useEffect(()=>()=>{if(clusterRef.current)clusterRef.current.destroy(true);},[]);
+ if(fleet&&!rows.length)
+  return html`<div id="list" ref=${holderRef}><p class="muted" style="padding:24px 20px;line-height:1.7">
+   ${fleet.rows.length?'No assets match the filter.'
+    :html`No assets in the store yet.<br/>Ingest data into the raw store (acm_data/raw) and the service will discover it on the next start; assets appear here the moment onboarding begins.`}
+  </p></div>`;
+ return html`<div id="list" ref=${holderRef}><div id="list-content"></div></div>`;}
+
+function AssetsSidebar(){
+ return html`<div id="lcol">
+  <div id="lbar">
+   <input id="q" placeholder="filter assets... ( / )" value=${S.query.value}
+    onInput=${(e)=>{S.query.value=e.target.value;localStorage.setItem('acm-query',e.target.value);}}/>
+   <${PillBar}/>
+  </div>
+  <${AssetList}/>
+ </div>`;}
+
+/* ---------------- Asset detail ---------------- */
+const NARR_LABEL={change:'change',evidence:'evidence',anatomy:'anatomy',shape:'shape',
+ horizon:'horizon',coverage:'coverage','immune-ok':'self-test','immune-sick':'self-test'};
+function Narrative({sections,state}){
+ if(!sections||!sections.length)return html`<p class="muted">no narrative available</p>`;
+ let lead=null,falsifiable=null;
+ const rows=[];
+ sections.forEach((s,i)=>{
+  if(s.kind==='judgment'){lead=s.text;return;}
+  if(s.kind==='falsifiable'){falsifiable=s.text.replace(/^This verdict is falsifiable by:\s*/,'');return;}
+  const cls='narr-row'+(s.kind==='immune-sick'?' narr-bad':s.kind==='immune-ok'?' narr-ok':'');
+  const style=s.kind==='evidence'?`border-left-color:${SC[state]||'var(--line)'}`:'';
+  rows.push(html`<div key=${i} class=${cls} style=${style}><b>${NARR_LABEL[s.kind]||s.kind}</b>${s.text}</div>`);});
+ return html`<${Fragment}>
+  ${lead?html`<p class="narr-lead">${lead}</p>`:null}
+  ${rows.length?html`<div class="narr-list">${rows}</div>`:null}
+  ${falsifiable?html`<div class="narr-falsifiable"><b>falsifiable by</b>${falsifiable}</div>`:null}
+ <//>`;}
+
+const DETAIL_TABS=[['overview','Overview'],['evidence','Evidence'],['anatomy','Anatomy & Prognosis'],['episodes','Episodes & Immune']];
+function DetailHead({d}){
+ const {v,row,key}=d;
+ const [busy,setBusy]=useState(null);
+ const run=(kind,msg)=>()=>act(kind,key,msg,(b)=>setBusy(b?kind:null));
+ return html`<div id="dhead">
+  <div class="drow">
+   <h2>${v.asset_key}</h2>
+   <span class=${'pill st-'+v.state}>${v.state}</span>
+   ${row&&row.live?html`<span class="pill" title="live buffer attached">LIVE</span>`:null}
+   <span style="flex:1"></span>
+   <button disabled=${busy==='tick'} onClick=${run('tick','Scoring')}>Score now</button>
+   <button disabled=${busy==='immune-pass'} onClick=${run('immune-pass','Immune pass (slow)')}>Immune pass</button>
+   <button disabled=${busy==='bootstrap'} onClick=${run('bootstrap','Bootstrap (multi-pass)')}>Bootstrap</button>
+   <button class="danger" disabled=${busy==='reanchor'} onClick=${()=>{
+     if(confirm('Close the open episode into the ledger and recalibrate from masked lifetime?'))run('reanchor','Re-anchor')();}}>Re-anchor</button>
+  </div>
+  <div class="drow muted" style="font-size:12.5px">
+   evidence ${fmtDec(v.evidence)} | confidence ${fmtDec(v.confidence)} | ${v.model_epoch}
+   | at ${v.at||'-'}${stale(v.at)}
+  </div>
+ </div>`;}
+function DetailTabs(){
+ const dtab=S.dtab.value;
+ return html`<div id="dtabs">${DETAIL_TABS.map(([id,lbl])=>html`
+  <a key=${id} class=${dtab===id?'on':''} onClick=${()=>S.dtab.value=id}>${lbl}</a>`)}</div>`;}
+
+function PaneOverview({d}){
+ const {health,narr,v}=d;
+ return html`<div class="pane on"><div class="cards">
+  <div class="card wide"><h3>Health index trajectory (windowed mean surprise)</h3>
+   <${EChart} id="c-health" height=260 option=${healthOption(health.series)}/></div>
+  <div class="card wide"><h3>Health narrative</h3><${Narrative} sections=${narr.sections} state=${v.state}/></div>
+ </div></div>`;}
+function PaneEvidence({d}){
+ const {v,doms,eph}=d;
+ const t=v.evidence_trail||{};
+ const fam=(v.coverage||{}).operating_point_familiarity;
+ return html`<div class="pane on"><div class="cards">
+  <div class="card wide"><h3>Evidence domains (log-wealth / threshold, alarm at 1.0)</h3>
+   <${EChart} id="c-domains" height=210 option=${domOption(doms)}/></div>
+  ${Object.keys(t.members||{}).length?html`<div class="card wide">
+   <h3>Evidence by detection timescale (block size, rows - red = that timescale alarmed)</h3>
+   <${EChart} id="c-members" height=170 option=${membersOption(t.members)}/></div>`:null}
+  <div class="card"><h3>Coverage & attribution</h3>
+   <div style="display:grid;grid-template-columns:1fr 1fr">
+    <${EChart} id="c-coverage" height=140 option=${typeof fam==='number'?gaugeOption(fam,'familiarity'):null}/>
+    ${t.concentration!==undefined?html`<${EChart} id="c-concentration" height=140 option=${gaugeOption(t.concentration,'concentration')}/>`:null}
+   </div>
+   <div class="kv">
+    <b>calibration rows</b><span>${fmtInt((v.coverage||{}).calib_rows)}</span>
+    <b>scored rows</b><span>${fmtInt((v.coverage||{}).scored_rows)}</span>
+    <b>attribution</b><span>${(v.attribution||[]).join(', ')||'-'}</span>
+    <b>falsifiable by</b><span>${v.falsifiable_by}</span></div></div>
+  <div class="card"><h3>Evidence trail</h3><div class="kv">
+   ${t.reason?html`<b>insufficient because</b><span>${t.reason}</span>`:null}
+   ${t.shape?html`<b>surprise shape</b><span>${t.shape}</span>`:null}
+   ${t.novelty!==undefined?html`<b>novelty</b><span>${fmtDec(t.novelty)}</span>`:null}
+   ${t.concentration!==undefined?html`<b>attribution concentration</b><span>${fmtDec(t.concentration)} ${t.concentration<0.4?'(coordinated move)':'(channel-local)'}</span>`:null}
+   ${eph.open_since?html`<b>episode open since</b><span>${eph.open_since}</span>`:null}
+   ${t.signature_match?html`<b>signature match</b><span>episode ${t.signature_match.episode} (confidence ${t.signature_match.confidence})</span>`:null}
+   ${t.trajectory_match?html`<b>trajectory match</b><span>episode ${t.trajectory_match.episode} (dist ${t.trajectory_match.distance}) - ~${t.trajectory_match.remaining_rows_estimate} rows to its peak</span>`:null}
+   ${!t.reason&&!t.shape&&!eph.open_since?html`<b>state</b><span class="muted">no active episode - nothing accumulating</span>`:null}
+  </div></div>
+ </div></div>`;}
+function PaneAnatomy({d}){
+ const {v}=d;
+ const t=v.evidence_trail||{};
+ return html`<div class="pane on"><div class="cards">
+  ${t.anatomy?html`<div class="card"><h3>Anatomy: organ surprise (origin in red)</h3>
+   <${EChart} id="c-anatomy" height=220 option=${anatomyOption(t.anatomy)}/></div>`
+   :html`<div class="card"><h3>Anatomy</h3><p class="muted">no organ decomposition for this verdict</p></div>`}
+  ${(t.horizon&&t.horizon.gated)?html`<div class="card"><h3>Prognosis: failure-time distribution${t.horizon.provisional_level?' [level provisional]':''}</h3>
+   <${EChart} id="c-horizon" height=180 option=${horizonOption(t.horizon)}/></div>`
+   :(t.horizon?html`<div class="card"><h3>Prognosis</h3><p class="muted">horizon gated: ${t.horizon.reason}</p></div>`
+   :html`<div class="card"><h3>Prognosis</h3><p class="muted">no failure-time estimate - nothing is accumulating</p></div>`)}
+ </div></div>`;}
+function PaneEpisodes({d}){
+ const {eph,immune}=d;
+ return html`<div class="pane on"><div class="cards">
+  ${(eph.episodes.length||eph.open_since)?html`<div class="card wide"><h3>Episode history (the ledger - absorbed changes included)</h3>
+   <${EChart} id="c-episodes" height=130 option=${episodesOption(eph)}/>
+   <table><tr><th>state</th><th>start</th><th>end</th><th>channels</th><th>shape</th><th>peak evidence</th></tr>
+   ${eph.episodes.map((e,i)=>html`<tr key=${i}><td><span class=${'pill st-'+(e.state==='alarm'?'alarm':'change-not-fault')}>${e.state}</span></td>
+    <td>${e.start}</td><td>${e.end||'open'}</td>
+    <td>${(e.channels||[]).slice(0,4).join(', ')||(e.source||'-')}</td>
+    <td>${e.shape||'-'}</td><td>${e.peak_evidence??'-'}</td></tr>`)}
+   </table></div>`:html`<div class="card wide"><h3>Episode history</h3><p class="muted">clean ledger - no episodes recorded for this asset</p></div>`}
+  ${immune&&!immune.status?html`<div class="card wide"><h3>Immune self-test ${immune.sick?'[SICK - rebuild triggered]':'[healthy]'}</h3>
+   <div style="display:grid;grid-template-columns:1fr 220px;gap:12px">
+    <${EChart} id="c-immune" height=200 option=${floorsOption(immune.floors)}/>
+    <div>${immune.rehearsal?html`<${EChart} id="c-rehearsal" height=150 option=${gaugeOption(immune.rehearsal.detected_fraction,'rehearsal detected')}/>`:null}
+     <div class="kv"><b>conformance</b><span>${immune.conformance_ok}${immune.conformance_note?' - '+immune.conformance_note:''}</span>
+     <b>pit</b><span>${immune.pit}</span><b>live degenerate</b><span>${immune.live_degenerate}</span></div></div>
+   </div></div>`:html`<div class="card"><h3>Immune self-test</h3><p class="muted">not yet run - use the Immune pass button</p></div>`}
+  ${immune&&!immune.status&&immune.profile?html`<div class="card"><h3>Detection profile (injected fault x magnitude, sigma)</h3>
+   <${EChart} id="c-immune-profile" height=180 option=${immuneProfileOption(immune.profile)}/></div>`:null}
+  ${immune&&!immune.status&&immune.rehearsal&&immune.rehearsal.floors?html`<div class="card">
+   <h3>Rehearsal floors per channel (sigma - lower is more sensitive)</h3>
+   <${EChart} id="c-rehearsal-floors" height=180 option=${floorsOption(immune.rehearsal.floors)}/></div>`:null}
+ </div></div>`;}
+const PENDING_WHY={queued:'waiting its turn',
+ onboarding:'calibrating from its lifetime history',
+ bootstrapping:'first-contact cleaning of its history'};
+function AssetDetail(){
+ const sel=S.sel.value;
+ useEffect(()=>{
+  DETAIL_AT='';S.ddata.value=null;
+  if(sel)loadDetail(sel,true);
+ },[sel]);
+ if(!sel)return html`<div id="detail"><p class="muted" style="padding:30px">Select an asset.</p></div>`;
+ const d=S.ddata.value;
+ if(!d)return html`<div id="detail"><p class="muted" style="padding:30px">Loading...</p></div>`;
+ if(d.pending)
+  return html`<div id="detail"><p class="muted" style="padding:28px;line-height:1.7">
+   ${d.row.asset_key} is <span class=${'pill st-'+d.row.state}>${d.row.state}</span> - ${PENDING_WHY[d.row.state]}.<br/>
+   Its first verdict lands here automatically when that finishes.</p></div>`;
+ const dtab=S.dtab.value;
+ return html`<div id="detail">
+  <${DetailHead} d=${d}/>
+  <${DetailTabs}/>
+  ${dtab==='overview'?html`<${PaneOverview} d=${d}/>`:null}
+  ${dtab==='evidence'?html`<${PaneEvidence} d=${d}/>`:null}
+  ${dtab==='anatomy'?html`<${PaneAnatomy} d=${d}/>`:null}
+  ${dtab==='episodes'?html`<${PaneEpisodes} d=${d}/>`:null}
+ </div>`;}
+
+function AssetsPage(){
+ return html`<div id="page-assets" class="page grid on">
+  <${AssetsSidebar}/><${AssetDetail}/>
+ </div>`;}
+
+/* ---------------- Activity page ---------------- */
+function ActStats(){
+ const events=S.actEvents.value;
+ const counts={};ACT_KINDS.forEach(k=>counts[k]=0);
+ events.forEach(e=>{counts[e.kind]=(counts[e.kind]||0)+1;});
+ const last=events[events.length-1];
+ return html`<div id="act-stats">
+  <${Kpi} cls="acc" label="total events" val=${fmtInt(events.length)} note="last 500"/>
+  ${ACT_KINDS.map(k=>html`<${Kpi} key=${k} label=${k} val=${fmtInt(counts[k])}/>`)}
+  <${Kpi} label="latest" val=${last?last.kind:'-'} note=${last?last.asset_key:''}/>
+ </div>`;}
+function ActPills(){
+ const filt=S.actFilter.value;
+ return html`<span id="act-pills">${ACT_KINDS.map(k=>html`
+  <span key=${k} class=${'pill'+(filt===k?' on':'')} onClick=${()=>S.actFilter.value=(filt===k?null:k)}>${k}</span>`)}</span>`;}
+function actLine(ev,i){
+ const t=(ev.at||'').replace('T',' ').replace(/\+.*$/,'');
+ return html`<div key=${i} class=${'act-row act-'+ev.kind}>
+  <span class="t">${t.slice(11)}</span>
+  <span class="k">${ev.kind}</span>
+  <span class="a">${ev.asset_key}</span>
+  <span class="m">${ev.msg}</span></div>`;}
+function ActLog(){
+ const events=S.actEvents.value,filt=S.actFilter.value;
+ const evs=(filt?events.filter(e=>e.kind===filt):events).slice().reverse();
+ return html`<div id="act-log">
+  ${evs.length?evs.map(actLine):html`<p class="muted" style="padding:24px">No events yet.</p>`}
+ </div>`;}
+function ActivityPage(){
+ return html`<div id="page-activity" class="page on">
+  <${ActStats}/>
+  <div id="actbar">
+   <span class="dotlive"></span><b style="font-size:12px;letter-spacing:1px">LIVE STREAM</b>
+   <span style="flex:1"></span>
+   <${ActPills}/>
+  </div>
+  <${ActLog}/>
+ </div>`;}
+
+/* ---------------- App shell ---------------- */
+function Main(){
+ const page=S.page.value;
+ return html`<div id="main">
+  <${Topbar}/>
+  ${page==='fleet'?html`<${FleetPage}/>`:null}
+  ${page==='assets'?html`<${AssetsPage}/>`:null}
+  ${page==='activity'?html`<${ActivityPage}/>`:null}
+ </div>`;}
+function App(){
+ useEffect(()=>{
+  addEventListener('hashchange',applyHash);
+  applyHash();
+  const onKey=(e)=>{
+   if(e.key==='Escape'&&S.reportOpen.value){hideReport();return;}
+   if(S.page.value!=='assets')return;
+   const q=$('#q');
+   if(e.key==='/'&&document.activeElement!==q){e.preventDefault();q&&q.focus();return;}
+   if(e.key==='Escape'&&document.activeElement===q&&S.query.value){
+    S.query.value='';localStorage.setItem('acm-query','');return;}
+   if(e.key==='ArrowDown'||e.key==='ArrowUp'){
+    const tag=(document.activeElement||{}).tagName;
+    if(tag==='INPUT'||tag==='TEXTAREA')return;
+    const rows=filteredRows();if(!rows.length)return;
+    e.preventDefault();
+    const i=rows.findIndex(r=>r.asset_key===S.sel.value);
+    const next=e.key==='ArrowDown'?Math.min(rows.length-1,i+1):Math.max(0,i<0?0:i-1);
+    // the list is virtualized (Clusterize) - only the scrolled-into-view
+    // rows exist in the DOM, so scroll #list to where the target row
+    // WILL be first, so Clusterize's next render (triggered by the
+    // selection change) includes it.
+    scrollListToIndex(next);
+    select(rows[next].asset_key);}};
+  document.addEventListener('keydown',onKey);
+  actBackfill();
+  refresh().then(fetchSparks);
+  connect();
+  return ()=>{removeEventListener('hashchange',applyHash);document.removeEventListener('keydown',onKey);};
+ },[]);
+ return html`<${Fragment}><${Nav}/><${Main}/><${Toasts}/><${ReportModal}/><//>`;}
+
+render(html`<${App}/>`,document.getElementById('app'));
+</script>
+</body></html>
