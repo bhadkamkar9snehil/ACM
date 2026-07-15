@@ -364,7 +364,20 @@ th{color:var(--mut);font-weight:normal;font-size:11px;letter-spacing:1px;
 let FLEET=null, SEL=null, FILTER=localStorage.getItem('acm-filter')||null, HEALTH={}, HASH='', DETAIL_AT='';
 let PAGE='fleet', DTAB='overview', DDATA=null, SORT_COL=null, SORT_DIR=1;
 const $=(s)=>document.querySelector(s);
-const esc=encodeURIComponent;
+// encodeURIComponent deliberately leaves ' ( ) ~ * ! unescaped (they're
+// valid in a URL path segment) - but esc() is also used to embed keys
+// inside single-quoted JS string literals in onclick="..." attributes
+// throughout this file, and an unescaped ' there breaks out of the
+// string literal. %27 is inert in both contexts (a normal path
+// segment unquotes it back to ' server-side; inside an onclick
+// attribute it can no longer terminate the string early), so this one
+// extra replace covers every existing and future esc() call site.
+const esc=(s)=>encodeURIComponent(s).replace(/'/g,'%27');
+// asset_key/log-message text is never assumed safe as HTML: keys are
+// unquote()'d straight off raw-store directory names (src/store/raw.py),
+// not a fixed enum, so anything that reaches innerHTML must be escaped.
+const escHtml=(s)=>String(s??'').replace(/[&<>"']/g,c=>
+ ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const SC={healthy:'#37b26c',watch:'#d8b636',alarm:'#e05252',escalating:'#ff6b6b',
  'change-not-fault':'#d88a36','insufficient-history':'#5b6b7d',
  bootstrapping:'#4a90d9',onboarding:'#8a76e0',queued:'#5b6b7d'};
@@ -491,11 +504,11 @@ function dashboard(){
  const tableRows=sortRows(rows);
  $('#ftable tbody').innerHTML=tableRows.map(r=>`
   <tr onclick="select('${esc(r.asset_key)}')">
-   <td style="font-weight:bold">${r.asset_key}${r.live?' <span class="pill" style="font-size:10px">LIVE</span>':''}</td>
+   <td style="font-weight:bold">${escHtml(r.asset_key)}${r.live?' <span class="pill" style="font-size:10px">LIVE</span>':''}</td>
    <td><span class="pill st-${r.state}">${r.state}</span></td>
    <td>${r.evidence}</td><td>${r.confidence}</td>
    <td class="muted">${r.at||'-'}</td>
-   <td><canvas data-fk="${r.asset_key}" style="width:100%;height:22px"></canvas></td>
+   <td><canvas data-fk="${escHtml(r.asset_key)}" style="width:100%;height:22px"></canvas></td>
   </tr>`).join('');
  tableRows.forEach(r=>{const cv=document.querySelector(`canvas[data-fk="${CSS.escape(r.asset_key)}"]`);
   if(cv&&HEALTH[r.asset_key])spark(cv,HEALTH[r.asset_key].slice(-120),11);});
@@ -523,8 +536,8 @@ function renderKpis(){
  const watching=(c.watch||0)+(c['change-not-fault']||0);
  const pending=(c.queued||0)+(c.onboarding||0)+(c.bootstrapping||0);
  const worst=rows.length?rows[0]:null;
- const kpi=(cls,label,val,note)=>`<div class="kpi ${cls}"><b>${label}</b>`+
-  `<div class="row"><span>${val}</span>${note?`<small title="${note}">${note}</small>`:''}</div></div>`;
+ const kpi=(cls,label,val,note)=>`<div class="kpi ${cls}"><b>${escHtml(label)}</b>`+
+  `<div class="row"><span>${escHtml(val)}</span>${note?`<small title="${escHtml(note)}">${escHtml(note)}</small>`:''}</div></div>`;
  $('#kpis').innerHTML=
   kpi('','fleet',FLEET.assets,pending?`${pending} pending`:'all verdicted')+
   kpi(alarms?'bad':'ok','alarms',alarms,alarms&&worst?worst.asset_key:'')+
@@ -563,14 +576,14 @@ function renderList(){
   return;}
  $('#list').innerHTML=shown.map(v=>`
   <div class="row ${SEL===v.asset_key?'sel':''}" onclick="select('${esc(v.asset_key)}')">
-   <span class="key">${v.asset_key}${v.live?' <span class="pill" style="font-size:10px" title="live buffer attached">LIVE</span>':''}</span>
+   <span class="key">${escHtml(v.asset_key)}${v.live?' <span class="pill" style="font-size:10px" title="live buffer attached">LIVE</span>':''}</span>
    <span class="pill st-${v.state}">${v.state}</span>
    <span class="sub">
     <span>ev ${v.evidence}</span>
     <span class="evbar"><i style="width:${Math.min(100,v.evidence*33)}%"></i></span>
     <span>conf ${v.confidence}</span>
    </span>
-   <canvas data-k="${v.asset_key}"></canvas>
+   <canvas data-k="${escHtml(v.asset_key)}"></canvas>
   </div>`).join('')+(rows.length>400?`<p class="muted" style="padding:10px 16px">and ${rows.length-400} more - refine the filter</p>`:'');
  shown.forEach(v=>{const cv=document.querySelector(`canvas[data-k="${CSS.escape(v.asset_key)}"]`);
   if(cv&&HEALTH[v.asset_key])spark(cv,HEALTH[v.asset_key].slice(-120),12);});}
@@ -582,12 +595,13 @@ function narrativeHtml(sections,state){
  if(!sections||!sections.length)return '<p class="muted">no narrative available</p>';
  const rows=[];let lead='',falsifiable='';
  sections.forEach(s=>{
-  if(s.kind==='judgment'){lead=s.text;return;}
+  const text=escHtml(s.text);
+  if(s.kind==='judgment'){lead=text;return;}
   if(s.kind==='falsifiable'){
-   falsifiable=s.text.replace(/^This verdict is falsifiable by:\s*/,'');return;}
+   falsifiable=text.replace(/^This verdict is falsifiable by:\s*/,'');return;}
   const cls=s.kind==='immune-sick'?'narr-row narr-bad':s.kind==='immune-ok'?'narr-row narr-ok':'narr-row';
   const style=s.kind==='evidence'?` style="border-left-color:${SC[state]||'var(--line)'}"`:'';
-  rows.push(`<div class="${cls}"${style}><b>${NARR_LABEL[s.kind]||s.kind}</b>${s.text}</div>`);});
+  rows.push(`<div class="${cls}"${style}><b>${NARR_LABEL[s.kind]||s.kind}</b>${text}</div>`);});
  return (lead?`<p class="narr-lead">${lead}</p>`:'')+
   (rows.length?`<div class="narr-list">${rows.join('')}</div>`:'')+
   (falsifiable?`<div class="narr-falsifiable"><b>falsifiable by</b>${falsifiable}</div>`:'');}
@@ -621,7 +635,7 @@ function healthChart(series){
     colorStops:[{offset:0,color:'rgba(74,163,223,0.30)'},{offset:1,color:'rgba(74,163,223,0.02)'}]}}}]});}
 function episodeTimeline(eph){
  const items=eph.episodes.map(e=>({s:e.start,e:e.end||new Date().toISOString(),st:e.state,
-  tip:`${e.state}<br>${e.start} -> ${e.end||'open'}<br>${(e.channels||[]).join(', ')||e.source||''}${e.shape?'<br>shape: '+e.shape:''}${e.peak_evidence!=null?'<br>peak evidence '+e.peak_evidence:''}`}));
+  tip:`${e.state}<br>${e.start} -> ${e.end||'open'}<br>${escHtml((e.channels||[]).join(', ')||e.source||'')}${e.shape?'<br>shape: '+escHtml(e.shape):''}${e.peak_evidence!=null?'<br>peak evidence '+e.peak_evidence:''}`}));
  if(eph.open_since)items.push({s:eph.open_since,e:new Date().toISOString(),st:'open',
   tip:'OPEN episode since '+eph.open_since});
  if(!items.length)return;
@@ -676,10 +690,10 @@ function horizonChart(hz){
      formatter:()=>`p10 ${hz.p10_steps} | median ${hz.median_steps} | p90 ${hz.p90_steps}`},
     markLine:{symbol:'none',lineStyle:{color:'#e05252',width:2},
      data:[{xAxis:hz.median_steps}],label:{color:'#e05252',formatter:'median'}}}]});}
-function immuneChart(immune){
- const entries=Object.entries(immune.floors||{});
+function floorsChart(id,floors){
+ const entries=Object.entries(floors||{});
  if(!entries.length)return;
- ec('c-immune',{grid:{left:8,right:36,top:8,bottom:6,containLabel:true},
+ ec(id,{grid:{left:8,right:36,top:8,bottom:6,containLabel:true},
   tooltip:{trigger:'axis',axisPointer:{type:'shadow'}},
   xAxis:{type:'value',name:'floor (sigma)',nameTextStyle:{color:CH.axis,fontSize:10},
    axisLabel:{color:CH.axis,fontSize:10},splitLine:{lineStyle:{color:CH.grid}}},
@@ -689,6 +703,39 @@ function immuneChart(immune){
    data:entries.map(([,f])=>({value:f??0,
     itemStyle:{color:f==null?'#5b6b7d':'#37b26c'},
     label:{show:f==null,position:'right',fontSize:10,color:CH.axis,formatter:'not detected'}}))}]});}
+function membersChart(members){
+ const entries=Object.entries(members||{}).sort((a,b)=>Number(a[0])-Number(b[0]));
+ if(!entries.length)return;
+ ec('c-members',{grid:{left:8,right:70,top:8,bottom:24,containLabel:true},
+  tooltip:{trigger:'axis',axisPointer:{type:'shadow'}},
+  xAxis:{type:'value',name:'log-wealth',nameTextStyle:{color:CH.axis,fontSize:10},
+   axisLabel:{color:CH.axis,fontSize:10},splitLine:{lineStyle:{color:CH.grid}}},
+  yAxis:{type:'category',inverse:true,data:entries.map(([k])=>`block ${k}`),
+   axisLabel:{color:CH.text,fontSize:10}},
+  series:[{type:'bar',barMaxWidth:16,
+   data:entries.map(([,m])=>({value:m.log_wealth,
+    itemStyle:{color:m.alarmed?'#e05252':'#4aa3df'},
+    label:{show:true,position:'right',fontSize:10,
+     color:m.alarmed?'#e05252':CH.axis,
+     formatter:()=>m.alarmed?'ALARMED '+m.log_wealth:String(m.log_wealth)}}))}]});}
+function immuneProfileChart(profile){
+ const faults=Object.keys(profile||{});
+ if(!faults.length)return;
+ const mags=Object.keys(profile[faults[0]]||{});
+ if(!mags.length)return;
+ const data=[];
+ faults.forEach((f,fi)=>mags.forEach((m,mi)=>data.push([mi,fi,profile[f][m]?1:0])));
+ ec('c-immune-profile',{
+  grid:{left:110,right:16,top:8,bottom:30},
+  tooltip:{formatter:p=>`${faults[p.data[1]]} @ ${mags[p.data[0]]} sigma: `+
+   (p.data[2]?'detected':'missed')},
+  xAxis:{type:'category',data:mags.map(m=>m+'sigma'),axisLabel:{color:CH.axis,fontSize:10},
+   splitArea:{show:true}},
+  yAxis:{type:'category',data:faults,axisLabel:{color:CH.text,fontSize:10},
+   splitArea:{show:true}},
+  visualMap:{show:false,min:0,max:1,inRange:{color:[CH.grid,'#37b26c']}},
+  series:[{type:'heatmap',data,label:{show:false},
+   itemStyle:{borderColor:CH.border,borderWidth:2}}]});}
 
 /* ------------------------------------------------ detail view (tabbed) */
 async function detail(key,force){
@@ -698,7 +745,7 @@ async function detail(key,force){
   const why={queued:'waiting its turn',
    onboarding:'calibrating from its lifetime history',
    bootstrapping:'first-contact cleaning of its history'};
-  $('#detail').innerHTML=`<p class="muted" style="padding:28px;line-height:1.7">${row.asset_key} is <span class="pill st-${row.state}">${row.state}</span> - ${why[row.state]}.<br>Its first verdict lands here automatically when that finishes.</p>`;
+  $('#detail').innerHTML=`<p class="muted" style="padding:28px;line-height:1.7">${escHtml(row.asset_key)} is <span class="pill st-${row.state}">${row.state}</span> - ${why[row.state]}.<br>Its first verdict lands here automatically when that finishes.</p>`;
   return;}
  const [v,narr,doms,health,eph]=await Promise.all([
   jget('/api/asset/'+esc(key)),jget('/api/narrative/'+esc(key)),
@@ -714,7 +761,7 @@ async function detail(key,force){
  $('#detail').innerHTML=`
  <div id="dhead">
   <div class="drow">
-   <h2>${v.asset_key}</h2>
+   <h2>${escHtml(v.asset_key)}</h2>
    <span class="pill st-${v.state}">${v.state}</span>
    ${row&&row.live?'<span class="pill" title="live buffer attached">LIVE</span>':''}
    <span style="flex:1"></span>
@@ -741,13 +788,19 @@ async function detail(key,force){
   <div class="cards">
    <div class="card wide"><h3>Evidence domains (log-wealth / threshold, alarm at 1.0)</h3>
     <div class="chart" id="c-domains" style="height:210px"></div></div>
-   <div class="card"><h3>Coverage: operating-point familiarity</h3>
-    <div class="chart" id="c-coverage" style="height:160px"></div>
+   ${Object.keys(t.members||{}).length?`<div class="card wide">
+    <h3>Evidence by detection timescale (block size, rows - red = that timescale alarmed)</h3>
+    <div class="chart" id="c-members" style="height:170px"></div></div>`:''}
+   <div class="card"><h3>Coverage &amp; attribution</h3>
+    <div style="display:grid;grid-template-columns:1fr 1fr">
+     <div class="chart" id="c-coverage" style="height:140px"></div>
+     ${t.concentration!==undefined?'<div class="chart" id="c-concentration" style="height:140px"></div>':''}
+    </div>
     <div class="kv">
      <b>calibration rows</b><span>${(v.coverage||{}).calib_rows??'-'}</span>
      <b>scored rows</b><span>${(v.coverage||{}).scored_rows??'-'}</span>
-     <b>attribution</b><span>${(v.attribution||[]).join(', ')||'-'}</span>
-     <b>falsifiable by</b><span>${v.falsifiable_by}</span></div></div>
+     <b>attribution</b><span>${escHtml((v.attribution||[]).join(', '))||'-'}</span>
+     <b>falsifiable by</b><span>${escHtml(v.falsifiable_by)}</span></div></div>
    <div class="card"><h3>Evidence trail</h3><div class="kv">
     ${t.reason?`<b>insufficient because</b><span>${t.reason}</span>`:''}
     ${t.shape?`<b>surprise shape</b><span>${t.shape}</span>`:''}
@@ -778,8 +831,8 @@ async function detail(key,force){
     <table><tr><th>state</th><th>start</th><th>end</th><th>channels</th><th>shape</th><th>peak evidence</th></tr>
     ${eph.episodes.map(e=>`<tr><td><span class="pill st-${e.state==='alarm'?'alarm':'change-not-fault'}">${e.state}</span></td>
      <td>${e.start}</td><td>${e.end||'open'}</td>
-     <td>${(e.channels||[]).slice(0,4).join(', ')||(e.source||'-')}</td>
-     <td>${e.shape||'-'}</td><td>${e.peak_evidence??'-'}</td></tr>`).join('')}
+     <td>${escHtml((e.channels||[]).slice(0,4).join(', ')||(e.source||'-'))}</td>
+     <td>${escHtml(e.shape)||'-'}</td><td>${e.peak_evidence??'-'}</td></tr>`).join('')}
     </table></div>`:'<div class="card wide"><h3>Episode history</h3><p class="muted">clean ledger - no episodes recorded for this asset</p></div>'}
    ${immune&&!immune.status?`<div class="card wide"><h3>Immune self-test ${immune.sick?'[SICK - rebuild triggered]':'[healthy]'}</h3>
     <div style="display:grid;grid-template-columns:1fr 220px;gap:12px">
@@ -788,6 +841,11 @@ async function detail(key,force){
       <div class="kv"><b>conformance</b><span>${immune.conformance_ok}${immune.conformance_note?' - '+immune.conformance_note:''}</span>
       <b>pit</b><span>${immune.pit}</span><b>live degenerate</b><span>${immune.live_degenerate}</span></div></div>
     </div></div>`:'<div class="card"><h3>Immune self-test</h3><p class="muted">not yet run - use the Immune pass button</p></div>'}
+   ${immune&&!immune.status&&immune.profile?`<div class="card"><h3>Detection profile (injected fault x magnitude, sigma)</h3>
+    <div class="chart" id="c-immune-profile" style="height:180px"></div></div>`:''}
+   ${immune&&!immune.status&&immune.rehearsal&&immune.rehearsal.floors?`<div class="card">
+    <h3>Rehearsal floors per channel (sigma - lower is more sensitive)</h3>
+    <div class="chart" id="c-rehearsal-floors" style="height:180px"></div></div>`:''}
   </div>
  </div>`;
  drawPane(DTAB);}
@@ -803,12 +861,17 @@ function drawPane(tab){
  const fam=(v.coverage||{}).operating_point_familiarity;
  if(tab==='overview')healthChart(health.series);
  if(tab==='evidence'){domChart(doms);
-  if(typeof fam==='number')gaugeChart('c-coverage',fam,'familiarity');}
+  if(typeof fam==='number')gaugeChart('c-coverage',fam,'familiarity');
+  if(t.concentration!==undefined)gaugeChart('c-concentration',t.concentration,'concentration');
+  if(t.members)membersChart(t.members);}
  if(tab==='anatomy'){if(t.anatomy)anatomyChart(t.anatomy);
   if(t.horizon&&t.horizon.gated)horizonChart(t.horizon);}
  if(tab==='episodes'){episodeTimeline(eph);
-  if(immune&&!immune.status){immuneChart(immune);
-   if(immune.rehearsal)gaugeChart('c-rehearsal',immune.rehearsal.detected_fraction,'rehearsal detected');}}}
+  if(immune&&!immune.status){floorsChart('c-immune',immune.floors);
+   if(immune.rehearsal){
+    gaugeChart('c-rehearsal',immune.rehearsal.detected_fraction,'rehearsal detected');
+    if(immune.rehearsal.floors)floorsChart('c-rehearsal-floors',immune.rehearsal.floors);}
+   if(immune.profile)immuneProfileChart(immune.profile);}}}
 
 /* ------------------------------------------------ page render */
 function renderPage(){
@@ -863,8 +926,8 @@ function actStats(){
  const counts={};ACT_KINDS.forEach(k=>counts[k]=0);
  ACT_EVENTS.forEach(e=>{counts[e.kind]=(counts[e.kind]||0)+1;});
  const last=ACT_EVENTS[ACT_EVENTS.length-1];
- const kpi=(cls,label,val,note)=>`<div class="kpi ${cls}"><b>${label}</b>`+
-  `<div class="row"><span>${val}</span>${note?`<small title="${note}">${note}</small>`:''}</div></div>`;
+ const kpi=(cls,label,val,note)=>`<div class="kpi ${cls}"><b>${escHtml(label)}</b>`+
+  `<div class="row"><span>${escHtml(val)}</span>${note?`<small title="${escHtml(note)}">${escHtml(note)}</small>`:''}</div></div>`;
  $('#act-stats').innerHTML=
   kpi('acc','total events',ACT_EVENTS.length,'last 500')+
   ACT_KINDS.map(k=>kpi('',k,counts[k],'')).join('')+
@@ -873,9 +936,9 @@ function actLine(ev){
  const t=(ev.at||'').replace('T',' ').replace(/\+.*$/,'');
  return `<div class="act-row act-${ev.kind}">`+
   `<span class="t">${t.slice(11)}</span>`+
-  `<span class="k">${ev.kind}</span>`+
-  `<span class="a">${ev.asset_key}</span>`+
-  `<span class="m">${ev.msg}</span></div>`;}
+  `<span class="k">${escHtml(ev.kind)}</span>`+
+  `<span class="a">${escHtml(ev.asset_key)}</span>`+
+  `<span class="m">${escHtml(ev.msg)}</span></div>`;}
 function actRender(){
  actPills();actStats();
  const log=$('#act-log');
