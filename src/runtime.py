@@ -348,7 +348,18 @@ class Runtime:
         return list(em._health_index) if em is not None else []
 
     def domains(self, asset_key: str) -> dict:
-        """Per-domain bank states for the UI evidence panel."""
+        """Per-domain bank states for the UI evidence panel.
+
+        Includes each domain's per-block-size member wealth (`members`),
+        not just the aggregate evidence/alarmed rollup: a verdict's own
+        evidence_trail only ever carries member detail for whichever ONE
+        domain won the state-priority resolution (monitor.py's
+        aux_states loop) - a tick decided by, say, dynamics-drift shows
+        NO block-size breakdown for any bank at all, including the
+        magnitude bank that lost. domains() reads bank.state() live and
+        independently of that resolution, so it is the one place every
+        bank's own timescale detail is visible on every tick regardless
+        of which domain's alarm actually drove the verdict."""
         m = self.monitors[asset_key].monitor
         out = {}
         pairs = [
@@ -368,8 +379,44 @@ class Runtime:
                     "enabled": True,
                     "alarmed": st.alarmed,
                     "evidence": round(st.evidence, 4),
+                    "members": {
+                        str(block_size): {
+                            "log_wealth": round(lw, 3),
+                            "alarmed": al,
+                        }
+                        for block_size, (lw, al) in st.member_states.items()
+                    },
                 }
         return out
+
+    def cost_summary(self) -> dict:
+        """Last-tick wall-clock cost per asset (hardware.MEASURED_COSTS),
+        worst-first - which assets are actually expensive to score, not
+        just which ones exist. Computed at every tick in Runtime.tick()
+        but never surfaced anywhere before this (#113)."""
+        from hardware import MEASURED_COSTS
+
+        rows = sorted(
+            (
+                {
+                    "asset_key": key,
+                    "wall_s": round(cost["wall_s"], 4),
+                    "rows": int(cost["rows"]),
+                    "rows_per_s": (
+                        round(cost["rows"] / cost["wall_s"], 1)
+                        if cost["wall_s"] > 0
+                        else None
+                    ),
+                }
+                for key, cost in MEASURED_COSTS.items()
+                if key in self.monitors
+            ),
+            key=lambda d: -d["wall_s"],
+        )
+        return {
+            "rows": rows,
+            "total_wall_s": round(sum(r["wall_s"] for r in rows), 4),
+        }
 
     def attach_live_source(self, asset_key: str, db_path) -> None:
         """Attach a SQLite buffer (bridge/sim-fed) to an asset; drained

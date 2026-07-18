@@ -294,6 +294,11 @@ def create_app(
             return JSONResponse({"error": "unknown asset"}, status_code=404)
         return JSONResponse(runtime.domains(asset_key))
 
+    @app.get("/api/cost")
+    def cost() -> JSONResponse:
+        """Fleet-wide last-tick wall-clock cost, worst-first (#113)."""
+        return JSONResponse(runtime.cost_summary())
+
     @app.get("/api/immune/{asset_key:path}")
     def immune(asset_key: str) -> JSONResponse:
         r = runtime.immune_results.get(asset_key)

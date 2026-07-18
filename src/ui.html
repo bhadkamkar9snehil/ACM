@@ -78,7 +78,7 @@ body{font:14px/1.5 var(--font-mono);background:var(--bg);color:var(--txt);
 #nav .foot .meta{color:var(--mut);font-size:11px;line-height:1.6}
 
 /* ---------------------------------------------------- main column */
-#main{display:grid;grid-template-rows:auto minmax(0,1fr);min-width:0}
+#main{display:grid;grid-template-rows:auto auto minmax(0,1fr);min-width:0}
 #topbar{display:flex;align-items:center;gap:var(--sp-7);padding:var(--sp-5) var(--sp-10);
  background:var(--bg2);border-bottom:1px solid var(--line)}
 #topbar h1{font-size:16px;letter-spacing:1px;text-transform:capitalize}
@@ -239,11 +239,23 @@ th{color:var(--mut);font-weight:normal;font-size:11px;letter-spacing:1px;
  gap:var(--sp-6);margin-bottom:var(--sp-8)}
 #actbar{display:flex;gap:var(--sp-3);align-items:center;margin-bottom:var(--sp-6);
  flex-wrap:wrap}
-#actbar .dotlive{width:8px;height:8px;border-radius:50%;background:#37b26c;
- animation:pulse 1.6s infinite}
+.dotlive{width:8px;height:8px;border-radius:50%;background:#37b26c;
+ animation:pulse 1.6s infinite;flex:0 0 auto}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.25}}
+#live-ticker{display:flex;align-items:center;gap:var(--sp-4);padding:var(--sp-3) var(--sp-10);
+ background:var(--bg2);border-bottom:1px solid var(--line);font-size:12px;color:var(--mut);
+ overflow:hidden}
+#live-ticker .tk{font-family:var(--font-mono);font-size:10.5px;color:var(--mut);flex:0 0 auto}
+#live-ticker .tkind{font-weight:bold;text-transform:uppercase;font-size:10.5px;
+ letter-spacing:.4px;flex:0 0 auto;color:var(--acc)}
+#live-ticker .tasset{font-weight:bold;color:var(--txt);flex:0 0 auto;cursor:pointer}
+#live-ticker .tasset:hover{color:var(--acc)}
+#live-ticker .tmsg{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--mut)}
+#live-ticker .tempty{color:var(--mut);font-style:italic}
 #act-log{border:1px solid var(--line);border-radius:var(--r-card);background:var(--bg2);
  box-shadow:var(--shadow);max-height:calc(100vh - 340px);overflow-y:auto}
+#asset-live-log{border:1px solid var(--line);border-radius:var(--r-control);background:var(--bg3);
+ max-height:280px;overflow-y:auto}
 .act-row{display:grid;grid-template-columns:88px 100px 140px minmax(0,1fr);
  gap:var(--sp-6);align-items:baseline;padding:var(--sp-3) var(--sp-8);
  border-bottom:1px solid var(--line);border-left:3px solid transparent;font-size:12.5px;
@@ -415,6 +427,7 @@ const S={
  reportErr:signal(''),
  ddata:signal(null),
  fleetHash:signal(''),
+ cost:signal(null),
 };
 let toastId=0;
 function toast(m){
@@ -631,21 +644,6 @@ function floorsOption(floors){
    data:entries.map(([,f])=>({value:f??0,
     itemStyle:{color:f==null?'#5b6b7d':'#37b26c'},
     label:{show:f==null,position:'right',fontSize:10,color:CH.axis,formatter:'not detected'}}))}]};}
-function membersOption(members){
- const entries=Object.entries(members||{}).sort((a,b)=>Number(a[0])-Number(b[0]));
- if(!entries.length)return null;
- return {grid:{left:8,right:70,top:8,bottom:24,containLabel:true},
-  tooltip:{trigger:'axis',axisPointer:{type:'shadow'}},
-  xAxis:{type:'value',name:'log-wealth',nameTextStyle:{color:CH.axis,fontSize:10},
-   axisLabel:{color:CH.axis,fontSize:10},splitLine:{lineStyle:{color:CH.grid}}},
-  yAxis:{type:'category',inverse:true,data:entries.map(([k])=>`block ${k}`),
-   axisLabel:{color:CH.text,fontSize:10}},
-  series:[{type:'bar',barMaxWidth:16,
-   data:entries.map(([,m])=>({value:m.log_wealth,
-    itemStyle:{color:m.alarmed?'#e05252':'#4aa3df'},
-    label:{show:true,position:'right',fontSize:10,
-     color:m.alarmed?'#e05252':CH.axis,
-     formatter:()=>m.alarmed?'ALARMED '+fmtDec(m.log_wealth):fmtDec(m.log_wealth)}}))}]};}
 function immuneProfileOption(profile){
  const faults=Object.keys(profile||{});
  if(!faults.length)return null;
@@ -663,6 +661,71 @@ function immuneProfileOption(profile){
   visualMap:{show:false,min:0,max:1,inRange:{color:[CH.grid,'#37b26c']}},
   series:[{type:'heatmap',data,label:{show:false},
    itemStyle:{borderColor:CH.border,borderWidth:2}}]};}
+// Per-domain, per-timescale wealth - the direct answer to "what is ACM
+// doing this tick" at the mechanism level. A verdict's own evidence_trail
+// only ever shows block-size detail for whichever ONE domain won the
+// state-priority resolution (monitor.py); /api/domains reads every
+// bank's state() independently, so this is the one place all 6 domains'
+// internal timescale members are visible on every tick, win or lose.
+// Block sizes are each domain's OWN derived timescale (decorrelation
+// length x1/x4/x16) and are not comparable across domains, so columns
+// are member RANK (shortest to longest per domain), not absolute size -
+// the actual block size is in the tooltip.
+function domainMembersOption(doms){
+ const names=Object.keys(doms||{}).filter(k=>doms[k]&&doms[k].enabled&&doms[k].members);
+ if(!names.length)return null;
+ let maxMembers=1,maxPos=0.01;
+ const rows=names.map(n=>{
+  const bsizes=Object.keys(doms[n].members).map(Number).sort((a,b)=>a-b);
+  maxMembers=Math.max(maxMembers,bsizes.length);
+  return bsizes.map(bs=>{
+   const m=doms[n].members[String(bs)];
+   maxPos=Math.max(maxPos,m.log_wealth);
+   return {bs,log_wealth:m.log_wealth,alarmed:m.alarmed};});});
+ if(maxMembers<1)return null;
+ // A supermartingale drifts negative under health and climbs toward the
+ // alarm threshold as evidence accumulates - it is NOT a symmetric
+ // diverging quantity where "very negative" deserves the same visual
+ // alarm as "very positive". Sequential scale instead: negative/near-
+ // zero wealth (no evidence) floors at the neutral grid color, rising
+ // wealth reads green->amber, and only a cell that has actually crossed
+ // its own threshold (alarmed=true) is forced red via an explicit
+ // itemStyle override - matching the green/amber/red-on-alarm language
+ // used by every other evidence chart in this file (evidenceOption,
+ // domOption). An earlier version used a diverging red<->green scale
+ // that put red at the NEGATIVE end, making a perfectly healthy,
+ // unalarmed bank read as if something were wrong - caught visually
+ // during review, not by any test.
+ const data=[];
+ rows.forEach((members,ni)=>members.forEach((m,ci)=>{
+  data.push({value:[ci,ni,Math.max(0,Math.round(m.log_wealth*1000)/1000)],
+   raw:Math.round(m.log_wealth*1000)/1000,
+   domain:names[ni],bs:m.bs,alarmed:m.alarmed,
+   itemStyle:m.alarmed
+    ?{color:'#e05252',borderColor:'#e05252',borderWidth:2}
+    :{borderColor:CH.border,borderWidth:1}});}));
+ return {grid:{left:150,right:20,top:8,bottom:30},
+  tooltip:{formatter:p=>`${p.data.domain}, block=${p.data.bs}<br>log-wealth ${fmtDec(p.data.raw)}${p.data.alarmed?' - ALARMED':''}`},
+  xAxis:{type:'category',data:Array.from({length:maxMembers},(_,i)=>`member ${i+1}`),
+   axisLabel:{color:CH.axis,fontSize:10},splitArea:{show:true}},
+  yAxis:{type:'category',data:names,axisLabel:{color:CH.text,fontSize:10,width:130,overflow:'truncate'},
+   splitArea:{show:true}},
+  visualMap:{show:false,min:0,max:maxPos,
+   inRange:{color:[CH.grid,'#d8b636']}},
+  series:[{type:'heatmap',data,label:{show:false}}]};}
+function costOption(rows){
+ if(!rows||!rows.length)return null;
+ const top=rows.slice(0,10);
+ return {grid:{left:10,right:60,top:10,bottom:10,containLabel:true},
+  tooltip:{trigger:'axis',axisPointer:{type:'shadow'},
+   formatter:p=>`${p[0].name}<br>${fmtDec(p[0].value)}s | ${fmtInt(top[p[0].dataIndex].rows)} rows`},
+  xAxis:{type:'value',name:'seconds',nameTextStyle:{color:CH.axis,fontSize:10},
+   axisLabel:{color:CH.axis,fontSize:10},splitLine:{lineStyle:{color:CH.grid}}},
+  yAxis:{type:'category',inverse:true,data:top.map(r=>r.asset_key),
+   axisLabel:{color:CH.text,fontSize:11,width:130,overflow:'truncate'}},
+  series:[{type:'bar',data:top.map(r=>r.wall_s),
+   label:{show:true,position:'right',color:CH.axis,fontSize:10,formatter:p=>fmtDec(p.value)+'s'},
+   itemStyle:{color:'#4aa3df',borderRadius:[0,3,3,0]},barMaxWidth:14}]};}
 
 /* ------------------------------------------------ routing */
 function parseHash(){
@@ -706,6 +769,7 @@ function applyFleet(data){
  $('#boot').classList.add('gone');
  if(changed){
   fetchSparks();
+  fetchCost();
   if(S.page.value==='assets'&&S.sel.value)loadDetail(S.sel.value,false);}}
 async function fetchSparks(){
  if(!S.fleet.value)return;
@@ -714,6 +778,8 @@ async function fetchSparks(){
  await Promise.all(top.map(async v=>{
   try{next[v.asset_key]=(await jget('/api/health/'+esc(v.asset_key))).series;}catch(e){}}));
  S.health.value=next;}
+async function fetchCost(){
+ try{S.cost.value=await jget('/api/cost');}catch(e){}}
 async function refresh(){try{applyFleet(await jget('/api/assets'));}catch(e){}}
 let DETAIL_AT='';
 async function loadDetail(key,force){
@@ -853,6 +919,7 @@ function KpiRow(){
 
 function FleetCharts(){
  const fleet=S.fleet.value;
+ const cost=S.cost.value;
  themeTick.value;
  if(!fleet)return html`<div id="fcharts"></div>`;
  const onScatterReady=(c)=>{if(!c.__wired){c.__wired=true;c.on('click',p=>{if(p.data&&p.data[3])select(esc(p.data[3]));});}};
@@ -860,6 +927,9 @@ function FleetCharts(){
   <div class="card"><h3>Fleet states</h3><${EChart} id="d-states" height=190 option=${statesOption(fleet.counts,fleet.assets)}/></div>
   <div class="card"><h3>Evidence - worst first (alarm at 1.0)</h3><${EChart} id="d-evidence" height=190 option=${evidenceOption(fleet.rows)}/></div>
   <div class="card"><h3>Confidence vs evidence (click a dot to open the asset)</h3><${EChart} id="d-scatter" height=190 option=${scatterOption(fleet.rows)} onReady=${onScatterReady}/></div>
+  <div class="card"><h3>Tick cost - slowest to score, worst first</h3>
+   ${cost&&cost.rows.length?html`<${EChart} id="d-cost" height=190 option=${costOption(cost.rows)}/>`
+    :html`<p class="muted" style="padding:20px">No tick has scored an asset yet in this session.</p>`}</div>
  </div>`;}
 
 const FTABLE_LABELS={asset_key:'asset',state:'state',evidence:'evidence',confidence:'confidence',at:'last verdict'};
@@ -1052,12 +1122,25 @@ function DetailTabs(){
  return html`<div id="dtabs">${DETAIL_TABS.map(([id,lbl])=>html`
   <a key=${id} class=${dtab===id?'on':''} onClick=${()=>S.dtab.value=id}>${lbl}</a>`)}</div>`;}
 
+// Fleet-wide S.actEvents already carries asset_key per event (the WS
+// activity push and the /api/activity backfill both do) - filtering it
+// client-side to the selected asset is enough to give every asset its
+// own live tick-by-tick feed with zero new backend surface, updating in
+// real time from the exact same stream the Activity page uses.
+function AssetLiveFeed({assetKey}){
+ const events=S.actEvents.value.filter(e=>e.asset_key===assetKey).slice(-40).reverse();
+ return html`<div class="card wide"><h3>Live for this asset</h3>
+  <div id="asset-live-log">
+   ${events.length?events.map(actLine):
+    html`<p class="muted" style="padding:16px">No activity recorded for this asset yet - it will appear here the moment the service touches it again.</p>`}
+  </div></div>`;}
 function PaneOverview({d}){
- const {health,narr,v}=d;
+ const {health,narr,v,key}=d;
  return html`<div class="pane on"><div class="cards">
   <div class="card wide"><h3>Health index trajectory (windowed mean surprise)</h3>
    <${EChart} id="c-health" height=260 option=${healthOption(health.series)}/></div>
   <div class="card wide"><h3>Health narrative</h3><${Narrative} sections=${narr.sections} state=${v.state}/></div>
+  <${AssetLiveFeed} assetKey=${key}/>
  </div></div>`;}
 function PaneEvidence({d}){
  const {v,doms,eph}=d;
@@ -1066,9 +1149,9 @@ function PaneEvidence({d}){
  return html`<div class="pane on"><div class="cards">
   <div class="card wide"><h3>Evidence domains (log-wealth / threshold, alarm at 1.0)</h3>
    <${EChart} id="c-domains" height=210 option=${domOption(doms)}/></div>
-  ${Object.keys(t.members||{}).length?html`<div class="card wide">
-   <h3>Evidence by detection timescale (block size, rows - red = that timescale alarmed)</h3>
-   <${EChart} id="c-members" height=170 option=${membersOption(t.members)}/></div>`:null}
+  <div class="card wide">
+   <h3>Every domain, every timescale, this tick</h3>
+   <${EChart} id="c-domain-members" height=200 option=${domainMembersOption(doms)}/></div>
   <div class="card"><h3>Coverage & attribution</h3>
    <div style="display:grid;grid-template-columns:1fr 1fr">
     <${EChart} id="c-coverage" height=140 option=${typeof fam==='number'?gaugeOption(fam,'familiarity'):null}/>
@@ -1196,11 +1279,31 @@ function ActivityPage(){
   <${ActLog}/>
  </div>`;}
 
+// The single most recent activity event, fleet-wide, always visible
+// regardless of which page is open - "live" as ambient chrome, not a
+// destination you have to navigate to. Reads the same S.actEvents
+// signal the Activity page's full log reads, so it's already live with
+// zero additional wiring.
+function LiveTicker(){
+ const events=S.actEvents.value;
+ const last=events.length?events[events.length-1]:null;
+ return html`<div id="live-ticker">
+  <span class="dotlive"></span>
+  ${last?html`<${Fragment}>
+   <span class="tk">${(last.at||'').replace('T',' ').replace(/\+.*$/,'').slice(11)}</span>
+   <span class="tkind">${last.kind}</span>
+   ${last.asset_key&&last.asset_key!=='-'
+    ?html`<span class="tasset" onClick=${()=>select(last.asset_key)}>${last.asset_key}</span>`:null}
+   <span class="tmsg">${last.msg}</span>
+  <//>`:html`<span class="tempty">waiting for the first tick...</span>`}
+ </div>`;}
+
 /* ---------------- App shell ---------------- */
 function Main(){
  const page=S.page.value;
  return html`<div id="main">
   <${Topbar}/>
+  <${LiveTicker}/>
   ${page==='fleet'?html`<${FleetPage}/>`:null}
   ${page==='assets'?html`<${AssetsPage}/>`:null}
   ${page==='activity'?html`<${ActivityPage}/>`:null}

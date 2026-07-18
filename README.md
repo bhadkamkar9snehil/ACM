@@ -186,12 +186,18 @@ loop never dies silently) + a zero-build UI (one HTML file, no bundler,
 Apache ECharts vendored and served locally - deliberate, for air-gapped
 plants). The UI is REAL-TIME: a WebSocket (`/api/ws`) pushes the fleet
 state after every tick and every action, with automatic reconnect and a
-polling fallback; renders are skipped when nothing changed. Fleet
+polling fallback; renders are skipped when nothing changed. A live
+ticker below the header shows the single most recent fleet-wide event
+on every page, not just the Activity tab. Fleet
 dashboard (state donut, worst-first evidence bars, confidence-vs-
-evidence scatter - click a dot to open the asset) plus per-asset charts:
-health-index trajectory with zoom, evidence-domain bars against the
-alarm line, coverage gauge, anatomy organ-surprise bars, failure-time
-distribution, episode timeline over real time, and immune floors. Live sources attach
+evidence scatter - click a dot to open the asset - plus a tick-cost
+chart: which assets are actually expensive to score) plus per-asset
+charts: health-index trajectory with zoom, evidence-domain bars against
+the alarm line, a per-domain per-timescale wealth heatmap (every e-process
+bank's own block-size members, not just whichever domain decided the
+verdict), a live tick-by-tick feed scoped to that one asset, coverage
+gauge, anatomy organ-surprise bars, failure-time distribution, episode
+timeline over real time, and immune floors. Live sources attach
 with `--live "asset/key=buffer.db"` (repeatable): any bridge that
 writes the SQLite buffer shape `(ts, payload_json)` feeds the store on
 every tick.
@@ -201,9 +207,10 @@ every tick.
 | `GET /api/assets` | fleet summary, worst-first, immune counts |
 | `GET /api/asset/{key}` | the full frozen verdict |
 | `GET /api/narrative/{key}` | the verdict as an operator-readable story |
-| `GET /api/domains/{key}` | per-domain evidence bars |
+| `GET /api/domains/{key}` | per-domain evidence bars, including every domain's per-block-size member wealth (not just the domain that decided the verdict) |
 | `GET /api/health/{key}` | health-index series (prognosis trajectory) |
 | `GET /api/immune/{key}` / `POST /api/immune-pass/{key}` | immune status / run a pass now |
+| `GET /api/cost` | last-tick wall-clock cost per asset, worst-first - which assets are actually expensive to score |
 | `POST /api/tick` / `POST /api/tick/{key}` | tick the fleet / one asset |
 | `POST /api/reanchor/{key}` | governed episode close + recalibration |
 | `POST /api/bootstrap/{key}` | first-contact cleaning on demand |
