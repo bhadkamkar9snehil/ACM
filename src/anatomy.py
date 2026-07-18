@@ -42,6 +42,12 @@ class Anatomy:
     channels: list[str]
     organs: list[tuple[str, ...]] = field(default_factory=list)
     organ_of: dict[str, int] = field(default_factory=dict)
+    # How many of N_SUBSAMPLES actually voted (channel-set-unstable
+    # subsamples are dropped, see learn()). STABILITY_FRACTION is applied
+    # against N_SUBSAMPLES regardless of this count, so a caller/test can
+    # use it to tell "4/5 agreed" apart from "4/5 of only 4 usable agreed" -
+    # previously invisible, silently weakening the stability guarantee.
+    usable_subsamples: int = N_SUBSAMPLES
 
     @classmethod
     def learn(cls, frame: pl.DataFrame, seed: int = 0) -> "Anatomy":
@@ -49,6 +55,7 @@ class Anatomy:
         n = frame.height
         votes: dict[tuple[int, int], int] = {}
         channels: list[str] | None = None
+        usable = 0
         for s in range(N_SUBSAMPLES):
             idx = np.sort(
                 rng.choice(n, size=max(200, n // 2), replace=False)
@@ -59,6 +66,7 @@ class Anatomy:
                 channels = scorer.channels
             elif scorer.channels != channels:
                 continue  # channel set unstable on this subsample
+            usable += 1
             b = np.abs(scorer.betas)
             sym = np.maximum(b, b.T)
             d = len(channels)
@@ -83,7 +91,7 @@ class Anatomy:
         groups: dict[int, list[str]] = {}
         for i, ch in enumerate(channels):
             groups.setdefault(find(i), []).append(ch)
-        anatomy = cls(channels=channels)
+        anatomy = cls(channels=channels, usable_subsamples=usable)
         for members in sorted(groups.values(), key=len, reverse=True):
             organ_idx = len(anatomy.organs)
             anatomy.organs.append(tuple(members))

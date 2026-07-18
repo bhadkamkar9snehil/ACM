@@ -164,6 +164,19 @@ class Runtime:
         # which is the only time this cache matters
         return hashlib.sha1(repr(raw).encode()).hexdigest()[:16]
 
+    @staticmethod
+    def _stagger(asset_key: str, salt: int = 0) -> int:
+        """Deterministic, restart-stable spread value for staggering
+        rebuild/immune-pass timing across the fleet. Must be hashlib, never
+        the builtin hash() - salted per process, so a hash()-based stagger
+        silently reshuffles every asset's schedule offset on every restart
+        (the exact failure mode _monitor_fingerprint's own docstring warns
+        against, found reused here on a later read of this file)."""
+        import hashlib
+
+        digest = hashlib.sha1(f"{asset_key}:{salt}".encode()).hexdigest()
+        return int(digest[:8], 16)
+
     def _monitor_cache_path(self, asset_key: str, scorer_cls) -> Path:
         from store.raw import _safe_key
 
@@ -419,7 +432,7 @@ class Runtime:
                     )
                     self._save_monitor_cache(asset_key)
         self._tick_counts[asset_key] += 1
-        stagger = hash(asset_key) % REBUILD_EVERY_TICKS
+        stagger = self._stagger(asset_key, salt=0) % REBUILD_EVERY_TICKS
         if (
             self._tick_counts[asset_key] + stagger
         ) % REBUILD_EVERY_TICKS == 0 and em.open_episode_start == "":
@@ -432,7 +445,7 @@ class Runtime:
                 self.store, ledger=self.ledger, cache_root=self.cache_root
             )
             self._save_monitor_cache(asset_key)
-        stagger_i = (hash(asset_key) // 7) % IMMUNE_EVERY_TICKS
+        stagger_i = self._stagger(asset_key, salt=1) % IMMUNE_EVERY_TICKS
         if (self._tick_counts[asset_key] + stagger_i) % IMMUNE_EVERY_TICKS == 0:
             self.immune_pass(asset_key)
         record_asset_cost(
