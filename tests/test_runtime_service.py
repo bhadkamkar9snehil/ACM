@@ -494,3 +494,34 @@ def test_websocket_stream_and_vendored_echarts(runtime):
     assert client.get("/vendor/../pyproject.toml").status_code in (404, 400)
     page = client.get("/").text
     assert "/vendor/echarts.min.js" in page and "/api/ws" in page
+
+
+def test_telemetry_evidence_history_and_cases_endpoints(runtime):
+    """The time-series surfaces: raw telemetry windows (attribution
+    channels by default), the decision layer's own evidence trajectory,
+    and the fleet-wide case list."""
+    client = TestClient(create_app(runtime))
+
+    t = client.get("/api/telemetry/f/bad").json()
+    assert t["ts"] and t["channels"], "telemetry window must not be empty"
+    assert len(t["ts"]) == len(next(iter(t["channels"].values())))
+    # the faulted channel (vib carries the seeded fault) is attributed
+    # and therefore selected by default
+    assert "vib" in t["channels"]
+
+    t2 = client.get("/api/telemetry/f/ok1?channels=temp&rows=500").json()
+    assert list(t2["channels"]) == ["temp"]
+    assert len(t2["ts"]) <= 500
+
+    eh = client.get("/api/evidence-history/f/bad").json()["points"]
+    assert eh, "a scored asset must have at least one evidence point"
+    assert {"at", "state", "domains"} <= set(eh[-1])
+    assert "magnitude" in eh[-1]["domains"]
+
+    cases = client.get("/api/cases").json()["cases"]
+    # f/bad alarmed during the fixture tick -> an open episode exists
+    open_cases = [c for c in cases if c["end"] is None]
+    assert any(c["asset_key"] == "f/bad" for c in open_cases)
+
+    assert client.get("/api/telemetry/nope").status_code == 404
+    assert client.get("/api/evidence-history/nope").status_code == 404

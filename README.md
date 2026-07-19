@@ -232,13 +232,18 @@ fallback. Chart-first by design:
 
 - **Fleet**: state donut, worst-first evidence bars, confidence-vs-
   evidence scatter (click a dot to open the asset), the alpha-budget
-  donut (the guarantee, visible), tick-cost chart, sortable detail
-  table with sparklines, a live ticker of the latest fleet event on
-  every page.
-- **Per asset**: evidence and confidence as bars against the alarm
-  line; health-index trajectory with zoom; evidence-domain bars; a
-  domain-by-timescale wealth heatmap (every bank's internals, every
-  tick); surprise-by-channel bars (attribution you can see);
+  donut (the guarantee, visible), tick-cost chart, a fleet-wide case
+  timeline (every episode, closed and open, as swimlanes over real
+  time), sortable detail table with sparklines, a live ticker of the
+  latest fleet event on every page.
+- **Per asset**: a large raw-telemetry time series (the attribution
+  channels over real timestamps, episode windows shaded in place,
+  zoomable, raw values in the tooltip); evidence-over-time - every
+  domain's accumulation toward the alarm line on a log scale; evidence
+  and confidence as bars against the alarm line; health-index
+  trajectory with zoom; evidence-domain bars; a domain-by-timescale
+  wealth heatmap (every bank's internals, every tick);
+  surprise-by-channel bars (attribution you can see);
   familiarity/concentration/novelty gauges with episode-state pills;
   a per-asset live activity feed; anatomy organ bars; failure-time
   distribution; episode timeline; immune floors, detection-profile
@@ -276,7 +281,10 @@ dataset): [`docs/testing-and-datasets.md`](docs/testing-and-datasets.md).
 | `GET /api/narrative/{key}` | the verdict as an operator-readable story |
 | `GET /api/domains/{key}` | per-domain evidence incl. per-block-size member wealth and exchangeability status |
 | `GET /api/health/{key}` | health-index series |
+| `GET /api/telemetry/{key}?channels=&rows=` | recent raw-telemetry window, downsampled; defaults to the verdict's attribution channels |
+| `GET /api/evidence-history/{key}` | per-domain evidence at every scoring event (the decision layer's own trajectory) |
 | `GET /api/episodes/{key}` | case history: ledgered faults AND absorbed changes, plus the open episode |
+| `GET /api/cases` | every episode across the fleet - closed and open - for the case timeline |
 | `GET /api/immune/{key}` / `POST /api/immune-pass/{key}` | immune status / run a pass now |
 | `GET /api/cost` | last-tick wall-clock cost per asset, worst-first |
 | `POST /api/tick` / `POST /api/tick/{key}` | tick the fleet / one asset |

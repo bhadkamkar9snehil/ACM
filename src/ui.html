@@ -402,6 +402,13 @@ const SC={healthy:'#37b26c',watch:'#d8b636',alarm:'#e05252',escalating:'#ff6b6b'
  'change-not-fault':'#d88a36','insufficient-history':'#5b6b7d',
  bootstrapping:'#4a90d9',onboarding:'#8a76e0',queued:'#5b6b7d'};
 const PENDING=['bootstrapping','onboarding','queued'];
+// one color per evidence domain, used identically by the budget donut,
+// the evidence-history lines, and anything else that names a domain -
+// a domain must look the same everywhere it appears
+const DOMAIN_COLORS={
+ 'magnitude':'#4aa3df','channel-local':'#8a76e0','availability':'#5b6b7d',
+ 'horizon-gap':'#37b26c','predictability-band':'#d8b636',
+ 'transient-response':'#d88a36','dynamics-drift':'#e05252'};
 function stale(at){
  if(!at)return '';
  const t=Date.parse(String(at).replace(' ','T'));
@@ -438,6 +445,7 @@ const S={
  ddata:signal(null),
  fleetHash:signal(''),
  cost:signal(null),
+ cases:signal(null),
 };
 let toastId=0;
 function toast(m){
@@ -763,8 +771,108 @@ function budgetOption(budget){
   series:[{type:'pie',radius:['46%','64%'],center:['50%','40%'],
    label:{show:false},emphasis:{label:{show:false}},
    itemStyle:{borderColor:CH.border,borderWidth:2},
-   data:shares.map(([name,share],i)=>({name,value:share,
-    itemStyle:{color:['#4aa3df','#8a76e0','#5b6b7d','#37b26c','#d8b636','#d88a36','#e05252'][i%7]}}))}]};}
+   data:shares.map(([name,share])=>({name,value:share,
+    itemStyle:{color:DOMAIN_COLORS[name]||'#888'}}))}]};}
+// ------------------------------------------------ the big time series
+// The raw telemetry itself - the one thing an operator always asks to
+// see and the UI never showed. Channels are min-max scaled to share one
+// axis (industrial channels differ by orders of magnitude); the tooltip
+// always shows the RAW value. Episode windows are shaded in place, so
+// "the machine got sick HERE" is visible against the actual signals.
+function telemetryOption(tel,eph){
+ const names=Object.keys((tel&&tel.channels)||{});
+ if(!names.length||!tel.ts.length)return null;
+ const ts=tel.ts.map(t=>Date.parse(String(t).replace(' ','T')));
+ const series=names.map((name,i)=>{
+  const vals=tel.channels[name];
+  let mn=Infinity,mx=-Infinity;
+  for(const v of vals){if(v!=null){if(v<mn)mn=v;if(v>mx)mx=v;}}
+  const span=(mx-mn)||1;
+  return {name,type:'line',showSymbol:false,smooth:0.1,
+   lineStyle:{width:1.5},emphasis:{lineStyle:{width:2.5}},
+   data:vals.map((v,j)=>[ts[j],v==null?null:(v-mn)/span,v])};});
+ const areas=[];
+ const col={'alarm':'rgba(224,82,82,0.14)','escalating':'rgba(224,82,82,0.14)',
+  'change-not-fault':'rgba(216,138,54,0.14)','intervention':'rgba(74,163,223,0.12)'};
+ (eph&&eph.episodes||[]).forEach(e=>{
+  areas.push([{xAxis:Date.parse(String(e.start).replace(' ','T')),
+    itemStyle:{color:col[e.state]||'rgba(127,142,161,0.10)'}},
+   {xAxis:e.end?Date.parse(String(e.end).replace(' ','T')):ts[ts.length-1]}]);});
+ if(eph&&eph.open_since)
+  areas.push([{xAxis:Date.parse(String(eph.open_since).replace(' ','T')),
+    itemStyle:{color:'rgba(224,82,82,0.18)'}},{xAxis:ts[ts.length-1]}]);
+ if(areas.length&&series.length)series[0].markArea={silent:true,data:areas};
+ return {grid:{left:10,right:16,top:30,bottom:44,containLabel:true},
+  legend:{top:0,left:0,textStyle:{color:CH.axis,fontSize:10},
+   itemWidth:14,itemHeight:2,icon:'rect'},
+  tooltip:{trigger:'axis',
+   formatter:(ps)=>{
+    if(!ps.length)return '';
+    let out=new Date(ps[0].value[0]).toISOString().slice(0,16).replace('T',' ');
+    ps.forEach(p=>{out+=`<br>${p.marker}${p.seriesName}: ${
+     p.value[2]==null?'-':fmtDec(p.value[2])}`;});
+    return out;}},
+  dataZoom:[{type:'inside'},{type:'slider',height:16,bottom:6,
+   borderColor:CH.grid,backgroundColor:'transparent',
+   fillerColor:'rgba(74,163,223,0.15)',textStyle:{color:CH.axis}}],
+  xAxis:{type:'time',axisLabel:{color:CH.axis,fontSize:10}},
+  yAxis:{type:'value',min:0,max:1,axisLabel:{show:false},
+   splitLine:{lineStyle:{color:CH.grid}}},
+  series};}
+// The decision layer's own motion: per-domain evidence at every scoring
+// event, on a log axis (evidence spans 0.01 to 100+), with the alarm
+// line at 1.0. Watching wealth climb toward the line IS the product.
+function evidenceHistoryOption(points){
+ if(!points||!points.length)return null;
+ const domains=[...new Set(points.flatMap(p=>Object.keys(p.domains||{})))];
+ if(!domains.length)return null;
+ const series=domains.map(name=>({name,type:'line',showSymbol:points.length<40,
+  symbolSize:4,lineStyle:{width:1.5,color:DOMAIN_COLORS[name]||'#888'},
+  itemStyle:{color:DOMAIN_COLORS[name]||'#888'},
+  data:points.map(p=>[Date.parse(String(p.at).replace(' ','T')),
+   Math.max(0.01,(p.domains||{})[name]??0.01)])}));
+ series[0].markLine={symbol:'none',lineStyle:{color:'#e05252',type:'dashed'},
+  label:{color:'#e05252',formatter:'alarm'},data:[{yAxis:1.0}]};
+ return {grid:{left:10,right:16,top:30,bottom:10,containLabel:true},
+  legend:{top:0,left:0,textStyle:{color:CH.axis,fontSize:10},
+   itemWidth:14,itemHeight:2,icon:'rect'},
+  tooltip:{trigger:'axis',valueFormatter:v=>fmtDec(v)},
+  xAxis:{type:'time',axisLabel:{color:CH.axis,fontSize:10}},
+  yAxis:{type:'log',min:0.01,axisLabel:{color:CH.axis,fontSize:10},
+   splitLine:{lineStyle:{color:CH.grid}}},
+  series};}
+// Fleet case timeline: every episode - closed and open - as a swimlane
+// per asset over real time. The ledger is the fleet's case history; an
+// invisible case history is a wasted one.
+function casesOption(cases){
+ if(!cases||!cases.length)return null;
+ const assets=[...new Set(cases.map(c=>c.asset_key))];
+ const col={'alarm':'#e05252','escalating':'#ff6b6b',
+  'change-not-fault':'#d88a36','intervention':'#4aa3df'};
+ const data=cases.map(c=>{
+  const s=Date.parse(String(c.start).replace(' ','T'));
+  // open episodes run through the asset's own LAST OBSERVATION, never
+  // wall-clock now - asset clocks lag on backfilled/compressed feeds
+  const e=c.end?Date.parse(String(c.end).replace(' ','T'))
+   :c.last_at?Date.parse(String(c.last_at).replace(' ','T')):s;
+  return {value:[s,e,assets.indexOf(c.asset_key),col[c.state]||'#888'],
+   tip:`${c.asset_key}<br>${c.state}${c.end?'':' - OPEN'}<br>`
+    +`${String(c.start).slice(0,16)} -> ${c.end?String(c.end).slice(0,16):'now'}`
+    +(c.shape?`<br>shape: ${c.shape}`:'')
+    +((c.channels||[]).length?`<br>${c.channels.join(', ')}`:'')
+    +(c.peak_evidence!=null?`<br>peak evidence ${fmtDec(c.peak_evidence)}`:'')};});
+ return {grid:{left:10,right:20,top:10,bottom:24,containLabel:true},
+  tooltip:{formatter:p=>p.data.tip},
+  xAxis:{type:'time',axisLabel:{color:CH.axis,fontSize:10}},
+  yAxis:{type:'category',data:assets,
+   axisLabel:{color:CH.text,fontSize:10,width:150,overflow:'truncate'}},
+  series:[{type:'custom',
+   renderItem:(params,api)=>{
+    const y=api.coord([0,api.value(2)])[1];
+    const x1=api.coord([api.value(0),0])[0],x2=api.coord([api.value(1),0])[0];
+    return {type:'rect',shape:{x:x1,y:y-9,width:Math.max(3,x2-x1),height:18},
+     style:{fill:api.value(3)}};},
+   encode:{x:[0,1],y:2},data}]};}
 function costOption(rows){
  if(!rows||!rows.length)return null;
  const top=rows.slice(0,10);
@@ -822,6 +930,7 @@ function applyFleet(data){
  if(changed){
   fetchSparks();
   fetchCost();
+  fetchCases();
   if(S.page.value==='assets'&&S.sel.value)loadDetail(S.sel.value,false);}}
 async function fetchSparks(){
  if(!S.fleet.value)return;
@@ -832,6 +941,8 @@ async function fetchSparks(){
  S.health.value=next;}
 async function fetchCost(){
  try{S.cost.value=await jget('/api/cost');}catch(e){}}
+async function fetchCases(){
+ try{S.cases.value=(await jget('/api/cases')).cases;}catch(e){}}
 async function refresh(){try{applyFleet(await jget('/api/assets'));}catch(e){}}
 let DETAIL_AT='';
 async function loadDetail(key,force){
@@ -840,14 +951,16 @@ async function loadDetail(key,force){
  if(row&&PENDING.includes(row.state)){
   S.ddata.value={pending:true,row,key};
   return;}
- const [v,narr,doms,hlth,eph]=await Promise.all([
+ const [v,narr,doms,hlth,eph,tel,evh]=await Promise.all([
   jget('/api/asset/'+esc(key)),jget('/api/narrative/'+esc(key)),
   jget('/api/domains/'+esc(key)),jget('/api/health/'+esc(key)),
-  jget('/api/episodes/'+esc(key))]);
+  jget('/api/episodes/'+esc(key)),
+  jget('/api/telemetry/'+esc(key)).catch(()=>({ts:[],channels:{}})),
+  jget('/api/evidence-history/'+esc(key)).catch(()=>({points:[]}))]);
  DETAIL_AT=v.at;
  S.health.value={...S.health.value,[key]:hlth.series};
  let immune=null;try{immune=await jget('/api/immune/'+esc(key));}catch(e){}
- S.ddata.value={v,narr,doms,health:hlth,eph,immune,row,key};}
+ S.ddata.value={v,narr,doms,health:hlth,eph,tel,evh:evh.points,immune,row,key};}
 
 /* ------------------------------------------------ realtime */
 let POLL=null,WS_TRIES=0;
@@ -984,6 +1097,11 @@ function FleetCharts(){
   <div class="card"><h3>Tick cost - slowest to score, worst first</h3>
    ${cost&&cost.rows.length?html`<${EChart} id="d-cost" height=190 option=${costOption(cost.rows)}/>`
     :html`<p class="muted" style="padding:20px">No tick has scored an asset yet in this session.</p>`}</div>
+  ${(S.cases.value||[]).length?html`<div class="card wide">
+   <h3>Case history across the fleet - every episode, closed and open, over real time</h3>
+   <${EChart} id="d-cases"
+    height=${Math.min(400,Math.max(120,28*[...new Set(S.cases.value.map(c=>c.asset_key))].length+50))}
+    option=${casesOption(S.cases.value)}/></div>`:null}
  </div>`;}
 
 const FTABLE_LABELS={asset_key:'asset',state:'state',evidence:'evidence',confidence:'confidence',at:'last verdict'};
@@ -1206,18 +1324,26 @@ function AssetLiveFeed({assetKey}){
     html`<p class="muted" style="padding:16px">No activity recorded for this asset yet - it will appear here the moment the service touches it again.</p>`}
   </div></div>`;}
 function PaneOverview({d}){
- const {health,narr,v,key}=d;
+ const {health,narr,v,key,tel,eph}=d;
+ const telOpt=telemetryOption(tel,eph);
  return html`<div class="pane on"><div class="cards">
+  ${telOpt?html`<div class="card wide">
+   <h3>The telemetry itself (each channel scaled to its own range; episode windows shaded; tooltip shows raw values)</h3>
+   <${EChart} id="c-telemetry" height=340 option=${telOpt}/></div>`:null}
   <div class="card wide"><h3>Health index trajectory (windowed mean surprise)</h3>
-   <${EChart} id="c-health" height=260 option=${healthOption(health.series)}/></div>
+   <${EChart} id="c-health" height=240 option=${healthOption(health.series)}/></div>
   <div class="card wide"><h3>Health narrative</h3><${Narrative} sections=${narr.sections} state=${v.state}/></div>
   <${AssetLiveFeed} assetKey=${key}/>
  </div></div>`;}
 function PaneEvidence({d}){
- const {v,doms,eph}=d;
+ const {v,doms,eph,evh}=d;
  const t=v.evidence_trail||{};
  const fam=(v.coverage||{}).operating_point_familiarity;
+ const evhOpt=evidenceHistoryOption(evh);
  return html`<div class="pane on"><div class="cards">
+  ${evhOpt?html`<div class="card wide">
+   <h3>Evidence over time - every domain's accumulation toward the alarm line (log scale)</h3>
+   <${EChart} id="c-evidence-history" height=260 option=${evhOpt}/></div>`:null}
   <div class="card wide"><h3>Evidence domains (log-wealth / threshold, alarm at 1.0)</h3>
    <${EChart} id="c-domains" height=210 option=${domOption(doms)}/></div>
   <div class="card wide">

@@ -57,6 +57,13 @@ class Runtime:
         from collections import deque
 
         self.activity = deque(maxlen=500)
+        # per-asset evidence trajectory: one point per scoring event
+        # ({at, state, domains: {name: evidence}}), rolling. The health
+        # index shows surprise over life; THIS shows the decision layer's
+        # own accumulation - evidence climbing toward the alarm line is
+        # the product's central motion and was previously unplottable.
+        self.evidence_history: dict[str, object] = {}
+        self._evidence_history_len = 2000
         if self.governor is None:
             self.governor = Governor.from_probe(probe())
         self.ledger = EpisodeLedger(Path(self.data_root) / "ledger.json")
@@ -425,6 +432,124 @@ class Runtime:
             "total_wall_s": round(sum(r["wall_s"] for r in rows), 4),
         }
 
+    def _record_evidence_point(self, asset_key: str, verdict) -> None:
+        """One evidence-trajectory point per scoring event: timestamp,
+        state word, and every enabled domain's current evidence."""
+        from collections import deque
+
+        hist = self.evidence_history.get(asset_key)
+        if hist is None:
+            hist = self.evidence_history[asset_key] = deque(
+                maxlen=self._evidence_history_len
+            )
+        doms = self.domains(asset_key)
+        hist.append(
+            {
+                "at": str(verdict.at),
+                "state": verdict.state,
+                "domains": {
+                    name: d["evidence"]
+                    for name, d in doms.items()
+                    if d.get("enabled")
+                },
+            }
+        )
+
+    def evidence_series(self, asset_key: str) -> list[dict]:
+        return list(self.evidence_history.get(asset_key, ()))
+
+    def telemetry(
+        self,
+        asset_key: str,
+        channels: list[str] | None = None,
+        rows: int = 20000,
+        max_points: int = 1500,
+    ) -> dict:
+        """A recent window of the RAW telemetry, downsampled for display.
+
+        Channel selection when none are requested: the current verdict's
+        attribution first (the channels carrying the surprise are the
+        ones worth looking at), then the first numeric columns as a
+        fallback - capped at 6 so the chart stays readable. Values are
+        returned raw; scaling for display is the UI's concern."""
+        frame = self.store.read_tail(asset_key, rows)
+        if frame.is_empty():
+            return {"ts": [], "channels": {}}
+        numeric = [
+            c
+            for c, dt in frame.schema.items()
+            if c != TIMESTAMP_COL and dt.is_numeric()
+        ]
+        if channels:
+            picked = [c for c in channels if c in numeric][:6]
+        else:
+            v = self.verdicts.get(asset_key)
+            attributed = [
+                c for c in (v.attribution if v else ()) if c in numeric
+            ]
+            picked = list(
+                dict.fromkeys(list(attributed) + numeric)
+            )[:6]
+        stride = max(1, frame.height // max_points)
+        thin = frame.gather_every(stride)
+        return {
+            "ts": [str(t) for t in thin.get_column(TIMESTAMP_COL).to_list()],
+            "channels": {
+                c: [
+                    (float(x) if x is not None else None)
+                    for x in thin.get_column(c).to_list()
+                ]
+                for c in picked
+            },
+        }
+
+    def fleet_cases(self) -> list[dict]:
+        """Every episode across the fleet - ledgered (closed) AND open -
+        for the fleet case timeline. The ledger is the fleet's case
+        history; an invisible case history is a wasted one."""
+        import json as _json
+
+        out = []
+        for e in self.ledger.episodes:
+            note = {}
+            if e.note:
+                try:
+                    note = _json.loads(e.note)
+                except _json.JSONDecodeError:
+                    pass
+            out.append(
+                {
+                    "asset_key": e.asset_key,
+                    "start": e.start,
+                    "end": e.end,
+                    "state": e.state,
+                    "shape": note.get("shape"),
+                    "channels": (note.get("channels") or [])[:4],
+                    "peak_evidence": note.get("peak_evidence"),
+                }
+            )
+        for key, em in self.monitors.items():
+            if em.open_episode_start:
+                v = self.verdicts.get(key)
+                out.append(
+                    {
+                        "asset_key": key,
+                        "start": em.open_episode_start,
+                        "end": None,  # open
+                        # the asset's own latest observation - open means
+                        # "through the last thing we saw", never through
+                        # wall-clock now (asset clocks can lag by months
+                        # on backfilled or time-compressed feeds)
+                        "last_at": str(v.at) if v else None,
+                        "state": v.state if v else "alarm",
+                        "shape": None,
+                        "channels": list(v.attribution[:4]) if v else [],
+                        "peak_evidence": v.evidence if v else None,
+                    }
+                )
+        out.sort(key=lambda d: str(d["start"]))
+        return out
+
     def attach_live_source(self, asset_key: str, db_path) -> None:
         """Attach a SQLite buffer (bridge/sim-fed) to an asset; drained
         on every tick before scoring."""
@@ -455,6 +580,7 @@ class Runtime:
             if asset_key in self.verdicts:
                 self.previous_verdicts[asset_key] = self.verdicts[asset_key]
             self.verdicts[asset_key] = verdict
+            self._record_evidence_point(asset_key, verdict)
             prev = self.previous_verdicts.get(asset_key)
             self.log(
                 asset_key,

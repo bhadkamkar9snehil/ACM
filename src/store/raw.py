@@ -176,6 +176,28 @@ class RawStore:
             frame = frame.filter(pl.col(TIMESTAMP_COL) < end)
         return frame
 
+    def read_tail(self, asset_key: str, rows: int) -> pl.DataFrame:
+        """The most recent `rows` rows, reading only as many partitions
+        (newest-first) as needed - the UI's telemetry window must not pay
+        for a deep history it will not show."""
+        asset_dir = self.root / _safe_key(asset_key)
+        paths = sorted(asset_dir.glob("*.parquet")) if asset_dir.exists() else []
+        if not paths:
+            return pl.DataFrame()
+        frames: list[pl.DataFrame] = []
+        total = 0
+        for p in reversed(paths):
+            f = pl.read_parquet(p)
+            frames.append(f)
+            total += f.height
+            if total >= rows:
+                break
+        return (
+            pl.concat(list(reversed(frames)), how="diagonal_relaxed")
+            .sort(TIMESTAMP_COL)
+            .tail(rows)
+        )
+
     def assets(self) -> list[str]:
         return sorted(
             _unsafe_key(p.name) for p in self.root.iterdir() if p.is_dir()

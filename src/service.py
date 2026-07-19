@@ -299,6 +299,36 @@ def create_app(
         """Fleet-wide last-tick wall-clock cost, worst-first (#113)."""
         return JSONResponse(runtime.cost_summary())
 
+    @app.get("/api/telemetry/{asset_key:path}")
+    def telemetry(
+        asset_key: str, channels: str = "", rows: int = 20000
+    ) -> JSONResponse:
+        """A recent raw-telemetry window, downsampled for display.
+        channels: comma-separated names; empty = the verdict's
+        attribution channels (the ones carrying the surprise)."""
+        if asset_key not in runtime.monitors:
+            return JSONResponse({"error": "unknown asset"}, status_code=404)
+        wanted = [c for c in channels.split(",") if c] or None
+        return JSONResponse(
+            runtime.telemetry(
+                asset_key, channels=wanted, rows=max(100, min(rows, 100_000))
+            )
+        )
+
+    @app.get("/api/evidence-history/{asset_key:path}")
+    def evidence_history(asset_key: str) -> JSONResponse:
+        """The decision layer's own trajectory: per-domain evidence at
+        every scoring event since service start (rolling window)."""
+        if asset_key not in runtime.monitors:
+            return JSONResponse({"error": "unknown asset"}, status_code=404)
+        return JSONResponse({"points": runtime.evidence_series(asset_key)})
+
+    @app.get("/api/cases")
+    def cases() -> JSONResponse:
+        """Every episode across the fleet - closed and open - for the
+        fleet case timeline."""
+        return JSONResponse({"cases": runtime.fleet_cases()})
+
     @app.get("/api/immune/{asset_key:path}")
     def immune(asset_key: str) -> JSONResponse:
         r = runtime.immune_results.get(asset_key)
