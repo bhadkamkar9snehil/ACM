@@ -350,7 +350,7 @@ def test_ui_and_control_endpoints(runtime):
     d = client.get("/api/domains/f/ok1").json()
     assert d["magnitude"]["enabled"] and "evidence" in d["magnitude"]
     assert set(d) == {
-        "magnitude", "availability", "horizon-gap",
+        "magnitude", "channel-local", "availability", "horizon-gap",
         "predictability-band", "transient-response", "dynamics-drift",
     }
     h = client.get("/api/health/f/ok1").json()

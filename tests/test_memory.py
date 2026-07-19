@@ -248,3 +248,27 @@ def test_lifetime_paths_survive_mixed_column_order(tmp_path):
     assert sample.height > 0
     mon = AssetMonitor("mx/1")
     assert mon.calibrate_from_lifetime(store), mon.insufficient_reason
+
+
+def test_calibration_sample_uses_consecutive_chunks(tmp_path):
+    """#114 door 2: when lifetime history exceeds the calibration budget,
+    the sample must be built from CONSECUTIVE chunks, never row-striding -
+    striding whitens the sample, so block sizes got derived from near-iid
+    data and applied to the fully-autocorrelated live stream (measured 8x
+    realized-vs-promised false alarms). Consecutive rows are recognizable
+    by their timestamp deltas: the modal delta must be the raw cadence and
+    must dominate the sample."""
+    store = RawStore(tmp_path / "raw")
+    for m in range(1, 13):
+        store.append("chunky", month_frame(2025, m, seed=m, n=2500))
+    base = LifetimeBaseline.build(store, "chunky")
+    sample = base.calibration_sample(store, max_rows=8000)
+    assert sample.height <= 8000
+    ts = sample.get_column(TIMESTAMP_COL).to_numpy()
+    deltas = np.diff(ts).astype("timedelta64[s]").astype(np.int64)
+    cadence = 30 * 60  # month_frame writes 30-minute rows
+    frac_consecutive = float(np.mean(deltas == cadence))
+    assert frac_consecutive > 0.9, (
+        f"only {frac_consecutive:.2f} of deltas are consecutive - "
+        "stride-whitening regression"
+    )

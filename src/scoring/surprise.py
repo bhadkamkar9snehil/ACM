@@ -113,8 +113,27 @@ class ConditionalSurpriseScorer:
         return (z - pred) / self.resid_scales
 
     def score(self, frame: pl.DataFrame) -> np.ndarray:
-        """Per-row surprise: mean |residual z| across channels."""
+        """Per-row surprise: mean |residual z| across channels.
+
+        The mean is the right lens for DIFFUSE and coordinated deviations,
+        but it dilutes a single faulty channel by ~1/d (measured: 15x
+        separation loss at 957 channels, #115 - the OMR lesson). The
+        channel-local lens is score_topk below; both feed their own
+        e-process banks so neither failure geometry hides the other."""
         return np.mean(np.abs(self._residual_z(frame)), axis=1)
+
+    def score_topk(self, frame: pl.DataFrame, k: int = 3) -> np.ndarray:
+        """Per-row surprise of the k most-surprised channels: the
+        channel-local lens. Top-3, not max: a single max is an extreme-
+        value statistic whose healthy tail grows with channel count,
+        crushing calibration contrast on wide assets; three simultaneously
+        elevated channels is rare under noise but routine when one
+        physical channel genuinely breaks (the ACM1 OMR evidence, #115).
+        Keeps ~5x more single-channel-fault separation than the mean at
+        wide d while staying calibrated."""
+        rz = np.abs(self._residual_z(frame))
+        kk = min(k, rz.shape[1])
+        return np.partition(rz, -kk, axis=1)[:, -kk:].mean(axis=1)
 
     def pit(self, frame: pl.DataFrame) -> np.ndarray:
         """(n, d) PIT values: uniform under health by construction."""

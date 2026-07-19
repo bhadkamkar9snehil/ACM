@@ -30,6 +30,21 @@ from memory.summaries import (
 from store.raw import TIMESTAMP_COL, RawStore, _safe_key
 
 RECENT_PERIODS = 2  # the open month + the one before it count as "recent"
+# Calibration downsampling unit (#114): when lifetime history exceeds the
+# calibration budget, the sample is built from CONSECUTIVE chunks of this
+# many rows, evenly spaced across the older life - never row-striding.
+# Striding whitens the sample (every k-th row decorrelates), so the
+# e-process derived block sizes from near-white calibration data and then
+# consumed the fully-autocorrelated CONSECUTIVE live stream: measured 8x
+# realized-vs-promised false alarms on the deep-history path. Chunks keep
+# the within-sample autocorrelation stream-representative; 512 rows per
+# chunk keeps every plausible SCADA-scale block length (and the ACF lags
+# needed to derive it) intact inside a single chunk while ~40 chunks per
+# 20k budget still spread the sample across the whole older life for
+# seasonal coverage. Chunk boundaries mix far-apart regimes into a few
+# boundary blocks, which widens apparent healthy spread slightly - an
+# error in the conservative (fewer-false-alarms) direction.
+CALIB_CHUNK_ROWS = 512
 
 
 @dataclass
@@ -141,9 +156,10 @@ class LifetimeBaseline:
         max_rows: int = 20000,
         exclude_recent: int | None = None,
     ) -> pl.DataFrame:
-        """Healthy rows for e-process calibration: stride-sampled across the
-        OLDER life (recent periods excluded so a developing fault cannot sit
-        inside its own calibration reference), ledger-masked."""
+        """Healthy rows for e-process calibration: CONSECUTIVE chunks
+        evenly spaced across the OLDER life (recent periods excluded so a
+        developing fault cannot sit inside its own calibration reference),
+        ledger-masked. Never row-strided - see CALIB_CHUNK_ROWS (#114)."""
         if exclude_recent is None:
             exclude_recent = RECENT_PERIODS
         asset_dir = store.root / _safe_key(self.asset_key)
@@ -164,6 +180,11 @@ class LifetimeBaseline:
         # #90 soak's auto-absorption crashed on exactly this concat
         full = pl.concat(frames, how="diagonal_relaxed").sort(TIMESTAMP_COL)
         if full.height > max_rows:
-            stride = full.height // max_rows
-            full = full.gather_every(stride)
+            n_chunks = max(1, max_rows // CALIB_CHUNK_ROWS)
+            spacing = full.height / n_chunks
+            chunks = [
+                full.slice(int(i * spacing), CALIB_CHUNK_ROWS)
+                for i in range(n_chunks)
+            ]
+            full = pl.concat(chunks, how="diagonal_relaxed")
         return full

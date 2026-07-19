@@ -136,3 +136,58 @@ def test_derived_bank_holds_ville_bound_on_ar1():
 def test_calibration_too_small_rejected():
     with pytest.raises(ValueError, match="calibration"):
         EProcess(np.arange(10.0), alpha=0.05)
+
+
+# ------------------------------------------------- #114 exchangeability audit
+def test_bank_refuses_underblocked_short_calibration():
+    """A calibration too short to find its own decorrelation length must
+    REFUSE to arm (-> insufficient-history at the monitor), never silently
+    under-block: the silent version realized 4x the promised false-alarm
+    rate (measured, #114)."""
+    rng = np.random.default_rng(41)
+    with pytest.raises(ValueError, match="autocorrelated"):
+        EProcessBank(ar1(360, phi=0.95, rng=rng), alpha=0.05, seed=1)
+    # the SAME process with enough history derives a real block and arms
+    bank = EProcessBank(ar1(6000, phi=0.95, rng=rng), alpha=0.05, seed=2)
+    assert bank.block_sizes[0] >= 20
+    assert bank.exchangeability_acf < 0.2
+
+
+def test_bank_discloses_qualified_exchangeability():
+    """Non-decaying regime-level correlation below the refusal floor arms
+    but records the residual acf - a qualified guarantee is disclosed,
+    never a silent fiction (#114)."""
+    rng = np.random.default_rng(8)
+    n, month = 8000, 400
+    levels = np.repeat(
+        rng.normal(scale=0.45, size=n // month + 1), month
+    )[:n]
+    x = rng.normal(size=n) + levels  # plateau acf ~ 0.15 at every lag
+    bank = EProcessBank(x, alpha=0.05, seed=3)
+    assert bank.exchangeability_acf >= 0.1  # recorded, visible
+    # iid calibration reads clean
+    clean = EProcessBank(rng.normal(size=8000), alpha=0.05, seed=4)
+    assert clean.exchangeability_acf < 0.1
+
+
+def test_chunked_calibration_holds_ville_on_consecutive_stream():
+    """Regression pin for #114 door 2: calibration built from CONSECUTIVE
+    chunks of a long autocorrelated life must hold the bound against the
+    consecutive live stream. The broken behavior (row-striding, which
+    whitens the calibration) realized 0.39 vs promised 0.05 here."""
+    alpha, runs, chunk, alarms = 0.05, 60, 512, 0
+    for r in range(runs):
+        rng = np.random.default_rng(50_000 + r)
+        life = ar1(40_000, phi=0.95, rng=rng)
+        n_chunks = 20_000 // chunk
+        spacing = life.size / n_chunks
+        calib = np.concatenate(
+            [life[int(i * spacing): int(i * spacing) + chunk]
+             for i in range(n_chunks)]
+        )
+        bank = EProcessBank(calib, alpha=alpha, seed=r)
+        bank.update(ar1(4000, phi=0.95, rng=rng))
+        alarms += bank.state().alarmed
+    assert alarms / runs <= 0.15, (
+        f"{alarms}/{runs} false alarms - stride-whitening regression"
+    )

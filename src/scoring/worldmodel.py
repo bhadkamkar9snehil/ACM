@@ -430,6 +430,16 @@ class TorchWorldModel:
             return np.array([])
         return np.mean(np.abs(rz), axis=1)
 
+    def score_topk(self, frame: pl.DataFrame, k: int = 3) -> np.ndarray:
+        """Channel-local lens: mean of the k largest per-channel |residual
+        z| per row - cross-tier contract parity with the conditional
+        scorer (#92 discipline; rationale in surprise.score_topk, #115)."""
+        rz = np.abs(self._residual_z(frame))
+        if rz.shape[0] == 0:
+            return np.array([])
+        kk = min(k, rz.shape[1])
+        return np.partition(rz, -kk, axis=1)[:, -kk:].mean(axis=1)
+
     def pit(self, frame: pl.DataFrame) -> np.ndarray:
         rz = self._residual_z(frame) * self.resid_scales  # raw residuals
         grid_pos = np.linspace(0, 1, PIT_GRID_K)

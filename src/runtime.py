@@ -364,6 +364,8 @@ class Runtime:
         out = {}
         pairs = [
             ("magnitude", m.bank),
+            # getattr: monitors unpickled from a pre-#115 cache
+            ("channel-local", getattr(m, "chan_bank", None)),
             ("availability", m.avail_bank),
             ("horizon-gap", m.gap_bank),
             ("predictability-band", m.band_bank),
@@ -379,6 +381,11 @@ class Runtime:
                     "enabled": True,
                     "alarmed": st.alarmed,
                     "evidence": round(st.evidence, 4),
+                    # >0 = the guarantee armed with residual correlation
+                    # left at the block scale: QUALIFIED, not clean (#114)
+                    "exchangeability_acf": getattr(
+                        bank, "exchangeability_acf", 0.0
+                    ),
                     "members": {
                         str(block_size): {
                             "log_wealth": round(lw, 3),
@@ -606,8 +613,17 @@ class Runtime:
 
             _wm.on_progress = self._train_observer(asset_key)
             try:
+                # audit=False: a scan pass's calibration EXPECTEDLY
+                # contains the contamination the pass exists to find - a
+                # contiguous fault block reads as huge autocorrelation and
+                # the exchangeability audit would refuse the instrument
+                # that cures the cause. The FINAL calibration below runs
+                # fully audited: that is the one that arms the guarantee.
                 ok = em.monitor.calibrate_from_lifetime(
-                    self.store, ledger=self.ledger, cache_root=self.cache_root
+                    self.store,
+                    ledger=self.ledger,
+                    cache_root=self.cache_root,
+                    audit=False,
                 )
             finally:
                 _wm.on_progress = None
@@ -829,13 +845,20 @@ class Runtime:
             rmap = rehearse(
                 live,
                 frame.tail(min(frame.height, 2500)),
-                bank.members[0]._calib_sorted,
+                # the RAW calibration stream - a member's _calib_sorted is
+                # sorted, which reads ~0.9 autocorrelated and made every
+                # rehearsal bank derive blocks over a monotone staircase
+                # (latent bug exposed by the #114 exchangeability audit)
+                getattr(bank, "calibration_scores", None)
+                if getattr(bank, "calibration_scores", None) is not None
+                else bank.members[0]._calib_sorted,
             )
             result["rehearsal"] = {
                 "floors": rmap.floors,
                 "overall_floor": rmap.overall_floor,
                 "detected_fraction": round(rmap.detected_fraction, 3),
                 "scope": rmap.scope,
+                "skipped_reason": rmap.skipped_reason,
             }
 
         # Conformance (like PIT) is an immune signal ONLY while the asset
@@ -875,6 +898,27 @@ class Runtime:
             previous=self.previous_verdicts.get(asset_key),
             immune=self.immune_results.get(asset_key),
         )
+
+    @staticmethod
+    def _budget_summary() -> dict:
+        """The alpha ledger: the promised false-alarm budget and its split
+        across evidence domains (union bound - shares sum to 1.0)."""
+        import monitor as M
+        from constants import get as const
+
+        return {
+            "alpha_per_asset_year": float(const("ALPHA_PER_ASSET_YEAR")),
+            "reanchors_per_year": int(const("REANCHORS_PER_YEAR")),
+            "shares": {
+                "magnitude": M.MAGNITUDE_ALPHA_SHARE,
+                "channel-local": M.CHANNEL_LOCAL_ALPHA_SHARE,
+                "availability": M.AVAILABILITY_ALPHA_SHARE,
+                "horizon-gap": M.HORIZON_GAP_ALPHA_SHARE,
+                "predictability-band": M.BAND_ALPHA_SHARE,
+                "transient-response": M.TRANSIENT_ALPHA_SHARE,
+                "dynamics-drift": M.DYNAMICS_ALPHA_SHARE,
+            },
+        }
 
     # -------------------------------------------------------- aggregates
     def summary(self) -> dict:
@@ -944,5 +988,8 @@ class Runtime:
                 "checked": len(self.immune_results),
                 "sick": immune_sick,
             },
+            # the ONE dial and how it is allocated - the guarantee is the
+            # product, so the UI must be able to show it, not just imply it
+            "budget": self._budget_summary(),
             "rows": rows,
         }

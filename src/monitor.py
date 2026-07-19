@@ -22,16 +22,23 @@ from store.raw import TIMESTAMP_COL
 
 FIT_FRACTION = 0.6
 MODEL_EPOCH_FMT = "{tag}-{fit_rows}r-{calib_rows}c"
-# alpha split across the two evidence domains (union bound keeps the total
-# budget exact): magnitude carries most faults; availability events are
-# rarer and structurally distinct.
-# union bound keeps the total budget exact across the four domains
-MAGNITUDE_ALPHA_SHARE = 0.5
+# alpha split across the evidence domains - the union bound keeps the
+# total budget exactly ALPHA_PER_ASSET_YEAR. Shares MUST sum to 1.0
+# (pinned by test). Magnitude (diffuse/coordinated deviations) carries
+# the largest share; channel-local is its counterpart lens for faults
+# the mean aggregation dilutes on wide assets (#115); the rest are
+# rarer, structurally distinct failure geometries.
+MAGNITUDE_ALPHA_SHARE = 0.4
+CHANNEL_LOCAL_ALPHA_SHARE = 0.1
 AVAILABILITY_ALPHA_SHARE = 0.15
 HORIZON_GAP_ALPHA_SHARE = 0.1
 BAND_ALPHA_SHARE = 0.05
 TRANSIENT_ALPHA_SHARE = 0.1
 DYNAMICS_ALPHA_SHARE = 0.1
+# Below this channel count the mean's dilution factor (sqrt(d) <= ~2.8)
+# does not warrant a separately funded stream - the two lenses would be
+# near-duplicates spending budget twice on the same geometry (#115).
+CHANNEL_LOCAL_MIN_CHANNELS = 8
 
 
 def _scorer_tag(scorer_cls) -> str:
@@ -47,6 +54,7 @@ class AssetMonitor:
     scorer_cls: type = ConditionalSurpriseScorer  # S4 primary; robust-z auxiliary
     scorer: object | None = None
     bank: EProcessBank | None = None
+    chan_bank: EProcessBank | None = None
     avail_bank: EProcessBank | None = None
     avail_scorer: object | None = None
     mh_scorer: object | None = None
@@ -80,6 +88,7 @@ class AssetMonitor:
             self.bank = EProcessBank(
                 calib_scores, alpha=alpha * MAGNITUDE_ALPHA_SHARE, seed=seed
             )
+            self.chan_bank = self._build_channel_bank(held_out, alpha, seed)
             self.avail_bank = self._build_avail_bank(held_out, alpha, seed)
             self._build_horizon_banks(fit, held_out, alpha, seed)
             self._build_transient_bank(calib_frame, alpha, seed)
@@ -103,6 +112,7 @@ class AssetMonitor:
         cache_root=None,
         seed: int = 0,
         include_recent: bool = False,
+        audit: bool = True,
     ) -> bool:
         """S3 calibration path: the scorer's reference comes from the
         recency-capped, ledger-masked LIFETIME baseline; the e-process
@@ -132,17 +142,27 @@ class AssetMonitor:
                 scorer = RobustZScorer()
                 scorer.medians, scorer.scales = base.medians, base.scales
                 calib_scores = scorer.score(sample)
+                held_out = sample
             else:
                 # conditional scorer: FIT on the older 60% of the lifetime
                 # sample, calibrate on the held-out rest (in-sample-bias law)
                 split = int(sample.height * FIT_FRACTION)
                 scorer = self.scorer_cls().fit(sample.head(split))
-                calib_scores = scorer.score(sample.slice(split))
+                held_out = sample.slice(split)
+                calib_scores = scorer.score(held_out)
             alpha = float(const("ALPHA_PER_ASSET_YEAR")) / float(
                 const("REANCHORS_PER_YEAR")
             )
             self.bank = EProcessBank(
-                calib_scores, alpha=alpha * MAGNITUDE_ALPHA_SHARE, seed=seed
+                calib_scores,
+                alpha=alpha * MAGNITUDE_ALPHA_SHARE,
+                seed=seed,
+                # audit=False only on bootstrap contamination-scan passes
+                # (see EProcessBank.__init__); production always audits
+                audit=audit,
+            )
+            self.chan_bank = self._build_channel_bank(
+                held_out, alpha, seed, scorer=scorer
             )
             self.avail_bank = self._build_avail_bank(sample, alpha, seed)
             split_mh = int(sample.height * FIT_FRACTION)
@@ -166,6 +186,33 @@ class AssetMonitor:
             f"s3-lifetime-{len(base.periods_used)}p-{base.rows_total}r"
         )
         return True
+
+    def _build_channel_bank(
+        self, held_out: pl.DataFrame, alpha: float, seed: int, scorer=None
+    ):
+        """Channel-local evidence stream (#115): a top-3 aggregation of the
+        SAME scorer's per-channel residuals, with its own bank and budget
+        share. The mean stream dilutes a single faulty channel by ~1/d
+        (measured 15x separation loss at 957 channels); this lens keeps it
+        visible. Only funded on assets wide enough for the two lenses to
+        genuinely differ (CHANNEL_LOCAL_MIN_CHANNELS); narrow assets leave
+        the share unspent, which under-runs the promised budget - honest
+        in the conservative direction."""
+        scorer = scorer if scorer is not None else self.scorer
+        if (
+            scorer is None
+            or not hasattr(scorer, "score_topk")
+            or len(getattr(scorer, "channels", ())) < CHANNEL_LOCAL_MIN_CHANNELS
+        ):
+            return None
+        try:
+            return EProcessBank(
+                scorer.score_topk(held_out),
+                alpha=alpha * CHANNEL_LOCAL_ALPHA_SHARE,
+                seed=seed + 500,
+            )
+        except ValueError:
+            return None
 
     def _build_avail_bank(
         self, calib_frame: pl.DataFrame, alpha: float, seed: int
@@ -291,6 +338,16 @@ class AssetMonitor:
         # starving the band bank of the very data that proved the fault).
         # Only the DOMAIN LABEL is chosen by priority afterwards.
         aux_states: list[tuple[str, object]] = []
+        # getattr: monitors unpickled from a cache written before the
+        # channel-local bank existed have no chan_bank attribute
+        chan_bank = getattr(self, "chan_bank", None)
+        if chan_bank is not None and not frame.is_empty():
+            aux_states.append(
+                (
+                    "channel-local",
+                    chan_bank.update(self.scorer.score_topk(frame)),
+                )
+            )
         if self.dyn_drift is not None and not frame.is_empty():
             d_stream = self.dyn_drift.drift_stream(frame)
             if d_stream.size:
@@ -325,14 +382,27 @@ class AssetMonitor:
                 aux_domain, aux_evidence = name, st.evidence
 
         if aux_domain is not None and not state_now.alarmed and not avail_alarmed:
+            # channel-local is the one aux domain whose alarm points at
+            # specific CHANNELS, not just a stream - carry the scorer's
+            # attribution and per-channel magnitudes so the verdict (and
+            # the UI's channel chart) names the culprit (#115)
+            aux_trail: dict = {"domain": aux_domain}
+            aux_attr: tuple = (aux_domain,)
+            if aux_domain == "channel-local" and not frame.is_empty():
+                if hasattr(self.scorer, "attribution"):
+                    aux_attr = tuple(self.scorer.attribution(frame))
+                if hasattr(self.scorer, "channel_surprise"):
+                    aux_trail["channel_surprise"] = (
+                        self.scorer.channel_surprise(frame)
+                    )
             return V.Verdict(
                 asset_key=self.asset_key,
                 at=self.last_ts,
                 state=V.STATE_ALARM,
                 confidence=V.confidence_from(self.calib_rows, aux_evidence),
                 evidence=round(aux_evidence, 4),
-                evidence_trail={"domain": aux_domain},
-                attribution=(aux_domain,),
+                evidence_trail=aux_trail,
+                attribution=aux_attr,
                 model_epoch=self.model_epoch,
                 coverage={
                     "calib_rows": self.calib_rows,

@@ -88,15 +88,22 @@ class DynamicsDrift:
         return np.nan_to_num((out - self.centers) / self.scales)
 
     def drift_stream(self, frame: pl.DataFrame) -> np.ndarray:
-        """Drift values over OVERLAPPING identification windows (stride =
-        window/8). Overlap induces serial dependence in the stream - which
-        is exactly what the e-process's derived block sizes exist to absorb
-        (D12 machinery); it buys enough calibration values from realistic
-        holdout sizes without weakening the identification window."""
+        """Drift values over NON-OVERLAPPING identification windows.
+
+        The first implementation used stride = window/8, hoping the
+        e-process's derived block sizes would absorb the induced serial
+        dependence. The #114 exchangeability audit measured that hope
+        false: adjacent overlapped values share 7/8 of their data (acf
+        ~0.9 by construction), no realistic calibration can block that
+        away, and the stream's false-alarm bound was fiction. Overlap
+        manufactured POINTS, not INFORMATION. Non-overlapping windows
+        yield genuinely independent operator estimates; the cost is that
+        this domain needs more history to arm (>= 30 windows for its
+        bank) - honest for a channel whose entire premise is SLOW
+        drift."""
         z = self._z(frame)
-        stride = IDENT_WINDOW // 8
         out = []
-        for a in range(0, z.shape[0] - IDENT_WINDOW + 1, stride):
+        for a in range(0, z.shape[0] - IDENT_WINDOW + 1, IDENT_WINDOW):
             a_w = _ident(z[a : a + IDENT_WINDOW])
             out.append(
                 float(np.linalg.norm(a_w - self.a_ref)) / self._ref_norm

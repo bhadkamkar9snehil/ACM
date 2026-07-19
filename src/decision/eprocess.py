@@ -56,7 +56,32 @@ import numpy as np
 _EPS_GRID = np.array([0.05, 0.1, 0.2, 0.35, 0.5, 0.65, 0.8])
 _LOG_WEALTH_CAP = 700.0  # exp overflow guard; far above any alarm threshold
 _ACF_DECORR_THRESHOLD = 0.1  # |acf| below this = effectively decorrelated
+# Refusal floor for the exchangeability audit (#114): a bank whose derived
+# block still carries residual |acf| at/above this REFUSES to arm (the
+# ValueError becomes insufficient-history at the monitor). Empirical basis
+# (250-300 reps, healthy streams, promised alpha 0.05): residual 0.53/0.74
+# realized 2.4x/4x the promised false-alarm rate; residual <= ~0.17 stayed
+# within ~1.2x (decaying/AR dependence) and ~2.7x (adversarial non-decaying
+# regime plateaus, disclosed via exchangeability_acf rather than refused).
+_ACF_REFUSAL_FLOOR = 0.2
 _MIN_CALIB_BLOCKS = 30
+
+
+def _acf_at(x: np.ndarray, lag: int) -> float:
+    """Lag-`lag` autocorrelation of a centered series (0.0 when the series
+    is too short or degenerate - the callers treat that as 'no evidence of
+    correlation', which errs conservative only where nothing can be
+    estimated anyway)."""
+    x = np.asarray(x, dtype=np.float64)
+    x = x[np.isfinite(x)]
+    n = x.size
+    if lag < 1 or n <= lag + 2:
+        return 0.0
+    x = x - x.mean()
+    denom = float(np.dot(x, x))
+    if denom <= 0.0:
+        return 0.0
+    return float(np.dot(x[:-lag], x[lag:])) / denom
 
 
 def decorrelation_length(x: np.ndarray, max_lag: int | None = None) -> int:
@@ -66,20 +91,22 @@ def decorrelation_length(x: np.ndarray, max_lag: int | None = None) -> int:
     scores instead of chosen: blocks shorter than the correlation length
     break exchangeability and inflate false alarms (the D12 trap, observed
     directly on the S1 pilots at 1s cadence). Never hardcode a block size.
+
+    The search is capped at n // (2 * _MIN_CALIB_BLOCKS) so the derived
+    block always leaves >= 30 calibration blocks. When the cap binds
+    WITHOUT the series having decorrelated, the returned lag is a lie -
+    callers that need the guarantee must check (EProcessBank does, and
+    refuses; see #114: the silent version of this produced a measured 4x
+    false-alarm-budget violation on short autocorrelated calibrations).
     """
     x = np.asarray(x, dtype=np.float64)
     x = x[np.isfinite(x)]
     n = x.size
     if n < 60:
         return 1
-    x = x - x.mean()
-    denom = float(np.dot(x, x))
-    if denom <= 0.0:
-        return 1
     max_lag = max_lag or n // (2 * _MIN_CALIB_BLOCKS)
     for lag in range(1, max(2, max_lag)):
-        acf = float(np.dot(x[:-lag], x[lag:])) / denom
-        if abs(acf) < _ACF_DECORR_THRESHOLD:
+        if abs(_acf_at(x, lag)) < _ACF_DECORR_THRESHOLD:
             return lag
     return max(1, max_lag)
 
@@ -176,19 +203,73 @@ class EProcessBank:
         alpha: float,
         block_sizes: tuple[int, ...] | None = None,
         seed: int = 0,
+        audit: bool = True,
     ) -> None:
+        """audit=False skips the exchangeability REFUSAL (the residual acf
+        is still recorded). Reserved for contamination-scan instruments -
+        the bootstrap's detect->mask->re-detect passes, whose calibration
+        EXPECTEDLY contains the very fault the pass exists to find (a
+        contiguous contaminated block reads as massive autocorrelation,
+        so the audit would refuse the instrument that cures the cause).
+        Production monitors always audit: the final post-masking
+        calibration is the one that arms the guarantee."""
         calib = np.asarray(calibration, dtype=np.float64)
         calib = calib[np.isfinite(calib)]
+        # Residual |acf| at the derived base block (0.0 when block sizes
+        # were passed explicitly - the caller owns validity in that case).
+        # Values in [_ACF_DECORR_THRESHOLD, _ACF_REFUSAL_FLOOR) mean the
+        # guarantee is armed but QUALIFIED - consumers surface this.
+        self.exchangeability_acf = 0.0
         if block_sizes is None:
             # Derive from the asset's own calibration: base block = the
             # decorrelation length; longer members at geometric spacing for
             # slower fault timescales; keep only members the calibration
             # can actually support with >= 30 blocks.
             base = decorrelation_length(calib)
+            # Exchangeability audit (#114): when the derivation's lag cap
+            # bound BEFORE the series decorrelated, the base block does not
+            # restore exchangeability and the Ville bound degrades.
+            # Measured on healthy AR(1) score streams (250-300 reps,
+            # promised alpha 0.05): residual |acf| at the capped block of
+            # 0.53/0.74 (a 360-row calibration at phi 0.9/0.95) realized
+            # 0.12/0.20 false-alarm rates - indefensible, REFUSED below;
+            # everything measured at residual |acf| <= ~0.17 stayed within
+            # ~1.2x for decaying (AR) dependence and within ~2.7x for the
+            # adversarial worst case (non-decaying regime-level plateaus).
+            # Policy: refuse the indefensible, DISCLOSE the marginal - the
+            # residual acf is recorded on the bank and surfaced so a
+            # merely-qualified guarantee is never a silent fiction. In
+            # both refusal families, more history genuinely cures it: AR
+            # dependence gets a longer lag search; regime plateaus become
+            # blockable once life spans >= _MIN_CALIB_BLOCKS regimes. The
+            # 2/sqrt(n) term is an estimation-noise allowance so short but
+            # genuinely-white calibrations are not refused on ACF noise.
+            residual_acf = abs(_acf_at(calib, base))
+            cap = max(1, calib.size // (2 * _MIN_CALIB_BLOCKS))
+            noise_allowance = 2.0 / np.sqrt(max(calib.size, 1))
+            if (
+                audit
+                and base >= cap
+                and residual_acf >= _ACF_REFUSAL_FLOOR + noise_allowance
+            ):
+                raise ValueError(
+                    "calibration too autocorrelated for its length: "
+                    f"|acf|={residual_acf:.2f} at the largest supportable "
+                    f"block ({base}); a valid false-alarm guarantee needs "
+                    "a longer healthy history"
+                )
+            self.exchangeability_acf = round(residual_acf, 3)
             candidates = [base, 4 * base, 16 * base]
             block_sizes = tuple(
                 b for b in candidates if calib.size // b >= _MIN_CALIB_BLOCKS
             ) or (base,)
+        # The raw (unsorted, unblocked) calibration stream, retained for
+        # consumers that must build derived banks over the SAME reference
+        # (immune rehearsal). Passing a member's _calib_sorted instead was
+        # a latent bug the #114 exchangeability audit exposed: a SORTED
+        # array reads as ~0.9 autocorrelated, so rehearsal had been
+        # deriving its block structure over a monotone staircase.
+        self.calibration_scores = calib
         member_alpha = alpha / len(block_sizes)
         self.members = [
             EProcess(

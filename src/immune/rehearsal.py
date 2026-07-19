@@ -46,6 +46,10 @@ class RehearsalMap:
     overall_floor: float | None = None
     detected_fraction: float = 0.0
     scope: str = ""
+    # non-empty = rehearsal could not run validly (e.g. the calibration
+    # failed the exchangeability audit, #114) - a measurement instrument
+    # that cannot measure says so instead of fabricating floors
+    skipped_reason: str = ""
 
     def to_dict(self) -> dict:
         return {
@@ -54,6 +58,7 @@ class RehearsalMap:
             "detected_fraction": round(self.detected_fraction, 3),
             "scope": self.scope,
             "cells": self.cells,
+            "skipped_reason": self.skipped_reason,
         }
 
 
@@ -84,6 +89,16 @@ def rehearse(
             f"{MAGNITUDES} x propagation {PROPAGATIONS} on {n} holdout rows"
         )
     )
+    # Every cell uses the SAME calibration, so derive the bank structure
+    # ONCE - and if the exchangeability audit refuses it (#114), rehearsal
+    # cannot produce valid floors: report that honestly instead of either
+    # crashing the immune pass or measuring with an invalid instrument.
+    try:
+        template = EProcessBank(calib_scores, alpha=REHEARSAL_ALPHA, seed=seed)
+    except ValueError as exc:
+        result.skipped_reason = f"cannot rehearse validly: {exc}"
+        return result
+    block_sizes = template.block_sizes
     detected_cells, total_cells = 0, 0
     for ci in _seed_channels(scorer):
         ch = scorer.channels[ci]
@@ -111,7 +126,10 @@ def rehearse(
                     )
                     scores = scorer.score(frame)
                     bank = EProcessBank(
-                        calib_scores, alpha=REHEARSAL_ALPHA, seed=seed
+                        calib_scores,
+                        alpha=REHEARSAL_ALPHA,
+                        block_sizes=block_sizes,
+                        seed=seed,
                     )
                     alarmed = bank.update(scores[onset:]).alarmed
                     key = f"{ch}|{shape}|p{prop}"
