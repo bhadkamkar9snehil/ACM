@@ -195,9 +195,14 @@ chart: which assets are actually expensive to score) plus per-asset
 charts: health-index trajectory with zoom, evidence-domain bars against
 the alarm line, a per-domain per-timescale wealth heatmap (every e-process
 bank's own block-size members, not just whichever domain decided the
-verdict), a live tick-by-tick feed scoped to that one asset, coverage
-gauge, anatomy organ-surprise bars, failure-time distribution, episode
-timeline over real time, and immune floors. Live sources attach
+verdict), a surprise-by-channel bar chart (the verdict's attribution as
+severity-colored bars, not a text list), familiarity/concentration/novelty
+gauges with episode-state pills, a live tick-by-tick feed scoped to that
+one asset, anatomy organ-surprise bars, failure-time distribution, episode
+timeline over real time, and immune floors with pass/fail status pills.
+The asset header shows evidence and confidence as bars against the alarm
+line; the health narrative keeps its one-sentence judgment visible and
+folds the full reasoning prose behind a toggle. Live sources attach
 with `--live "asset/key=buffer.db"` (repeatable): any bridge that
 writes the SQLite buffer shape `(ts, payload_json)` feeds the store on
 every tick.

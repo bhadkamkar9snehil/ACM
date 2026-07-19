@@ -448,6 +448,19 @@ class TorchWorldModel:
         order = np.argsort(contrib)[::-1]
         return [self.channels[i] for i in order[:top_k]]
 
+    def channel_surprise(
+        self, frame: pl.DataFrame, top_k: int = 12
+    ) -> dict[str, float]:
+        """attribution() with magnitudes kept - cross-tier contract parity
+        with the conditional scorer (the #92 lesson: a Tier-2 asset must
+        render the same UI, not a degraded one)."""
+        rz = np.abs(self._residual_z(frame.tail(min(frame.height, 256 + LAG))))
+        if rz.shape[0] == 0:
+            return {}
+        contrib = np.nanmean(rz, axis=0)
+        order = np.argsort(contrib)[::-1][:top_k]
+        return {self.channels[i]: round(float(contrib[i]), 3) for i in order}
+
     def concentration(self, frame: pl.DataFrame, top_k: int = 2) -> float:
         """Share of total surprise carried by the top_k channels -
         IDENTICAL semantics to the conditional scorer's (cross-tier

@@ -472,7 +472,10 @@ def test_episodes_report_and_live_flag_endpoints(runtime, tmp_path):
 
     page = client.get("/").text
     assert "Episode history" in page and "/api/report" in page
-    assert "Evidence trail" in page
+    # the evidence-trail surface is chart-first now: the Signals card
+    # (gauges + episode-state pills) and the surprise-by-channel chart
+    # replaced the old "Evidence trail" kv text block
+    assert "Signals" in page and "Surprise by channel" in page
 
 
 def test_websocket_stream_and_vendored_echarts(runtime):

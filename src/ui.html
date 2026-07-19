@@ -219,6 +219,16 @@ th{color:var(--mut);font-weight:normal;font-size:11px;letter-spacing:1px;
 #dhead .drow{display:flex;gap:var(--sp-5);align-items:center;flex-wrap:wrap;
  margin-bottom:var(--sp-4)}
 #dhead h2{font-size:20px;letter-spacing:0.5px}
+.schips{display:flex;gap:var(--sp-8);align-items:center;flex-wrap:wrap;
+ margin-bottom:var(--sp-5)}
+.schip{display:flex;align-items:center;gap:var(--sp-3);font-size:12px}
+.schip b{font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--mut);
+ font-weight:normal}
+.schip .sval{font-weight:bold;font-size:13px;color:var(--txt);
+ font-variant-numeric:tabular-nums}
+.sbar{width:64px;height:7px;background:var(--bg3);border-radius:var(--r-tight);
+ overflow:hidden;border:1px solid var(--line)}
+.sbar i{display:block;height:100%}
 #dtabs{display:flex;gap:var(--sp-hairline);padding:0 var(--sp-10);
  border-bottom:1px solid var(--line)}
 #dtabs a{padding:var(--sp-3) var(--sp-8);font-size:12.5px;color:var(--mut);cursor:pointer;
@@ -713,6 +723,25 @@ function domainMembersOption(doms){
   visualMap:{show:false,min:0,max:maxPos,
    inRange:{color:[CH.grid,'#d8b636']}},
   series:[{type:'heatmap',data,label:{show:false}}]};}
+// Surprise by channel - the chart form of what was previously the
+// "attribution" text list. Bars are the verdict's own per-channel mean
+// |residual z| (evidence_trail.channel_surprise); severity-colored so
+// the eye finds the guilty channel without reading anything.
+function channelSurpriseOption(cs){
+ const entries=Object.entries(cs||{});
+ if(!entries.length)return null;
+ return {grid:{left:8,right:44,top:8,bottom:6,containLabel:true},
+  tooltip:{trigger:'axis',axisPointer:{type:'shadow'}},
+  xAxis:{type:'value',name:'mean |resid z|',nameTextStyle:{color:CH.axis,fontSize:10},
+   axisLabel:{color:CH.axis,fontSize:10},splitLine:{lineStyle:{color:CH.grid}}},
+  yAxis:{type:'category',inverse:true,data:entries.map(([k])=>k),
+   axisLabel:{color:CH.text,fontSize:10,width:130,overflow:'truncate'}},
+  series:[{type:'bar',barMaxWidth:12,
+   data:entries.map(([,v])=>({value:v,
+    itemStyle:{color:v>=3?'#e05252':v>=1.5?'#d8b636':'#4aa3df',
+     borderRadius:[0,3,3,0]},
+    label:{show:true,position:'right',fontSize:10,color:CH.axis,
+     formatter:p=>fmtDec(p.value)}}))}]};}
 function costOption(rows){
  if(!rows||!rows.length)return null;
  const top=rows.slice(0,10);
@@ -1079,7 +1108,13 @@ function AssetsSidebar(){
 /* ---------------- Asset detail ---------------- */
 const NARR_LABEL={change:'change',evidence:'evidence',anatomy:'anatomy',shape:'shape',
  horizon:'horizon',coverage:'coverage','immune-ok':'self-test','immune-sick':'self-test'};
+// The one-sentence judgment stays visible; the full reasoning prose is
+// collapsed behind a toggle. The story is a product feature (a verdict
+// that explains itself), but it is reference material, not something an
+// operator should wade through on every glance - the charts carry the
+// at-a-glance load now.
 function Narrative({sections,state}){
+ const [open,setOpen]=useState(false);
  if(!sections||!sections.length)return html`<p class="muted">no narrative available</p>`;
  let lead=null,falsifiable=null;
  const rows=[];
@@ -1089,10 +1124,13 @@ function Narrative({sections,state}){
   const cls='narr-row'+(s.kind==='immune-sick'?' narr-bad':s.kind==='immune-ok'?' narr-ok':'');
   const style=s.kind==='evidence'?`border-left-color:${SC[state]||'var(--line)'}`:'';
   rows.push(html`<div key=${i} class=${cls} style=${style}><b>${NARR_LABEL[s.kind]||s.kind}</b>${s.text}</div>`);});
+ const hasMore=rows.length>0||!!falsifiable;
  return html`<${Fragment}>
-  ${lead?html`<p class="narr-lead">${lead}</p>`:null}
-  ${rows.length?html`<div class="narr-list">${rows}</div>`:null}
-  ${falsifiable?html`<div class="narr-falsifiable"><b>falsifiable by</b>${falsifiable}</div>`:null}
+  ${lead?html`<p class="narr-lead" style=${open?'':'margin-bottom:0'}>${lead}</p>`:null}
+  ${open&&rows.length?html`<div class="narr-list">${rows}</div>`:null}
+  ${open&&falsifiable?html`<div class="narr-falsifiable"><b>falsifiable by</b>${falsifiable}</div>`:null}
+  ${hasMore?html`<div style="margin-top:10px"><button style="font-size:11px;padding:3px 10px"
+    onClick=${()=>setOpen(!open)}>${open?'hide reasoning':'show reasoning'}</button></div>`:null}
  <//>`;}
 
 const DETAIL_TABS=[['overview','Overview'],['evidence','Evidence'],['anatomy','Anatomy & Prognosis'],['episodes','Episodes & Immune']];
@@ -1112,9 +1150,17 @@ function DetailHead({d}){
    <button class="danger" disabled=${busy==='reanchor'} onClick=${()=>{
      if(confirm('Close the open episode into the ledger and recalibrate from masked lifetime?'))run('reanchor','Re-anchor')();}}>Re-anchor</button>
   </div>
-  <div class="drow muted" style="font-size:12.5px">
-   evidence ${fmtDec(v.evidence)} | confidence ${fmtDec(v.confidence)} | ${v.model_epoch}
-   | at ${v.at||'-'}${stale(v.at)}
+  <div class="schips">
+   <span class="schip"><b>evidence</b>
+    <span class="sbar"><i style=${`width:${Math.min(100,v.evidence*100)}%;background:${v.evidence>=1?'var(--bad)':v.evidence>=0.5?'var(--warn)':'var(--ok)'}`}></i></span>
+    <span class="sval" style=${v.evidence>=1?'color:var(--bad)':''}>${fmtDec(v.evidence)}</span>
+    <span class="muted" style="font-size:10.5px">alarm at 1.0</span></span>
+   <span class="schip"><b>confidence</b>
+    <span class="sbar"><i style=${`width:${Math.min(100,v.confidence*100)}%;background:var(--acc)`}></i></span>
+    <span class="sval">${fmtDec(v.confidence)}</span></span>
+   <span class="schip"><b>model</b><span class="pill" style="font-size:10.5px">${v.model_epoch}</span></span>
+   <span class="schip"><b>at</b><span class="muted">${v.at||'-'}</span>
+    ${stale(v.at)?html`<span class="pill st-watch" style="font-size:10.5px" title="asset clock may lag wall clock">stale</span>`:null}</span>
   </div>
  </div>`;}
 function DetailTabs(){
@@ -1152,26 +1198,29 @@ function PaneEvidence({d}){
   <div class="card wide">
    <h3>Every domain, every timescale, this tick</h3>
    <${EChart} id="c-domain-members" height=200 option=${domainMembersOption(doms)}/></div>
-  <div class="card"><h3>Coverage & attribution</h3>
-   <div style="display:grid;grid-template-columns:1fr 1fr">
+  ${Object.keys(t.channel_surprise||{}).length?html`<div class="card wide">
+   <h3>Surprise by channel (severity-colored; the old attribution list, as bars)</h3>
+   <${EChart} id="c-channels" height=${Math.max(120,34*Math.min(12,Object.keys(t.channel_surprise).length)+40)}
+    option=${channelSurpriseOption(t.channel_surprise)}/></div>`:null}
+  <div class="card"><h3>Signals</h3>
+   <div style=${`display:grid;grid-template-columns:repeat(${t.novelty!==undefined?3:2},1fr)`}>
     <${EChart} id="c-coverage" height=140 option=${typeof fam==='number'?gaugeOption(fam,'familiarity'):null}/>
     ${t.concentration!==undefined?html`<${EChart} id="c-concentration" height=140 option=${gaugeOption(t.concentration,'concentration')}/>`:null}
+    ${t.novelty!==undefined?html`<${EChart} id="c-novelty" height=140 option=${gaugeOption(t.novelty,'novelty')}/>`:null}
    </div>
-   <div class="kv">
-    <b>calibration rows</b><span>${fmtInt((v.coverage||{}).calib_rows)}</span>
-    <b>scored rows</b><span>${fmtInt((v.coverage||{}).scored_rows)}</span>
-    <b>attribution</b><span>${(v.attribution||[]).join(', ')||'-'}</span>
-    <b>falsifiable by</b><span>${v.falsifiable_by}</span></div></div>
-  <div class="card"><h3>Evidence trail</h3><div class="kv">
-   ${t.reason?html`<b>insufficient because</b><span>${t.reason}</span>`:null}
-   ${t.shape?html`<b>surprise shape</b><span>${t.shape}</span>`:null}
-   ${t.novelty!==undefined?html`<b>novelty</b><span>${fmtDec(t.novelty)}</span>`:null}
-   ${t.concentration!==undefined?html`<b>attribution concentration</b><span>${fmtDec(t.concentration)} ${t.concentration<0.4?'(coordinated move)':'(channel-local)'}</span>`:null}
-   ${eph.open_since?html`<b>episode open since</b><span>${eph.open_since}</span>`:null}
-   ${t.signature_match?html`<b>signature match</b><span>episode ${t.signature_match.episode} (confidence ${t.signature_match.confidence})</span>`:null}
-   ${t.trajectory_match?html`<b>trajectory match</b><span>episode ${t.trajectory_match.episode} (dist ${t.trajectory_match.distance}) - ~${t.trajectory_match.remaining_rows_estimate} rows to its peak</span>`:null}
-   ${!t.reason&&!t.shape&&!eph.open_since?html`<b>state</b><span class="muted">no active episode - nothing accumulating</span>`:null}
-  </div></div>
+   <div class="schips" style="margin:var(--sp-3) 0 0">
+    ${t.shape?html`<span class=${'pill '+(t.shape==='drift'?'st-escalating':t.shape==='step'?'st-change-not-fault':'st-insufficient-history')}
+     title="episode surprise shape: drift = fault-like monotone growth, step = change-candidate plateau">shape: ${t.shape}</span>`:null}
+    ${eph.open_since?html`<span class="pill st-watch" title=${'episode open since '+eph.open_since}>episode open</span>`:null}
+    ${t.signature_match?html`<span class="pill st-change-not-fault" title=${'matches past episode '+t.signature_match.episode}>seen before (${t.signature_match.confidence})</span>`:null}
+    ${t.trajectory_match?html`<span class="pill st-escalating" title=${'tracking past episode '+t.trajectory_match.episode+' (dist '+t.trajectory_match.distance+')'}>~${fmtInt(t.trajectory_match.remaining_rows_estimate)} rows to peak</span>`:null}
+    ${t.reason?html`<span class="pill st-insufficient-history" title=${t.reason}>insufficient: ${t.reason}</span>`:null}
+    ${!t.reason&&!t.shape&&!eph.open_since?html`<span class="pill st-healthy">no active episode</span>`:null}
+   </div>
+   <div class="schips" style="margin:var(--sp-4) 0 0">
+    <span class="schip"><b>calib rows</b><span class="sval">${fmtInt((v.coverage||{}).calib_rows)}</span></span>
+    <span class="schip"><b>scored rows</b><span class="sval">${fmtInt((v.coverage||{}).scored_rows)}</span></span>
+   </div></div>
  </div></div>`;}
 function PaneAnatomy({d}){
  const {v}=d;
@@ -1200,8 +1249,14 @@ function PaneEpisodes({d}){
    <div style="display:grid;grid-template-columns:1fr 220px;gap:12px">
     <${EChart} id="c-immune" height=200 option=${floorsOption(immune.floors)}/>
     <div>${immune.rehearsal?html`<${EChart} id="c-rehearsal" height=150 option=${gaugeOption(immune.rehearsal.detected_fraction,'rehearsal detected')}/>`:null}
-     <div class="kv"><b>conformance</b><span>${immune.conformance_ok}${immune.conformance_note?' - '+immune.conformance_note:''}</span>
-     <b>pit</b><span>${immune.pit}</span><b>live degenerate</b><span>${immune.live_degenerate}</span></div></div>
+     <div class="schips" style="margin:0;gap:var(--sp-3)">
+      <span class=${'pill '+(immune.conformance_ok?'st-healthy':'st-alarm')}
+       title=${immune.conformance_note||'clean holdout must not alarm'}>conformance ${immune.conformance_ok?'ok':'FAIL'}</span>
+      <span class=${'pill '+(immune.pit==='ok'?'st-healthy':'st-watch')}
+       title="PIT distortion classification: ok / channels / model">pit: ${immune.pit}</span>
+      <span class=${'pill '+(immune.live_degenerate?'st-alarm':'st-healthy')}
+       title="near-zero variance or too few unique score values = dead scorer">${immune.live_degenerate?'scorer DEGENERATE':'scorer alive'}</span>
+     </div></div>
    </div></div>`:html`<div class="card"><h3>Immune self-test</h3><p class="muted">not yet run - use the Immune pass button</p></div>`}
   ${immune&&!immune.status&&immune.profile?html`<div class="card"><h3>Detection profile (injected fault x magnitude, sigma)</h3>
    <${EChart} id="c-immune-profile" height=180 option=${immuneProfileOption(immune.profile)}/></div>`:null}

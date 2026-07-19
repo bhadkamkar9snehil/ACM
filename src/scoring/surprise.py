@@ -180,6 +180,19 @@ class ConditionalSurpriseScorer:
         order = np.argsort(contrib)[::-1]
         return [self.channels[i] for i in order[:top_k]]
 
+    def channel_surprise(
+        self, frame: pl.DataFrame, top_k: int = 12
+    ) -> dict[str, float]:
+        """attribution() with the MAGNITUDES kept: top_k channels by mean
+        |residual z| over the recent tail, name -> value. Display
+        telemetry for the UI's surprise-by-channel chart - names alone
+        (attribution) can only ever render as text."""
+        tail_h = min(frame.height, 256)
+        rz = np.abs(self._residual_z(frame.tail(tail_h)))
+        contrib = np.nanmean(rz, axis=0)
+        order = np.argsort(contrib)[::-1][:top_k]
+        return {self.channels[i]: round(float(contrib[i]), 3) for i in order}
+
     # --------------------------------------------------------- helpers
     def _numeric_matrix(self, frame: pl.DataFrame) -> tuple[list[str], np.ndarray]:
         cols = [

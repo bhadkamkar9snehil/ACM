@@ -383,6 +383,15 @@ class AssetMonitor:
             if hasattr(self.scorer, "coverage") and not frame.is_empty()
             else 1.0
         )
+        # per-channel surprise magnitudes: display telemetry only (the UI's
+        # surprise-by-channel chart) - attribution names alone can only
+        # ever render as text. hasattr-guarded like coverage above.
+        channel_surprise = (
+            self.scorer.channel_surprise(frame)
+            if hasattr(self.scorer, "channel_surprise")
+            and not frame.is_empty()
+            else {}
+        )
         return V.Verdict(
             asset_key=self.asset_key,
             at=self.last_ts,
@@ -398,6 +407,11 @@ class AssetMonitor:
                     str(b): {"log_wealth": round(lw, 3), "alarmed": al}
                     for b, (lw, al) in state_now.member_states.items()
                 },
+                **(
+                    {"channel_surprise": channel_surprise}
+                    if channel_surprise
+                    else {}
+                ),
             },
             attribution=tuple(self.scorer.attribution(frame)),
             model_epoch=self.model_epoch,
