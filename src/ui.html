@@ -742,6 +742,29 @@ function channelSurpriseOption(cs){
      borderRadius:[0,3,3,0]},
     label:{show:true,position:'right',fontSize:10,color:CH.axis,
      formatter:p=>fmtDec(p.value)}}))}]};}
+// The guarantee, made visible: ACM's ONE dial is a promised false-alarm
+// budget (alpha per asset-year), split across the evidence domains by
+// union bound. This was previously invisible in the UI - the product's
+// central object shown nowhere. Donut = the split; center = the promise.
+function budgetOption(budget){
+ if(!budget)return null;
+ const shares=Object.entries(budget.shares||{});
+ if(!shares.length)return null;
+ return {tooltip:{trigger:'item',
+   formatter:p=>`${p.name}<br>${(p.value*100).toFixed(0)}% of the budget`},
+  legend:{bottom:4,left:'center',textStyle:{color:CH.axis,fontSize:10},
+   itemWidth:9,itemHeight:9,icon:'circle'},
+  graphic:[{type:'text',left:'center',top:'34%',
+   style:{text:`<= ${budget.alpha_per_asset_year}`,fill:CH.text,fontSize:26,
+    fontWeight:'bold',fontFamily:'Consolas,Menlo,monospace',align:'center'}},
+   {type:'text',left:'center',top:'47%',
+   style:{text:'false alarm / asset-year',fill:CH.axis,fontSize:10,
+    fontFamily:'Consolas,Menlo,monospace',align:'center'}}],
+  series:[{type:'pie',radius:['46%','64%'],center:['50%','40%'],
+   label:{show:false},emphasis:{label:{show:false}},
+   itemStyle:{borderColor:CH.border,borderWidth:2},
+   data:shares.map(([name,share],i)=>({name,value:share,
+    itemStyle:{color:['#4aa3df','#8a76e0','#5b6b7d','#37b26c','#d8b636','#d88a36','#e05252'][i%7]}}))}]};}
 function costOption(rows){
  if(!rows||!rows.length)return null;
  const top=rows.slice(0,10);
@@ -956,6 +979,8 @@ function FleetCharts(){
   <div class="card"><h3>Fleet states</h3><${EChart} id="d-states" height=190 option=${statesOption(fleet.counts,fleet.assets)}/></div>
   <div class="card"><h3>Evidence - worst first (alarm at 1.0)</h3><${EChart} id="d-evidence" height=190 option=${evidenceOption(fleet.rows)}/></div>
   <div class="card"><h3>Confidence vs evidence (click a dot to open the asset)</h3><${EChart} id="d-scatter" height=190 option=${scatterOption(fleet.rows)} onReady=${onScatterReady}/></div>
+  <div class="card"><h3>The guarantee - alpha budget by evidence domain</h3>
+   <${EChart} id="d-budget" height=190 option=${budgetOption(fleet.budget)}/></div>
   <div class="card"><h3>Tick cost - slowest to score, worst first</h3>
    ${cost&&cost.rows.length?html`<${EChart} id="d-cost" height=190 option=${costOption(cost.rows)}/>`
     :html`<p class="muted" style="padding:20px">No tick has scored an asset yet in this session.</p>`}</div>
@@ -1216,6 +1241,9 @@ function PaneEvidence({d}){
     ${t.trajectory_match?html`<span class="pill st-escalating" title=${'tracking past episode '+t.trajectory_match.episode+' (dist '+t.trajectory_match.distance+')'}>~${fmtInt(t.trajectory_match.remaining_rows_estimate)} rows to peak</span>`:null}
     ${t.reason?html`<span class="pill st-insufficient-history" title=${t.reason}>insufficient: ${t.reason}</span>`:null}
     ${!t.reason&&!t.shape&&!eph.open_since?html`<span class="pill st-healthy">no active episode</span>`:null}
+    ${(()=>{const q=Object.entries(doms||{}).filter(([,d])=>d&&d.enabled&&(d.exchangeability_acf||0)>=0.1);
+      return q.length?html`<span class="pill st-watch"
+       title=${'residual correlation survives at the block scale in: '+q.map(([n,d])=>`${n} (acf ${d.exchangeability_acf})`).join(', ')+' - the false-alarm bound may be inflated up to ~2-3x for these domains until more history accumulates'}>guarantee qualified</span>`:null;})()}
    </div>
    <div class="schips" style="margin:var(--sp-4) 0 0">
     <span class="schip"><b>calib rows</b><span class="sval">${fmtInt((v.coverage||{}).calib_rows)}</span></span>

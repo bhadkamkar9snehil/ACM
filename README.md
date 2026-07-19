@@ -1,7 +1,5 @@
 # ACM - Asset Condition Monitor
 
-> Version 2.0 - the ground-up rewrite. The product is ACM; the 2 lives in the version field, not the name.
-
 ACM watches industrial assets and tells you when something is wrong -
 **unattended, with no labels, no training-data preparation, no
 thresholds to tune, and a mathematically guaranteed false-alarm
@@ -15,9 +13,9 @@ time-to-failure while a fault develops.
 **One dial.** The only configuration in the entire system is
 `ALPHA_PER_ASSET_YEAR` (default 1.0): the promised number of false
 alarms per asset per year. Everything else is derived from the asset's
-own data or is a structural constant with its rationale written next to
-it in the code (`src/constants.py`). There is no config file, no
-per-site table, no threshold sheet.
+own data or is a structural constant with its rationale written next
+to it in `src/constants.py`. There is no config file, no per-site
+table, no threshold sheet.
 
 ```bash
 ./install.sh          # or: .\install.ps1 on Windows (installs uv, syncs, self-tests)
@@ -25,284 +23,292 @@ uv run python -m service --root acm_data --port 8899 --tick-seconds 300
 # self-ticking fleet service + zero-build UI: open http://127.0.0.1:8899
 ```
 
-Design docs: `docs/acm-gem-plan.md` (the architecture),
-`docs/acm-rethink-plan.md` (why the rewrite), and
-`docs/acm-implementation-plan.md` (the build guide). The pre-rewrite
-system lives under [`lab/`](lab/README.md) as reference and tooling.
+Deep documentation:
+
+| Document | Contents |
+|---|---|
+| [`docs/how-acm-works.md`](docs/how-acm-works.md) | the complete explanation, from first principles - every layer, every architectural decision and its tradeoff |
+| [`docs/src-file-guide.md`](docs/src-file-guide.md) | what every file in `src/` does |
+| [`docs/testing-and-datasets.md`](docs/testing-and-datasets.md) | how to test ACM, and how to adapt any dataset into the shape it wants |
 
 ---
 
-## Why the guarantee is real (and not a threshold)
+## Why it is different
 
-Classical anomaly detection alerts when a score crosses a line, so its
-false-alarm rate is whatever the data decides it is. ACM instead runs
-**anytime-valid e-processes** over its surprise scores: a bank of
-betting processes wagers against the hypothesis "this asset is still
-healthy", and an alarm fires only when accumulated evidence crosses the
-Ville bound for the declared alpha. The math gives a hard ceiling on
-false alarms per anchor period regardless of when you look, how long
-the asset runs, or what the data distribution is - the guarantee is the
-contract, detection power is what improves with tiers and models.
+Classical monitoring alerts when a score crosses a line - so its
+false-alarm rate is whatever the data decides, and "tuning the
+threshold" quietly destroys any statistical meaning the score had. ACM
+inverts the contract: the operator declares the acceptable false-alarm
+rate, and the mathematics guarantees it.
 
-- Alarms **latch**: once evidence crosses, the episode stays open until
-  it is resolved (repair, re-anchor, or governed absorption) - evidence
-  is never quietly forgotten.
-- `REANCHORS_PER_YEAR = 52` converts the yearly rate dial into a
-  per-anchor probability, so weekly re-anchoring keeps the yearly
-  budget exact.
-- Block sizes for the e-process are **derived from calibration
-  autocorrelation** - fixed sizes false-alarmed on real 1 Hz pilots.
+- **No labels, ever.** Fault examples do not exist for the faults that
+  matter. Everything is learned from the asset's own unlabeled history.
+- **Anytime-valid.** The guarantee holds while checking every tick,
+  forever - no multiple-testing penalty, no "you looked too often".
+- **Evidence, not scores.** An alarm is the end of an accumulation you
+  can watch happening (the UI shows evidence climbing toward the alarm
+  line at 1.0), not a point spike crossing a magic number.
+- **Honest states.** `insufficient-history` (cannot promise the
+  guarantee yet - and says why) and `change-not-fault` (the machine
+  changed, legitimately) are first-class verdicts, not errors. When
+  the guarantee can only be qualified, the qualification is disclosed.
+- **Every verdict is falsifiable.** Each one states what observation
+  would overturn it - and that clause is mechanism, not prose: the
+  system acts on it.
 
-## What a verdict looks like
+## The architecture
 
-Every asset always has exactly one current verdict, and the contract is
-frozen (v1, `src/verdict.py`):
+```mermaid
+flowchart LR
+    subgraph ingest [Ingest]
+        RAW[(Raw store\nmonthly parquet\nUTC-strict, label-free)]
+        LIVE[Live buffers\nSQLite bridges]
+    end
+    subgraph scoring [Scoring]
+        SC[Scorer: per-row surprise\nT0 ridge / T2 neural]
+    end
+    subgraph decision [Decision]
+        B[7 e-process banks\nalpha split by union bound]
+    end
+    subgraph memory [Memory]
+        EP[Episodes:\nfault vs change]
+        LG[(Ledger)]
+        BL[Lifetime baseline\nrecency-capped]
+    end
+    subgraph explain [Explanation]
+        V[Verdict + narrative\nanatomy + prognosis]
+    end
+    IMM[Immune self-test\nweekly, per asset]
 
-| Field | Meaning |
-|---|---|
-| `state` | `healthy`, `insufficient-history`, `watch`, `alarm`, `escalating`, `change-not-fault` |
-| `confidence` | how sure the system is of the state word |
-| `evidence` | accumulated e-process evidence (alarm at >= 1.0) |
-| `evidence_trail` | everything behind the number: shape, novelty, episode start, signature match, anatomy, horizon |
-| `attribution` | which channels carry the surprise |
-| `coverage` | is the current operating point inside familiar territory? |
-| `model_epoch` | which learned model produced this |
-| `falsifiable_by` | what observation would overturn this verdict |
+    LIVE --> RAW --> SC --> B --> EP --> V
+    EP <--> LG
+    LG --> BL --> SC
+    IMM -.checks.-> SC
+    IMM -.checks.-> B
+```
 
-`escalating` carries a **failure-time distribution** (information-gain
-horizon plus a case-based trajectory match against the asset's own past
-episodes). `change-not-fault` carries a re-baseline proposal - and the
-runtime executes it (below).
+Every asset is an independent world - its own scorer, banks, episodes,
+baseline. A fleet is N monitors; one asset is a fleet of one.
 
-## The six evidence domains
+### One tick, end to end
 
-Six independent domains accumulate evidence in parallel, each with its
-own e-process bank and a share of the alpha budget (union bound keeps
-the total exact):
+```mermaid
+sequenceDiagram
+    participant L as Service loop
+    participant M as Monitor (per asset)
+    participant B as Evidence banks
+    participant E as Episode layer
+    participant UI as UI (WebSocket)
+    L->>M: new rows since last tick
+    M->>B: surprise streams (all 7 domains ingest every frame)
+    B-->>M: wealth / alarms per domain and timescale
+    M->>E: raw verdict
+    E-->>L: final verdict (shape, novelty, concentration,\nsignature match, horizon)
+    L->>L: governed absorption? staggered rebuild? immune due?
+    L-->>UI: push fleet state + activity
+```
 
-| Domain | Catches |
-|---|---|
-| **magnitude** | conditional surprise: each channel reconstructed from the others; residual z against lifetime calibration |
-| **availability** | the parked/silent machine - absence of data is evidence too |
-| **horizon-gap** | multi-horizon predictions diverging from actuals |
-| **predictability-band** | the asset becoming easier/harder to predict than its history says |
-| **transient-response** | startup/shutdown fingerprints drifting from the learned catalogue |
-| **dynamics-drift** | Koopman-style linear-dynamics drift - the machine's physics changing |
+### The verdict lifecycle
 
-## Episodes: faults vs changes, decided with corroboration
+```mermaid
+stateDiagram-v2
+    [*] --> insufficient_history : not enough valid history
+    insufficient_history --> healthy : guarantee armed
+    healthy --> watch : evidence rising
+    watch --> healthy : evidence decays
+    watch --> alarm : evidence >= 1.0
+    healthy --> alarm : evidence >= 1.0
+    alarm --> escalating : drift shape (fault-like)
+    alarm --> change_not_fault : step shape + coordinated move
+    change_not_fault --> healthy : absorbed after one anchor period\n(new normal, governed)
+    escalating --> healthy : repair + re-anchor\n(fault window masked forever)
+```
 
-Evidence crossing the bound opens an **episode** at the surprise onset
-(never at the frame boundary). The episode is then adjudicated:
+## The false-alarm guarantee, in one paragraph
 
-- **drift shape** -> `escalating` (fault-like, horizon attached).
-- **step shape + LOW attribution concentration** (a coordinated move
-  across channels, not a channel-local defect) -> `change-not-fault`.
-  Shape alone cannot separate a constant-severity fault from a setpoint
-  change - the concentration corroboration is what can, and it works
-  identically at every tier.
-- **signature match**: the episode is compared against the asset's own
-  ledgered past (channels + shape) and any recurrence is reported with
-  confidence.
+Surprise scores are converted to conformal p-values against a healthy
+calibration sample (pure counting - no distributional assumptions). A
+betting martingale compounds them into evidence: a fair game under
+health, exponential growth under sustained abnormality. Ville's
+inequality bounds the probability that the wealth EVER crosses
+`1/alpha` - so "evidence >= 1.0 => alarm" carries the promised bound
+at every moment of an unbounded watch. Autocorrelation is handled by
+aggregating scores into blocks sized from the asset's own measured
+decorrelation length - and when the history cannot support a valid
+block, ACM **refuses to arm** (honest `insufficient-history`) or arms
+with a **disclosed qualification**, never a silent fiction. Alarms
+latch until an episode is adjudicated: a self-resetting alarm would
+spend the budget twice.
 
-**Change-not-fault episodes absorb automatically**: when the new
-plateau has held for one full anchor period (about a week - the
-system's own cadence), the runtime re-anchors, the plateau becomes part
-of normal, and the alpha accounting still holds because an absorb IS an
-anchor. If surprise resumes on the absorbed baseline, a fresh episode
-opens and escalates - the falsifiability text on the verdict is
-mechanism, not prose. Fault episodes never self-absorb; they wait for
-resolution.
+## The seven evidence domains
 
-## Lifetime memory (the frog-proof baseline)
+The alpha budget is split across parallel evidence domains (union
+bound - shares sum to exactly 1.0, so the total promise holds no
+matter which domain fires). Each is a different failure geometry:
 
-The definition of "normal" comes from the asset's **entire life**,
-never a trailing window:
+| Domain | Share | Catches |
+|---|---|---|
+| **magnitude** | 0.40 | diffuse deviation: many channels off at once (mean of per-channel residuals) |
+| **channel-local** | 0.10 | single-channel faults that the mean dilutes on wide assets (top-3 residuals) |
+| **availability** | 0.15 | the parked/silent machine - absence of data is evidence too |
+| **horizon-gap** | 0.10 | slow drift a tracking model would hide (long- minus short-horizon surprise) |
+| **predictability-band** | 0.05 | the asset becoming easier OR harder to predict than its history says |
+| **transient-response** | 0.10 | startup/shutdown fingerprints drifting from the learned catalogue |
+| **dynamics-drift** | 0.10 | the machine's governing dynamics changing shape (operator re-identification) |
 
-- **Immortal raw store**: monthly parquet partitions, append-only,
-  atomic writes, timezone-strict UTC, column-order-insensitive, labels
-  rejected at the door.
-- **Mergeable summaries** make lifetime statistics cheap: count / mean
-  / variance merge exactly, quantiles within grid error.
-- **Recency cap** (`RECENCY_CAP = 0.20`): recent data can never hold
-  more than 20% of the baseline's weight, so a slow drift cannot boil
-  the frog - the drift the trailing-window design absorbed is exactly
-  the drift ACM alarms on (pinned by test).
-- **Episode ledger**: fault windows are masked out of the healthy
-  baseline; change-not-fault windows are absorbed into it (each state
-  means what it says). A mask that would leave no baseline is
-  self-refuting and gets repaired, never obeyed.
-- Everything derived (baselines, calibrations) is a cache; replaying
-  raw history regenerates it.
+## Episodes: fault or change?
 
-## First contact: the bootstrap
+Evidence crossing the bound opens an episode, back-dated to the
+measured surprise onset. Adjudication uses two independent axes -
+*shape* (drifting = fault-like; stepped = change-like) and
+*concentration* (channel-local = fault-like; coordinated across
+channels = change-like) - because either alone is ambiguous. A
+`change-not-fault` episode absorbs automatically once its plateau
+holds for one anchor period: the new operating point becomes normal,
+governed, with the alpha accounting intact. If the call was wrong,
+surprise resumes against the new baseline and a fresh episode opens -
+falsifiability as mechanism. Fault episodes never self-absorb.
 
-Real histories arrive contaminated. On first contact (once per asset
-lifetime, tracked durably), ACM runs **detect -> mask -> re-detect to
-convergence**: calibrate on the raw life, find episodes (a contiguous
-contamination scan plus a full e-process replay), ledger them, then
-recalibrate on the masked life and look again - each pass sees a
-cleaner definition of normal until nothing new is found. The service
-runs this in the tick loop, so the UI is never blocked by a deep
-history.
+Every closed episode - fault and absorbed change - lives permanently
+in the ledger, giving each asset a case history: new episodes are
+matched against it by signature (same channels, same shape: "seen
+before, resolved as X") and by trajectory ("tracking the 2025 bearing
+failure; ~3 weeks to its peak").
+
+## Lifetime memory
+
+The definition of normal comes from the asset's **entire life**, never
+a trailing window: recent data is arithmetically capped at 20% of the
+baseline's weight (a slow drift cannot boil the frog - the drift a
+trailing window absorbs is exactly the drift ACM alarms on), ledgered
+fault windows are masked out forever, and lifetime statistics stay
+cheap through mergeable monthly summaries. Calibration samples are
+built from consecutive chunks spread across the older life - never
+row-striding, which whitens the sample and quietly breaks the
+guarantee's block derivation.
+
+First contact runs **detect -> mask -> re-detect to convergence**:
+
+```mermaid
+flowchart LR
+    A[calibrate on raw life] --> B[replay through e-process\n+ contamination scan]
+    B --> C{new episodes?}
+    C -- yes --> D[ledger + mask] --> A2[recalibrate on masked life] --> B
+    C -- no --> E[converged - final audited calibration arms the guarantee]
+```
 
 ## The immune system
 
-A monitor that silently dies is worse than no monitor. Weekly (per
-asset, staggered), ACM validates itself:
-
-- **sensitivity profile**: canonical fault injections against the
-  pipeline recipe - can this asset's data even carry a detection?
-- **live degeneracy check**: is the deployed scorer's actual output
-  alive (a zeroed scorer passes the recipe check - found by test)?
-- **PIT conformance**: are the model's probabilities still calibrated?
-  (An immune signal only while NOT alarmed - a fault in the tail is not
-  model sickness.)
-
-A sick model triggers a governed rebuild, and the finding is a
-first-class event in the fleet summary.
+Weekly per asset (staggered), ACM tests itself with no labels: fault
+injections at a magnitude ladder into the asset's own held-out data
+(the measured detection floor - "will see a 1-sigma drift, not a
+0.5-sigma one"), a clean-holdout conformance check (the promise,
+spot-checked), a dead-scorer check (a silent zero reads as a healthy
+fleet - the worst failure), and counterfactual rehearsal: faults
+propagated through the machine's own learned couplings, mapping the
+honest detection boundary rather than the flattering one. A sick
+result drops confidence and triggers a governed rebuild.
 
 ## Hardware tiers - same guarantee, more power
 
-The verdict semantics are identical at every tier; only detection power
-differs.
+Verdict semantics are identical at every tier; only detection power
+differs. The tier is probed, never assumed - and if the probe claims
+GPU but torch cannot import, the degradation is loudly visible.
 
 | Tier | Scorer | When |
 |---|---|---|
-| **T0** | conditional ridge reconstruction (`ConditionalSurpriseScorer`) | any CPU box |
-| **T2 / T2-S** | per-channel quantile world model (`TorchWorldModel`) | torch importable + GPU-class hardware (probed, never assumed) |
+| **T0** | conditional ridge reconstruction | any CPU box |
+| **T2 / T2-S** | per-channel neural quantile world model | GPU-class hardware |
 
 First cross-tier datapoint on real SCADA (CARE Farm A, generator
 bearing failure): the world model detected at **48h lag vs Tier 0's
-240h** on the same event - after alarming early, classifying the early
-signal change-not-fault, absorbing it, and re-alarming when surprise
-resumed. (CPU cost of that power: ~19 min per calibration at 82
-channels - the GPU box is the intended home.)
+240h** on the same event.
 
-## Service, UI, API
+## The UI
 
-`python -m service` is the whole deployment: FastAPI + a
-self-ticking loop (guarded - a failing tick is logged and retried, the
-loop never dies silently) + a zero-build UI (one HTML file, no bundler,
-Apache ECharts vendored and served locally - deliberate, for air-gapped
-plants). The UI is REAL-TIME: a WebSocket (`/api/ws`) pushes the fleet
-state after every tick and every action, with automatic reconnect and a
-polling fallback; renders are skipped when nothing changed. A live
-ticker below the header shows the single most recent fleet-wide event
-on every page, not just the Activity tab. Fleet
-dashboard (state donut, worst-first evidence bars, confidence-vs-
-evidence scatter - click a dot to open the asset - plus a tick-cost
-chart: which assets are actually expensive to score) plus per-asset
-charts: health-index trajectory with zoom, evidence-domain bars against
-the alarm line, a per-domain per-timescale wealth heatmap (every e-process
-bank's own block-size members, not just whichever domain decided the
-verdict), a surprise-by-channel bar chart (the verdict's attribution as
-severity-colored bars, not a text list), familiarity/concentration/novelty
-gauges with episode-state pills, a live tick-by-tick feed scoped to that
-one asset, anatomy organ-surprise bars, failure-time distribution, episode
-timeline over real time, and immune floors with pass/fail status pills.
-The asset header shows evidence and confidence as bars against the alarm
-line; the health narrative keeps its one-sentence judgment visible and
-folds the full reasoning prose behind a toggle. Live sources attach
-with `--live "asset/key=buffer.db"` (repeatable): any bridge that
-writes the SQLite buffer shape `(ts, payload_json)` feeds the store on
-every tick.
+One HTML file, zero build, all libraries vendored - works air-gapped,
+deploys by copying a directory. Real-time over WebSocket with polling
+fallback. Chart-first by design:
+
+- **Fleet**: state donut, worst-first evidence bars, confidence-vs-
+  evidence scatter (click a dot to open the asset), the alpha-budget
+  donut (the guarantee, visible), tick-cost chart, sortable detail
+  table with sparklines, a live ticker of the latest fleet event on
+  every page.
+- **Per asset**: evidence and confidence as bars against the alarm
+  line; health-index trajectory with zoom; evidence-domain bars; a
+  domain-by-timescale wealth heatmap (every bank's internals, every
+  tick); surprise-by-channel bars (attribution you can see);
+  familiarity/concentration/novelty gauges with episode-state pills;
+  a per-asset live activity feed; anatomy organ bars; failure-time
+  distribution; episode timeline; immune floors, detection-profile
+  heatmap, and pass/fail pills. The narrative keeps its one-sentence
+  judgment visible and folds the full reasoning behind a toggle.
+
+## Commands
+
+```bash
+# --- run ---
+uv run python -m service --root acm_data --port 8899 --tick-seconds 300
+uv run python -m service --root acm_data \
+    --live "plant/asset-01=bridge_buffer.db"      # live SQLite bridge (repeatable)
+
+# --- test ---
+uv run pytest tests -q                            # full suite
+uv run pytest tests -q -m "not statistical"       # fast lane
+
+# --- evidence lane: real labeled datasets through the production path ---
+uv run python -m evidence.care_replay \
+    --farm-dir "care_data/Wind Farm A" --out results/care_A \
+    --scorer tier0                                # worldmodel | auto
+uv run python -m evidence.soak --out results/soak # implement-and-forget gate
+```
+
+Feeding data (programmatic seeding, live buffers, adapting any
+dataset): [`docs/testing-and-datasets.md`](docs/testing-and-datasets.md).
+
+## API
 
 | Endpoint | Purpose |
 |---|---|
-| `GET /api/assets` | fleet summary, worst-first, immune counts |
+| `GET /api/assets` | fleet summary, worst-first, immune counts, the alpha-budget ledger |
 | `GET /api/asset/{key}` | the full frozen verdict |
 | `GET /api/narrative/{key}` | the verdict as an operator-readable story |
-| `GET /api/domains/{key}` | per-domain evidence bars, including every domain's per-block-size member wealth (not just the domain that decided the verdict) |
-| `GET /api/health/{key}` | health-index series (prognosis trajectory) |
+| `GET /api/domains/{key}` | per-domain evidence incl. per-block-size member wealth and exchangeability status |
+| `GET /api/health/{key}` | health-index series |
+| `GET /api/episodes/{key}` | case history: ledgered faults AND absorbed changes, plus the open episode |
 | `GET /api/immune/{key}` / `POST /api/immune-pass/{key}` | immune status / run a pass now |
-| `GET /api/cost` | last-tick wall-clock cost per asset, worst-first - which assets are actually expensive to score |
+| `GET /api/cost` | last-tick wall-clock cost per asset, worst-first |
 | `POST /api/tick` / `POST /api/tick/{key}` | tick the fleet / one asset |
 | `POST /api/reanchor/{key}` | governed episode close + recalibration |
 | `POST /api/bootstrap/{key}` | first-contact cleaning on demand |
-| `GET /api/episodes/{key}` | the asset's case history: ledgered faults AND absorbed changes, plus the open episode |
 | `GET /api/report` | fleet report (markdown), worst-first |
-
-## Evidence lane (regression evidence, never tuning)
-
-Real-data replays run through the PRODUCTION path and land in
-gitignored `results/`; summaries go to the knowledge base.
-
-```bash
-# CARE-to-Compare farm replays (adapter declares UTC, labels never enter the store)
-uv run python -m evidence.care_replay \
-    --farm-dir "care_data/Wind Farm A" --events 40 68 --out results/acm_care_A
-# --scorer worldmodel|tier0|auto forces a cross-tier comparison
-
-# The implement-and-forget gate: real service + continuously-fed live buffer
-# through healthy -> setpoint change -> fault; exits non-zero on any failure
-uv run python -m evidence.soak --root results/soak1 --minutes 90
-```
-
-Current evidence (small samples, honestly labeled as such):
-
-- **Operational soak: PASSED all 8 criteria** - 37.5 compressed
-  asset-days: healthy stayed healthy, change declared and
-  auto-absorbed at exactly one anchor period, post-absorb plateau
-  healthy, fault alarmed on the absorbed baseline, zero tick failures,
-  RSS flat.
-- **CARE Farm A pilot (8 events)**: 0/5 normals false-alarmed (the
-  alpha guarantee held on real SCADA); generator-bearing anomaly hit
-  (Tier 0 lag 240h, world model 48h); one anomaly alarmed but
-  classified change-not-fault (open observation); one missed on an
-  8-day evidence runway (power, not a bug). CARE prediction windows
-  are 8-20 days - short runway for an e-process by construction.
-
-## Development
-
-```bash
-uv sync                                   # env from the committed lockfile
-uv run pytest tests                       # full suite (unit + statistical lanes)
-uv run pytest tests -m "not statistical"  # fast lane
-uv run pytest tests -m statistical        # acceptance lane (immune, conformance)
-```
-
-- **Issue-first**: every change has a GitHub issue; commits reference it.
-- **The statistical lane blocks like a unit test** - a change that
-  greens its target but reds the lane is rejected, not negotiated.
-- **The never-built list is the filter**: no trailing/trim windows, no
-  threshold rules, no distrust gates, no fusion auto-tuning, no
-  kurt/skew features. These are lessons, not omissions - the lab
-  earned each one.
-- `acm` never imports the legacy lab (CI-enforced import boundary);
-  ASCII-only in `src/` and `tests/` (CI-enforced).
-- `CLAUDE.md` is the knowledge base - the durable memory of every
-  lesson, kept current by rule.
+| `WS /api/ws` | real-time fleet + activity stream |
 
 ## Repository layout
 
 ```
-src/             the product (flat src-layout; no wrapping package -
-                 service/runtime/decision/scoring/... import directly)
+src/             the product (flat layout: service.py, runtime.py,
+                 monitor.py, episodes.py, decision/, scoring/, memory/,
+                 immune/, evidence/, store/, ingest/, ui.html)
 tests/           unit + statistical + evidence-machinery tests
+docs/            how-acm-works, src-file-guide, testing-and-datasets
 install.sh|ps1   one-command install (uv-based)
-pyproject.toml   uv-locked project; the ONLY tunable is the alpha dial
-docs/            design plans, build guide, ml-book, legacy docs
-paper/           research paper draft (Markdown)
-lab/             the pre-rewrite ACM1 system: six-detector pipeline,
-                 simulator, CARE/public-dataset benchmark harnesses -
-                 reference + tooling, not the product (lab/README.md)
-CLAUDE.md        the knowledge base
+lab/             the previous-generation system: kept as reference and
+                 dataset/benchmark tooling (lab/README.md)
 ```
 
-## The legacy lab
+## Current evidence (small samples, honestly labeled as such)
 
-The pre-rewrite system (stateless six-detector pipeline, correlation-
-discounted fusion, self-tuned alarm rules, the full simulator, CARE and
-public-dataset benchmark harnesses) is fully documented in
-[`lab/README.md`](lab/README.md) and runs from `lab/`:
-
-```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/bhadkamkar9snehil/ACM/main/lab/setup.sh)   # Linux/macOS
-irm https://raw.githubusercontent.com/bhadkamkar9snehil/ACM/main/lab/setup_acm.ps1 | iex       # Windows
-cd ~/ACM/lab && python scripts/acm_service.py   # -> http://localhost:8765
-```
-
-Its datasets and harnesses remain ACM's evidence fuel; its hard-won
-failures (the OMR in-sample bias, the GMM dimensionality collapse, the
-contamination-filter rejection, the empty-rule_fired diagnosis) are why
-ACM's never-built list exists.
+- **Operational soak: passed all 8 criteria** over 37.5 compressed
+  asset-days: healthy stayed healthy, a coordinated setpoint change
+  was declared change-not-fault and auto-absorbed at exactly one
+  anchor period, a subsequent fault alarmed on the absorbed baseline,
+  zero tick failures, flat memory.
+- **CARE Farm A pilot (8 events)**: 0/5 normal events false-alarmed
+  (the alpha promise held on real SCADA); the generator-bearing
+  anomaly was detected (Tier 0 lag 240h, world model 48h); one
+  anomaly alarmed but was classified change-not-fault (recorded as an
+  open observation); one was missed on an 8-day evidence runway -
+  CARE prediction windows are 8-20 days, a short runway for evidence
+  accumulation by construction.
