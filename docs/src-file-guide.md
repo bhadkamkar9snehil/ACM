@@ -137,10 +137,19 @@ flowchart TD
   channel-local lens (`score_topk`), PIT values + distortion
   classification, attribution with magnitudes, operating-point
   familiarity, concentration.
-- **`worldmodel.py`** - `TorchWorldModel` (Tier 2): one small MLP per
-  channel with quantile heads (pinball loss), self-history excluded by
-  design, grouped-batch GPU training with per-channel early stop;
-  contract-identical interface to Tier 0.
+- **`worldmodel.py`** - the Tier 2 world models, two architectures
+  behind one contract-identical interface (shared `_ResidualLenses`
+  base so score/PIT/attribution/concentration cannot drift between
+  them). `TorchWorldModel`: one small MLP per channel with quantile
+  heads (pinball loss), self-history excluded by design, grouped-batch
+  GPU training with per-channel early stop - O(d^2) compute in channel
+  count. `MaskedWorldModel` (#100): ONE shared trunk trained
+  masked-reconstruction style - a fixed seeded channel partition is
+  masked group by group (all lags plus a mask-indicator input) and each
+  channel's prediction is only read from the pass where it was masked,
+  so own-history exclusion holds by construction and compute/memory are
+  O(d). Override-only (not governor-selected) until CARE evidence-lane
+  parity on the GPU box lands.
 - **`availability.py`** - the standstill lens: fraction of channels
   whose rolling variance collapsed against their CALIBRATED live scale,
   plus cadence-gap detection.

@@ -188,6 +188,21 @@ measured, not hypothesized), and its interface is contract-identical to
 Tier 0 (same score/attribution/concentration/coverage methods), so the
 verdict vocabulary never depends on the hardware tier.
 
+For very wide assets there is a second Tier 2 architecture,
+`MaskedWorldModel`: instead of d per-channel networks (whose compute
+grows with the *square* of channel count), ONE shared trunk learns to
+reconstruct any masked group of channels from the rest, with a mask
+indicator distinguishing "unknown" from "at the median". A channel's
+prediction is only ever read from the pass where that channel and all
+its lagged copies were masked out of the input - the same
+no-self-conditioning rule, enforced by construction (tests pin it
+exactly: shifting a channel's values moves its residual one-for-one,
+proving the prediction cannot see the shift). The mask partition is
+fixed and seeded, so training and scoring see identical inputs and
+scores are deterministic. It is deliberately not chosen automatically:
+until it has earned detection parity on the real-data evidence lane, it
+is reachable only by explicit override.
+
 ### 3.2 Decision: from surprise to evidence to alarm
 
 This is the mathematical heart of ACM (`decision/eprocess.py`), and the

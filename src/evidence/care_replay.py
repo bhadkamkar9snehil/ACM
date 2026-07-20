@@ -106,6 +106,10 @@ def _scorer_cls(name: str) -> type | None:
         from scoring.worldmodel import TorchWorldModel
 
         return TorchWorldModel
+    if name == "masked":
+        from scoring.worldmodel import MaskedWorldModel
+
+        return MaskedWorldModel
     raise ValueError(f"unknown scorer {name!r}")
 
 
@@ -292,10 +296,12 @@ def main() -> int:
     ap.add_argument("--chunk-rows", type=int, default=DEFAULT_CHUNK_ROWS)
     ap.add_argument(
         "--scorer",
-        choices=("auto", "tier0", "worldmodel"),
+        choices=("auto", "tier0", "worldmodel", "masked"),
         default="auto",
         help="force a scorer for cross-tier comparison (#91); "
-        "auto follows the probed hardware tier",
+        "auto follows the probed hardware tier; masked is the O(d) "
+        "shared-trunk world model (#100, override-only until parity "
+        "evidence lands)",
     )
     args = ap.parse_args()
     replay_farm(

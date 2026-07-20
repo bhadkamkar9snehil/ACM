@@ -265,7 +265,7 @@ uv run pytest tests -q -m "not statistical"       # fast lane
 # --- evidence lane: real labeled datasets through the production path ---
 uv run python -m evidence.care_replay \
     --farm-dir "care_data/Wind Farm A" --out results/care_A \
-    --scorer tier0                                # worldmodel | auto
+    --scorer tier0                                # worldmodel | masked | auto
 uv run python -m evidence.soak --out results/soak # implement-and-forget gate
 ```
 

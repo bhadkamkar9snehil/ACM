@@ -1,6 +1,12 @@
 """S7 spike, in-tree: the world model must beat the ridge conditioner
 where nonlinearity exists, with calibrated PIT - the GO criteria from the
-board brief, executable evidence instead of a memo."""
+board brief, executable evidence instead of a memo.
+
+Every gate runs for BOTH world-model architectures (#100): the
+per-channel TorchWorldModel and the O(d) shared-trunk MaskedWorldModel.
+The contract is one scorer interface with tier-free verdict semantics -
+an architecture that cannot pass the same gates is not a world model.
+"""
 
 from datetime import datetime, timedelta, timezone
 
@@ -11,11 +17,13 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from scoring.surprise import ConditionalSurpriseScorer, ks_uniform
-from scoring.worldmodel import TorchWorldModel
+from scoring.worldmodel import MaskedWorldModel, TorchWorldModel
 from store.raw import TIMESTAMP_COL
 
 UTC = timezone.utc
 pytestmark = pytest.mark.statistical
+
+WM_CLASSES = (TorchWorldModel, MaskedWorldModel)
 
 
 def nonlinear_machine(n, seed=0, fault=0.0):
@@ -49,11 +57,12 @@ def nonlinear_machine(n, seed=0, fault=0.0):
     )
 
 
-@pytest.fixture(scope="module")
-def fitted_pair():
+@pytest.fixture(scope="module", params=WM_CLASSES,
+                ids=lambda c: c.__name__)
+def fitted_pair(request):
     frame = nonlinear_machine(8000, seed=1)
     fit = frame.head(6000)
-    wm = TorchWorldModel().fit(fit)
+    wm = request.param().fit(fit)
     ridge = ConditionalSurpriseScorer().fit(fit)
     return wm, ridge, frame
 
@@ -87,12 +96,47 @@ def test_spike_go_beats_ridge_on_nonlinear_coupling(fitted_pair):
     assert sep_wm > 1.2 * sep_ridge, (sep_wm, sep_ridge)
 
 
-def test_world_model_drops_into_the_monitor(fitted_pair):
+def test_own_channel_invariance(fitted_pair):
+    """C9, pinned exactly: a channel's PREDICTION must not depend on the
+    channel's own values (contemporaneous or lagged). Shift vib by a
+    constant delta - vib's residual z must move by exactly
+    delta/resid_scale (the prediction cannot see the shift). Holds for
+    the per-channel model by input pruning and for the masked model by
+    mask construction; a violation here is the tracking-model failure
+    that hides developing faults."""
+    wm, _ridge, frame = fitted_pair
+    healthy_tail = frame.slice(6000)
+    j = wm.channels.index("vib")
+    delta_raw = 3.0 * float(wm.scales[j])
+    rz0 = wm._residual_z(healthy_tail)
+    shifted = healthy_tail.with_columns(
+        (pl.col("vib") + delta_raw).alias("vib")
+    )
+    rz1 = wm._residual_z(shifted)
+    expected = (delta_raw / float(wm.scales[j])) / float(wm.resid_scales[j])
+    got = rz1[:, j] - rz0[:, j]
+    assert np.allclose(got, expected, rtol=1e-4), (
+        float(np.median(got)), expected
+    )
+
+
+def test_scoring_deterministic(fitted_pair):
+    """The e-process must never see scoring noise: two score() calls
+    over the same frame are byte-identical (the masked model's fixed
+    seeded partition is what makes this true there)."""
+    wm, _ridge, frame = fitted_pair
+    tail = frame.slice(6000)
+    assert np.array_equal(wm.score(tail), wm.score(tail))
+    assert np.array_equal(wm.score_topk(tail), wm.score_topk(tail))
+
+
+@pytest.mark.parametrize("wm_cls", WM_CLASSES, ids=lambda c: c.__name__)
+def test_world_model_drops_into_the_monitor(wm_cls):
     """Interface parity: the world model is a drop-in scorer_cls - same
     spine, same banks, same verdicts (D6/D7: the swap is architectural)."""
     from monitor import AssetMonitor
 
-    mon = AssetMonitor("wm/1", scorer_cls=TorchWorldModel)
+    mon = AssetMonitor("wm/1", scorer_cls=wm_cls)
     assert mon.calibrate(nonlinear_machine(6000, seed=3))
     ok = mon.process(nonlinear_machine(1500, seed=4))
     assert ok.state != "alarm"
@@ -140,7 +184,7 @@ def test_concentration_cross_tier_parity():
     coordinated = frame(shift_all=2.5, start_i=n)
     local = frame(vib_fault=4.0, start_i=2 * n)
 
-    for scorer_cls in (ConditionalSurpriseScorer, TorchWorldModel):
+    for scorer_cls in (ConditionalSurpriseScorer, *WM_CLASSES):
         scorer = scorer_cls().fit(healthy)
         assert hasattr(scorer, "concentration"), scorer_cls.__name__
         c_coord = scorer.concentration(coordinated)
