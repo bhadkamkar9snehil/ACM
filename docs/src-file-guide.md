@@ -104,7 +104,21 @@ flowchart TD
   (detect -> mask -> re-detect), per-tick orchestration (live-buffer
   drain, scoring, governed absorption, staggered weekly rebuilds and
   immune passes), the activity stream, and the aggregate fleet summary
-  (including the alpha budget ledger).
+  (including the alpha budget ledger). `fleet_worker_count` (#133, default
+  1/sequential everywhere except the live service) fans onboard/bootstrap
+  out across a ProcessPoolExecutor via `fleet_workers.py`.
+- **`fleet_workers.py`** (#133) - the parallel onboard/bootstrap
+  algorithm and its two ProcessPoolExecutor entry points. Shared
+  free-function versions of `run_onboard`/`run_bootstrap` (used by both
+  the sequential `Runtime` methods and the worker processes - one
+  algorithm, not two) plus the monitor-cache free functions. Workers
+  never write to the shared ledger/bootstrapped-marker files (each is a
+  single file for the whole fleet - concurrent writers would race and
+  lose updates); a worker's ledger changes are diffed and applied by the
+  parent, sequentially, as futures complete. `worker_init()` sets the
+  BLAS thread-count guard before a worker's first numpy import (spawn
+  context, never fork - the predecessor system's fork+BLAS deadlock,
+  CLAUDE.md mistake #44).
 - **`scheduler.py`** - thin async fleet scheduler used by the service
   loop.
 - **`service.py`** - FastAPI app: JSON API, WebSocket push, the

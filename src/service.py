@@ -11,6 +11,20 @@ Run: uv run python -m service [--root <data_root>] [--port 8899]
 
 from __future__ import annotations
 
+# BLAS thread-count guard: MUST run before numpy is imported ANYWHERE in
+# this process - the lab's hard-won, documented deadlock (CLAUDE.md
+# mistake #44): unconstrained BLAS thread pools forking under
+# ProcessPoolExecutor load, silently, permanently. hardware.py itself
+# imports no numpy, so this is safe to run before every other import
+# here. Previously this call was made further down, inside main(), AFTER
+# `from runtime import Runtime` below had already pulled numpy in
+# uncapped - found and fixed while wiring #133's parallel fleet workers,
+# which made this guard load-bearing for the first time (no
+# ProcessPoolExecutor existed in this codebase before #133).
+from hardware import set_thread_caps
+
+set_thread_caps(1)
+
 import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -377,10 +391,11 @@ def main() -> None:  # pragma: no cover - manual entrypoint
 
     import uvicorn
 
-    from hardware import set_thread_caps
+    from hardware import Governor, probe
     from store.raw import RawStore
 
-    set_thread_caps(1)
+    # (set_thread_caps already ran at module import time, above - see
+    # the comment there)
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", default="acm_data")
     parser.add_argument("--port", type=int, default=8899)
@@ -397,7 +412,15 @@ def main() -> None:  # pragma: no cover - manual entrypoint
     )
     args = parser.parse_args()
     root = Path(args.root).resolve()
-    runtime = Runtime(store=RawStore(root / "raw"), data_root=root)
+    # #133: the live service is the one Runtime construction site that
+    # opts into parallel fleet onboard/bootstrap - tests, the evidence
+    # lane, and the soak all get the dataclass default (1, sequential),
+    # deliberately unaffected.
+    governor = Governor.from_probe(probe())
+    runtime = Runtime(
+        store=RawStore(root / "raw"), data_root=root, governor=governor,
+        fleet_worker_count=governor.evidence_workers,
+    )
 
     def deferred_setup(on_progress=None) -> None:
         # onboarding calibrates every asset from its lifetime history -

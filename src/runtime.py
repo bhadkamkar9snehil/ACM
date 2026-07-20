@@ -16,6 +16,7 @@ from pathlib import Path
 
 import polars as pl
 
+import fleet_workers as _fw
 import verdict as V
 from episodes import EpisodicMonitor
 from hardware import Governor, probe, record_asset_cost, record_stage_cost
@@ -37,6 +38,14 @@ class Runtime:
     # probed tier - verdict semantics are tier-free, so cross-tier
     # comparisons run the SAME runtime with only this swapped
     scorer_cls_override: type | None = None
+    # #133: onboard/bootstrap fan out across a ProcessPoolExecutor when
+    # > 1. Defaults to 1 (sequential, today's exact behavior) everywhere
+    # a Runtime is constructed except the live service, which explicitly
+    # passes the hardware-probed worker count - tests, the evidence
+    # lane, and the soak are deliberately unaffected by default (tiny
+    # synthetic fixtures have nothing to gain from pool-spawn overhead,
+    # and a silent default-on would make the test suite flaky/slow).
+    fleet_worker_count: int = 1
     monitors: dict[str, EpisodicMonitor] = field(default_factory=dict)
     verdicts: dict[str, V.Verdict] = field(default_factory=dict)
     previous_verdicts: dict[str, V.Verdict] = field(default_factory=dict)
@@ -111,12 +120,17 @@ class Runtime:
 
         return ConditionalSurpriseScorer
 
-    def log(self, asset_key: str, kind: str, msg: str) -> None:
+    def log(self, asset_key: str, kind: str, msg: str, at: str | None = None) -> None:
         """Append one activity event and push it to any live observer.
         kind is a short slug (onboard/bootstrap/tick/train/...) the UI
-        colors by; msg is the human-readable step."""
+        colors by; msg is the human-readable step. `at` lets a caller
+        replay a worker-process log line with its TRUE wall-clock
+        timestamp (#133: a parallel worker's steps are buffered and
+        replayed here only once the worker returns - the timestamp
+        should reflect when the step actually happened, not when it
+        was relayed)."""
         event = {
-            "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "at": at or datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "asset_key": asset_key,
             "kind": kind,
             "msg": msg,
@@ -148,28 +162,13 @@ class Runtime:
     # everything that would change the fit - store content, ledger fault
     # windows, scorer class. Any mismatch = silent recalibration.
     def _monitor_fingerprint(self, asset_key: str, scorer_cls) -> str:
-        import hashlib
-
-        from memory.ledger import FAULT_STATES
-
-        from _version import __version__ as _ver
-
-        windows = tuple(self.ledger.windows(asset_key, states=FAULT_STATES))
-        span = self.store.span(asset_key)
-        raw = (
-            self.store.row_count(asset_key),
-            str(span[1]) if span else "",
-            windows,
-            scorer_cls.__name__,
-            # code version: a monitor pickled by different code must never
-            # be trusted - AssetMonitor's structure can change between
-            # releases and unpickle would not complain
-            _ver,
-        )
-        # hashlib, NEVER hash(): builtin hash is salted per process, so a
-        # hash()-based fingerprint can never match across a restart -
-        # which is the only time this cache matters
-        return hashlib.sha1(repr(raw).encode()).hexdigest()[:16]
+        # delegates to fleet_workers.monitor_fingerprint (#133) - the
+        # SAME algorithm a worker process uses (no Runtime instance
+        # available there), so the two can never drift apart. hashlib,
+        # never hash(): builtin hash is salted per process, so a
+        # hash()-based fingerprint can never match across a restart (or
+        # a worker process) - which is the only time this cache matters.
+        return _fw.monitor_fingerprint(self.store, self.ledger, asset_key, scorer_cls)
 
     @staticmethod
     def _stagger(asset_key: str, salt: int = 0) -> int:
@@ -185,47 +184,27 @@ class Runtime:
         return int(digest[:8], 16)
 
     def _monitor_cache_path(self, asset_key: str, scorer_cls) -> Path:
-        from store.raw import _safe_key
-
-        d = self.cache_root / _safe_key(asset_key)
-        d.mkdir(parents=True, exist_ok=True)
-        return d / (
-            f"monitor-{self._monitor_fingerprint(asset_key, scorer_cls)}.pkl"
+        return _fw.monitor_cache_path(
+            self.cache_root, asset_key, self._monitor_fingerprint(asset_key, scorer_cls)
         )
 
     def _save_monitor_cache(self, asset_key: str) -> None:
-        import pickle
-
         em = self.monitors[asset_key]
         try:
-            path = self._monitor_cache_path(
-                asset_key, em.monitor.scorer_cls
-            )
-            tmp = path.with_suffix(".tmp")
-            tmp.write_bytes(pickle.dumps(em.monitor))
-            tmp.replace(path)
-            # stale fingerprints of this asset are dead weight
-            for old in path.parent.glob("monitor-*.pkl"):
-                if old != path:
-                    old.unlink(missing_ok=True)
+            fp = self._monitor_fingerprint(asset_key, em.monitor.scorer_cls)
+            _fw.save_monitor_cache(em.monitor, self.cache_root, asset_key, fp)
         except Exception as exc:  # noqa: BLE001 - cache is an optimization
             self.log(asset_key, "service",
                      f"monitor cache save failed ({exc}) - will recalibrate "
                      f"on next start")
 
     def _load_monitor_cache(self, asset_key: str, scorer_cls):
-        import pickle
-
-        path = self._monitor_cache_path(asset_key, scorer_cls)
-        if not path.exists():
+        monitor = _fw.load_monitor_cache(
+            self.cache_root, asset_key, scorer_cls, self.store, self.ledger
+        )
+        if monitor is not None and monitor.asset_key != asset_key:
             return None
-        try:
-            monitor = pickle.loads(path.read_bytes())
-            if monitor.asset_key != asset_key:
-                return None
-            return monitor
-        except Exception:  # noqa: BLE001 - a bad cache is just a miss
-            return None
+        return monitor
 
     def onboard(self, asset_key: str) -> bool:
         scorer_cls = self._select_scorer_cls()
@@ -240,25 +219,13 @@ class Runtime:
                 "unchanged since last calibration)",
             )
             return True
-        self.log(
-            asset_key,
-            "onboard",
-            f"calibrating from lifetime history (scorer {scorer_cls.__name__})",
-        )
         t0 = time.monotonic()
-        em = EpisodicMonitor(
-            AssetMonitor(asset_key, scorer_cls=scorer_cls),
-            self.ledger,
+        monitor, ok = _fw.run_onboard(
+            asset_key, self.store, self.ledger, self.cache_root, scorer_cls,
+            progress=self._train_observer(asset_key),
+            log=lambda kind, msg: self.log(asset_key, kind, msg),
         )
-        from scoring import worldmodel as _wm
-
-        _wm.on_progress = self._train_observer(asset_key)
-        try:
-            ok = em.monitor.calibrate_from_lifetime(
-                self.store, ledger=self.ledger, cache_root=self.cache_root
-            )
-        finally:
-            _wm.on_progress = None
+        em = EpisodicMonitor(monitor, self.ledger)
         self.monitors[asset_key] = em
         self._tick_counts[asset_key] = 0
         if not ok:
@@ -288,17 +255,129 @@ class Runtime:
                 self.busy.setdefault(key, "queued")
         if on_progress is not None:
             on_progress()
-        out = {}
+
+        # cache hits are a pickle load, not worth a worker process - only
+        # genuine calibration work (#133's actual cost) gets parallelized
+        out: dict[str, bool] = {}
+        to_calibrate: list[str] = []
+        scorer_cls = self._select_scorer_cls()
+        for key in keys:
+            if self._load_monitor_cache(key, scorer_cls) is not None:
+                self.busy[key] = "onboarding"
+                if on_progress is not None:
+                    on_progress()
+                out[key] = self.onboard(key)
+                self.busy.pop(key, None)
+                if on_progress is not None:
+                    on_progress()
+            else:
+                to_calibrate.append(key)
+
+        out.update(self._onboard_parallel(to_calibrate, scorer_cls, on_progress))
+        return out
+
+    def _onboard_parallel(
+        self, keys: list[str], scorer_cls, on_progress=None
+    ) -> dict[str, bool]:
+        """Fans calibrate_from_lifetime out across fleet_worker_count
+        worker processes (#133). Falls back to the exact sequential loop
+        when there is nothing to gain (fleet_worker_count<=1, or a
+        single asset - pool-spawn overhead would only lose)."""
+        out: dict[str, bool] = {}
+        if not keys:
+            return out
+        if self.fleet_worker_count <= 1 or len(keys) <= 1:
+            for key in keys:
+                self.busy[key] = "onboarding"
+                if on_progress is not None:
+                    on_progress()
+                out[key] = self.onboard(key)
+                self.busy.pop(key, None)
+                if on_progress is not None:
+                    on_progress()
+            return out
+
+        from concurrent.futures import ProcessPoolExecutor, as_completed
+        from concurrent.futures.process import BrokenProcessPool
+
         for key in keys:
             self.busy[key] = "onboarding"
-            if on_progress is not None:
-                on_progress()
-            try:
+        if on_progress is not None:
+            on_progress()
+        try:
+            with ProcessPoolExecutor(
+                max_workers=self.fleet_worker_count,
+                mp_context=_fw.spawn_context(), initializer=_fw.worker_init,
+            ) as pool:
+                futures = {
+                    pool.submit(
+                        _fw.onboard_worker, key, str(self.store.root),
+                        str(self.cache_root), scorer_cls,
+                    ): key
+                    for key in keys
+                }
+                for fut in as_completed(futures):
+                    key = futures[fut]
+                    try:
+                        res = fut.result()
+                    except BrokenProcessPool:
+                        # pool-WIDE catastrophe (e.g. workers crashed at
+                        # their own startup) - NOT a per-asset failure.
+                        # Escalate rather than silently mis-reporting
+                        # every asset as insufficient-history (found live:
+                        # a caller without the multiprocessing spawn
+                        # module's required `__main__` guard makes every
+                        # worker crash before running any real work).
+                        raise
+                    except Exception as exc:  # noqa: BLE001
+                        self.log(key, "service", f"onboard worker FAILED: {exc}")
+                        em = EpisodicMonitor(
+                            AssetMonitor(key, scorer_cls=scorer_cls), self.ledger
+                        )
+                        self.monitors[key] = em
+                        self._tick_counts[key] = 0
+                        self.verdicts[key] = em.process(pl.DataFrame())
+                        out[key] = False
+                    else:
+                        for at, kind, msg in res["log_lines"]:
+                            self.log(key, kind, msg, at=at)
+                        if res["ok"]:
+                            cached = self._load_monitor_cache(key, scorer_cls)
+                            em = EpisodicMonitor(cached, self.ledger)
+                        else:
+                            em = EpisodicMonitor(
+                                AssetMonitor(key, scorer_cls=scorer_cls), self.ledger
+                            )
+                        self.monitors[key] = em
+                        self._tick_counts[key] = 0
+                        if not res["ok"]:
+                            self.verdicts[key] = em.process(pl.DataFrame())
+                        record_stage_cost(key, "onboard", res["dt"])
+                        out[key] = res["ok"]
+                    self.busy.pop(key, None)
+                    if on_progress is not None:
+                        on_progress()
+        except BrokenProcessPool as exc:
+            self.log(
+                "-", "service",
+                f"parallel onboard pool failed to start ({exc}) - falling "
+                "back to sequential for the remaining assets. If Runtime "
+                "is constructed and onboard_all()/bootstrap_virgin() are "
+                "called from a standalone script (not `python -m "
+                "service`), that code needs an `if __name__ == "
+                "'__main__':` guard - required by Python's multiprocessing "
+                "spawn context (docs: 'Safe importing of main module').",
+            )
+            for key in keys:
+                if key in out:
+                    continue
+                self.busy[key] = "onboarding"
+                if on_progress is not None:
+                    on_progress()
                 out[key] = self.onboard(key)
-            finally:
                 self.busy.pop(key, None)
-            if on_progress is not None:
-                on_progress()
+                if on_progress is not None:
+                    on_progress()
         return out
 
     def bootstrap_virgin(self, on_progress=None) -> dict[str, dict]:
@@ -311,6 +390,7 @@ class Runtime:
         Pre-marker data roots: existing ledger windows are accepted as
         evidence of a prior first contact (and back-filled into the
         marker), so old deployments are not re-bootstrapped either."""
+        pending: list[str] = []
         out = {}
         for key in self.monitors:
             if key in self._bootstrapped:
@@ -318,15 +398,129 @@ class Runtime:
             if self.ledger.windows(key):
                 self._mark_bootstrapped(key)
                 continue
-            self.busy[key] = "bootstrapping"
-            if on_progress is not None:
-                on_progress()
-            try:
-                out[key] = self.bootstrap(key)
-            finally:
-                self.busy.pop(key, None)
+            pending.append(key)
+        out.update(self._bootstrap_parallel(pending, on_progress))
+        return out
+
+    def _bootstrap_parallel(
+        self, keys: list[str], on_progress=None
+    ) -> dict[str, dict]:
+        """Fans first-contact bootstrap out across fleet_worker_count
+        worker processes (#133) - the stage that dominates a fresh
+        fleet's first minutes. Falls back to the exact sequential loop
+        when there is nothing to gain."""
+        out: dict[str, dict] = {}
+        if not keys:
+            return out
+        if self.fleet_worker_count <= 1 or len(keys) <= 1:
+            for key in keys:
+                self.busy[key] = "bootstrapping"
                 if on_progress is not None:
                     on_progress()
+                try:
+                    out[key] = self.bootstrap(key)
+                finally:
+                    self.busy.pop(key, None)
+                    if on_progress is not None:
+                        on_progress()
+            return out
+
+        from concurrent.futures import ProcessPoolExecutor, as_completed
+        from concurrent.futures.process import BrokenProcessPool
+        from dataclasses import asdict
+
+        from memory.ledger import Episode
+
+        scorer_cls = self._select_scorer_cls()
+        for key in keys:
+            self.busy[key] = "bootstrapping"
+        if on_progress is not None:
+            on_progress()
+        try:
+            with ProcessPoolExecutor(
+                max_workers=self.fleet_worker_count,
+                mp_context=_fw.spawn_context(), initializer=_fw.worker_init,
+            ) as pool:
+                futures = {
+                    pool.submit(
+                        _fw.bootstrap_worker, key, str(self.store.root),
+                        str(self.cache_root), scorer_cls,
+                        [
+                            asdict(e) for e in self.ledger.episodes
+                            if e.asset_key == key
+                        ],
+                    ): key
+                    for key in keys
+                }
+                for fut in as_completed(futures):
+                    key = futures[fut]
+                    try:
+                        res = fut.result()
+                    except BrokenProcessPool:
+                        # pool-WIDE catastrophe, not a per-asset failure -
+                        # escalate (see _onboard_parallel's identical
+                        # guard for why)
+                        raise
+                    except Exception as exc:  # noqa: BLE001
+                        self.log(key, "service", f"bootstrap worker FAILED: {exc}")
+                        # do not retry forever on a poison asset - a
+                        # repeated crash on every service restart is worse
+                        # than one asset staying in its pre-bootstrap state
+                        self._mark_bootstrapped(key)
+                        out[key] = {"asset": key, "error": str(exc)}
+                    else:
+                        for at, kind, msg in res["log_lines"]:
+                            self.log(key, kind, msg, at=at)
+                        # the parent is the ONLY ledger/marker writer -
+                        # apply the worker's diff sequentially here, never
+                        # inside a worker (fleet_workers.py module docstring)
+                        for e in res["added_episodes"]:
+                            self.ledger.add(Episode(**e))
+                        for e in res["removed_episodes"]:
+                            self.ledger.remove(Episode(**e))
+                        self._last_seen[key] = res["last_seen"]
+                        self._mark_bootstrapped(key)
+                        if res["final_calibration"]:
+                            cached = self._load_monitor_cache(key, scorer_cls)
+                            if cached is not None:
+                                self.monitors[key] = EpisodicMonitor(cached, self.ledger)
+                                self._tick_counts[key] = 0
+                        record_stage_cost(
+                            key, "bootstrap", res["dt"], res["history_rows"]
+                        )
+                        out[key] = {
+                            "asset": key,
+                            "passes": res["passes"],
+                            "final_calibration": res["final_calibration"],
+                            "dropped_self_refuting_windows":
+                                res["dropped_self_refuting_windows"],
+                        }
+                    self.busy.pop(key, None)
+                    if on_progress is not None:
+                        on_progress()
+        except BrokenProcessPool as exc:
+            self.log(
+                "-", "service",
+                f"parallel bootstrap pool failed to start ({exc}) - falling "
+                "back to sequential for the remaining assets. If Runtime "
+                "is constructed and onboard_all()/bootstrap_virgin() are "
+                "called from a standalone script (not `python -m "
+                "service`), that code needs an `if __name__ == "
+                "'__main__':` guard - required by Python's multiprocessing "
+                "spawn context (docs: 'Safe importing of main module').",
+            )
+            for key in keys:
+                if key in out:
+                    continue
+                self.busy[key] = "bootstrapping"
+                if on_progress is not None:
+                    on_progress()
+                try:
+                    out[key] = self.bootstrap(key)
+                finally:
+                    self.busy.pop(key, None)
+                    if on_progress is not None:
+                        on_progress()
         return out
 
     def _mark_bootstrapped(self, asset_key: str) -> None:
@@ -701,249 +895,36 @@ class Runtime:
         return moved
 
     # -------------------------------------------------------- bootstrap
-    @staticmethod
-    def _scan_contamination(
-        ts_col, scores, window: int = 256, mads: float = 4.0
-    ) -> list[tuple[str, str]]:
-        """Contiguous elevated blocks in the lifetime score trace.
-
-        The e-process cannot detect contamination sitting INSIDE its own
-        calibration reference. The discriminator (inherited from the lab's
-        contamination-filter post-mortem): genuine contamination is a
-        CONTIGUOUS block of elevated surprise; legitimate rare operation is
-        scattered tail values. Percentile trimming is banned (it deletes
-        healthy variance); block scanning flags only sustained runs.
-        """
-        import numpy as np
-
-        s = np.asarray(scores, dtype=np.float64)
-        n = s.size
-        if n < 4 * window:
-            return []
-        k = n // window
-        wm = s[: k * window].reshape(k, window).mean(axis=1)
-        med = float(np.median(wm))
-        mad = 1.4826 * float(np.median(np.abs(wm - med)))
-        mad = max(mad, 1e-9)
-        hot = wm > med + mads * mad
-        regions, start = [], None
-        for i, h in enumerate(hot):
-            if h and start is None:
-                start = i
-            elif not h and start is not None:
-                regions.append((start, i))
-                start = None
-        if start is not None:
-            regions.append((start, k))
-        out = []
-        for a, b in regions:
-            t0 = str(ts_col[a * window])
-            t1 = str(ts_col[min(b * window, n - 1)])
-            out.append((t0, t1))
-        return out
-
     def bootstrap(self, asset_key: str, max_iters: int = 4) -> dict:
         """First contact with an asset's history: DETECT -> MASK ->
         RE-DETECT to convergence (rethink plan bootstrap requirement).
 
-        Pass 1 calibrates on raw lifetime (possibly contaminated), replays
-        the whole history, and ledgers any episodes found. Each further
-        pass recalibrates on the ledger-MASKED lifetime - the baseline the
-        previous pass could not have (its contamination is now excluded) -
-        and replays again. Converged when a pass finds no new episodes.
-        Every pass analyses the same data against a cleaner definition of
-        normal; this is the multiple-run-throughs mechanism.
+        Delegates the algorithm to fleet_workers.run_bootstrap (#133) -
+        the SAME function a parallel worker process runs, parameterized
+        with THIS runtime's real store/ledger/cache_root instead of a
+        worker's private throwaway ledger. Sequential callers (this
+        method, used by bootstrap_virgin's fallback and the single-asset
+        /api/bootstrap/{key} trigger) need no diff-and-apply step since
+        self.ledger IS the real ledger - writes land directly.
         """
-        # name avoids colliding with the per-window `t0`/`t1` locals used
-        # later in this method (_scan_contamination results, _span())
         _bootstrap_started = time.monotonic()
         em = self.monitors[asset_key]
-        history = self.store.read(asset_key)
-        self.log(
-            asset_key,
-            "bootstrap",
-            f"first contact: detect->mask->re-detect over {history.height} "
-            f"rows (max {max_iters} passes)",
+        result = _fw.run_bootstrap(
+            asset_key, self.store, self.ledger, em, self.cache_root,
+            max_iters, log=lambda kind, msg: self.log(asset_key, kind, msg),
+            progress=self._train_observer(asset_key),
         )
-        passes = []
-        for it in range(max_iters):
-            self.log(
-                asset_key,
-                "bootstrap",
-                f"pass {it + 1}: recalibrating on ledger-masked lifetime",
-            )
-            from scoring import worldmodel as _wm
-
-            _wm.on_progress = self._train_observer(asset_key)
-            try:
-                # audit=False: a scan pass's calibration EXPECTEDLY
-                # contains the contamination the pass exists to find - a
-                # contiguous fault block reads as huge autocorrelation and
-                # the exchangeability audit would refuse the instrument
-                # that cures the cause. The FINAL calibration below runs
-                # fully audited: that is the one that arms the guarantee.
-                ok = em.monitor.calibrate_from_lifetime(
-                    self.store,
-                    ledger=self.ledger,
-                    cache_root=self.cache_root,
-                    audit=False,
-                )
-            finally:
-                _wm.on_progress = None
-            if not ok:
-                passes.append({"pass": it + 1, "status": "insufficient"})
-                self.log(asset_key, "bootstrap",
-                         f"pass {it + 1}: insufficient history - stopping")
-                break
-            em.open_episode_start = ""
-            em._episode_scores = []
-            episodes_before = len(self.ledger.episodes)
-
-            # each pass analyses only the not-yet-explained life: rows
-            # already inside ledger windows are excluded, so a pass can
-            # only find NEW structure (this is what makes the loop
-            # converge instead of re-finding the same fault forever)
-            unexplained = self.ledger.mask(asset_key, history)
-            if unexplained.is_empty():
-                passes.append({"pass": it + 1, "new_episodes": 0})
-                self.log(asset_key, "bootstrap",
-                         f"pass {it + 1}: whole life explained - converged")
-                break
-            self.log(
-                asset_key,
-                "bootstrap",
-                f"pass {it + 1}: contamination scan + e-process replay of "
-                f"{unexplained.height} unexplained rows",
-            )
-
-            # DETECT part 1 - contamination scan of the score trace
-            # (catches faults sitting inside the calibration reference,
-            # which the e-process structurally cannot)
-            scores_full = em.monitor.scorer.score(unexplained)
-            ts_col = unexplained.get_column(TIMESTAMP_COL).to_list()
-            existing = self.ledger.windows(asset_key)
-            for t0, t1 in self._scan_contamination(ts_col, scores_full):
-                overlaps = any(
-                    not (t1 < w0 or t0 > w1) for w0, w1 in existing
-                )
-                if not overlaps:
-                    from memory.ledger import Episode
-
-                    self.ledger.add(
-                        Episode(
-                            asset_key=asset_key,
-                            start=t0,
-                            end=t1,
-                            state="alarm",
-                            note='{"source": "bootstrap-scan"}',
-                        )
-                    )
-
-            # DETECT part 2 - e-process replay of the unexplained life
-            last_verdict = None
-            for chunk_start in range(0, unexplained.height, 4000):
-                if chunk_start and chunk_start % 20000 == 0:
-                    self.log(
-                        asset_key,
-                        "bootstrap",
-                        f"pass {it + 1}: replayed "
-                        f"{chunk_start}/{unexplained.height} rows",
-                    )
-                chunk = unexplained.slice(chunk_start, 4000)
-                v = em.process(chunk)
-                if v.state in (
-                    V.STATE_ALARM,
-                    V.STATE_ESCALATING,
-                    V.STATE_CHANGE,
-                ):
-                    last_verdict = v
-                elif em.open_episode_start and last_verdict is not None:
-                    # evidence latched but state recovered -> close episode
-                    em.reanchor(store=self.store, last_verdict=last_verdict,
-                                cache_root=self.cache_root)
-                    last_verdict = None
-            if em.open_episode_start and last_verdict is not None:
-                em.reanchor(store=self.store, last_verdict=last_verdict,
-                            cache_root=self.cache_root)
-            found = len(self.ledger.episodes) - episodes_before
-            passes.append({"pass": it + 1, "new_episodes": found})
-            self.log(
-                asset_key,
-                "bootstrap",
-                f"pass {it + 1} done: {found} new episode(s) ledgered"
-                + ("" if found else " - converged"),
-            )
-            if found == 0:
-                break
-        # leave the monitor calibrated on the final masked baseline; a
-        # failure here means a DEAD monitor, so it is reported, not dropped
-        final_ok = em.monitor.calibrate_from_lifetime(
-            self.store, ledger=self.ledger, cache_root=self.cache_root
-        )
-        dropped: list[dict] = []
-        if not final_ok:
-            # SELF-REFUTING MASK guard (#92): a ledger mask that leaves
-            # the calibration with nothing cannot be right - a baseline
-            # must exist for "unhealthy" to mean anything (the #87 lesson
-            # generalized to fault windows: the WM bootstrap ledgered a
-            # full-life alarm and killed the monitor). Drop the WIDEST
-            # bootstrap-created fault window and recalibrate, repeating
-            # until calibration succeeds or none remain. Live-path
-            # reanchor is untouched - this is first-contact-only repair.
-            from memory.ledger import FAULT_STATES
-
-            def _span(e) -> float:
-                try:
-                    t0 = datetime.fromisoformat(e.start)
-                    t1 = datetime.fromisoformat(
-                        e.end or "9999-12-31T00:00:00+00:00"
-                    )
-                    return (t1 - t0).total_seconds()
-                except ValueError:
-                    return 0.0
-
-            while not final_ok:
-                candidates = [
-                    e
-                    for e in self.ledger.episodes
-                    if e.asset_key == asset_key and e.state in FAULT_STATES
-                ]
-                if not candidates:
-                    break  # genuinely thin data: insufficient is honest
-                widest = max(candidates, key=_span)
-                self.ledger.remove(widest)
-                dropped.append(
-                    {"start": widest.start, "end": widest.end}
-                )
-                final_ok = em.monitor.calibrate_from_lifetime(
-                    self.store, ledger=self.ledger, cache_root=self.cache_root
-                )
-        self._last_seen[asset_key] = (
-            history.get_column(TIMESTAMP_COL).max()
-            if not history.is_empty()
-            else None
-        )
+        self._last_seen[asset_key] = result["last_seen"]
         self._mark_bootstrapped(asset_key)
-        if final_ok:
-            # the ledger grew during bootstrap, so the pre-bootstrap cache
-            # fingerprint is stale - persist the final calibrated monitor
-            self._save_monitor_cache(asset_key)
         record_stage_cost(
             asset_key, "bootstrap",
-            time.monotonic() - _bootstrap_started, history.height,
-        )
-        self.log(
-            asset_key,
-            "bootstrap",
-            f"first contact complete: {len(passes)} pass(es), "
-            f"{sum(p.get('new_episodes', 0) for p in passes)} episode(s), "
-            f"final calibration {'ok' if final_ok else 'FAILED'}",
+            time.monotonic() - _bootstrap_started, result["history_rows"],
         )
         return {
             "asset": asset_key,
-            "passes": passes,
-            "final_calibration": bool(final_ok),
-            "dropped_self_refuting_windows": dropped,
+            "passes": result["passes"],
+            "final_calibration": result["final_calibration"],
+            "dropped_self_refuting_windows": result["dropped_self_refuting_windows"],
         }
 
     # ----------------------------------------------------- immune path

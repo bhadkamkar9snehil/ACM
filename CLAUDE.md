@@ -3275,3 +3275,98 @@ auto-absorb -> surprise resumed -> re-alarm). Event 25 (normal): clean,
 healthy throughout. CPU cost: ~19 min per calibration / ~90 min per
 event replay at 82 channels - the GPU box is the intended Tier 2 home;
 these numbers are the Tier 2-S lower bound.
+
+### Parallel fleet onboard/bootstrap - #133, built after a UI review
+found the fleet running strictly one-asset-at-a-time (2026-07-20)
+
+`Runtime.onboard_all()`/`bootstrap_virgin()` previously looped assets
+sequentially even though `hardware.Governor.evidence_workers` had been
+computed since S0.4 and never consumed anywhere - staged, unfinished
+work, not an oversight (module comment said as much). Fixed with a new
+`src/fleet_workers.py`: `Runtime.onboard()`/`.bootstrap()`'s algorithms
+were extracted into free functions (`run_onboard`/`run_bootstrap`,
+parameterized instead of reading `self.*`) shared verbatim by the
+sequential Runtime methods AND a `ProcessPoolExecutor` worker path - one
+algorithm, not two, so they cannot drift apart. New `fleet_worker_count`
+field on `Runtime`, default 1 (sequential, byte-identical to before);
+only `service.py`'s real entrypoint opts in via the probed
+`governor.evidence_workers` - tests/evidence-lane/soak are deliberately
+unaffected by default (tiny synthetic fixtures have nothing to gain
+from pool-spawn overhead, and a silent default-on would make the suite
+flaky/slow).
+
+**Two hazards found and designed around, not discovered by accident:**
+1. `EpisodeLedger` and the `bootstrapped.json` marker are each a SINGLE
+   SHARED FILE for the whole fleet, loaded fully into memory and
+   rewritten whole on every write. Two OS processes writing concurrently
+   is a lost-update race (each holds its own in-memory copy; whichever
+   process's full-list rewrite lands last silently drops the other's
+   addition) - this is NOT the same failure class as a threading race,
+   it is silent and would not show up as an exception. Fix: workers
+   never write to a shared file. Onboard only READS the ledger
+   (`calibrate_from_lifetime` never calls `.add()`/`.remove()` - many
+   concurrent readers of an unwritten file is safe). Bootstrap DOES
+   write, so its worker gets a PRIVATE, throwaway `EpisodeLedger` seeded
+   with a snapshot of just that asset's own episodes, runs the full
+   detect-mask-redetect loop against it, and returns only the diff
+   (added/removed episodes, as plain dicts - `Episode` is a frozen,
+   hashable dataclass, so `set(private.episodes) - set(snapshot)` is the
+   whole diff algorithm). The PARENT is the only ledger/marker writer,
+   applying each worker's diff sequentially as futures complete. Fitted
+   monitor state crosses the process boundary through the EXISTING
+   on-disk cache file (same fingerprinted pickle path `_save_monitor_
+   cache`/`_load_monitor_cache` already used), not custom object
+   pickling - a worker leaves exactly the artifact the parent already
+   knows how to load.
+2. `hardware.set_thread_caps(1)` (the BLAS-thread-count guard, written
+   specifically to prevent CLAUDE.md mistake #44's fork+BLAS deadlock)
+   already existed but was called INSIDE `service.py`'s `main()`, AFTER
+   `from runtime import Runtime` at module top had already pulled numpy
+   in uncapped - a latent bug, harmless until #133 made it load-bearing
+   (no ProcessPoolExecutor existed in this codebase before). Fixed by
+   moving the call to literally the first executable statement in
+   service.py (hardware.py itself imports no numpy, so this is safe).
+   `spawn` context (never `fork`) used for the executor itself as a
+   second, independent line of defense, plus a `worker_init()`
+   initializer that re-applies the guard in each worker before its first
+   task-module (and therefore numpy) import.
+
+**A third hazard found live, by testing with a bare throwaway script
+(not pytest) that lacked `if __name__ == "__main__":`**: Python's
+`multiprocessing` spawn context requires this guard - without it, a
+spawned worker re-executes the entire launching script's top-level code,
+including the very `Runtime(...).onboard_all()` call that spawned it,
+which then tries to spawn ITS OWN pool and hits multiprocessing's own
+"attempt to start a new process before the current process has finished
+bootstrapping" safety exception. `service.py`'s real entrypoint IS
+correctly guarded (`if __name__ == "__main__": main()`), so production
+use was never at risk - but the FAILURE MODE for an unguarded caller was
+silent and wrong, not loud: every future raised the same
+`BrokenProcessPool`, my original per-future exception handler caught it
+per-asset and quietly reported a fully healthy, data-rich 6-asset test
+fleet as insufficient-history (0 stage-cost rows, 0 episodes found, all
+false). Fixed by catching `BrokenProcessPool` distinctly from ordinary
+per-asset failures (which stay per-asset - a corrupt CSV for ONE asset
+must not sink the rest), re-raising it out of the pool's `with` block,
+and falling back to the exact sequential loop for whatever wasn't yet
+processed, with ONE loud log line naming the `__main__`-guard
+requirement. Pytest itself was never vulnerable to this (test modules
+are always imported, never executed as `__main__`, so a spawned child
+re-executing a test module's top level just redefines functions
+harmlessly) - this is exactly why the bug surfaced only outside the test
+harness, and why a real standalone smoke script (not just pytest) is
+worth running before trusting a new ProcessPoolExecutor path.
+
+Verified: `test_parallel_fleet_ops_match_sequential` (statistical lane)
+runs two Runtime instances over IDENTICAL seeded data, one sequential
+one parallel (fleet_worker_count=2), and asserts EXACT match - ledger
+episodes (start/end/state tuples), bootstrapped markers, and a
+subsequent tick's verdict state + evidence (to 1e-9) - across both
+paths. A standalone 6-asset smoke through the real service app (not
+just Runtime directly) measured 9.3s sequential vs 5.1s at
+fleet_worker_count=3 (1.8x - synthetic per-asset work is small, so
+spawn overhead eats into the theoretical gain; the real-world win is on
+genuine CARE-scale multi-minute bootstraps, not this smoke fixture) with
+byte-identical fleet state (6 assets, 12 stage-cost rows, 1 real
+episode) in both runs. Full suite green throughout (sequential path -
+the default everywhere except the live service - untouched).

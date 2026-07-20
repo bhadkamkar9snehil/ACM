@@ -239,6 +239,16 @@ First cross-tier datapoint on real SCADA (CARE Farm A, generator
 bearing failure): the world model detected at **48h lag vs Tier 0's
 240h** on the same event.
 
+The same probe sizes a fleet-wide worker pool: onboard and first-contact
+bootstrap - independent per asset by architecture - fan out across a
+`ProcessPoolExecutor` sized to the probed core/RAM budget, instead of
+running one asset at a time. A fresh fleet's slowest phase (bootstrap's
+multi-pass replay over each asset's whole history) is the one this
+speeds up; per-tick scoring stays sequential (already fast once an
+asset is calibrated). Sequential (`fleet_worker_count=1`) remains the
+default for every other Runtime caller - tests, the evidence lane, and
+the soak are deliberately unaffected.
+
 ## The UI
 
 One HTML file, zero build, all libraries vendored - works air-gapped,

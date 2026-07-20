@@ -182,6 +182,91 @@ def test_self_ticking_service(runtime):
     assert any(after[k] > before.get(k, 0) for k in after), (before, after)
 
 
+def _seed_bootstrap_fixture(store, key, seed, fault_month=None):
+    """Mirrors test_bootstrap_detect_mask_redetect_converges's fixture -
+    optionally one contaminated month mid-history, so the parity check
+    below exercises the actual ledger-write path (episodes.add/remove),
+    not just a clean no-op bootstrap."""
+    rng = np.random.default_rng(seed)
+    start = datetime(2025, 1, 1, tzinfo=UTC)
+    for m in range(10):
+        n = 1200
+        fault = 5.0 if m == fault_month else 0.0
+        ts0 = start + timedelta(days=30 * m)
+        ts = [ts0 + timedelta(minutes=10 * i) for i in range(n)]
+        temp = rng.normal(size=n)
+        vib = 0.8 * temp + 0.3 * rng.normal(size=n)
+        if fault:
+            vib = vib + fault * np.concatenate(
+                [np.linspace(0, 1, n // 2), np.ones(n - n // 2)]
+            )
+        store.append(
+            key,
+            pl.DataFrame({
+                TIMESTAMP_COL: pl.Series(ts, dtype=pl.Datetime("us", "UTC")),
+                "temp": temp, "vib": vib,
+                "press": rng.normal(size=n), "flow": rng.normal(size=n),
+            }),
+        )
+
+
+@pytest.mark.statistical  # spawns real OS processes - slower than the fast lane
+def test_parallel_fleet_ops_match_sequential(tmp_path):
+    """#133: fleet_worker_count>1 fans onboard/bootstrap out across a
+    ProcessPoolExecutor. This is the load-bearing regression test - a
+    parallel run over the SAME seeded data must produce IDENTICAL
+    outcomes to the sequential run: same ledger episodes (the lost-
+    update race this design exists to avoid), same bootstrapped
+    markers, same verdict states/evidence after a subsequent tick."""
+    seq_root, par_root = tmp_path / "seq", tmp_path / "par"
+    seq_store, par_store = RawStore(seq_root / "raw"), RawStore(par_root / "raw")
+    for store in (seq_store, par_store):
+        _seed_bootstrap_fixture(store, "p/clean", seed=1)
+        _seed_bootstrap_fixture(store, "p/fault", seed=2, fault_month=6)
+
+    rt_seq = Runtime(store=seq_store, data_root=seq_root, fleet_worker_count=1)
+    rt_seq.onboard_all()
+    rt_seq.bootstrap_virgin()
+
+    rt_par = Runtime(store=par_store, data_root=par_root, fleet_worker_count=2)
+    rt_par.onboard_all()
+    rt_par.bootstrap_virgin()
+
+    assert set(rt_seq._bootstrapped) == set(rt_par._bootstrapped) == {
+        "p/clean", "p/fault",
+    }
+    for key in ("p/clean", "p/fault"):
+        seq_eps = sorted(
+            (e.start, e.end, e.state)
+            for e in rt_seq.ledger.episodes if e.asset_key == key
+        )
+        par_eps = sorted(
+            (e.start, e.end, e.state)
+            for e in rt_par.ledger.episodes if e.asset_key == key
+        )
+        assert seq_eps == par_eps, (key, seq_eps, par_eps)
+        assert rt_seq.monitors[key].monitor.bank is not None
+        assert rt_par.monitors[key].monitor.bank is not None
+
+    # a subsequent tick must behave identically too - not just the
+    # bootstrap artifacts, but the calibrated monitor's actual verdicts
+    extra = pl.DataFrame({
+        TIMESTAMP_COL: pl.Series(
+            [datetime(2025, 11, 1, tzinfo=UTC) + timedelta(minutes=10 * i)
+             for i in range(300)],
+            dtype=pl.Datetime("us", "UTC"),
+        ),
+        "temp": np.zeros(300), "vib": np.zeros(300),
+        "press": np.zeros(300), "flow": np.zeros(300),
+    })
+    seq_store.append("p/clean", extra)
+    par_store.append("p/clean", extra)
+    v_seq, v_par = rt_seq.tick("p/clean"), rt_par.tick("p/clean")
+    assert v_seq is not None and v_par is not None
+    assert v_seq.state == v_par.state
+    assert v_seq.evidence == pytest.approx(v_par.evidence, abs=1e-9)
+
+
 def test_bootstrap_virgin_runs_once_per_asset_lifetime(tmp_path):
     """First contact happens exactly once: bootstrap_virgin marks the
     asset durably and never re-runs - including across a service restart
