@@ -484,6 +484,7 @@ const S={
  fleetHash:signal(''),
  cost:signal(null),
  cases:signal(null),
+ stageCost:signal(null),
 };
 let toastId=0;
 function toast(m){
@@ -556,8 +557,14 @@ function Spark({dataKey,h:hh}){
  const ref=useRef(null);
  const series=S.health.value[dataKey];
  useEffect(()=>{
-  if(ref.current&&series)spark(ref.current,series.slice(-120),hh);
+  if(ref.current&&series&&series.length>=2)spark(ref.current,series.slice(-120),hh);
  });
+ // #132: an asset with no health series yet (queued/bootstrapping/
+ // insufficient-history - most of a freshly-seeded fleet) previously
+ // left a bare, unstyled <canvas> at browser-default size with nothing
+ // drawn - it read as a rendering bug, not "no data yet".
+ if(!series||series.length<2)
+  return html`<span class="muted" style="font-size:10px">no data yet</span>`;
  return html`<canvas ref=${ref}></canvas>`;}
 
 /* ------------------------------------------------ chart option builders
@@ -796,17 +803,22 @@ function budgetOption(budget){
  if(!budget)return null;
  const shares=Object.entries(budget.shares||{});
  if(!shares.length)return null;
+ // #132: 7 long domain names in a horizontal bottom legend wrapped to
+ // 2-3 rows and collided with the ring's own footprint. A vertical
+ // legend down the right side, with the ring shifted left, never wraps
+ // into the ring regardless of card width.
  return {tooltip:{trigger:'item',
    formatter:p=>`${p.name}<br>${(p.value*100).toFixed(0)}% of the budget`},
-  legend:{bottom:4,left:'center',textStyle:{color:CH.axis,fontSize:10},
-   itemWidth:9,itemHeight:9,icon:'circle'},
-  graphic:[{type:'text',left:'center',top:'34%',
-   style:{text:`<= ${budget.alpha_per_asset_year}`,fill:CH.text,fontSize:26,
+  legend:{orient:'vertical',right:6,top:'middle',
+   textStyle:{color:CH.axis,fontSize:10},
+   itemWidth:9,itemHeight:9,itemGap:8,icon:'circle'},
+  graphic:[{type:'text',left:'34%',top:'34%',
+   style:{text:`<= ${budget.alpha_per_asset_year}`,fill:CH.text,fontSize:24,
     fontWeight:'bold',fontFamily:'Consolas,Menlo,monospace',align:'center'}},
-   {type:'text',left:'center',top:'47%',
-   style:{text:'false alarm / asset-year',fill:CH.axis,fontSize:10,
+   {type:'text',left:'34%',top:'48%',
+   style:{text:'false alarm / asset-year',fill:CH.axis,fontSize:9,
     fontFamily:'Consolas,Menlo,monospace',align:'center'}}],
-  series:[{type:'pie',radius:['46%','64%'],center:['50%','40%'],
+  series:[{type:'pie',radius:['44%','60%'],center:['34%','44%'],
    label:{show:false},emphasis:{label:{show:false}},
    itemStyle:{borderColor:CH.border,borderWidth:2},
    data:shares.map(([name,share])=>({name,value:share,
@@ -884,7 +896,12 @@ function evidenceHistoryOption(points){
 // invisible case history is a wasted one.
 function casesOption(cases){
  if(!cases||!cases.length)return null;
- const assets=[...new Set(cases.map(c=>c.asset_key))];
+ // #132: Set() insertion order followed whatever order the API
+ // returned episodes in - unsorted, and reshuffling on every poll as
+ // new episodes arrived made row identity jump around. A stable sort
+ // keeps each asset pinned to the same lane across polls.
+ const assets=[...new Set(cases.map(c=>c.asset_key))]
+  .sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}));
  const col={'alarm':'#e05252','escalating':'#ff6b6b',
   'change-not-fault':'#d88a36','intervention':'#4aa3df'};
  const data=cases.map(c=>{
@@ -924,6 +941,28 @@ function costOption(rows){
   series:[{type:'bar',data:top.map(r=>r.wall_s),
    label:{show:true,position:'right',color:CH.axis,fontSize:10,formatter:p=>fmtDec(p.value)+'s'},
    itemStyle:{color:'#4aa3df',borderRadius:[0,3,3,0]},barMaxWidth:14}]};}
+const STAGE_COLORS={onboard:'#4aa3df',bootstrap:'#d88a36',tick:'#37b26c'};
+function stageCostOption(rows){
+ // #132: onboard/bootstrap/tick wall-clock, worst-first - the KPI view
+ // costOption() above can't give (it's tick-only, overwritten every
+ // tick, so it's empty for the whole bootstrap phase of a fresh fleet).
+ if(!rows||!rows.length)return null;
+ const top=rows.slice(0,10);
+ return {grid:{left:10,right:60,top:10,bottom:10,containLabel:true},
+  tooltip:{trigger:'axis',axisPointer:{type:'shadow'},
+   formatter:p=>{const r=top[p[0].dataIndex];
+    return `${r.asset_key} - ${r.stage}<br>${fmtDec(r.wall_s)}s`
+     +(r.rows?` | ${fmtInt(r.rows)} rows`:'')
+     +(r.rows_per_s?` (${fmtInt(r.rows_per_s)}/s)`:'');}},
+  xAxis:{type:'value',name:'seconds',nameTextStyle:{color:CH.axis,fontSize:10},
+   axisLabel:{color:CH.axis,fontSize:10},splitLine:{lineStyle:{color:CH.grid}}},
+  yAxis:{type:'category',inverse:true,
+   data:top.map(r=>`${r.asset_key} [${r.stage}]`),
+   axisLabel:{color:CH.text,fontSize:10,width:150,overflow:'truncate'}},
+  series:[{type:'bar',data:top.map(r=>({value:r.wall_s,
+     itemStyle:{color:STAGE_COLORS[r.stage]||'#888',borderRadius:[0,3,3,0]}})),
+   label:{show:true,position:'right',color:CH.axis,fontSize:10,formatter:p=>fmtDec(p.value)+'s'},
+   barMaxWidth:14}]};}
 
 /* ------------------------------------------------ routing */
 function parseHash(){
@@ -968,6 +1007,7 @@ function applyFleet(data){
  if(changed){
   fetchSparks();
   fetchCost();
+  fetchStageCost();
   fetchCases();
   if(S.page.value==='assets'&&S.sel.value)loadDetail(S.sel.value,false);}}
 async function fetchSparks(){
@@ -979,6 +1019,8 @@ async function fetchSparks(){
  S.health.value=next;}
 async function fetchCost(){
  try{S.cost.value=await jget('/api/cost');}catch(e){}}
+async function fetchStageCost(){
+ try{S.stageCost.value=await jget('/api/stage-cost');}catch(e){}}
 async function fetchCases(){
  try{S.cases.value=(await jget('/api/cases')).cases;}catch(e){}}
 async function refresh(){try{applyFleet(await jget('/api/assets'));}catch(e){}}
@@ -1123,6 +1165,7 @@ function KpiRow(){
 function FleetCharts(){
  const fleet=S.fleet.value;
  const cost=S.cost.value;
+ const stageCost=S.stageCost.value;
  themeTick.value;
  if(!fleet)return html`<div id="fcharts"></div>`;
  const onScatterReady=(c)=>{if(!c.__wired){c.__wired=true;c.on('click',p=>{if(p.data&&p.data[3])select(esc(p.data[3]));});}};
@@ -1135,6 +1178,9 @@ function FleetCharts(){
   <div class="card"><h3>Tick cost - slowest to score, worst first</h3>
    ${cost&&cost.rows.length?html`<${EChart} id="d-cost" height=190 option=${costOption(cost.rows)}/>`
     :html`<p class="muted" style="padding:20px">No tick has scored an asset yet in this session.</p>`}</div>
+  <div class="card"><h3>Stage cost - onboard/bootstrap/tick, slowest first</h3>
+   ${stageCost&&stageCost.rows.length?html`<${EChart} id="d-stagecost" height=190 option=${stageCostOption(stageCost.rows)}/>`
+    :html`<p class="muted" style="padding:20px">No stage has completed yet in this session.</p>`}</div>
   ${(S.cases.value||[]).length?html`<div class="card wide">
    <h3>Case history across the fleet - every episode, closed and open, over real time</h3>
    <${EChart} id="d-cases"

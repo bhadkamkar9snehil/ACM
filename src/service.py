@@ -299,6 +299,14 @@ def create_app(
         """Fleet-wide last-tick wall-clock cost, worst-first (#113)."""
         return JSONResponse(runtime.cost_summary())
 
+    @app.get("/api/stage-cost")
+    def stage_cost() -> JSONResponse:
+        """Fleet-wide onboard/bootstrap/tick wall-clock cost, worst-first
+        (#132) - the performance KPI visibility cost_summary() above
+        doesn't have: bootstrap dominates a fleet's first minutes and
+        was previously invisible entirely."""
+        return JSONResponse(runtime.stage_cost_summary())
+
     @app.get("/api/telemetry/{asset_key:path}")
     def telemetry(
         asset_key: str, channels: str = "", rows: int = 20000

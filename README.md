@@ -307,6 +307,7 @@ dataset): [`docs/testing-and-datasets.md`](docs/testing-and-datasets.md).
 | `GET /api/cases` | every episode across the fleet - closed and open - for the case timeline |
 | `GET /api/immune/{key}` / `POST /api/immune-pass/{key}` | immune status / run a pass now |
 | `GET /api/cost` | last-tick wall-clock cost per asset, worst-first |
+| `GET /api/stage-cost` | onboard/bootstrap/tick wall-clock cost per (asset, stage), worst-first |
 | `POST /api/tick` / `POST /api/tick/{key}` | tick the fleet / one asset |
 | `POST /api/reanchor/{key}` | governed episode close + recalibration |
 | `POST /api/bootstrap/{key}` | first-contact cleaning on demand |

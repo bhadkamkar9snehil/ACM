@@ -84,6 +84,26 @@ def test_service_endpoints_carry_the_contract(runtime):
     assert client.get("/api/asset/nope").status_code == 404
 
 
+def test_stage_cost_summary_and_endpoint(runtime):
+    """#132: onboard/bootstrap/tick durations, worst-first - the
+    performance-KPI gap cost_summary() (tick-only) can't fill, since it
+    reads empty for the whole time a fleet is bootstrapping. The
+    `runtime` fixture's onboard_all()+tick_all() already exercised both
+    stages for every asset."""
+    summary = runtime.stage_cost_summary()
+    stages_seen = {r["stage"] for r in summary["rows"]}
+    assert "onboard" in stages_seen and "tick" in stages_seen
+    keys_seen = {r["asset_key"] for r in summary["rows"]}
+    assert keys_seen <= {"f/ok1", "f/ok2", "f/bad"}
+    wall_s = [r["wall_s"] for r in summary["rows"]]
+    assert wall_s == sorted(wall_s, reverse=True)  # worst-first
+    assert summary["total_wall_s"] == round(sum(wall_s), 4)
+
+    client = TestClient(create_app(runtime))
+    body = client.get("/api/stage-cost").json()
+    assert body["rows"] and {r["stage"] for r in body["rows"]} == stages_seen
+
+
 def test_tick_endpoint_and_incremental(runtime):
     client = TestClient(create_app(runtime))
     assert client.post("/api/tick").json()["assets_moved"] == 0  # no new data

@@ -131,3 +131,25 @@ MEASURED_COSTS: dict[str, dict[str, float]] = {}
 
 def record_asset_cost(asset_key: str, wall_s: float, rows: int) -> None:
     MEASURED_COSTS[asset_key] = {"wall_s": wall_s, "rows": float(rows)}
+
+
+# Per-STAGE cost measurement (onboard / bootstrap / tick), separate from
+# MEASURED_COSTS above (tick-only, overwritten every tick - an existing,
+# tested contract left untouched). Bootstrap in particular can dominate
+# wall-clock for a fleet's first minutes (multi-pass replay over the
+# asset's whole life) and previously had NO visibility at all - the
+# "Tick cost" card reads "no tick has scored an asset yet" for the
+# entire time a fleet is bootstrapping, which is exactly the blind spot
+# this closes.
+STAGE_COSTS: dict[str, dict[str, object]] = {}  # f"{key}::{stage}" -> row
+
+
+def record_stage_cost(
+    asset_key: str, stage: str, wall_s: float, rows: int = 0
+) -> None:
+    STAGE_COSTS[f"{asset_key}::{stage}"] = {
+        "asset_key": asset_key,
+        "stage": stage,
+        "wall_s": wall_s,
+        "rows": float(rows),
+    }

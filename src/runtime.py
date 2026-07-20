@@ -18,7 +18,7 @@ import polars as pl
 
 import verdict as V
 from episodes import EpisodicMonitor
-from hardware import Governor, probe, record_asset_cost
+from hardware import Governor, probe, record_asset_cost, record_stage_cost
 from memory.ledger import EpisodeLedger
 from monitor import AssetMonitor
 from store.raw import TIMESTAMP_COL, RawStore
@@ -265,11 +265,13 @@ class Runtime:
             self.verdicts[asset_key] = em.process(pl.DataFrame())
         else:
             self._save_monitor_cache(asset_key)
+        dt = time.monotonic() - t0
+        record_stage_cost(asset_key, "onboard", dt)
         self.log(
             asset_key,
             "onboard",
             f"{'calibrated' if ok else 'insufficient history'} "
-            f"in {time.monotonic() - t0:.0f}s",
+            f"in {dt:.0f}s",
         )
         return ok
 
@@ -424,6 +426,38 @@ class Runtime:
                 }
                 for key, cost in MEASURED_COSTS.items()
                 if key in self.monitors
+            ),
+            key=lambda d: -d["wall_s"],
+        )
+        return {
+            "rows": rows,
+            "total_wall_s": round(sum(r["wall_s"] for r in rows), 4),
+        }
+
+    def stage_cost_summary(self) -> dict:
+        """Wall-clock cost per (asset, stage), worst-first (#132): unlike
+        cost_summary() above (tick only, overwritten every tick),
+        this covers onboard and bootstrap too - the stages that
+        dominate a fleet's first minutes and previously had NO
+        visibility at all (the Tick-cost card reads empty for the
+        entire time a fleet is bootstrapping)."""
+        from hardware import STAGE_COSTS
+
+        rows = sorted(
+            (
+                {
+                    "asset_key": row["asset_key"],
+                    "stage": row["stage"],
+                    "wall_s": round(row["wall_s"], 4),
+                    "rows": int(row["rows"]),
+                    "rows_per_s": (
+                        round(row["rows"] / row["wall_s"], 1)
+                        if row["wall_s"] > 0 and row["rows"] > 0
+                        else None
+                    ),
+                }
+                for row in STAGE_COSTS.values()
+                if row["asset_key"] in self.monitors
             ),
             key=lambda d: -d["wall_s"],
         )
@@ -628,9 +662,9 @@ class Runtime:
         stagger_i = self._stagger(asset_key, salt=1) % IMMUNE_EVERY_TICKS
         if (self._tick_counts[asset_key] + stagger_i) % IMMUNE_EVERY_TICKS == 0:
             self.immune_pass(asset_key)
-        record_asset_cost(
-            asset_key, time.monotonic() - started, frame.height
-        )
+        dt = time.monotonic() - started
+        record_asset_cost(asset_key, dt, frame.height)
+        record_stage_cost(asset_key, "tick", dt, frame.height)
         return verdict
 
     @staticmethod
@@ -720,6 +754,9 @@ class Runtime:
         Every pass analyses the same data against a cleaner definition of
         normal; this is the multiple-run-throughs mechanism.
         """
+        # name avoids colliding with the per-window `t0`/`t1` locals used
+        # later in this method (_scan_contamination results, _span())
+        _bootstrap_started = time.monotonic()
         em = self.monitors[asset_key]
         history = self.store.read(asset_key)
         self.log(
@@ -891,6 +928,10 @@ class Runtime:
             # the ledger grew during bootstrap, so the pre-bootstrap cache
             # fingerprint is stale - persist the final calibrated monitor
             self._save_monitor_cache(asset_key)
+        record_stage_cost(
+            asset_key, "bootstrap",
+            time.monotonic() - _bootstrap_started, history.height,
+        )
         self.log(
             asset_key,
             "bootstrap",
