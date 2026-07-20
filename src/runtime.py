@@ -257,10 +257,25 @@ class Runtime:
         return ok
 
     def onboard_all(self, on_progress=None) -> dict[str, bool]:
-        keys = list(self.store.assets())
+        # discover from the raw store (any asset with history) UNION the
+        # registry (a registered asset may not have data yet), minus
+        # anything explicitly retired (#137). The registry is the durable
+        # record of what should be monitored; the store is the ground truth
+        # of what has data.
+        retired = {
+            a.asset_key for a in self.state.list_assets(include_retired=True)
+            if a.retired_at is not None
+        }
+        registered = {
+            a.asset_key for a in self.state.list_assets()
+        }
+        keys = sorted(
+            (set(self.store.assets()) | registered) - retired
+        )
         self.log(
             "-", "service",
-            f"discovered {len(keys)} asset(s) in the raw store",
+            f"discovered {len(keys)} asset(s) "
+            f"({len(retired)} retired, skipped)",
         )
         # every discovered asset is visible from the first moment: a
         # fleet being calibrated must never render as an empty fleet
@@ -393,6 +408,99 @@ class Runtime:
                 if on_progress is not None:
                     on_progress()
         return out
+
+    # -------------------------------------------- live asset lifecycle (#137)
+    def register_asset(
+        self, asset_key: str, source_config: dict | None = None,
+        display_name: str | None = None, group: str | None = None,
+    ) -> None:
+        """Add/update a registry row - the durable record that this asset
+        should be monitored and where its data comes from. Does not
+        onboard; call onboard_and_bootstrap() for that (the API runs it in
+        the background)."""
+        from store.state import AssetRow
+
+        existing = self.state.get_asset(asset_key)
+        self.state.upsert_asset(AssetRow(
+            asset_key=asset_key,
+            display_name=display_name,
+            grp=group or (existing.grp if existing else "fleet"),
+            enabled=True,
+            added_at=(existing.added_at if existing and existing.added_at
+                      else datetime.now(timezone.utc).isoformat()),
+            retired_at=None,  # re-registering un-retires
+            source_kind=(source_config or {}).get("kind", "manual"),
+            source_config=source_config,
+        ))
+        self.log(asset_key, "service",
+                 f"registered (source={((source_config or {}).get('kind') or 'manual')})")
+
+    def onboard_and_bootstrap(self, asset_key: str) -> dict:
+        """Bring ONE asset live with no restart (#137): onboard, then
+        first-contact bootstrap if it has never been bootstrapped. Runs on
+        a worker thread (the API dispatches via asyncio.to_thread), so the
+        event loop and the rest of the fleet keep serving. Single-asset,
+        so the sequential path is used - no pool spawn."""
+        self.busy[asset_key] = "onboarding"
+        try:
+            ok = self.onboard(asset_key)
+            booted = None
+            if ok and asset_key not in self._bootstrapped \
+                    and not self.ledger.windows(asset_key):
+                self.busy[asset_key] = "bootstrapping"
+                booted = self.bootstrap(asset_key)
+            elif ok:
+                self._mark_bootstrapped(asset_key)
+        finally:
+            self.busy.pop(asset_key, None)
+        return {"asset": asset_key, "onboarded": ok, "bootstrap": booted}
+
+    def retire_asset(self, asset_key: str, purge: bool = False) -> dict:
+        """Stop monitoring an asset. Default keeps its history (retired in
+        the registry, skipped on the next start). purge=True is the
+        explicit destructive path: drop the monitor, the state-store rows,
+        the monitor cache, AND the raw history directory - the one
+        deliberate exception to the immortal-store rule (R1), taken only
+        because an operator explicitly asked to purge."""
+        self.monitors.pop(asset_key, None)
+        self._last_seen.pop(asset_key, None)
+        self._tick_counts.pop(asset_key, None)
+        self.busy.pop(asset_key, None)
+        self.verdicts.pop(asset_key, None)
+        self.previous_verdicts.pop(asset_key, None)
+        self.evidence_history.pop(asset_key, None)
+        self.immune_results.pop(asset_key, None)
+        self._bootstrapped.pop(asset_key, None)
+        if purge:
+            import shutil
+
+            from store.raw import _safe_key
+
+            self.state.delete_asset(asset_key)
+            for root in (self.store.root, self.cache_root):
+                d = root / _safe_key(asset_key)
+                if d.exists():
+                    shutil.rmtree(d, ignore_errors=True)
+            self.log(asset_key, "service", "PURGED (history + state removed)")
+        else:
+            self.state.retire_asset(
+                asset_key, datetime.now(timezone.utc).isoformat()
+            )
+            self.log(asset_key, "service", "retired (history kept)")
+        return {"asset": asset_key, "purged": purge}
+
+    def reonboard(self, asset_key: str) -> dict:
+        """Force recalibration from lifetime: drop the fingerprinted
+        monitor cache so onboard cannot restore a stale fit, then
+        onboard again (already-bootstrapped assets skip re-bootstrap)."""
+        import shutil
+
+        from store.raw import _safe_key
+
+        d = self.cache_root / _safe_key(asset_key)
+        if d.exists():
+            shutil.rmtree(d, ignore_errors=True)
+        return self.onboard_and_bootstrap(asset_key)
 
     def bootstrap_virgin(self, on_progress=None) -> dict[str, dict]:
         """First-contact cleaning for every never-bootstrapped asset:

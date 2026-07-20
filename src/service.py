@@ -29,7 +29,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import (
     FileResponse,
     HTMLResponse,
@@ -80,10 +80,18 @@ def create_app(
     a dead service, not a busy one)."""
 
     hub = _WsHub()
+    # retain references to fire-and-forget background jobs (live onboarding,
+    # #137) so they are not garbage-collected mid-run
+    background_tasks: set = set()
 
     async def push_fleet() -> None:
         if hub.clients:
             await hub.broadcast({"type": "fleet", "data": runtime.summary()})
+
+    def _spawn_bg(coro) -> None:
+        t = asyncio.create_task(coro)
+        background_tasks.add(t)
+        t.add_done_callback(background_tasks.discard)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -218,6 +226,63 @@ def create_app(
         out = await asyncio.to_thread(runtime.bootstrap, asset_key)
         await push_fleet()
         return JSONResponse(out)
+
+    # -------------------------------------------- live asset lifecycle (#137)
+    @app.post("/api/assets")
+    async def add_asset(req: Request) -> JSONResponse:
+        """Register an asset and bring it live with no restart. Onboarding
+        runs in the background; the UI watches it via the activity stream
+        and the busy map (queued -> onboarding -> bootstrapping -> live)."""
+        body = await req.json()
+        key = (body.get("asset_key") or "").strip()
+        if not key:
+            return JSONResponse(
+                {"error": "asset_key is required"}, status_code=400
+            )
+        if key in runtime.monitors or runtime.state.get_asset(key) is not None:
+            existing = runtime.state.get_asset(key)
+            if existing is not None and existing.retired_at is None:
+                return JSONResponse(
+                    {"error": f"asset {key!r} already exists"},
+                    status_code=409,
+                )
+        runtime.register_asset(
+            key, source_config=body.get("source_config"),
+            display_name=body.get("display_name"), group=body.get("group"),
+        )
+        runtime.busy[key] = "queued"
+
+        async def _bg() -> None:
+            await asyncio.to_thread(runtime.onboard_and_bootstrap, key)
+            await push_fleet()
+
+        _spawn_bg(_bg())
+        await push_fleet()
+        return JSONResponse({"asset_key": key, "status": "onboarding"})
+
+    @app.delete("/api/assets/{asset_key:path}")
+    async def del_asset(asset_key: str, purge: bool = False) -> JSONResponse:
+        known = (asset_key in runtime.monitors
+                 or runtime.state.get_asset(asset_key) is not None)
+        if not known:
+            return JSONResponse({"error": "unknown asset"}, status_code=404)
+        out = await asyncio.to_thread(runtime.retire_asset, asset_key, purge)
+        await push_fleet()
+        return JSONResponse(out)
+
+    @app.post("/api/assets/{asset_key:path}/reonboard")
+    async def reonboard_asset(asset_key: str) -> JSONResponse:
+        known = (asset_key in runtime.monitors
+                 or runtime.state.get_asset(asset_key) is not None)
+        if not known:
+            return JSONResponse({"error": "unknown asset"}, status_code=404)
+
+        async def _bg() -> None:
+            await asyncio.to_thread(runtime.reonboard, asset_key)
+            await push_fleet()
+
+        _spawn_bg(_bg())
+        return JSONResponse({"asset_key": asset_key, "status": "reonboarding"})
 
     @app.get("/api/episodes/{asset_key:path}")
     def episodes(asset_key: str) -> JSONResponse:

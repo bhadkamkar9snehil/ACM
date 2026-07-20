@@ -118,6 +118,68 @@ def test_restart_does_not_double_count_evidence(tmp_path):
     assert rt2.state.get_last_seen("r/1") == seen_before
 
 
+def test_live_asset_lifecycle_no_restart(tmp_path):
+    """#137: register -> onboard+bootstrap live -> retire -> re-register
+    -> purge, all on a running Runtime with no restart."""
+    store = RawStore(tmp_path / "raw")
+    seed_asset(store, "live/1", seed=1)
+
+    rt = Runtime(store=store, data_root=tmp_path)
+    # nothing discovered yet (asset seeded but not onboarded)
+    rt.register_asset("live/1", display_name="Live One", group="test")
+    assert rt.state.get_asset("live/1").display_name == "Live One"
+
+    out = rt.onboard_and_bootstrap("live/1")
+    assert out["onboarded"] is True
+    assert "live/1" in rt.monitors
+    assert "live/1" in rt._bootstrapped  # first contact ran + marked
+    assert rt.state.get_last_seen("live/1") is not None
+
+    # retire (keep history): stops monitoring, registry retired, raw kept
+    rt.retire_asset("live/1", purge=False)
+    assert "live/1" not in rt.monitors
+    assert rt.state.get_asset("live/1").retired_at is not None
+    assert (tmp_path / "raw").exists()
+    assert store.row_count("live/1") > 0  # history intact
+
+    # a restart-equivalent onboard_all must SKIP the retired asset
+    rt2 = Runtime(store=store, data_root=tmp_path)
+    rt2.onboard_all()
+    assert "live/1" not in rt2.monitors
+
+    # re-register un-retires; then purge removes registry + raw + cache
+    rt2.register_asset("live/1")
+    assert rt2.state.get_asset("live/1").retired_at is None
+    rt2.onboard_and_bootstrap("live/1")
+    rt2.retire_asset("live/1", purge=True)
+    assert rt2.state.get_asset("live/1") is None
+    from store.raw import _safe_key
+    assert not (tmp_path / "raw" / _safe_key("live/1")).exists()
+
+
+def test_asset_lifecycle_endpoints(runtime):
+    """#137 API surface: add (409 on dup), delete, reonboard, wired and
+    returning the right shapes. Onboarding itself runs in the background;
+    the registry write is synchronous so it is assertable immediately."""
+    client = TestClient(create_app(runtime))
+    # f/ok1 already exists in the fixture fleet
+    r = client.post("/api/assets", json={"asset_key": "f/ok1"})
+    assert r.status_code == 409
+    # a brand-new key registers and reports onboarding
+    r = client.post("/api/assets", json={
+        "asset_key": "new/x", "display_name": "New X", "group": "g"})
+    assert r.status_code == 200 and r.json()["status"] == "onboarding"
+    assert runtime.state.get_asset("new/x").display_name == "New X"
+    # missing key -> 400
+    assert client.post("/api/assets", json={}).status_code == 400
+    # delete unknown -> 404; delete known -> ok
+    assert client.request("DELETE", "/api/assets/nope/nope").status_code == 404
+    assert client.request("DELETE", "/api/assets/new/x").status_code == 200
+    assert runtime.state.get_asset("new/x").retired_at is not None
+    # reonboard unknown -> 404
+    assert client.post("/api/assets/nope/reonboard").status_code == 404
+
+
 def test_stage_cost_summary_and_endpoint(runtime):
     """#132: onboard/bootstrap/tick durations, worst-first - the
     performance-KPI gap cost_summary() (tick-only) can't fill, since it
