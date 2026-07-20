@@ -368,6 +368,7 @@ def run_bootstrap(asset_key, store, ledger, em, cache_root, max_iters=4, log=Non
 def onboard_worker(asset_key: str, store_root: str, cache_root: str, scorer_cls) -> dict:
     from memory.ledger import EpisodeLedger
     from store.raw import RawStore
+    from store.state import SqliteStateStore
 
     started = time.monotonic()
     log_lines: list[tuple] = []
@@ -379,10 +380,13 @@ def onboard_worker(asset_key: str, store_root: str, cache_root: str, scorer_cls)
         log("train", f"world model: epoch {done}/{total} (all channels batched)")
 
     store = RawStore(store_root)
-    # onboard never writes to the ledger (calibrate_from_lifetime only
-    # reads windows()/mask()) - many concurrent readers of the real
-    # shared file is safe, no private copy needed
-    ledger = EpisodeLedger(Path(cache_root).parent / "ledger.json")
+    # onboard never WRITES to the ledger (calibrate_from_lifetime only
+    # reads windows()/mask()), so a read-only store connection is safe -
+    # SQLite WAL allows many concurrent readers (#135). The ledger must
+    # reflect the REAL episodes (fault windows drive the masked baseline),
+    # so read from the state store, not an empty/stale file.
+    state = SqliteStateStore(Path(cache_root).parent / "state.db")
+    ledger = EpisodeLedger(store=state)
     monitor, ok = run_onboard(
         asset_key, store, ledger, Path(cache_root), scorer_cls,
         progress=progress, log=log,
@@ -390,6 +394,7 @@ def onboard_worker(asset_key: str, store_root: str, cache_root: str, scorer_cls)
     if ok:
         fp = monitor_fingerprint(store, ledger, asset_key, scorer_cls)
         save_monitor_cache(monitor, cache_root, asset_key, fp)
+    state.close()
     dt = time.monotonic() - started
     log("onboard", f"{'calibrated' if ok else 'insufficient history'} in {dt:.0f}s")
     return {"asset_key": asset_key, "ok": ok, "dt": dt, "log_lines": log_lines}

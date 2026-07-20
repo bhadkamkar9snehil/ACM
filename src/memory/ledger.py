@@ -42,22 +42,47 @@ class Episode:
 
 
 class EpisodeLedger:
-    def __init__(self, path: Path | str) -> None:
-        self.path = Path(path)
+    """The episode API upstream code depends on (`.episodes`, add, remove,
+    windows, mask). Two backends behind the same surface (#135):
+
+    - store-backed (the real fleet ledger): episodes live in the state
+      store's `episodes` table; `self.episodes` is an in-memory mirror kept
+      in sync on add/remove, so every existing reader (`ledger.episodes`,
+      `set(ledger.episodes)`, `len(...)`) is byte-for-byte unchanged.
+    - file-backed (a worker's private throwaway ledger, #133, and any
+      legacy caller): the original JSON behavior, unchanged.
+
+    Construct with `store=` for the durable table, or `path=` for the
+    file/JSON path. The worker diff mechanism keeps using the file path;
+    that ledger never crosses a restart, so it does not need a table."""
+
+    def __init__(
+        self, path: Path | str | None = None, *, store=None
+    ) -> None:
+        self.store = store
+        self.path = Path(path) if path is not None else None
         self.episodes: list[Episode] = []
-        if self.path.exists():
+        if store is not None:
+            self.episodes = [Episode(**e) for e in store.list_episodes()]
+        elif self.path is not None and self.path.exists():
             data = json.loads(self.path.read_text(encoding="utf-8"))
             self.episodes = [Episode(**e) for e in data]
 
     def add(self, episode: Episode) -> None:
         self.episodes.append(episode)
-        self._save()
+        if self.store is not None:
+            self.store.add_episode(asdict(episode))
+        else:
+            self._save()
 
     def remove(self, episode: Episode) -> None:
         """Drop one episode (bootstrap's self-refuting-mask guard, #92).
         Episodes are frozen dataclasses, so identity is by value."""
         self.episodes.remove(episode)
-        self._save()
+        if self.store is not None:
+            self.store.remove_episode(asdict(episode))
+        else:
+            self._save()
 
     def _save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)

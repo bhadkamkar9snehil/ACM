@@ -8,7 +8,6 @@ One asset is a fleet of one; there is no single-asset mode.
 
 from __future__ import annotations
 
-import json
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -75,19 +74,23 @@ class Runtime:
         self._evidence_history_len = 2000
         if self.governor is None:
             self.governor = Governor.from_probe(probe())
-        self.ledger = EpisodeLedger(Path(self.data_root) / "ledger.json")
+        # relational state store (#135): registry, episodes, runtime
+        # journal, decision output - all in proper tables. Replaces the
+        # old ledger.json/bootstrapped.json files (auto-migrated on first
+        # open of a pre-#135 data root).
+        from store.state import SqliteStateStore, migrate_json_files
+
+        self.state = SqliteStateStore(Path(self.data_root) / "state.db")
+        migrate_json_files(self.state, Path(self.data_root))
+        self.ledger = EpisodeLedger(store=self.state)
         self.cache_root = Path(self.data_root) / "memcache"
         # durable first-contact record: {asset_key: iso_utc_completed_at}.
         # "Virgin" means "never bootstrapped", NOT "no ledger windows" -
         # a clean asset never gains windows, so a windows-based test would
         # re-run the full multi-pass bootstrap on EVERY service start
         # (found by test: the tick loop sat behind a redundant bootstrap).
-        self._bootstrapped_path = Path(self.data_root) / "bootstrapped.json"
-        self._bootstrapped: dict[str, str] = {}
-        if self._bootstrapped_path.exists():
-            self._bootstrapped = json.loads(
-                self._bootstrapped_path.read_text(encoding="utf-8")
-            )
+        # Now a column on the assets table, not bootstrapped.json.
+        self._bootstrapped: dict[str, str] = self.state.get_bootstrapped()
 
     # ----------------------------------------------------------- assets
     def _select_scorer_cls(self):
@@ -524,13 +527,12 @@ class Runtime:
         return out
 
     def _mark_bootstrapped(self, asset_key: str) -> None:
-        self._bootstrapped[asset_key] = datetime.now(timezone.utc).isoformat()
-        self._bootstrapped_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self._bootstrapped_path.with_suffix(".tmp")
-        tmp.write_text(
-            json.dumps(self._bootstrapped, indent=1), encoding="utf-8"
-        )
-        tmp.replace(self._bootstrapped_path)
+        at = datetime.now(timezone.utc).isoformat()
+        self._bootstrapped[asset_key] = at
+        # ensure a registry row exists (legacy data roots discover assets
+        # by directory; the store row is what makes the marker durable)
+        self.state.ensure_asset(asset_key, at)
+        self.state.set_bootstrapped(asset_key, at)
 
     def reanchor(self, asset_key: str) -> bool:
         """Governed episode close + recalibration, exposed for the UI."""
