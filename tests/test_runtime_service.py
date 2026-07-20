@@ -84,6 +84,40 @@ def test_service_endpoints_carry_the_contract(runtime):
     assert client.get("/api/asset/nope").status_code == 404
 
 
+def test_restart_does_not_double_count_evidence(tmp_path):
+    """#120 / #136 reproduction: the durable runtime journal means a
+    fresh Runtime over the same data root does NOT re-read the whole life
+    on its first tick. Before the fix, _last_seen was RAM-only, so a
+    restart re-ingested all history into the cached-wealth banks -
+    double-counting evidence and violating the alpha guarantee.
+
+    This test fails against pre-#136 main (the first post-restart tick
+    reports rows moved and bank wealth changes with no new data)."""
+    store = RawStore(tmp_path / "raw")
+    seed_asset(store, "r/1", seed=1)
+
+    rt = Runtime(store=store, data_root=tmp_path)
+    rt.onboard_all()
+    rt.tick_all()  # scores the whole history, sets verdict + last_seen
+    seen_before = rt.state.get_last_seen("r/1")
+    assert seen_before is not None  # journal is durable, not RAM-only
+    ev_before = rt.verdicts["r/1"].evidence
+
+    # simulate a service restart: brand-new Runtime, same data root, NO
+    # new data appended
+    rt2 = Runtime(store=store, data_root=tmp_path)
+    # verdict + evidence history hydrate from the store immediately, before
+    # any tick (restart continuity - the UI is not blank on restart)
+    assert "r/1" in rt2.verdicts, "verdict not hydrated after restart"
+    assert rt2.verdicts["r/1"].evidence == pytest.approx(ev_before, abs=1e-9)
+    assert rt2.evidence_series("r/1")
+
+    rt2.onboard_all()  # restores the cached monitor + resumes the journal
+    moved = rt2.tick_all()  # no new rows since the durable last_seen
+    assert moved == 0, "restart re-read history that was already scored"
+    assert rt2.state.get_last_seen("r/1") == seen_before
+
+
 def test_stage_cost_summary_and_endpoint(runtime):
     """#132: onboard/bootstrap/tick durations, worst-first - the
     performance-KPI gap cost_summary() (tick-only) can't fill, since it

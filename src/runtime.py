@@ -91,6 +91,11 @@ class Runtime:
         # (found by test: the tick loop sat behind a redundant bootstrap).
         # Now a column on the assets table, not bootstrapped.json.
         self._bootstrapped: dict[str, str] = self.state.get_bootstrapped()
+        # restart continuity (#136): repopulate verdicts / evidence history
+        # / activity / immune from the store so the UI is never blank after
+        # a restart. The runtime journal (last_seen/tick_count) is resumed
+        # per-asset in onboard via _resume_journal.
+        self._hydrate_from_store()
 
     # ----------------------------------------------------------- assets
     def _select_scorer_cls(self):
@@ -139,6 +144,12 @@ class Runtime:
             "msg": msg,
         }
         self.activity.append(event)
+        # durable activity log (#136): survives restart, and is the audit
+        # trail #121 will read. Never let a store hiccup break real work.
+        try:
+            self.state.append_activity(event)
+        except Exception:  # noqa: BLE001
+            pass
         if self.on_activity is not None:
             try:
                 self.on_activity(event)
@@ -214,7 +225,7 @@ class Runtime:
         cached = self._load_monitor_cache(asset_key, scorer_cls)
         if cached is not None:
             self.monitors[asset_key] = EpisodicMonitor(cached, self.ledger)
-            self._tick_counts[asset_key] = 0
+            self._resume_journal(asset_key)  # #136: durable last_seen/ticks
             self.log(
                 asset_key,
                 "onboard",
@@ -230,7 +241,7 @@ class Runtime:
         )
         em = EpisodicMonitor(monitor, self.ledger)
         self.monitors[asset_key] = em
-        self._tick_counts[asset_key] = 0
+        self._resume_journal(asset_key)
         if not ok:
             self.verdicts[asset_key] = em.process(pl.DataFrame())
         else:
@@ -338,7 +349,7 @@ class Runtime:
                             AssetMonitor(key, scorer_cls=scorer_cls), self.ledger
                         )
                         self.monitors[key] = em
-                        self._tick_counts[key] = 0
+                        self._resume_journal(key)
                         self.verdicts[key] = em.process(pl.DataFrame())
                         out[key] = False
                     else:
@@ -352,7 +363,7 @@ class Runtime:
                                 AssetMonitor(key, scorer_cls=scorer_cls), self.ledger
                             )
                         self.monitors[key] = em
-                        self._tick_counts[key] = 0
+                        self._resume_journal(key)
                         if not res["ok"]:
                             self.verdicts[key] = em.process(pl.DataFrame())
                         record_stage_cost(key, "onboard", res["dt"])
@@ -481,13 +492,14 @@ class Runtime:
                             self.ledger.add(Episode(**e))
                         for e in res["removed_episodes"]:
                             self.ledger.remove(Episode(**e))
-                        self._last_seen[key] = res["last_seen"]
-                        self._mark_bootstrapped(key)
+                        self._mark_bootstrapped(key)  # ensures registry row
+                        self._set_last_seen(key, res["last_seen"])
+                        self._tick_counts[key] = 0
+                        self.state.set_tick_count(key, 0)
                         if res["final_calibration"]:
                             cached = self._load_monitor_cache(key, scorer_cls)
                             if cached is not None:
                                 self.monitors[key] = EpisodicMonitor(cached, self.ledger)
-                                self._tick_counts[key] = 0
                         record_stage_cost(
                             key, "bootstrap", res["dt"], res["history_rows"]
                         )
@@ -533,6 +545,71 @@ class Runtime:
         # by directory; the store row is what makes the marker durable)
         self.state.ensure_asset(asset_key, at)
         self.state.set_bootstrapped(asset_key, at)
+
+    # --------------------------------------------- durable runtime journal
+    # (#136 / the #120 fix): last_seen and tick_count are WRITE-THROUGH to
+    # the state store, and RESUMED from it on onboard - so a restart picks
+    # up exactly where it left off instead of re-reading the whole life
+    # (which double-counts evidence into the cached-wealth banks).
+    def _resume_journal(self, asset_key: str) -> None:
+        self.state.ensure_asset(
+            asset_key, datetime.now(timezone.utc).isoformat()
+        )
+        self._tick_counts[asset_key] = self.state.get_tick_count(asset_key)
+        ls = self.state.get_last_seen(asset_key)
+        if ls is not None:
+            self._last_seen[asset_key] = datetime.fromisoformat(ls)
+
+    def _set_last_seen(self, asset_key: str, value) -> None:
+        self._last_seen[asset_key] = value
+        self.state.set_last_seen(
+            asset_key, value.isoformat() if value is not None else None
+        )
+
+    def _bump_tick_count(self, asset_key: str) -> None:
+        n = self._tick_counts.get(asset_key, 0) + 1
+        self._tick_counts[asset_key] = n
+        self.state.set_tick_count(asset_key, n)
+
+    def _hydrate_from_store(self) -> None:
+        """On startup, repopulate the operator-facing decision state from
+        the store so a restart shows real history immediately - not a
+        blank fleet, an empty evidence chart, or a lost activity feed
+        (#136)."""
+        import json as _json
+        from collections import deque
+
+        for key, rec in self.state.latest_verdicts().items():
+            payload = _json.loads(rec["payload"]) if rec.get("payload") else {}
+            vd = payload.get("verdict")
+            if not vd:
+                continue
+            vd = dict(vd)
+            vd["attribution"] = tuple(vd.get("attribution") or ())
+            try:
+                self.verdicts[key] = V.Verdict(**vd)
+            except Exception:  # noqa: BLE001 - a stale schema is a miss, not a crash
+                pass
+
+        for key in list(self.verdicts):
+            pts = []
+            for row in self.state.evidence_series(
+                key, self._evidence_history_len
+            ):
+                payload = (
+                    _json.loads(row["payload"]) if row.get("payload") else {}
+                )
+                pts.append({
+                    "at": row["at"], "state": row["state"],
+                    "domains": payload.get("domains", {}),
+                })
+            if pts:
+                dq = deque(maxlen=self._evidence_history_len)
+                dq.extend(pts)
+                self.evidence_history[key] = dq
+
+        self.activity.extend(self.state.recent_activity(self.activity.maxlen))
+        self.immune_results.update(self.state.all_immune())
 
     def reanchor(self, asset_key: str) -> bool:
         """Governed episode close + recalibration, exposed for the UI."""
@@ -673,17 +750,32 @@ class Runtime:
                 maxlen=self._evidence_history_len
             )
         doms = self.domains(asset_key)
+        domains_ev = {
+            name: d["evidence"]
+            for name, d in doms.items()
+            if d.get("enabled")
+        }
         hist.append(
-            {
+            {"at": str(verdict.at), "state": verdict.state,
+             "domains": domains_ev}
+        )
+        # durable decision output (#136): one row per scoring event, so
+        # the evidence-over-time chart and the current verdict survive a
+        # restart. Full verdict stored in payload for faithful hydration.
+        try:
+            self.state.append_verdict({
+                "asset_key": asset_key,
                 "at": str(verdict.at),
                 "state": verdict.state,
-                "domains": {
-                    name: d["evidence"]
-                    for name, d in doms.items()
-                    if d.get("enabled")
-                },
-            }
-        )
+                "evidence": float(verdict.evidence),
+                "confidence": float(verdict.confidence),
+                "attribution": list(verdict.attribution),
+                "model_epoch": verdict.model_epoch,
+                "payload": {"domains": domains_ev,
+                            "verdict": verdict.to_dict()},
+            })
+        except Exception:  # noqa: BLE001 - output store must not break a tick
+            pass
 
     def evidence_series(self, asset_key: str) -> list[dict]:
         return list(self.evidence_history.get(asset_key, ()))
@@ -805,7 +897,9 @@ class Runtime:
             frame = frame.filter(pl.col(TIMESTAMP_COL) > since)
         verdict = None
         if not frame.is_empty():
-            self._last_seen[asset_key] = frame.get_column(TIMESTAMP_COL).max()
+            self._set_last_seen(
+                asset_key, frame.get_column(TIMESTAMP_COL).max()
+            )
             verdict = em.process(frame)
             if asset_key in self.verdicts:
                 self.previous_verdicts[asset_key] = self.verdicts[asset_key]
@@ -841,7 +935,7 @@ class Runtime:
                         "change-not-fault absorbed: baseline re-anchored",
                     )
                     self._save_monitor_cache(asset_key)
-        self._tick_counts[asset_key] += 1
+        self._bump_tick_count(asset_key)
         stagger = self._stagger(asset_key, salt=0) % REBUILD_EVERY_TICKS
         if (
             self._tick_counts[asset_key] + stagger
@@ -916,8 +1010,8 @@ class Runtime:
             max_iters, log=lambda kind, msg: self.log(asset_key, kind, msg),
             progress=self._train_observer(asset_key),
         )
-        self._last_seen[asset_key] = result["last_seen"]
-        self._mark_bootstrapped(asset_key)
+        self._mark_bootstrapped(asset_key)  # ensures registry row first
+        self._set_last_seen(asset_key, result["last_seen"])
         record_stage_cost(
             asset_key, "bootstrap",
             time.monotonic() - _bootstrap_started, result["history_rows"],
@@ -1035,6 +1129,12 @@ class Runtime:
                 self.store, ledger=self.ledger, cache_root=self.cache_root
             )
         self.immune_results[asset_key] = result
+        try:  # durable (#136): the immune panel survives a restart
+            self.state.upsert_immune(
+                asset_key, datetime.now(timezone.utc).isoformat(), result
+            )
+        except Exception:  # noqa: BLE001
+            pass
         return result
 
     def narrative_sections(self, asset_key: str) -> list[dict] | None:
