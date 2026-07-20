@@ -131,6 +131,34 @@ button.danger:hover{border-color:var(--bad);color:var(--bad);background:rgba(var
 button.danger:active{background:rgba(var(--bad-rgb),.18)}
 button:disabled{opacity:.4;cursor:wait}
 button:disabled:hover{border-color:var(--line);color:var(--txt);background:var(--bg3)}
+button.primary{border-color:var(--acc);color:var(--acc);background:rgba(var(--acc-rgb),.12)}
+button.sm{font-size:var(--fs-sm);padding:2px var(--sp-4)}
+/* form controls (#139 control console) - matched to the button system */
+input,select,textarea{font:inherit;font-size:var(--fs-md);color:var(--txt);
+ background:var(--bg);border:1px solid var(--line-strong);
+ border-radius:var(--r-control);padding:var(--sp-2) var(--sp-5)}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--acc)}
+input::placeholder{color:var(--mut)}
+label.fld{display:flex;flex-direction:column;gap:2px;font-size:var(--fs-xs);
+ letter-spacing:.5px;color:var(--mut);text-transform:uppercase}
+label.fld input,label.fld select{text-transform:none;letter-spacing:0}
+.frow{display:flex;gap:var(--sp-4);flex-wrap:wrap;align-items:flex-end}
+.frow>label.fld{flex:1;min-width:120px}
+
+/* control console */
+#page-control{padding:var(--sp-7) var(--sp-10) var(--sp-9)}
+#page-control.on{display:block}
+#ctl-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));
+ gap:var(--sp-7);align-items:start}
+#ctl-grid .card.wide{grid-column:1/-1}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:var(--sp-2) var(--sp-6);
+ font-size:var(--fs-md)}
+.kv .k{color:var(--mut)}
+.kv .v{text-align:right;font-variant-numeric:tabular-nums}
+.src-ok{color:var(--ok)}
+.src-err{color:var(--bad)}
+.roflag{font-size:var(--fs-xs);color:var(--mut);border:1px dashed var(--line-strong);
+ border-radius:var(--r-control);padding:1px var(--sp-3);margin-left:var(--sp-3)}
 
 .page{display:none;min-height:0;overflow-y:auto}
 .page.on{display:block}
@@ -454,6 +482,18 @@ function stale(at){
  const hh=(Date.now()-t)/3.6e6;
  return hh>48?` (stale ${Math.round(hh)}h - asset clock may lag wall clock)`:'';}
 async function jget(u){const r=await fetch(u);if(!r.ok)throw new Error(u+' '+r.status);return r.json();}
+async function jpost(u,body){const r=await fetch(u,{method:'POST',
+ headers:body!==undefined?{'content-type':'application/json'}:{},
+ body:body!==undefined?JSON.stringify(body):undefined});
+ const d=await r.json().catch(()=>({}));
+ if(!r.ok)throw new Error(d.error||(u+' '+r.status));return d;}
+async function jdel(u){const r=await fetch(u,{method:'DELETE'});
+ const d=await r.json().catch(()=>({}));
+ if(!r.ok)throw new Error(d.error||(u+' '+r.status));return d;}
+async function jpostText(u,text,ctype){const r=await fetch(u,{method:'POST',
+ headers:{'content-type':ctype||'text/plain'},body:text});
+ const d=await r.json().catch(()=>({}));
+ if(!r.ok)throw new Error(d.error||(u+' '+r.status));return d;}
 
 /* ------------------------------------------------ global reactive store
    Every piece of state that more than one component reads lives in a
@@ -485,6 +525,10 @@ const S={
  cost:signal(null),
  cases:signal(null),
  stageCost:signal(null),
+ registry:signal(null),
+ storage:signal(null),
+ svcInfo:signal(null),
+ sources:signal(null),
 };
 let toastId=0;
 function toast(m){
@@ -968,7 +1012,7 @@ function stageCostOption(rows){
 function parseHash(){
  const hh=(location.hash||'#/fleet').replace(/^#\/?/,'');
  const parts=hh.split('/');
- const page=['fleet','assets','activity'].includes(parts[0])?parts[0]:'fleet';
+ const page=['fleet','assets','activity','control'].includes(parts[0])?parts[0]:'fleet';
  return {page,sel:(page==='assets'&&parts.length>1)?decodeURIComponent(parts.slice(1).join('/')):null};}
 function applyHash(){
  const {page,sel}=parseHash();
@@ -1023,6 +1067,14 @@ async function fetchStageCost(){
  try{S.stageCost.value=await jget('/api/stage-cost');}catch(e){}}
 async function fetchCases(){
  try{S.cases.value=(await jget('/api/cases')).cases;}catch(e){}}
+async function fetchControl(){
+ // control-console data: registry, storage, service info, source health.
+ // Fetched on demand (when the Control page is open) and after any
+ // control action, not on every fleet tick.
+ try{S.registry.value=(await jget('/api/registry')).assets;}catch(e){}
+ try{S.storage.value=await jget('/api/storage');}catch(e){}
+ try{S.svcInfo.value=await jget('/api/service-info');}catch(e){}
+ try{S.sources.value=(await jget('/api/sources')).sources;}catch(e){}}
 async function refresh(){try{applyFleet(await jget('/api/assets'));}catch(e){}}
 let DETAIL_AT='';
 async function loadDetail(key,force){
@@ -1110,6 +1162,7 @@ function Nav(){
     ${alarms?html`<span class="badge">${alarms}</span>`:null}</a>
    <a class=${page==='assets'?'on':''} onClick=${go('assets')}><span>${'\u25A7'}</span><span class="lbl">Assets</span></a>
    <a class=${page==='activity'?'on':''} onClick=${go('activity')}><span>${'\u25B7'}</span><span class="lbl">Activity</span></a>
+   <a class=${page==='control'?'on':''} onClick=${go('control')}><span>${'\u2699'}</span><span class="lbl">Control</span></a>
   </div>
   <div class="foot">
    <span class="meta">alpha=1/asset-year</span>
@@ -1591,6 +1644,204 @@ function LiveTicker(){
   <//>`:html`<span class="tempty">waiting for the first tick...</span>`}
  </div>`;}
 
+/* ---------------- Control console (#139) ----------------
+   The two-way surface: everything an operator does is reachable here -
+   add/retire/re-onboard assets, configure + watch ingestion sources,
+   feed data manually, inspect storage, drive service operations. Reads
+   the registry/storage/service-info/sources endpoints; writes via the
+   #137/#138 APIs. ML config (the one dial) is shown READ-ONLY - the
+   config split is a product principle the UI must reinforce. */
+async function ctlAct(fn,msg){
+ toast(msg+'...');
+ try{const d=await fn();toast(msg+': done');await fetchControl();
+  if(!S.wsOn.value)await refresh();return d;}
+ catch(e){toast('FAILED: '+e.message);throw e;}}
+
+const SRC_KINDS=[
+ ['manual','Manual only (push rows / upload CSV)'],
+ ['file','File (CSV/parquet, re-read each tick)'],
+ ['sqlite','SQLite historian table'],
+ ['http','HTTP JSON endpoint (polled)'],
+];
+function AddAssetForm(){
+ const [key,setKey]=useState('');
+ const [name,setName]=useState('');
+ const [grp,setGrp]=useState('');
+ const [kind,setKind]=useState('manual');
+ const [cfg,setCfg]=useState({});
+ const [busy,setBusy]=useState(false);
+ const f=(k)=>(e)=>setCfg({...cfg,[k]:e.target.value});
+ const submit=async()=>{
+  if(!key.trim())return toast('asset key is required');
+  setBusy(true);
+  const source_config={kind,...cfg};
+  try{await ctlAct(()=>jpost('/api/assets',
+    {asset_key:key.trim(),display_name:name||null,group:grp||null,source_config}),
+    'Register '+key.trim());
+   setKey('');setName('');setGrp('');setCfg({});setKind('manual');}
+  catch(e){}finally{setBusy(false);}};
+ return html`<div class="card">
+  <h3>Add asset</h3>
+  <div class="frow">
+   <label class="fld">asset key<input value=${key} placeholder="plant/pump-3"
+    onInput=${e=>setKey(e.target.value)}/></label>
+   <label class="fld">display name<input value=${name}
+    onInput=${e=>setName(e.target.value)}/></label>
+   <label class="fld">group<input value=${grp} placeholder="fleet"
+    onInput=${e=>setGrp(e.target.value)}/></label>
+  </div>
+  <div class="frow" style="margin-top:var(--sp-4)">
+   <label class="fld" style="flex:2">data source
+    <select value=${kind} onChange=${e=>{setKind(e.target.value);setCfg({});}}>
+     ${SRC_KINDS.map(([v,l])=>html`<option value=${v}>${l}</option>`)}
+    </select></label>
+  </div>
+  ${kind==='file'?html`<div class="frow" style="margin-top:var(--sp-4)">
+    <label class="fld" style="flex:3">file path<input onInput=${f('path')}
+     placeholder="/data/feeds/pump3.csv"/></label>
+    <label class="fld">ts column<input onInput=${f('ts_col')} placeholder="(auto)"/></label>
+   </div>`:null}
+  ${kind==='sqlite'?html`<div class="frow" style="margin-top:var(--sp-4)">
+    <label class="fld">db path<input onInput=${f('db_path')} placeholder="hist.db"/></label>
+    <label class="fld">table<input onInput=${f('table')} placeholder="readings"/></label>
+    <label class="fld">ts column<input onInput=${f('ts_col')} placeholder="ts"/></label>
+   </div>`:null}
+  ${kind==='http'?html`<div class="frow" style="margin-top:var(--sp-4)">
+    <label class="fld" style="flex:3">url<input onInput=${f('url')}
+     placeholder="https://host/readings"/></label>
+    <label class="fld">rows key<input onInput=${f('rows_key')} placeholder="(root)"/></label>
+   </div>`:null}
+  <div style="margin-top:var(--sp-5);display:flex;gap:var(--sp-4);align-items:center">
+   <button class="primary" disabled=${busy} onClick=${submit}>Register + onboard</button>
+   <span class="meta" style="color:var(--mut);font-size:var(--fs-sm)">
+    onboards live in the background - watch the activity stream</span>
+  </div>
+ </div>`;}
+
+function IngestForm(){
+ const [key,setKey]=useState('');
+ const [csv,setCsv]=useState('');
+ const [busy,setBusy]=useState(false);
+ const send=async()=>{
+  if(!key.trim()||!csv.trim())return toast('need an asset key and CSV text');
+  setBusy(true);
+  try{const d=await ctlAct(()=>jpostText('/api/ingest/'+esc(key.trim())+'/csv',csv,'text/csv'),
+    'Ingest CSV into '+key.trim());
+   toast('stored '+(d.rows_stored||0)+' rows');setCsv('');}
+  catch(e){}finally{setBusy(false);}};
+ const onFile=(e)=>{const file=e.target.files&&e.target.files[0];if(!file)return;
+  const rd=new FileReader();rd.onload=()=>setCsv(String(rd.result||''));rd.readAsText(file);};
+ return html`<div class="card">
+  <h3>Ingest data (manual)</h3>
+  <div class="frow">
+   <label class="fld" style="flex:2">asset key<input value=${key}
+    placeholder="existing or new key" onInput=${e=>setKey(e.target.value)}/></label>
+   <label class="fld">from file<input type="file" accept=".csv" onChange=${onFile}/></label>
+  </div>
+  <textarea style="width:100%;margin-top:var(--sp-4);min-height:90px"
+   placeholder="timestamp,temp,vib&#10;2025-01-01T00:00:00Z,1.2,0.3&#10;..."
+   value=${csv} onInput=${e=>setCsv(e.target.value)}></textarea>
+  <div style="margin-top:var(--sp-4)">
+   <button class="primary" disabled=${busy} onClick=${send}>Append rows</button>
+  </div>
+ </div>`;}
+
+function RegistryTable(){
+ const reg=S.registry.value;
+ const fleet=S.fleet.value;
+ const stateOf=(k)=>{const r=fleet&&fleet.rows.find(x=>x.asset_key===k);return r?r.state:'-';};
+ if(!reg)return html`<div class="card wide"><h3>Assets</h3><p class="meta">loading...</p></div>`;
+ const retire=(k,purge)=>{
+  if(purge&&!confirm('PURGE '+k+'? This deletes its raw history and all state. This cannot be undone.'))return;
+  if(!purge&&!confirm('Retire '+k+'? Monitoring stops; history is kept.'))return;
+  ctlAct(()=>jdel('/api/assets/'+esc(k)+(purge?'?purge=true':'')),(purge?'Purge ':'Retire ')+k);};
+ return html`<div class="card wide">
+  <h3>Assets (${reg.length})</h3>
+  <div style="overflow-x:auto"><table>
+   <thead><tr><th style="width:22%">key</th><th>name</th><th>group</th>
+    <th>source</th><th>state</th><th>ticks</th><th style="width:210px">actions</th></tr></thead>
+   <tbody>${reg.map(a=>html`<tr key=${a.asset_key}
+     style=${a.retired_at?'opacity:.5':''}>
+    <td style="font-weight:bold" onClick=${()=>select(a.asset_key)}>${a.asset_key}</td>
+    <td>${a.display_name||''}</td><td>${a.grp||''}</td>
+    <td>${a.source_kind||'manual'}</td>
+    <td>${a.retired_at?html`<span class="meta">retired</span>`
+      :html`<span class=${'pill st-'+stateOf(a.asset_key)}>${stateOf(a.asset_key)}</span>`}</td>
+    <td style="font-variant-numeric:tabular-nums">${a.tick_count||0}</td>
+    <td>${a.retired_at?null:html`<${Fragment}>
+     <button class="sm" onClick=${()=>ctlAct(()=>jpost('/api/assets/'+esc(a.asset_key)+'/reonboard'),'Re-onboard '+a.asset_key)}>re-onboard</button>
+     <button class="sm danger" onClick=${()=>retire(a.asset_key,false)}>retire</button>
+     <button class="sm danger" onClick=${()=>retire(a.asset_key,true)}>purge</button>
+    <//>`}</td>
+   </tr>`)}</tbody>
+  </table></div>
+ </div>`;}
+
+function SourcesPanel(){
+ const srcs=S.sources.value;const storage=S.storage.value;
+ return html`<div class="card">
+  <h3>Ingestion sources</h3>
+  ${storage&&storage.incoming_dir?html`<p class="meta" style="font-size:var(--fs-sm);margin-bottom:var(--sp-4)">
+    drop-folder: <code>${storage.incoming_dir}</code> - copy a CSV/parquet in to auto-onboard</p>`:null}
+  ${!srcs||!srcs.length?html`<p class="meta">no pull sources attached (manual/drop-folder only)</p>`
+   :html`<table><thead><tr><th>asset</th><th>kind</th><th>last rows</th><th>status</th></tr></thead>
+    <tbody>${srcs.map(s=>html`<tr key=${s.asset_key}>
+     <td>${s.asset_key}</td><td>${s.kind}</td>
+     <td style="font-variant-numeric:tabular-nums">${s.last_drain_rows==null?'-':s.last_drain_rows}</td>
+     <td class=${s.last_error?'src-err':'src-ok'}>${s.last_error?s.last_error.slice(0,40):'ok'}</td>
+    </tr>`)}</tbody></table>`}
+ </div>`;}
+
+function StoragePanel(){
+ const s=S.storage.value;
+ if(!s)return html`<div class="card"><h3>Storage</h3><p class="meta">loading...</p></div>`;
+ return html`<div class="card">
+  <h3>Storage</h3>
+  <div class="kv">
+   <span class="k">backend</span><span class="v">${s.backend}</span>
+   <span class="k">state db</span><span class="v" style="overflow-wrap:anywhere">${s.state_db}</span>
+   <span class="k">raw root</span><span class="v" style="overflow-wrap:anywhere">${s.raw_root}</span>
+   ${Object.entries(s.tables||{}).map(([t,n])=>html`<${Fragment} key=${t}>
+    <span class="k">${t}</span><span class="v">${fmtInt(n)} rows</span><//>`)}
+  </div>
+ </div>`;}
+
+function ServicePanel(){
+ const info=S.svcInfo.value;
+ const [busy,setBusy]=useState(false);
+ return html`<div class="card">
+  <h3>Service operations</h3>
+  ${info?html`<div class="kv" style="margin-bottom:var(--sp-5)">
+   <span class="k">tier</span><span class="v">${info.tier}</span>
+   <span class="k">scorer</span><span class="v">${info.scorer}</span>
+   <span class="k">fleet workers</span><span class="v">${info.fleet_worker_count}</span>
+   <span class="k">tick interval</span><span class="v">${info.tick_seconds?info.tick_seconds+'s':'manual'}</span>
+   <span class="k">live assets</span><span class="v">${info.assets}</span>
+   <span class="k">alpha / asset-year<span class="roflag">ML - read only</span></span>
+   <span class="v">${info.alpha_per_asset_year}</span>
+  </div>`:null}
+  <div style="display:flex;gap:var(--sp-4);flex-wrap:wrap">
+   <button disabled=${busy} onClick=${async()=>{setBusy(true);
+    try{await ctlAct(()=>jpost('/api/tick'),'Tick all');}finally{setBusy(false);}}}>Tick all now</button>
+  </div>
+  <p class="meta" style="font-size:var(--fs-sm);margin-top:var(--sp-4);color:var(--mut)">
+   The one dial (alpha) and all ML constants live in <code>constants.py</code> and are
+   deliberately not editable from the UI - the config split is a product invariant.</p>
+ </div>`;}
+
+function ControlPage(){
+ useEffect(()=>{fetchControl();},[]);
+ return html`<div id="page-control" class="page on">
+  <div id="ctl-grid">
+   <${AddAssetForm}/>
+   <${IngestForm}/>
+   <${SourcesPanel}/>
+   <${StoragePanel}/>
+   <${ServicePanel}/>
+   <${RegistryTable}/>
+  </div>
+ </div>`;}
+
 /* ---------------- App shell ---------------- */
 function Main(){
  const page=S.page.value;
@@ -1600,6 +1851,7 @@ function Main(){
   ${page==='fleet'?html`<${FleetPage}/>`:null}
   ${page==='assets'?html`<${AssetsPage}/>`:null}
   ${page==='activity'?html`<${ActivityPage}/>`:null}
+  ${page==='control'?html`<${ControlPage}/>`:null}
  </div>`;}
 function App(){
  useEffect(()=>{

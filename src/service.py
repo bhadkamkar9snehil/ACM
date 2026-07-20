@@ -285,27 +285,11 @@ def create_app(
         return JSONResponse({"asset_key": asset_key, "status": "reonboarding"})
 
     # ------------------------------------------------- manual ingest (#138)
-    @app.post("/api/ingest/{asset_key:path}")
-    async def ingest_rows_ep(asset_key: str, req: Request) -> JSONResponse:
-        """Append rows to an asset's history: body {rows:[{ts, ch...}]}.
-        Same normalize()/append() law as every other source."""
-        from ingest.csv_source import ingest_rows
-
-        body = await req.json()
-        rows = body.get("rows") or []
-        try:
-            rep = await asyncio.to_thread(
-                ingest_rows, runtime.store, asset_key, rows, body.get("ts_col")
-            )
-        except Exception as exc:  # noqa: BLE001 - bad payload is a 400
-            return JSONResponse({"error": str(exc)}, status_code=400)
-        await push_fleet()
-        return JSONResponse({
-            "asset_key": asset_key, "rows_read": rep.rows_read,
-            "rows_stored": rep.rows_stored, "channels": rep.channels,
-            "dropped_columns": list(rep.dropped_columns),
-        })
-
+    # NOTE: the /csv route MUST be declared before the greedy
+    # {asset_key:path} rows route below - a :path converter matches
+    # trailing segments too, so if the rows route came first it would
+    # swallow ".../csv" requests (found by test: CSV body hit the JSON
+    # handler). FastAPI matches routes in definition order.
     @app.post("/api/ingest/{asset_key:path}/csv")
     async def ingest_csv_ep(asset_key: str, req: Request) -> JSONResponse:
         """Upload a CSV as multipart or raw body; appended to the asset's
@@ -346,6 +330,79 @@ def create_app(
             "asset_key": asset_key, "rows_read": rep.rows_read,
             "rows_stored": rep.rows_stored, "channels": rep.channels,
             "dropped_columns": list(rep.dropped_columns),
+        })
+
+    @app.post("/api/ingest/{asset_key:path}")
+    async def ingest_rows_ep(asset_key: str, req: Request) -> JSONResponse:
+        """Append rows to an asset's history: body {rows:[{ts, ch...}]}.
+        Same normalize()/append() law as every other source. Declared
+        AFTER the /csv route above (greedy :path ordering)."""
+        from ingest.csv_source import ingest_rows
+
+        body = await req.json()
+        rows = body.get("rows") or []
+        try:
+            rep = await asyncio.to_thread(
+                ingest_rows, runtime.store, asset_key, rows, body.get("ts_col")
+            )
+        except Exception as exc:  # noqa: BLE001 - bad payload is a 400
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        await push_fleet()
+        return JSONResponse({
+            "asset_key": asset_key, "rows_read": rep.rows_read,
+            "rows_stored": rep.rows_stored, "channels": rep.channels,
+            "dropped_columns": list(rep.dropped_columns),
+        })
+
+    @app.get("/api/registry")
+    def registry() -> JSONResponse:
+        """The asset registry for the control console: every registered
+        asset (incl. retired) with its display name, group, source kind,
+        enabled/retired state, bootstrap marker, and durable journal."""
+        from dataclasses import asdict as _asdict
+
+        rows = [
+            _asdict(a)
+            for a in runtime.state.list_assets(include_retired=True)
+        ]
+        # also surface raw-store assets not yet registered (legacy roots)
+        registered = {r["asset_key"] for r in rows}
+        for key in runtime.store.assets():
+            if key not in registered:
+                rows.append({
+                    "asset_key": key, "display_name": None, "grp": None,
+                    "enabled": True, "added_at": None, "retired_at": None,
+                    "source_kind": None, "source_config": None,
+                    "last_seen": None, "tick_count": 0,
+                    "bootstrapped_at": None,
+                })
+        return JSONResponse({"assets": sorted(rows, key=lambda r: r["asset_key"])})
+
+    @app.get("/api/storage")
+    def storage() -> JSONResponse:
+        """Storage panel: table row counts + where the data lives."""
+        return JSONResponse({
+            "backend": "sqlite",
+            "state_db": str(runtime.state.path),
+            "raw_root": str(runtime.store.root),
+            "incoming_dir": str(runtime.incoming_dir)
+            if runtime.incoming_dir else None,
+            "tables": runtime.state.table_counts(),
+        })
+
+    @app.get("/api/service-info")
+    def service_info() -> JSONResponse:
+        """Service-operations panel: tier, scorer, workers, cadence, the
+        one dial (read-only - ML config is not editable from the UI)."""
+        from constants import get as _const
+
+        return JSONResponse({
+            "tier": runtime.governor.tier,
+            "scorer": runtime._select_scorer_cls().__name__,
+            "fleet_worker_count": runtime.fleet_worker_count,
+            "tick_seconds": tick_seconds,
+            "alpha_per_asset_year": _const("ALPHA_PER_ASSET_YEAR"),
+            "assets": len(runtime.monitors),
         })
 
     @app.get("/api/sources")

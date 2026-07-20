@@ -180,6 +180,42 @@ def test_asset_lifecycle_endpoints(runtime):
     assert client.post("/api/assets/nope/reonboard").status_code == 404
 
 
+def test_control_console_endpoints(runtime):
+    """#138/#139: the endpoints the control console reads and writes -
+    registry, storage, service-info, sources, and manual ingest."""
+    client = TestClient(create_app(runtime))
+
+    reg = client.get("/api/registry").json()["assets"]
+    assert {a["asset_key"] for a in reg} >= {"f/ok1", "f/ok2", "f/bad"}
+
+    storage = client.get("/api/storage").json()
+    assert storage["backend"] == "sqlite"
+    assert "assets" in storage["tables"] and "verdict_history" in storage["tables"]
+
+    info = client.get("/api/service-info").json()
+    assert "tier" in info and info["alpha_per_asset_year"] is not None
+
+    assert "sources" in client.get("/api/sources").json()
+
+    # manual row ingest into an existing asset
+    from datetime import datetime, timedelta, timezone as _tz
+    base = datetime(2026, 1, 1, tzinfo=_tz.utc)
+    rows = [
+        {"timestamp": (base + timedelta(minutes=10 * i)).isoformat(),
+         "temp": 0.1 * i, "vib": 0.2 * i, "press": 0.0, "flow": 0.0}
+        for i in range(20)
+    ]
+    r = client.post("/api/ingest/f/ok1", json={"rows": rows})
+    assert r.status_code == 200 and r.json()["rows_stored"] == 20
+
+    # CSV ingest via raw body; label column dropped at the door
+    csv = "timestamp,temp,vib,label\n2026-02-01T00:00:00Z,1.0,2.0,RUN\n"
+    r = client.post("/api/ingest/f/ok1/csv", content=csv,
+                    headers={"content-type": "text/csv"})
+    assert r.status_code == 200
+    assert "label" in r.json()["dropped_columns"]
+
+
 def test_stage_cost_summary_and_endpoint(runtime):
     """#132: onboard/bootstrap/tick durations, worst-first - the
     performance-KPI gap cost_summary() (tick-only) can't fill, since it

@@ -321,8 +321,27 @@ dataset): [`docs/testing-and-datasets.md`](docs/testing-and-datasets.md).
 | `POST /api/tick` / `POST /api/tick/{key}` | tick the fleet / one asset |
 | `POST /api/reanchor/{key}` | governed episode close + recalibration |
 | `POST /api/bootstrap/{key}` | first-contact cleaning on demand |
+| `POST /api/assets` | register + live-onboard an asset (no restart); body `{asset_key, display_name?, group?, source_config?}` |
+| `DELETE /api/assets/{key}?purge=` | retire (keep history) or purge (delete history + state) |
+| `POST /api/assets/{key}/reonboard` | force recalibration from lifetime |
+| `POST /api/ingest/{key}` / `POST /api/ingest/{key}/csv` | append rows (JSON) / upload a CSV |
+| `GET /api/registry` | the asset registry (source config, journal, retired/enabled) |
+| `GET /api/sources` | per-asset ingestion-source health (last drain, errors) |
+| `GET /api/storage` | state-store backend, paths, and table row counts |
+| `GET /api/service-info` | tier, scorer, workers, cadence, the one dial (read-only) |
 | `GET /api/report` | fleet report (markdown), worst-first |
 | `WS /api/ws` | real-time fleet + activity stream |
+
+All of the above is driveable from the UI's **Control** console (the gear
+nav item): add/retire/re-onboard assets, configure and watch ingestion
+sources, feed data manually, inspect storage, and run service
+operations - two-way, no restart. State lives in a relational store
+(SQLite by default, one file in the data root); nothing an operator sees
+evaporates on restart.
+
+**Adding data, three ways:** the Control console (upload CSV / register a
+source), the API above, or the **drop-folder** - copy a CSV/parquet into
+`<data_root>/incoming/` and it becomes a monitored asset within one tick.
 
 ## Repository layout
 
