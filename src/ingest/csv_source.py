@@ -83,3 +83,25 @@ def ingest_csv(
         channels=frame.width - 1,
         dropped_columns=dropped,
     )
+
+
+def ingest_rows(
+    store: RawStore,
+    asset_key: str,
+    rows: list[dict],
+    ts_col: str | None = None,
+) -> IngestReport:
+    """Manual row ingestion (#138): a list of {ts, ch1, ch2, ...} dicts,
+    e.g. a POST /api/ingest body. Same normalize()/append() law as CSV."""
+    if not rows:
+        return IngestReport(asset_key, 0, 0, 0, ())
+    raw = pl.DataFrame(rows, infer_schema_length=len(rows))
+    frame, dropped = normalize(raw, ts_col=ts_col)
+    stored = store.append(asset_key, frame)
+    return IngestReport(
+        asset_key=asset_key,
+        rows_read=raw.height,
+        rows_stored=stored,
+        channels=frame.width - 1,
+        dropped_columns=dropped,
+    )

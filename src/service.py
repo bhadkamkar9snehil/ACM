@@ -284,6 +284,88 @@ def create_app(
         _spawn_bg(_bg())
         return JSONResponse({"asset_key": asset_key, "status": "reonboarding"})
 
+    # ------------------------------------------------- manual ingest (#138)
+    @app.post("/api/ingest/{asset_key:path}")
+    async def ingest_rows_ep(asset_key: str, req: Request) -> JSONResponse:
+        """Append rows to an asset's history: body {rows:[{ts, ch...}]}.
+        Same normalize()/append() law as every other source."""
+        from ingest.csv_source import ingest_rows
+
+        body = await req.json()
+        rows = body.get("rows") or []
+        try:
+            rep = await asyncio.to_thread(
+                ingest_rows, runtime.store, asset_key, rows, body.get("ts_col")
+            )
+        except Exception as exc:  # noqa: BLE001 - bad payload is a 400
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        await push_fleet()
+        return JSONResponse({
+            "asset_key": asset_key, "rows_read": rep.rows_read,
+            "rows_stored": rep.rows_stored, "channels": rep.channels,
+            "dropped_columns": list(rep.dropped_columns),
+        })
+
+    @app.post("/api/ingest/{asset_key:path}/csv")
+    async def ingest_csv_ep(asset_key: str, req: Request) -> JSONResponse:
+        """Upload a CSV as multipart or raw body; appended to the asset's
+        history. The fastest 'add data from the browser' path."""
+        import io
+        import tempfile
+
+        from ingest.csv_source import ingest_csv
+
+        ctype = req.headers.get("content-type", "")
+        if ctype.startswith("multipart/form-data"):
+            form = await req.form()
+            upload = form.get("file")
+            if upload is None:
+                return JSONResponse(
+                    {"error": "no file field"}, status_code=400
+                )
+            data = await upload.read()
+        else:
+            data = await req.body()
+        if not data:
+            return JSONResponse({"error": "empty upload"}, status_code=400)
+
+        def _do() -> object:
+            with tempfile.NamedTemporaryFile(
+                suffix=".csv", delete=True
+            ) as tf:
+                tf.write(data)
+                tf.flush()
+                return ingest_csv(runtime.store, asset_key, tf.name)
+
+        try:
+            rep = await asyncio.to_thread(_do)
+        except Exception as exc:  # noqa: BLE001
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        await push_fleet()
+        return JSONResponse({
+            "asset_key": asset_key, "rows_read": rep.rows_read,
+            "rows_stored": rep.rows_stored, "channels": rep.channels,
+            "dropped_columns": list(rep.dropped_columns),
+        })
+
+    @app.get("/api/sources")
+    def sources() -> JSONResponse:
+        """Per-asset ingestion source status for the control console:
+        kind, last drain rows, last error, config (secrets omitted)."""
+        out = []
+        for key, src in runtime.live_sources.items():
+            out.append({
+                "asset_key": key,
+                "kind": type(src).__name__,
+                "last_drain_rows": getattr(src, "last_drain_rows", None),
+                "last_error": getattr(src, "last_error", ""),
+            })
+        return JSONResponse({
+            "sources": out,
+            "incoming_dir": str(runtime.incoming_dir)
+            if runtime.incoming_dir else None,
+        })
+
     @app.get("/api/episodes/{asset_key:path}")
     def episodes(asset_key: str) -> JSONResponse:
         """The asset's case history: every ledgered episode - faults AND
@@ -482,9 +564,14 @@ def main() -> None:  # pragma: no cover - manual entrypoint
     # lane, and the soak all get the dataclass default (1, sequential),
     # deliberately unaffected.
     governor = Governor.from_probe(probe())
+    incoming = root / "incoming"
+    incoming.mkdir(parents=True, exist_ok=True)
     runtime = Runtime(
         store=RawStore(root / "raw"), data_root=root, governor=governor,
         fleet_worker_count=governor.evidence_workers,
+        # drop-folder ingestion (#138): copy a CSV/parquet into
+        # <root>/incoming and it becomes a monitored asset within a tick
+        incoming_dir=incoming,
     )
 
     def deferred_setup(on_progress=None) -> None:

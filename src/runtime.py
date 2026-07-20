@@ -60,11 +60,16 @@ class Runtime:
     # on_activity (set by the service) pushes each event to the UI live.
     activity: object = None
     on_activity: object = None
+    # drop-folder ingestion (#138): a directory scanned each tick; new
+    # CSV/parquet files auto-register + onboard. Set by the service; None
+    # (default) disables the scan for tests/evidence/soak.
+    incoming_dir: object = None
 
     def __post_init__(self) -> None:
         from collections import deque
 
         self.activity = deque(maxlen=500)
+        self._incoming_seen: set = set()
         # per-asset evidence trajectory: one point per scoring event
         # ({at, state, domains: {name: evidence}}), rolling. The health
         # index shows surprise over life; THIS shows the decision layer's
@@ -226,6 +231,7 @@ class Runtime:
         if cached is not None:
             self.monitors[asset_key] = EpisodicMonitor(cached, self.ledger)
             self._resume_journal(asset_key)  # #136: durable last_seen/ticks
+            self._attach_source_from_config(asset_key)  # #138 pull sources
             self.log(
                 asset_key,
                 "onboard",
@@ -242,6 +248,7 @@ class Runtime:
         em = EpisodicMonitor(monitor, self.ledger)
         self.monitors[asset_key] = em
         self._resume_journal(asset_key)
+        self._attach_source_from_config(asset_key)  # #138 pull sources
         if not ok:
             self.verdicts[asset_key] = em.process(pl.DataFrame())
         else:
@@ -379,6 +386,7 @@ class Runtime:
                             )
                         self.monitors[key] = em
                         self._resume_journal(key)
+                        self._attach_source_from_config(key)  # #138
                         if not res["ok"]:
                             self.verdicts[key] = em.process(pl.DataFrame())
                         record_stage_cost(key, "onboard", res["dt"])
@@ -989,6 +997,67 @@ class Runtime:
             db_path=db_path, asset_key=asset_key
         )
 
+    def _attach_source_from_config(self, asset_key: str) -> None:
+        """Build a pull-source (file/sqlite/http) from the asset's
+        registry source_config and register it for per-tick draining
+        (#138). Called on onboard, so a restart re-attaches every asset's
+        source from the durable registry. buffer/manual/folder kinds have
+        no per-asset pull step and are skipped."""
+        from ingest.sources import build_source
+
+        row = self.state.get_asset(asset_key)
+        if row is None or not row.source_config:
+            return
+        src = build_source(asset_key, row.source_config)
+        if src is not None:
+            self.live_sources[asset_key] = src
+
+    def scan_incoming(self) -> int:
+        """Drop-folder ingestion (#138): any new .csv/.parquet under
+        self.incoming_dir becomes a monitored asset. The asset key is the
+        file's path relative to the folder, minus the suffix (so
+        `incoming/plant/pump-3.csv` -> `plant/pump-3`). Auto-registers +
+        ingests + onboards; already-ingested files are skipped by name.
+        Returns the number of newly onboarded assets."""
+        if not self.incoming_dir:
+            return 0
+        from pathlib import Path as _P
+
+        from ingest.csv_source import ingest_csv
+
+        root = _P(self.incoming_dir)
+        if not root.exists():
+            return 0
+        onboarded = 0
+        for path in sorted(root.rglob("*")):
+            if path.suffix not in (".csv", ".parquet") or not path.is_file():
+                continue
+            if str(path) in self._incoming_seen:
+                continue
+            self._incoming_seen.add(str(path))
+            rel = path.relative_to(root).with_suffix("")
+            key = str(rel).replace("\\", "/")
+            try:
+                if path.suffix == ".parquet":
+                    import polars as _pl
+
+                    from ingest.csv_source import normalize
+                    frame, _d = normalize(_pl.read_parquet(path))
+                    self.store.append(key, frame)
+                else:
+                    ingest_csv(self.store, key, path)
+                self.register_asset(
+                    key, source_config={"kind": "folder", "file": str(path)}
+                )
+                self.log(key, "service",
+                         f"drop-folder: ingested {path.name}, onboarding")
+                self.onboard_and_bootstrap(key)
+                onboarded += 1
+            except Exception as exc:  # noqa: BLE001 - one bad file is not fatal
+                self.log(key, "service",
+                         f"drop-folder: FAILED to ingest {path.name}: {exc}")
+        return onboarded
+
     # ------------------------------------------------------------ ticks
     def tick(self, asset_key: str) -> V.Verdict | None:
         """Score any new rows for one asset; returns the verdict if new
@@ -1086,6 +1155,13 @@ class Runtime:
     def tick_all(self) -> int:
         moved = 0
         t0 = time.monotonic()
+        # drop-folder ingestion runs first, so a file copied in becomes a
+        # live asset within one tick (#138); no-op unless incoming_dir set
+        if self.incoming_dir:
+            try:
+                self.scan_incoming()
+            except Exception:  # noqa: BLE001 - a scan error must not stall ticks
+                pass
         for key in list(self.monitors):
             if self.tick(key) is not None:
                 moved += 1
