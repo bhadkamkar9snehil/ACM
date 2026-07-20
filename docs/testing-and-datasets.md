@@ -33,6 +33,7 @@ What each file pins down:
 | `test_raw_store.py` | store contract: UTC enforcement, month partitions, column-order insensitivity |
 | `test_worldmodel.py` | Tier 2 (skipped automatically when torch is absent): PIT calibration, the nonlinear go/no-go separation criterion, cross-tier contract parity |
 | `test_care_replay.py` | the evidence-lane machinery itself, on a tiny synthetic CARE-shaped farm |
+| `test_seed_demo.py` | the live-seeding path (#131): one asset per event, no meta/label columns, no train/prediction split |
 | `test_ascii.py` / `test_import_boundary.py` | repo hygiene |
 
 Conventions: tests marked `statistical` run repeated-trial probability
@@ -151,6 +152,27 @@ first-contact bootstrap, chunked ticks - and is scored: anomaly events
 as hit/miss with detection lag in hours; normal events as
 clean/false-alarm. `summary.json` aggregates; per-event JSON keeps the
 whole tick trace for diagnosis.
+
+### Watching it live in the UI instead (`evidence.seed_demo`)
+
+`care_replay` above answers "did ACM detect the labeled fault" with a
+results file - it runs each event in its own private, throwaway store
+and never touches a running service. To instead just WATCH ACM work
+against real data in the browser, seed events into a live data root:
+
+```bash
+uv run python lab/scripts/download_care_benchmark.py --dest care_data --farms A
+uv run python -m evidence.seed_demo \
+    --farm-dir "care_data/Wind Farm A" --root acm_data
+uv run python -m service --root acm_data --port 8899
+```
+
+Each event becomes one continuous asset (`wind-farm-a/<event_id>`) - the
+full CSV span in chronological order, no train/prediction split (a live
+asset's raw history is simply its whole life). The running service
+auto-discovers, onboards, and bootstraps every seeded asset on startup,
+same as any other asset. Re-run `seed_demo` with `--prefix` to namespace
+a second batch, or `--farm-dir "care_data/Wind Farm B"` for another farm.
 
 ### Adapting any other dataset
 

@@ -206,6 +206,10 @@ flowchart TD
 - **`evidence/care_replay.py`** - the evidence lane: replays CARE-shaped
   farm datasets through the full production path and scores the verdicts
   against ground-truth labels (see `docs/testing-and-datasets.md`).
+- **`evidence/seed_demo.py`** (#131) - seeds a CARE-shaped farm into a
+  LIVE data root as one continuous asset per event (no train/prediction
+  split, unlike care_replay's isolated scoring runs) - the "watch it
+  work in the UI" path for a running `python -m service`.
 - **`evidence/soak.py`** - the operational soak: runs the real service
   against a time-compressed live feed through healthy -> change ->
   fault phases and checks eight pass/fail criteria.

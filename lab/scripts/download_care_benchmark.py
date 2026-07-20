@@ -17,18 +17,21 @@ from __future__ import annotations
 
 import argparse
 import shutil
-import sys
 import tempfile
 from pathlib import Path
 
 ZENODO_URL = "https://zenodo.org/records/15846963/files/CARE_To_Compare.zip?download=1"
-ROOT = Path(__file__).resolve().parents[1]
+# repo root: lab/scripts/<this file> -> lab/ -> repo root. --dest is
+# documented (README, docs/testing-and-datasets.md) as living at the
+# repo root ("care_data/Wind Farm A") - this used to resolve one level
+# too shallow (into lab/), a real onboarding bug (#131).
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--dest", default="care_data",
-                    help="Destination directory (default: care_data inside ACM root)")
+                    help="Destination directory (default: care_data at the repo root)")
     ap.add_argument("--farms", nargs="+", default=["A"], choices=["A", "B", "C"],
                     help="Wind farms to download (default: A)")
     ap.add_argument("--count", type=int, default=None,
@@ -38,10 +41,15 @@ def main() -> int:
     try:
         from remotezip import RemoteZip
     except ImportError:
-        print("Installing remotezip...")
-        import subprocess
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "remotezip"])
-        from remotezip import RemoteZip
+        # remotezip is a declared project dependency (pyproject.toml) as
+        # of #131 - 'uv sync' installs it. A missing-pip venv (uv-managed
+        # venvs ship no pip by default) previously made the old runtime
+        # 'pip install' fallback here fail with a confusing second error.
+        print(
+            "remotezip is not installed. Run 'uv sync' at the repo root "
+            "(it is a declared dependency), or 'uv pip install remotezip'."
+        )
+        return 1
 
     dest = Path(args.dest) if Path(args.dest).is_absolute() else ROOT / args.dest
     dest.mkdir(parents=True, exist_ok=True)
@@ -69,7 +77,7 @@ def main() -> int:
                 data_files = data_files[:args.count]
 
             to_download = info_files + data_files
-            print(f"\nFarm {farm}: {len(info_files)} metadata + {len(data_files)} event CSVs → {farm_dir}")
+            print(f"\nFarm {farm}: {len(info_files)} metadata + {len(data_files)} event CSVs -> {farm_dir}")
 
             with tempfile.TemporaryDirectory() as tmp:
                 tmp_path = Path(tmp)
@@ -89,7 +97,7 @@ def main() -> int:
                     sz_mb = target.stat().st_size / 1_048_576
                     print(f"  [{i}/{len(to_download)}] {rel}  ({sz_mb:.1f} MB)", flush=True)
 
-            print(f"Farm {farm} done → {farm_dir}")
+            print(f"Farm {farm} done -> {farm_dir}")
 
     print(f"\nRun benchmark:")
     for farm in args.farms:

@@ -62,28 +62,53 @@ def load_event_info(farm_dir: Path) -> list[dict]:
     return _read_care_csv(farm_dir / "event_info.csv").to_dicts()
 
 
-def load_event_frames(
-    farm_dir: Path, event_id: object
-) -> tuple[pl.DataFrame, pl.DataFrame]:
-    """Read one event CSV, adapt to store shape, split train/prediction."""
+def _adapt_event_csv(farm_dir: Path, event_id: object) -> pl.DataFrame:
+    """Shared adapter step: read one event CSV, declare the timestamp
+    zone, rename to the store's timestamp column. Still carries
+    train_test (needed by load_event_frames' split) and any other meta
+    columns - callers select the columns they want."""
     raw = _read_care_csv(farm_dir / "datasets" / f"{event_id}.csv")
     if "train_test" not in raw.columns:
         raise ValueError(f"event {event_id}: no train_test column")
-    raw = raw.with_columns(
+    return raw.with_columns(
         # naive-by-format, UTC-by-documentation: declared here, on purpose
         pl.col("time_stamp").str.to_datetime(time_unit="us", time_zone="UTC")
     ).rename({"time_stamp": TIMESTAMP_COL})
+
+
+def _numeric_columns(raw: pl.DataFrame) -> list[str]:
+    """Timestamp plus every numeric, non-meta column - the model-input
+    columns. Meta/label columns (train_test, status_type_id, id,
+    asset_id) never reach a caller through this."""
     drop = [c for c in META_COLS if c in raw.columns and c != "time_stamp"]
-    keep_numeric = [
+    return [
         c
         for c, dt in raw.schema.items()
         if c == TIMESTAMP_COL or (c not in drop and dt.is_numeric())
     ]
+
+
+def load_event_frames(
+    farm_dir: Path, event_id: object
+) -> tuple[pl.DataFrame, pl.DataFrame]:
+    """Read one event CSV, adapt to store shape, split train/prediction."""
+    raw = _adapt_event_csv(farm_dir, event_id)
+    keep_numeric = _numeric_columns(raw)
     train = raw.filter(pl.col("train_test") == "train").select(keep_numeric)
     predict = raw.filter(pl.col("train_test") == "prediction").select(
         keep_numeric
     )
     return train, predict
+
+
+def load_event_full_frame(farm_dir: Path, event_id: object) -> pl.DataFrame:
+    """The full event history in original row order, model-input columns
+    only (no train/prediction split). Used to seed a live demo asset:
+    unlike the evidence lane's isolated per-event replay, a live asset
+    just needs its continuous raw history - the whole span IS the
+    asset's life (evidence.seed_demo, issue #131)."""
+    raw = _adapt_event_csv(farm_dir, event_id)
+    return raw.select(_numeric_columns(raw))
 
 
 def _parse_utc(value: str) -> datetime:

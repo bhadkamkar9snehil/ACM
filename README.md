@@ -23,6 +23,21 @@ uv run python -m service --root acm_data --port 8899 --tick-seconds 300
 # self-ticking fleet service + zero-build UI: open http://127.0.0.1:8899
 ```
 
+That starts an empty fleet - nothing to watch yet. To see ACM working
+against real sensor history in three more commands:
+
+```bash
+uv run python lab/scripts/download_care_benchmark.py --dest care_data --farms A
+uv run python -m evidence.seed_demo --farm-dir "care_data/Wind Farm A" --root acm_data
+uv run python -m service --root acm_data --port 8899
+# open http://127.0.0.1:8899 - every downloaded event is now a fleet asset
+```
+
+`download_care_benchmark.py` pulls real wind-turbine SCADA history from
+the public CARE-to-Compare dataset (tens of MB per event); `seed_demo`
+appends each event as one continuous asset into `acm_data`, and the
+service auto-discovers, onboards, and bootstraps everything on startup.
+
 Deep documentation:
 
 | Document | Contents |
@@ -261,6 +276,11 @@ uv run python -m service --root acm_data \
 # --- test ---
 uv run pytest tests -q                            # full suite
 uv run pytest tests -q -m "not statistical"       # fast lane
+
+# --- demo data: seed real CARE events into a live fleet (see the UI work) ---
+uv run python lab/scripts/download_care_benchmark.py --dest care_data --farms A
+uv run python -m evidence.seed_demo \
+    --farm-dir "care_data/Wind Farm A" --root acm_data
 
 # --- evidence lane: real labeled datasets through the production path ---
 uv run python -m evidence.care_replay \
