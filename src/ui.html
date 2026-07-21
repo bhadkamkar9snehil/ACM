@@ -50,13 +50,15 @@
     by role: xs = uppercase eyebrows/labels, sm = secondary/pills,
     md = dense body (tables, meta, buttons), base = body, lg = page
     titles, xl = the asset headline, num = the big KPI figures. */
- --fs-xs:10.5px;--fs-sm:11.5px;--fs-md:12.5px;--fs-base:13.5px;
- --fs-lg:15.5px;--fs-xl:20px;--fs-num:24px;
+ --fs-xs:11px;--fs-sm:12px;--fs-md:13px;--fs-base:14px;
+ --fs-lg:16.5px;--fs-xl:21px;--fs-num:26px;
 
  /* spacing scale - every padding/margin/gap in this file is drawn from
-    here by role, not hand-picked per component */
- --sp-1:4px;--sp-2:6px;--sp-3:8px;--sp-4:10px;--sp-5:12px;--sp-6:14px;
- --sp-7:16px;--sp-8:18px;--sp-9:20px;--sp-10:24px;--sp-hairline:2px;
+    here by role, not hand-picked per component. Widened (2026-07) for
+    breathing room: card padding, grid gaps, and page margins all pull
+    from the upper end. */
+ --sp-1:4px;--sp-2:6px;--sp-3:9px;--sp-4:12px;--sp-5:16px;--sp-6:20px;
+ --sp-7:24px;--sp-8:28px;--sp-9:34px;--sp-10:44px;--sp-hairline:2px;
 
  /* corner radius scale */
  --r-tight:3px;--r-control:6px;--r-card:10px;--r-pill:999px;}
@@ -145,16 +147,19 @@ label.fld input,label.fld select{text-transform:none;letter-spacing:0}
 .frow{display:flex;gap:var(--sp-4);flex-wrap:wrap;align-items:flex-end}
 .frow>label.fld{flex:1;min-width:120px}
 
-/* control console */
-#page-control{padding:var(--sp-7) var(--sp-10) var(--sp-9)}
+/* control console - 2 roomy columns (was 3 narrow, which broke the kv
+   values mid-word and overflowed the file input); registry spans full. */
+#page-control{padding:var(--sp-8) var(--sp-10) var(--sp-9);max-width:1500px}
 #page-control.on{display:block}
-#ctl-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));
+#ctl-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(500px,1fr));
  gap:var(--sp-7);align-items:start}
 #ctl-grid .card.wide{grid-column:1/-1}
-.kv{display:grid;grid-template-columns:auto 1fr;gap:var(--sp-2) var(--sp-6);
- font-size:var(--fs-md)}
+#ctl-grid .card{padding:var(--sp-8) var(--sp-8)}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:var(--sp-3) var(--sp-7);
+ font-size:var(--fs-md);line-height:1.7}
 .kv .k{color:var(--mut)}
-.kv .v{text-align:right;font-variant-numeric:tabular-nums}
+.kv .v{text-align:right;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+input[type=file]{max-width:100%;font-size:var(--fs-sm)}
 .src-ok{color:var(--ok)}
 .src-err{color:var(--bad)}
 .roflag{font-size:var(--fs-xs);color:var(--mut);border:1px dashed var(--line-strong);
@@ -224,10 +229,13 @@ th{color:var(--mut);font-weight:normal;font-size:var(--fs-xs);letter-spacing:1px
  margin-right:var(--sp-2)}
 
 /* ---------------------------------------------------- fleet page */
-#page-fleet{padding:var(--sp-7) var(--sp-10) var(--sp-9)}
-#page-fleet.on{display:flex;flex-direction:column;overflow-y:hidden}
-#kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:var(--sp-5);
- margin-bottom:var(--sp-6)}
+/* the whole page scrolls (was a fixed-viewport flex column with only the
+   table scrolling internally - which squeezed every section as content
+   grew). Each band now takes its natural height and breathes. */
+#page-fleet{padding:var(--sp-8) var(--sp-10) var(--sp-9)}
+#page-fleet.on{display:block;overflow-y:auto}
+#kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(185px,1fr));gap:var(--sp-6);
+ margin-bottom:var(--sp-7)}
 .kpi{background:var(--bg2);border:1px solid var(--line);border-radius:var(--r-card);
  padding:var(--sp-5) var(--sp-7);box-shadow:var(--shadow)}
 .kpi b{display:block;font-size:var(--fs-xs);letter-spacing:1.5px;color:var(--mut);
@@ -240,13 +248,16 @@ th{color:var(--mut);font-weight:normal;font-size:var(--fs-xs);letter-spacing:1px
  text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .kpi.bad span{color:var(--bad)}.kpi.warn span{color:var(--warn)}
 .kpi.ok span{color:var(--ok)}.kpi.acc span{color:var(--acc)}
-#fcharts{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:var(--sp-5);
- margin-bottom:var(--sp-6);flex:0 0 auto}
+/* 3 charts per row on a desktop (was cramming 4-5 via a 320px min, which
+   truncated axis labels and overlapped the donut legend); collapses to 2
+   then 1 as width drops. */
+#fcharts{display:grid;grid-template-columns:repeat(auto-fit,minmax(430px,1fr));
+ gap:var(--sp-7);margin-bottom:var(--sp-7);flex:0 0 auto}
 #fcharts .card.wide{grid-column:1/-1}
-#fcharts .dchart{height:190px}
-#ftable-card{padding:0;display:flex;flex-direction:column;flex:1 1 auto;min-height:220px}
-#ftable-card h3{padding:var(--sp-5) var(--sp-7) 0;flex:0 0 auto}
-#ftable-scroll{overflow-y:auto;flex:1 1 auto;min-height:0}
+#fcharts .dchart{height:230px}
+#ftable-card{padding:0;display:flex;flex-direction:column}
+#ftable-card h3{padding:var(--sp-6) var(--sp-8) 0;flex:0 0 auto}
+#ftable-scroll{overflow-y:auto;max-height:70vh}
 #ftable{margin-top:var(--sp-4)}
 #ftable thead th{position:sticky;top:0;background:var(--bg2);z-index:1;border-bottom:1px solid var(--line-strong)}
 #ftable td{padding:var(--sp-3) var(--sp-8)}
@@ -579,7 +590,13 @@ function EChart({id,height,option,onReady}){
   if(onReady)onReady(c);
   const onResize=()=>c.resize();
   addEventListener('resize',onResize);
-  return ()=>{removeEventListener('resize',onResize);c.dispose();inst.current=null;};
+  // A chart that inits inside a hidden/not-yet-sized tab reads clientWidth=0
+  // and reserves label space against a stale narrow box (clips y-axis labels
+  // on horizontal-bar charts). Observe the container so it re-lays-out the
+  // moment its own box gets real width, not only on window resize.
+  const ro=new ResizeObserver(()=>c.resize());
+  ro.observe(ref.current);
+  return ()=>{removeEventListener('resize',onResize);ro.disconnect();c.dispose();inst.current=null;};
  },[]);
  useEffect(()=>{
   if(inst.current&&option)
@@ -635,11 +652,11 @@ function statesOption(counts,assets){
 function evidenceOption(rows){
  const nonzero=rows.filter(r=>r.evidence>0.005);
  const top=(nonzero.length?nonzero:rows).slice(0,8);
- return {grid:{left:10,right:56,top:10,bottom:10,containLabel:true},
+ return {grid:{left:124,right:56,top:10,bottom:10},
   tooltip:{trigger:'axis',axisPointer:{type:'shadow'}},
   xAxis:{type:'value',axisLabel:{color:CH.axis,fontSize:10},splitLine:{lineStyle:{color:CH.grid}}},
   yAxis:{type:'category',inverse:true,data:top.map(r=>r.asset_key),
-   axisLabel:{color:CH.text,fontSize:11,width:130,overflow:'truncate'}},
+   axisLabel:{color:CH.text,fontSize:11}},
   series:[{type:'bar',data:top.map(r=>({value:r.evidence,itemStyle:{color:SC[r.state]||'#888',borderRadius:[0,3,3,0]}})),
    label:{show:true,position:'right',color:CH.axis,fontSize:10,
     formatter:p=>p.value>=0.005?p.value.toFixed(2):''},
@@ -647,9 +664,10 @@ function evidenceOption(rows){
     label:{color:'#e05252',formatter:'alarm'},data:[{xAxis:1}]},
    barMaxWidth:14}]};}
 function scatterOption(rows){
- return {grid:{left:10,right:24,top:16,bottom:10,containLabel:true},
+ return {grid:{left:10,right:24,top:16,bottom:28,containLabel:true},
   tooltip:{formatter:p=>`${p.data[3]}<br>evidence ${p.data[1]} | confidence ${p.data[0]}`},
-  xAxis:{type:'value',name:'confidence',nameTextStyle:{color:CH.axis,fontSize:10},min:0,max:1,
+  xAxis:{type:'value',name:'confidence',nameLocation:'middle',nameGap:24,
+   nameTextStyle:{color:CH.axis,fontSize:10},min:0,max:1,
    axisLabel:{color:CH.axis,fontSize:10},splitLine:{lineStyle:{color:CH.grid}}},
   yAxis:{type:'log',min:0.01,axisLabel:{color:CH.axis,fontSize:10},splitLine:{lineStyle:{color:CH.grid}}},
   series:[{type:'scatter',symbolSize:d=>10+Math.min(16,d[1]*2),
@@ -975,13 +993,13 @@ function casesOption(cases){
 function costOption(rows){
  if(!rows||!rows.length)return null;
  const top=rows.slice(0,10);
- return {grid:{left:10,right:60,top:10,bottom:10,containLabel:true},
+ return {grid:{left:124,right:60,top:10,bottom:10},
   tooltip:{trigger:'axis',axisPointer:{type:'shadow'},
    formatter:p=>`${p[0].name}<br>${fmtDec(p[0].value)}s | ${fmtInt(top[p[0].dataIndex].rows)} rows`},
   xAxis:{type:'value',name:'seconds',nameTextStyle:{color:CH.axis,fontSize:10},
    axisLabel:{color:CH.axis,fontSize:10},splitLine:{lineStyle:{color:CH.grid}}},
   yAxis:{type:'category',inverse:true,data:top.map(r=>r.asset_key),
-   axisLabel:{color:CH.text,fontSize:11,width:130,overflow:'truncate'}},
+   axisLabel:{color:CH.text,fontSize:11}},
   series:[{type:'bar',data:top.map(r=>r.wall_s),
    label:{show:true,position:'right',color:CH.axis,fontSize:10,formatter:p=>fmtDec(p.value)+'s'},
    itemStyle:{color:'#4aa3df',borderRadius:[0,3,3,0]},barMaxWidth:14}]};}
@@ -992,7 +1010,7 @@ function stageCostOption(rows){
  // tick, so it's empty for the whole bootstrap phase of a fresh fleet).
  if(!rows||!rows.length)return null;
  const top=rows.slice(0,10);
- return {grid:{left:10,right:60,top:10,bottom:10,containLabel:true},
+ return {grid:{left:168,right:60,top:10,bottom:10},
   tooltip:{trigger:'axis',axisPointer:{type:'shadow'},
    formatter:p=>{const r=top[p[0].dataIndex];
     return `${r.asset_key} - ${r.stage}<br>${fmtDec(r.wall_s)}s`
@@ -1002,7 +1020,7 @@ function stageCostOption(rows){
    axisLabel:{color:CH.axis,fontSize:10},splitLine:{lineStyle:{color:CH.grid}}},
   yAxis:{type:'category',inverse:true,
    data:top.map(r=>`${r.asset_key} [${r.stage}]`),
-   axisLabel:{color:CH.text,fontSize:10,width:150,overflow:'truncate'}},
+   axisLabel:{color:CH.text,fontSize:10}},
   series:[{type:'bar',data:top.map(r=>({value:r.wall_s,
      itemStyle:{color:STAGE_COLORS[r.stage]||'#888',borderRadius:[0,3,3,0]}})),
    label:{show:true,position:'right',color:CH.axis,fontSize:10,formatter:p=>fmtDec(p.value)+'s'},
@@ -1223,16 +1241,16 @@ function FleetCharts(){
  if(!fleet)return html`<div id="fcharts"></div>`;
  const onScatterReady=(c)=>{if(!c.__wired){c.__wired=true;c.on('click',p=>{if(p.data&&p.data[3])select(esc(p.data[3]));});}};
  return html`<div id="fcharts">
-  <div class="card"><h3>Fleet states</h3><${EChart} id="d-states" height=190 option=${statesOption(fleet.counts,fleet.assets)}/></div>
-  <div class="card"><h3>Evidence - worst first (alarm at 1.0)</h3><${EChart} id="d-evidence" height=190 option=${evidenceOption(fleet.rows)}/></div>
-  <div class="card"><h3>Confidence vs evidence (click a dot to open the asset)</h3><${EChart} id="d-scatter" height=190 option=${scatterOption(fleet.rows)} onReady=${onScatterReady}/></div>
+  <div class="card"><h3>Fleet states</h3><${EChart} id="d-states" height=230 option=${statesOption(fleet.counts,fleet.assets)}/></div>
+  <div class="card"><h3>Evidence - worst first (alarm at 1.0)</h3><${EChart} id="d-evidence" height=230 option=${evidenceOption(fleet.rows)}/></div>
+  <div class="card"><h3>Confidence vs evidence (click a dot to open the asset)</h3><${EChart} id="d-scatter" height=230 option=${scatterOption(fleet.rows)} onReady=${onScatterReady}/></div>
   <div class="card"><h3>The guarantee - alpha budget by evidence domain</h3>
-   <${EChart} id="d-budget" height=190 option=${budgetOption(fleet.budget)}/></div>
+   <${EChart} id="d-budget" height=230 option=${budgetOption(fleet.budget)}/></div>
   <div class="card"><h3>Tick cost - slowest to score, worst first</h3>
-   ${cost&&cost.rows.length?html`<${EChart} id="d-cost" height=190 option=${costOption(cost.rows)}/>`
+   ${cost&&cost.rows.length?html`<${EChart} id="d-cost" height=230 option=${costOption(cost.rows)}/>`
     :html`<p class="muted" style="padding:20px">No tick has scored an asset yet in this session.</p>`}</div>
   <div class="card"><h3>Stage cost - onboard/bootstrap/tick, slowest first</h3>
-   ${stageCost&&stageCost.rows.length?html`<${EChart} id="d-stagecost" height=190 option=${stageCostOption(stageCost.rows)}/>`
+   ${stageCost&&stageCost.rows.length?html`<${EChart} id="d-stagecost" height=230 option=${stageCostOption(stageCost.rows)}/>`
     :html`<p class="muted" style="padding:20px">No stage has completed yet in this session.</p>`}</div>
   ${(S.cases.value||[]).length?html`<div class="card wide">
    <h3>Case history across the fleet - every episode, closed and open, over real time</h3>
@@ -1739,7 +1757,7 @@ function IngestForm(){
    <label class="fld">from file<input type="file" accept=".csv" onChange=${onFile}/></label>
   </div>
   <textarea style="width:100%;margin-top:var(--sp-4);min-height:90px"
-   placeholder="timestamp,temp,vib&#10;2025-01-01T00:00:00Z,1.2,0.3&#10;..."
+   placeholder=${"timestamp,temp,vib\n2025-01-01T00:00:00Z,1.2,0.3\n..."}
    value=${csv} onInput=${e=>setCsv(e.target.value)}></textarea>
   <div style="margin-top:var(--sp-4)">
    <button class="primary" disabled=${busy} onClick=${send}>Append rows</button>
