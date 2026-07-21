@@ -232,6 +232,7 @@ class Runtime:
             self.monitors[asset_key] = EpisodicMonitor(cached, self.ledger)
             self._resume_journal(asset_key)  # #136: durable last_seen/ticks
             self._attach_source_from_config(asset_key)  # #138 pull sources
+            self._restore_wealth(asset_key)  # exact e-process continuity
             self.log(
                 asset_key,
                 "onboard",
@@ -253,6 +254,7 @@ class Runtime:
             self.verdicts[asset_key] = em.process(pl.DataFrame())
         else:
             self._save_monitor_cache(asset_key)
+            self._restore_wealth(asset_key)  # exact e-process continuity
         dt = time.monotonic() - t0
         record_stage_cost(asset_key, "onboard", dt)
         self.log(
@@ -387,7 +389,9 @@ class Runtime:
                         self.monitors[key] = em
                         self._resume_journal(key)
                         self._attach_source_from_config(key)  # #138
-                        if not res["ok"]:
+                        if res["ok"]:
+                            self._restore_wealth(key)  # exact continuity
+                        else:
                             self.verdicts[key] = em.process(pl.DataFrame())
                         record_stage_cost(key, "onboard", res["dt"])
                         out[key] = res["ok"]
@@ -686,6 +690,39 @@ class Runtime:
         n = self._tick_counts.get(asset_key, 0) + 1
         self._tick_counts[asset_key] = n
         self.state.set_tick_count(asset_key, n)
+
+    def _save_wealth(self, asset_key: str) -> None:
+        """Persist the monitor's per-tick e-process wealth so a restart
+        resumes the exact evidence trajectory (not the last monitor-cache
+        checkpoint). Best-effort - a store hiccup must never break a tick."""
+        em = self.monitors.get(asset_key)
+        if em is None or em.monitor.bank is None:
+            return
+        try:
+            self.state.save_wealth(
+                asset_key, datetime.now(timezone.utc).isoformat(),
+                em.monitor.runtime_state(),
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _restore_wealth(self, asset_key: str) -> None:
+        """On onboard, overlay the durable wealth snapshot onto the freshly
+        restored/recalibrated monitor. Signature-gated per bank, so it only
+        applies where the calibration reference reproduced identically."""
+        em = self.monitors.get(asset_key)
+        if em is None or em.monitor.bank is None:
+            return
+        try:
+            snap = self.state.get_wealth(asset_key)
+        except Exception:  # noqa: BLE001
+            snap = None
+        if not snap:
+            return
+        restored = em.monitor.load_runtime_state(snap)
+        if restored:
+            self.log(asset_key, "onboard",
+                     f"resumed e-process wealth ({len(restored)} bank(s))")
 
     def _hydrate_from_store(self) -> None:
         """On startup, repopulate the operator-facing decision state from
@@ -1129,6 +1166,10 @@ class Runtime:
         stagger_i = self._stagger(asset_key, salt=1) % IMMUNE_EVERY_TICKS
         if (self._tick_counts[asset_key] + stagger_i) % IMMUNE_EVERY_TICKS == 0:
             self.immune_pass(asset_key)
+        if verdict is not None:
+            # exact restart continuity: snapshot the banks' wealth after
+            # this tick's processing (and any absorb/rebuild above)
+            self._save_wealth(asset_key)
         dt = time.monotonic() - started
         record_asset_cost(asset_key, dt, frame.height)
         record_stage_cost(asset_key, "tick", dt, frame.height)

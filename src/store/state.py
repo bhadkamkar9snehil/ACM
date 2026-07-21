@@ -97,6 +97,16 @@ CREATE TABLE IF NOT EXISTS immune_results (
     at          TEXT,
     payload     TEXT                -- JSON
 );
+
+-- per-tick e-process wealth snapshot (exact restart continuity): the
+-- seven banks' log-wealth/buffer/rng, so a restart resumes the evidence
+-- trajectory bit-exactly instead of reverting to the last monitor-cache
+-- checkpoint. One row per asset, overwritten every tick.
+CREATE TABLE IF NOT EXISTS monitor_wealth (
+    asset_key   TEXT PRIMARY KEY,
+    at          TEXT,
+    state       TEXT                -- JSON: {bank_name: {signature, members}}
+);
 """
 
 
@@ -241,6 +251,9 @@ class SqliteStateStore(StateStore):
             )
             self._con.execute(
                 "DELETE FROM immune_results WHERE asset_key=?", (asset_key,)
+            )
+            self._con.execute(
+                "DELETE FROM monitor_wealth WHERE asset_key=?", (asset_key,)
             )
 
     @staticmethod
@@ -394,6 +407,24 @@ class SqliteStateStore(StateStore):
                 "SELECT asset_key, payload FROM immune_results"
             ).fetchall()
         return {r["asset_key"]: json.loads(r["payload"]) for r in rows}
+
+    # ------------------------------------------------- e-process wealth
+    def save_wealth(self, asset_key: str, at: str, state: dict) -> None:
+        with self._lock:
+            self._con.execute(
+                "INSERT INTO monitor_wealth (asset_key, at, state) "
+                "VALUES (?,?,?) ON CONFLICT(asset_key) DO UPDATE SET "
+                "at=excluded.at, state=excluded.state",
+                (asset_key, at, json.dumps(state)),
+            )
+
+    def get_wealth(self, asset_key: str) -> Optional[dict]:
+        with self._lock:
+            r = self._con.execute(
+                "SELECT state FROM monitor_wealth WHERE asset_key=?",
+                (asset_key,),
+            ).fetchone()
+        return json.loads(r["state"]) if r is not None else None
 
     # ------------------------------------------------------------ counts
     def table_counts(self) -> dict[str, int]:

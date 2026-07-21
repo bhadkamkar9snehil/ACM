@@ -216,6 +216,53 @@ def test_control_console_endpoints(runtime):
     assert "label" in r.json()["dropped_columns"]
 
 
+def test_restart_resumes_exact_eprocess_wealth(tmp_path):
+    """End-to-end: the durable wealth snapshot means a restart resumes the
+    monitor's accumulated e-process wealth exactly, not the last cache
+    checkpoint. Feeding identical new data to a restarted Runtime and a
+    never-restarted control must yield identical evidence."""
+    def evidence_after(rt, key):
+        v = rt.verdicts.get(key)
+        return None if v is None else v.evidence
+
+    # a data root the control keeps ticking; a copy the restart uses
+    store = RawStore(tmp_path / "raw")
+    seed_asset(store, "w/1", seed=1)
+    rt = Runtime(store=store, data_root=tmp_path)
+    rt.onboard_all()
+    rt.tick_all()  # scores the seeded history, sets + persists wealth
+
+    pre_wealth = rt.monitors["w/1"].monitor.bank.members[0].max_log_wealth
+
+    # simulate a restart mid-life: brand-new Runtime over the SAME root
+    rt2 = Runtime(store=store, data_root=tmp_path)
+    rt2.onboard_all()  # recalibrates deterministically + restores wealth
+    post_wealth = rt2.monitors["w/1"].monitor.bank.members[0].max_log_wealth
+    assert post_wealth == pytest.approx(pre_wealth, abs=1e-9), (
+        "restart did not resume the accumulated e-process wealth"
+    )
+
+    # append the SAME new batch to both and tick; evidence must match
+    extra = _extra_batch()
+    store.append("w/1", extra)
+    v_ctrl = rt.tick("w/1")
+    v_restart = rt2.tick("w/1")
+    assert v_ctrl is not None and v_restart is not None
+    assert v_restart.evidence == pytest.approx(v_ctrl.evidence, abs=1e-9)
+
+
+def _extra_batch():
+    rng = np.random.default_rng(99)
+    start = datetime(2025, 7, 1, tzinfo=UTC)
+    n = 300
+    ts = [start + timedelta(minutes=10 * i) for i in range(n)]
+    return pl.DataFrame({
+        TIMESTAMP_COL: pl.Series(ts, dtype=pl.Datetime("us", "UTC")),
+        "temp": rng.normal(size=n), "vib": rng.normal(size=n),
+        "press": rng.normal(size=n), "flow": rng.normal(size=n),
+    })
+
+
 def test_stage_cost_summary_and_endpoint(runtime):
     """#132: onboard/bootstrap/tick durations, worst-first - the
     performance-KPI gap cost_summary() (tick-only) can't fill, since it

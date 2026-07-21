@@ -170,6 +170,30 @@ class EProcess:
                 self._buffer = self._buffer[self.block_size:]
                 self._ingest_block(block_stat)
 
+    # ---- durable runtime state (exact restart continuity) -------------
+    # The mutable state that evolves per tick: the accumulated wealth, the
+    # partial-block buffer, and the RNG (the p-value's smoothing draw
+    # advances it every block). Persisting all of it lets a restart resume
+    # the e-process BIT-EXACTLY rather than reverting to the last monitor-
+    # cache checkpoint. The calibration reference (_calib_sorted, block_size,
+    # alpha) is NOT here - it is restored by rebuilding the identical bank.
+    def runtime_state(self) -> dict:
+        return {
+            "log_wealth": self.log_wealth,
+            "max_log_wealth": self.max_log_wealth,
+            "n_blocks": self.n_blocks,
+            "buffer": list(self._buffer),
+            "rng": self._rng.bit_generator.state,
+        }
+
+    def load_runtime_state(self, d: dict) -> None:
+        self.log_wealth = float(d["log_wealth"])
+        self.max_log_wealth = float(d["max_log_wealth"])
+        self.n_blocks = int(d["n_blocks"])
+        self._buffer = [float(x) for x in d.get("buffer", [])]
+        if d.get("rng") is not None:
+            self._rng.bit_generator.state = d["rng"]
+
     def _ingest_block(self, x: float) -> None:
         n = self._calib_sorted.size
         greater = n - np.searchsorted(self._calib_sorted, x, side="right")
@@ -286,6 +310,45 @@ class EProcessBank:
         for m in self.members:
             m.update(scores)
         return self.state()
+
+    # ---- durable runtime state (exact restart continuity) -------------
+    def _signature(self) -> str:
+        """Stable identity of the calibration REFERENCE this bank's wealth
+        was accumulated against. Wealth is only meaningful against the
+        same reference, so restore is gated on this matching: a bank
+        rebuilt from identical data (deterministic calibration) reproduces
+        the same signature and resumes exactly; a rebuilt-from-different-
+        data bank does not, and safely starts fresh instead of overlaying
+        wealth onto a different block structure."""
+        import hashlib
+
+        cal = np.ascontiguousarray(
+            np.asarray(self.calibration_scores, dtype=np.float64)
+        )
+        h = hashlib.sha1(cal.tobytes())
+        h.update(repr(self.block_sizes).encode())
+        return h.hexdigest()[:16]
+
+    def runtime_state(self) -> dict:
+        return {
+            "signature": self._signature(),
+            "members": {
+                str(m.block_size): m.runtime_state() for m in self.members
+            },
+        }
+
+    def load_runtime_state(self, d: dict) -> bool:
+        """Overlay persisted wealth onto this bank. Returns True if applied
+        (signature matched), False if skipped (reference differs - the
+        conservative fresh start)."""
+        if not d or d.get("signature") != self._signature():
+            return False
+        members = d.get("members", {})
+        for m in self.members:
+            ms = members.get(str(m.block_size))
+            if ms is not None:
+                m.load_runtime_state(ms)
+        return True
 
     def state(self) -> BankState:
         member_states = {

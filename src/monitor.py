@@ -493,6 +493,39 @@ class AssetMonitor:
             falsifiable_by=falsifiable,
         )
 
+    # ---- durable runtime wealth (exact restart continuity) ------------
+    # The seven evidence-domain banks are the ONLY per-tick mutable state
+    # that carries the guarantee forward (every scorer is stateless across
+    # ticks - it scores the frame against fixed calibration references).
+    # Persisting every bank's wealth per tick and restoring it on onboard
+    # makes a restart resume the exact evidence trajectory, instead of
+    # reverting to the last monitor-cache checkpoint (which is only saved
+    # on absorption / weekly rebuild, and never during an open alarm).
+    _WEALTH_BANKS = (
+        "bank", "chan_bank", "avail_bank", "gap_bank", "band_bank",
+        "trans_bank", "dyn_bank",
+    )
+
+    def runtime_state(self) -> dict:
+        out = {}
+        for name in self._WEALTH_BANKS:
+            b = getattr(self, name, None)
+            if b is not None:
+                out[name] = b.runtime_state()
+        return out
+
+    def load_runtime_state(self, state: dict) -> list[str]:
+        """Overlay persisted per-bank wealth. Returns the banks restored
+        (a bank whose calibration signature no longer matches is skipped -
+        the conservative fresh start)."""
+        restored = []
+        for name in self._WEALTH_BANKS:
+            b = getattr(self, name, None)
+            bs = (state or {}).get(name)
+            if b is not None and bs is not None and b.load_runtime_state(bs):
+                restored.append(name)
+        return restored
+
 
 def render_report(verdicts: list[V.Verdict]) -> str:
     """Minimal S1 fleet report (markdown). The UI shell arrives at S6."""

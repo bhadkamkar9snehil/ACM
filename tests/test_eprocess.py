@@ -191,3 +191,64 @@ def test_chunked_calibration_holds_ville_on_consecutive_stream():
     assert alarms / runs <= 0.15, (
         f"{alarms}/{runs} false alarms - stride-whitening regression"
     )
+
+
+def test_wealth_persistence_is_bit_exact_across_restart():
+    """Restart continuity: a bank restored from its persisted runtime
+    state (JSON round-tripped, as it would be through the store) resumes
+    the EXACT evidence trajectory of a bank that never restarted - and a
+    fresh bank (the pre-fix behaviour) provably diverges. This is the
+    guarantee-bearing state, so continuity must be exact, not merely
+    conservative."""
+    import json
+
+    rng = np.random.default_rng(7)
+    calib = rng.normal(size=2000)
+    scores = np.concatenate([rng.normal(size=500), rng.normal(1.5, 1, size=500)])
+    chunks = [scores[i:i + 37] for i in range(0, len(scores), 37)]
+    cut = 8
+
+    # control: one bank, no restart
+    control = EProcessBank(calib, alpha=0.02, seed=0)
+    ctrl_ev = []
+    for ch in chunks:
+        control.update(ch)
+        ctrl_ev.append(control.state().evidence)
+
+    # restart: run to `cut`, snapshot through JSON, load into a fresh bank
+    pre = EProcessBank(calib, alpha=0.02, seed=0)
+    for ch in chunks[:cut]:
+        pre.update(ch)
+    snap = json.loads(json.dumps(pre.runtime_state()))
+
+    resumed = EProcessBank(calib, alpha=0.02, seed=0)
+    assert resumed.load_runtime_state(snap) is True  # signature matched
+    res_ev = []
+    for ch in chunks[cut:]:
+        resumed.update(ch)
+        res_ev.append(resumed.state().evidence)
+    assert res_ev == ctrl_ev[cut:], "restart broke the evidence trajectory"
+
+    # the gap was real: a fresh bank (wealth reset) diverges
+    fresh = EProcessBank(calib, alpha=0.02, seed=0)
+    fresh_ev = []
+    for ch in chunks[cut:]:
+        fresh.update(ch)
+        fresh_ev.append(fresh.state().evidence)
+    assert fresh_ev != ctrl_ev[cut:]
+
+
+def test_wealth_restore_rejects_a_different_reference():
+    """Signature gate: wealth is only overlaid onto the SAME calibration
+    reference. A bank calibrated on different data refuses the snapshot
+    (returns False) and starts fresh, never grafting wealth onto a
+    different block structure."""
+    import json
+
+    rng = np.random.default_rng(1)
+    a = EProcessBank(rng.normal(size=1500), alpha=0.02, seed=0)
+    a.update(rng.normal(2.0, 1, size=400))
+    snap = json.loads(json.dumps(a.runtime_state()))
+
+    b = EProcessBank(rng.normal(size=1500), alpha=0.02, seed=0)  # different calib
+    assert b.load_runtime_state(snap) is False
