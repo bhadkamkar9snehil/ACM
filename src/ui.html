@@ -211,6 +211,9 @@ th{color:var(--mut);font-weight:normal;font-size:var(--fs-xs);letter-spacing:1px
 .kv span,td,th{overflow-wrap:anywhere;word-break:break-word}
 .muted{color:var(--mut)}
 .chart{width:100%}
+.cap{color:var(--mut);font-size:var(--fs-sm);line-height:1.55;margin-top:var(--sp-4);
+ padding-top:var(--sp-4);border-top:1px solid var(--line)}
+.cap b{color:var(--txt);font-weight:bold}
 
 /* ---------------------------------------------------- health narrative */
 .narr-lead{font-size:var(--fs-base);font-weight:bold;line-height:1.6;margin-bottom:var(--sp-6)}
@@ -248,13 +251,22 @@ th{color:var(--mut);font-weight:normal;font-size:var(--fs-xs);letter-spacing:1px
  text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .kpi.bad span{color:var(--bad)}.kpi.warn span{color:var(--warn)}
 .kpi.ok span{color:var(--ok)}.kpi.acc span{color:var(--acc)}
-/* 3 charts per row on a desktop (was cramming 4-5 via a 320px min, which
-   truncated axis labels and overlapped the donut legend); collapses to 2
-   then 1 as width drops. */
-#fcharts{display:grid;grid-template-columns:repeat(auto-fit,minmax(430px,1fr));
- gap:var(--sp-7);margin-bottom:var(--sp-7);flex:0 0 auto}
+/* Deliberate hierarchy on a 6-col grid instead of equal auto-fit cells:
+   the two primary triage charts (evidence bars, confidence scatter) get a
+   wide 4-col box; the two reference donuts (states, alpha budget) sit beside
+   them in a compact 2-col box; the diagnostic cost charts share a row 3+3;
+   case history spans the full width. Collapses to a single column on narrow
+   screens so nothing is ever cramped. */
+#fcharts{display:grid;grid-template-columns:repeat(6,1fr);
+ gap:var(--sp-7);margin-bottom:var(--sp-7);align-items:stretch}
+#fcharts .card{grid-column:span 6}
+#fcharts .c-evidence,#fcharts .c-scatter{grid-column:span 4}
+#fcharts .c-states,#fcharts .c-budget{grid-column:span 2}
+#fcharts .c-tickcost,#fcharts .c-stagecost{grid-column:span 3}
 #fcharts .card.wide{grid-column:1/-1}
-#fcharts .dchart{height:230px}
+@media(max-width:1200px){
+ #fcharts{grid-template-columns:1fr}
+ #fcharts .card{grid-column:1/-1}}
 #ftable-card{padding:0;display:flex;flex-direction:column}
 #ftable-card h3{padding:var(--sp-6) var(--sp-8) 0;flex:0 0 auto}
 #ftable-scroll{overflow-y:auto;max-height:70vh}
@@ -590,13 +602,7 @@ function EChart({id,height,option,onReady}){
   if(onReady)onReady(c);
   const onResize=()=>c.resize();
   addEventListener('resize',onResize);
-  // A chart that inits inside a hidden/not-yet-sized tab reads clientWidth=0
-  // and reserves label space against a stale narrow box (clips y-axis labels
-  // on horizontal-bar charts). Observe the container so it re-lays-out the
-  // moment its own box gets real width, not only on window resize.
-  const ro=new ResizeObserver(()=>c.resize());
-  ro.observe(ref.current);
-  return ()=>{removeEventListener('resize',onResize);ro.disconnect();c.dispose();inst.current=null;};
+  return ()=>{removeEventListener('resize',onResize);c.dispose();inst.current=null;};
  },[]);
  useEffect(()=>{
   if(inst.current&&option)
@@ -675,7 +681,7 @@ function scatterOption(rows){
    itemStyle:{color:p=>SC[p.data[2]]||'#888',opacity:0.85}}]};}
 function domOption(doms){
  const names=Object.keys(doms),on=n=>doms[n].enabled;
- return {grid:{left:8,right:40,top:8,bottom:6,containLabel:true},
+ return {grid:{left:150,right:40,top:8,bottom:6},
   tooltip:{trigger:'axis',axisPointer:{type:'shadow'}},
   xAxis:{type:'value',max:v=>Math.max(1.2,v.max),axisLabel:{color:CH.axis,fontSize:10},
    splitLine:{lineStyle:{color:CH.grid}}},
@@ -722,7 +728,7 @@ function anatomyOption(anat){
  const entries=Object.entries(anat.organ_surprise||{});
  if(!entries.length)return null;
  const names=entries.map(([o])=>o.split(',').slice(0,2).join(',')+(o.split(',').length>2?'..':''));
- return {grid:{left:8,right:30,top:8,bottom:6,containLabel:true},
+ return {grid:{left:138,right:30,top:8,bottom:6},
   tooltip:{trigger:'axis',axisPointer:{type:'shadow'},
    formatter:p=>entries[p[0].dataIndex][0]+'<br>surprise '+p[0].value},
   xAxis:{type:'value',axisLabel:{color:CH.axis,fontSize:10},splitLine:{lineStyle:{color:CH.grid}}},
@@ -845,7 +851,7 @@ function domainMembersOption(doms){
 function channelSurpriseOption(cs){
  const entries=Object.entries(cs||{});
  if(!entries.length)return null;
- return {grid:{left:8,right:44,top:8,bottom:6,containLabel:true},
+ return {grid:{left:138,right:44,top:8,bottom:6},
   tooltip:{trigger:'axis',axisPointer:{type:'shadow'}},
   xAxis:{type:'value',name:'mean |resid z|',nameTextStyle:{color:CH.axis,fontSize:10},
    axisLabel:{color:CH.axis,fontSize:10},splitLine:{lineStyle:{color:CH.grid}}},
@@ -874,12 +880,13 @@ function budgetOption(budget){
   legend:{orient:'vertical',right:6,top:'middle',
    textStyle:{color:CH.axis,fontSize:10},
    itemWidth:9,itemHeight:9,itemGap:8,icon:'circle'},
-  graphic:[{type:'text',left:'34%',top:'34%',
-   style:{text:`<= ${budget.alpha_per_asset_year}`,fill:CH.text,fontSize:24,
-    fontWeight:'bold',fontFamily:'Consolas,Menlo,monospace',align:'center'}},
-   {type:'text',left:'34%',top:'48%',
-   style:{text:'false alarm / asset-year',fill:CH.axis,fontSize:9,
-    fontFamily:'Consolas,Menlo,monospace',align:'center'}}],
+  // Just the total in the ring center - the "<= N false alarms/asset-year"
+  // wording lives in an HTML caption below the chart (ECharts graphic %-anchor
+  // positioning drifts the text off the ring center and clips it).
+  graphic:[{type:'text',left:'31%',top:'44%',
+   style:{text:`<= ${budget.alpha_per_asset_year}`,fill:CH.text,fontSize:26,
+    fontWeight:'bold',fontFamily:'Consolas,Menlo,monospace',
+    align:'center',verticalAlign:'middle'}}],
   series:[{type:'pie',radius:['44%','60%'],center:['34%','44%'],
    label:{show:false},emphasis:{label:{show:false}},
    itemStyle:{borderColor:CH.border,borderWidth:2},
@@ -978,11 +985,11 @@ function casesOption(cases){
     +(c.shape?`<br>shape: ${c.shape}`:'')
     +((c.channels||[]).length?`<br>${c.channels.join(', ')}`:'')
     +(c.peak_evidence!=null?`<br>peak evidence ${fmtDec(c.peak_evidence)}`:'')};});
- return {grid:{left:10,right:20,top:10,bottom:24,containLabel:true},
+ return {grid:{left:150,right:20,top:10,bottom:24},
   tooltip:{formatter:p=>p.data.tip},
   xAxis:{type:'time',axisLabel:{color:CH.axis,fontSize:10}},
   yAxis:{type:'category',data:assets,
-   axisLabel:{color:CH.text,fontSize:10,width:150,overflow:'truncate'}},
+   axisLabel:{color:CH.text,fontSize:10}},
   series:[{type:'custom',
    renderItem:(params,api)=>{
     const y=api.coord([0,api.value(2)])[1];
@@ -1241,16 +1248,17 @@ function FleetCharts(){
  if(!fleet)return html`<div id="fcharts"></div>`;
  const onScatterReady=(c)=>{if(!c.__wired){c.__wired=true;c.on('click',p=>{if(p.data&&p.data[3])select(esc(p.data[3]));});}};
  return html`<div id="fcharts">
-  <div class="card"><h3>Fleet states</h3><${EChart} id="d-states" height=230 option=${statesOption(fleet.counts,fleet.assets)}/></div>
-  <div class="card"><h3>Evidence - worst first (alarm at 1.0)</h3><${EChart} id="d-evidence" height=230 option=${evidenceOption(fleet.rows)}/></div>
-  <div class="card"><h3>Confidence vs evidence (click a dot to open the asset)</h3><${EChart} id="d-scatter" height=230 option=${scatterOption(fleet.rows)} onReady=${onScatterReady}/></div>
-  <div class="card"><h3>The guarantee - alpha budget by evidence domain</h3>
-   <${EChart} id="d-budget" height=230 option=${budgetOption(fleet.budget)}/></div>
-  <div class="card"><h3>Tick cost - slowest to score, worst first</h3>
-   ${cost&&cost.rows.length?html`<${EChart} id="d-cost" height=230 option=${costOption(cost.rows)}/>`
+  <div class="card c-evidence"><h3>Evidence - worst first (alarm at 1.0)</h3><${EChart} id="d-evidence" height=300 option=${evidenceOption(fleet.rows)}/></div>
+  <div class="card c-states"><h3>Fleet states</h3><${EChart} id="d-states" height=300 option=${statesOption(fleet.counts,fleet.assets)}/></div>
+  <div class="card c-scatter"><h3>Confidence vs evidence (click a dot to open the asset)</h3><${EChart} id="d-scatter" height=300 option=${scatterOption(fleet.rows)} onReady=${onScatterReady}/></div>
+  <div class="card c-budget"><h3>The guarantee - alpha budget by evidence domain</h3>
+   <${EChart} id="d-budget" height=270 option=${budgetOption(fleet.budget)}/>
+   ${fleet.budget?html`<div class="cap">at most <b>${fleet.budget.alpha_per_asset_year}</b> false alarm(s) per asset-year, split across the evidence domains by union bound</div>`:null}</div>
+  <div class="card c-tickcost"><h3>Tick cost - slowest to score, worst first</h3>
+   ${cost&&cost.rows.length?html`<${EChart} id="d-cost" height=260 option=${costOption(cost.rows)}/>`
     :html`<p class="muted" style="padding:20px">No tick has scored an asset yet in this session.</p>`}</div>
-  <div class="card"><h3>Stage cost - onboard/bootstrap/tick, slowest first</h3>
-   ${stageCost&&stageCost.rows.length?html`<${EChart} id="d-stagecost" height=230 option=${stageCostOption(stageCost.rows)}/>`
+  <div class="card c-stagecost"><h3>Stage cost - onboard/bootstrap/tick, slowest first</h3>
+   ${stageCost&&stageCost.rows.length?html`<${EChart} id="d-stagecost" height=260 option=${stageCostOption(stageCost.rows)}/>`
     :html`<p class="muted" style="padding:20px">No stage has completed yet in this session.</p>`}</div>
   ${(S.cases.value||[]).length?html`<div class="card wide">
    <h3>Case history across the fleet - every episode, closed and open, over real time</h3>
