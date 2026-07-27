@@ -248,6 +248,12 @@ th{color:var(--mut);font-weight:normal;font-size:var(--fs-xs);letter-spacing:1px
    grew). Each band now takes its natural height and breathes. */
 #page-fleet{padding:var(--sp-6) var(--sp-7) var(--sp-7)}
 #page-fleet.on{display:block;overflow-y:auto}
+#warmup{display:flex;align-items:baseline;gap:var(--sp-4);flex-wrap:wrap;
+ background:var(--bg2);border:1px solid var(--line);border-left:none;
+ border-radius:var(--r-card);box-shadow:var(--shadow);
+ padding:var(--sp-4) var(--sp-6);margin-bottom:var(--sp-5);font-size:var(--fs-md)}
+#warmup b{font-weight:bold}
+#warmup span:last-child{color:var(--mut);line-height:1.6}
 #kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(185px,1fr));gap:var(--sp-5);
  margin-bottom:var(--sp-5)}
 .kpi{background:var(--bg2);border:1px solid var(--line);border-radius:var(--r-card);
@@ -262,25 +268,20 @@ th{color:var(--mut);font-weight:normal;font-size:var(--fs-xs);letter-spacing:1px
  text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .kpi.bad span{color:var(--bad)}.kpi.warn span{color:var(--warn)}
 .kpi.ok span{color:var(--ok)}.kpi.acc span{color:var(--acc)}
-/* Deliberate hierarchy on a 6-col grid instead of equal auto-fit cells:
-   the two primary triage charts (evidence bars, confidence scatter) get a
-   wide 4-col box; the two reference donuts (states, alpha budget) sit beside
-   them in a compact 2-col box; the diagnostic cost charts share a row 3+3;
-   case history spans the full width. Collapses to a single column on narrow
-   screens so nothing is ever cramped. */
-#fcharts{display:grid;grid-template-columns:repeat(6,1fr);
- gap:var(--sp-5);margin-bottom:var(--sp-5);align-items:stretch}
-#fcharts .card{grid-column:span 6}
-#fcharts .c-evidence,#fcharts .c-scatter{grid-column:span 4}
-#fcharts .c-states,#fcharts .c-budget{grid-column:span 2}
-#fcharts .c-tickcost,#fcharts .c-stagecost{grid-column:span 3}
-#fcharts .card.wide{grid-column:1/-1}
-@media(max-width:1200px){
- #fcharts{grid-template-columns:1fr}
- #fcharts .card{grid-column:1/-1}}
+/* Two equal columns of same-height charts. The earlier 6-col span layout
+   gave the triage charts more width, but it could not survive a panel
+   dropping out: any row whose cells differ in height leaves a hole. Every
+   card here holds a 300px chart, so pairs always come out even however
+   many panels have data. Case history and the fleet table run full width. */
+#fcharts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));
+ gap:var(--sp-5);margin-bottom:var(--sp-5)}
+#fcases{margin-bottom:var(--sp-5)}
+#fwaiting{color:var(--mut);font-size:var(--fs-sm);line-height:1.6;
+ margin-bottom:var(--sp-5)}
+@media(max-width:1200px){#fcharts{grid-template-columns:1fr}}
 #ftable-card{padding:0;display:flex;flex-direction:column}
 #ftable-card h3{padding:var(--sp-6) var(--sp-6) 0;flex:0 0 auto}
-#ftable-scroll{overflow-y:auto;max-height:70vh}
+#ftable-scroll{overflow-x:auto}
 #ftable{margin-top:var(--sp-4)}
 #ftable thead th{position:sticky;top:0;background:var(--bg2);z-index:1;border-bottom:1px solid var(--line-strong)}
 #ftable td{padding:var(--sp-3) var(--sp-6)}
@@ -1255,6 +1256,25 @@ function KpiRow(){
   <${Kpi} cls="acc" label="engine" val=${fleet.tier} note=${fleet.scorer||''}/>
  </div>`;}
 
+/* While a fleet is still onboarding, every steady-state number on this page
+   is legitimately zero - alarms, watching, healthy, peak evidence. Four
+   zeroes read as "nothing here" when the truth is "not yet". Say the truth
+   instead, and only while it IS the truth. */
+function WarmupBanner(){
+ const fleet=S.fleet.value;
+ if(!fleet)return null;
+ const c=fleet.counts;
+ const pending=(c.queued||0)+(c.onboarding||0)+(c.bootstrapping||0);
+ if(!pending)return null;
+ const verdicted=Math.max(0,(fleet.assets||0)-pending);
+ return html`<div id="warmup">
+  <span class="dotlive"></span>
+  <b>${fmtInt(pending)} of ${fmtInt(fleet.assets)} assets are still onboarding.</b>
+  <span>${'Calibrating each asset against its own history - first verdicts land as '
+   +'each one finishes, and the figures below fill in with them.'
+   +(verdicted?` ${fmtInt(verdicted)} done so far.`:'')}</span>
+ </div>`;}
+
 function FleetCharts(){
  const fleet=S.fleet.value;
  const cost=S.cost.value;
@@ -1262,27 +1282,50 @@ function FleetCharts(){
  themeTick.value;
  if(!fleet)return html`<div id="fcharts"></div>`;
  const onScatterReady=(c)=>{if(!c.__wired){c.__wired=true;c.on('click',p=>{if(p.data&&p.data[3])select(esc(p.data[3]));});}};
- return html`<div id="fcharts">
-  <div class="card c-evidence"><h3>Evidence - worst first (alarm at 1.0)</h3><${EChart} id="d-evidence" height=300 option=${evidenceOption(fleet.rows)}/></div>
-  <div class="card c-states"><h3>Fleet states</h3><${EChart} id="d-states" height=300 option=${statesOption(fleet.counts,fleet.assets)}/></div>
-  <div class="card c-scatter"><h3>Confidence vs evidence (click a dot to open the asset)</h3><${EChart} id="d-scatter" height=300 option=${scatterOption(fleet.rows)} onReady=${onScatterReady}/></div>
-  <div class="card c-budget"><h3>The guarantee - alpha budget by evidence domain</h3>
-   <${EChart} id="d-budget" height=270 option=${budgetOption(fleet.budget)}/>
-   ${fleet.budget?html`<div class="cap">at most <b>${fleet.budget.alpha_per_asset_year}</b> false alarm(s) per asset-year, split across the evidence domains by union bound</div>`:null}</div>
-  <div class="card c-tickcost"><h3>Tick cost - slowest to score, worst first</h3>
-   ${cost&&cost.rows.length?html`<${EChart} id="d-cost" height=260 option=${costOption(cost.rows)}/>`
-    :html`<p class="muted" style="padding:20px">No tick has scored an asset yet in this session.</p>`}</div>
-  <div class="card c-stagecost"><h3>Stage cost - onboard/bootstrap/tick, slowest first</h3>
-   ${stageCost&&stageCost.rows.length?html`<${EChart} id="d-stagecost" height=260 option=${stageCostOption(stageCost.rows)}/>`
-    :html`<p class="muted" style="padding:20px">No stage has completed yet in this session.</p>`}</div>
-  ${(S.cases.value||[]).length?html`<div class="card wide">
+ // A chart of all-zeroes is not information, and a COLLAPSED card is worse
+ // than no card: CSS grid sizes a row to its tallest cell, so a one-line
+ // card beside a 300px chart leaves a 250px hole that reads as breakage.
+ // So an empty panel is dropped from the grid entirely and named in one
+ // muted line underneath - every card that remains holds a real chart of
+ // the same height, which is why the columns always come out even.
+ const anyEv=fleet.rows.some(r=>r.evidence>0.005);
+ const anyScatter=fleet.rows.some(r=>r.evidence>0.005||r.confidence>0);
+ const hasCost=!!(cost&&cost.rows.length);
+ const hasStage=!!(stageCost&&stageCost.rows.length);
+ const cards=[],waiting=[];
+ if(anyEv)cards.push(html`<div class="card" key="ev"><h3>Evidence - worst first (alarm at 1.0)</h3>
+   <${EChart} id="d-evidence" height=300 option=${evidenceOption(fleet.rows)}/></div>`);
+ else waiting.push('evidence ranking (nothing above zero yet)');
+ cards.push(html`<div class="card" key="st"><h3>Fleet states</h3>
+   <${EChart} id="d-states" height=300 option=${statesOption(fleet.counts,fleet.assets)}/></div>`);
+ if(anyScatter)cards.push(html`<div class="card" key="sc"><h3>Confidence vs evidence (click a dot to open the asset)</h3>
+   <${EChart} id="d-scatter" height=300 option=${scatterOption(fleet.rows)} onReady=${onScatterReady}/></div>`);
+ else waiting.push('confidence vs evidence (no verdict carries either yet)');
+ cards.push(html`<div class="card" key="bg"><h3>The guarantee - alpha budget by evidence domain</h3>
+   <${EChart} id="d-budget" height=300 option=${budgetOption(fleet.budget)}/>
+   ${fleet.budget?html`<div class="cap">at most <b>${fleet.budget.alpha_per_asset_year}</b> false alarm(s) per asset-year, split across the evidence domains by union bound</div>`:null}</div>`);
+ if(hasCost)cards.push(html`<div class="card" key="tc"><h3>Tick cost - slowest to score, worst first</h3>
+   <${EChart} id="d-cost" height=300 option=${costOption(cost.rows)}/></div>`);
+ else waiting.push('tick cost (no tick has scored an asset this session)');
+ if(hasStage)cards.push(html`<div class="card" key="sg"><h3>Stage cost - onboard/bootstrap/tick, slowest first</h3>
+   <${EChart} id="d-stagecost" height=300 option=${stageCostOption(stageCost.rows)}/></div>`);
+ else waiting.push('stage cost (no stage has completed this session)');
+ const caseKeys=[...new Set((S.cases.value||[]).map(c=>c.asset_key))];
+ return html`<div>
+  <div id="fcharts">${cards}</div>
+  ${caseKeys.length?html`<div id="fcases"><div class="card">
    <h3>Case history across the fleet - every episode, closed and open, over real time</h3>
-   <${EChart} id="d-cases"
-    height=${Math.min(400,Math.max(120,28*[...new Set(S.cases.value.map(c=>c.asset_key))].length+50))}
-    option=${casesOption(S.cases.value)}/></div>`:null}
+   <${EChart} id="d-cases" height=${Math.min(400,Math.max(120,28*caseKeys.length+50))}
+    option=${casesOption(S.cases.value)}/></div></div>`:null}
+  ${waiting.length?html`<p id="fwaiting">Waiting on data: ${waiting.join(' | ')}</p>`:null}
  </div>`;}
 
 const FTABLE_LABELS={asset_key:'asset',state:'state',evidence:'evidence',confidence:'confidence',at:'last verdict'};
+/* evidence/confidence are two short numbers - they were each being handed
+   the same width as the asset key, which left the trend sparklines crushed
+   against the right edge with dead space in the middle. */
+const FTABLE_W={asset_key:'width:26%',state:'width:13%',evidence:'width:9%',
+ confidence:'width:10%',at:'width:20%'};
 function sortRows(rows){
  const col=S.sortCol.value;
  if(!col)return rows;
@@ -1298,9 +1341,9 @@ function FTableHead(){
  const col=S.sortCol.value,dir=S.sortDir.value;
  return html`<thead><tr>
   ${['asset_key','state','evidence','confidence','at'].map(c=>html`
-   <th key=${c} style=${c==='asset_key'?'width:26%':c==='at'?'':'width:12%'} onClick=${()=>sortClick(c)}>
+   <th key=${c} style=${FTABLE_W[c]} onClick=${()=>sortClick(c)}>
     ${FTABLE_LABELS[c]}${col===c?html`<span class="arrow">${dir>0?'\u25B2':'\u25BC'}</span>`:null}</th>`)}
-  <th style="width:16%">trend</th></tr></thead>`;}
+  <th style="width:22%">trend</th></tr></thead>`;}
 function FTableRow({r}){
  return html`<tr onClick=${()=>select(r.asset_key)}>
   <td style="font-weight:bold">${r.asset_key}${r.live?html` <span class="pill" style="font-size:10px">LIVE</span>`:null}</td>
@@ -1325,7 +1368,7 @@ function FleetTable(){
 
 function FleetPage(){
  return html`<div id="page-fleet" class="page on">
-  <${KpiRow}/><${FleetCharts}/><${FleetTable}/>
+  <${WarmupBanner}/><${KpiRow}/><${FleetCharts}/><${FleetTable}/>
  </div>`;}
 
 /* ---------------- Assets page ---------------- */
