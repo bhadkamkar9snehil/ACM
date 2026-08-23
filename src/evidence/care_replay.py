@@ -6,7 +6,7 @@ the verdicts against the farm's ground-truth labels. This is design-time
 evidence (regression only, never tuning): results land in a gitignored out
 dir and are summarized into the KB by hand.
 
-Input layout (scripts/download_care_benchmark.py output, unchanged):
+Input layout (evidence.download_care output):
     <farm_dir>/event_info.csv
     <farm_dir>/datasets/{event_id}.csv
 

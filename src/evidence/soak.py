@@ -1,26 +1,11 @@
-"""Operational soak (evidence lane, issue #90): the implement-and-forget
-proof. Runs the REAL service entrypoint as a subprocess against a
-continuously-fed live buffer and watches it do everything unattended:
-first-contact bootstrap, self-ticks, change declaration, governed
-auto-absorption (#89), and fault detection - while sampling RSS and API
-health the whole time.
+"""Operational soak: exercise the real service unattended.
 
-Asset clock is time-compressed: the feeder writes one 10-minute-cadence
-row per `--rows-per-second` wall second, so a 90-minute soak covers
-about 37 asset-days.
+Runs the service against a continuously-fed live buffer through healthy,
+legitimate-change and local-fault phases while sampling API health and RSS.
+The final report is a gate: any failed criterion exits nonzero.
 
 Run:
     uv run python -m evidence.soak --root results/soak1 --minutes 90
-
-Phases (fractions of the fed rows):
-    0.00-0.28  healthy continuation
-    0.28-0.61  coordinated setpoint change (+2.5 on drivers) - must be
-               declared change-not-fault and AUTO-ABSORBED once the
-               plateau passes one anchor period of asset time
-    0.61-1.00  local fault ramp on vib - must alarm
-
-The final report checks each criterion and exits 1 on any failure, so a
-soak is a gate, not a demo.
 """
 
 from __future__ import annotations
@@ -39,10 +24,11 @@ import numpy as np
 import polars as pl
 
 from store.raw import TIMESTAMP_COL, RawStore
+from store.state import SqliteStateStore
 
 UTC = timezone.utc
 ASSET_KEY = "soak/1"
-CADENCE_MIN = 10  # asset-clock minutes per row
+CADENCE_MIN = 10
 
 
 def _row(rng, setpoint: float, fault: float) -> dict:
@@ -60,12 +46,12 @@ def _row(rng, setpoint: float, fault: float) -> dict:
 
 
 def seed_history(store: RawStore, months: int = 6, seed: int = 21) -> datetime:
-    """Backfill healthy history; returns the asset-clock 'now'."""
+    """Backfill healthy history and return the asset-clock now."""
     rng = np.random.default_rng(seed)
     start = datetime(2025, 1, 1, tzinfo=UTC)
-    n = 30 * 24 * 60 // CADENCE_MIN  # rows per month
-    for m in range(months):
-        t0 = start + timedelta(days=30 * m)
+    n = 30 * 24 * 60 // CADENCE_MIN
+    for month in range(months):
+        t0 = start + timedelta(days=30 * month)
         rows = [_row(rng, 0.0, 0.0) for _ in range(n)]
         frame = pl.DataFrame(rows).with_columns(
             pl.Series(
@@ -81,8 +67,8 @@ def seed_history(store: RawStore, months: int = 6, seed: int = 21) -> datetime:
 def _api(port: int, path: str):
     with urllib.request.urlopen(
         f"http://127.0.0.1:{port}{path}", timeout=5
-    ) as r:
-        return json.loads(r.read())
+    ) as response:
+        return json.loads(response.read())
 
 
 def _rss_mb(pid: int) -> float:
@@ -94,19 +80,34 @@ def _rss_mb(pid: int) -> float:
 
 
 def _healthy_after_change(samples: list[dict]) -> bool:
-    """A healthy sample AFTER the first change-not-fault sample, still in
-    the change phase = the plateau was absorbed and is the new normal."""
+    """Return whether an absorbed change later returned to healthy."""
     seen_change = False
-    for s in samples:
-        if s.get("state") == "change-not-fault":
+    for sample in samples:
+        if sample.get("state") == "change-not-fault":
             seen_change = True
         elif (
             seen_change
-            and s["phase"] == "change"
-            and s.get("state") == "healthy"
+            and sample["phase"] == "change"
+            and sample.get("state") == "healthy"
         ):
             return True
     return False
+
+
+def _episodes(root: Path) -> list[dict]:
+    """Read the production episode ledger from durable relational state."""
+    path = root / "state.db"
+    if not path.exists():
+        return []
+    state = SqliteStateStore(path)
+    try:
+        return [
+            episode
+            for episode in state.list_episodes()
+            if episode["asset_key"] == ASSET_KEY
+        ]
+    finally:
+        state.close()
 
 
 def run_soak(
@@ -116,7 +117,10 @@ def run_soak(
     port: int,
     tick_seconds: float,
 ) -> dict:
+    if root.exists() and any(root.iterdir()):
+        raise ValueError(f"soak root must be empty: {root}")
     root.mkdir(parents=True, exist_ok=True)
+
     store = RawStore(root / "raw")
     asset_now = seed_history(store)
     buffer_db = root / "live_buffer.db"
@@ -127,6 +131,7 @@ def run_soak(
     )
     con.commit()
 
+    service_log = (root / "service.log").open("w")
     proc = subprocess.Popen(
         [
             sys.executable,
@@ -141,7 +146,7 @@ def run_soak(
             "--live",
             f"{ASSET_KEY}={buffer_db}",
         ],
-        stdout=(root / "service.log").open("w"),
+        stdout=service_log,
         stderr=subprocess.STDOUT,
     )
     total_rows = int(minutes * 60 * rows_per_second)
@@ -151,10 +156,11 @@ def run_soak(
     trace_path = root / "soak_trace.jsonl"
     started = time.monotonic()
     next_sample = started
+    service_alive = False
     try:
         for i in range(total_rows):
             if proc.poll() is not None:
-                break  # service died - the report will fail loudly
+                break
             ts = asset_now + timedelta(minutes=CADENCE_MIN * (i + 1))
             setpoint = 2.5 if i >= ph_change else 0.0
             fault = (
@@ -188,13 +194,13 @@ def run_soak(
                         state=detail.get("state"),
                         evidence=detail.get("evidence"),
                     )
-                except Exception as exc:  # noqa: BLE001 - sampled, not fatal
+                except Exception as exc:
                     sample["api_error"] = str(exc)[:120]
                 samples.append(sample)
-                with trace_path.open("a") as fh:
-                    fh.write(json.dumps(sample) + "\n")
+                with trace_path.open("a", encoding="utf-8") as trace:
+                    trace.write(json.dumps(sample) + "\n")
             time.sleep(1.0 / rows_per_second)
-        time.sleep(2 * tick_seconds)  # let the last rows get ticked
+        time.sleep(2 * tick_seconds)
         service_alive = proc.poll() is None
     finally:
         proc.terminate()
@@ -203,15 +209,13 @@ def run_soak(
         except subprocess.TimeoutExpired:
             proc.kill()
         con.close()
+        service_log.close()
 
-    ledger_path = root / "ledger.json"
-    episodes = (
-        json.loads(ledger_path.read_text()) if ledger_path.exists() else []
-    )
+    episodes = _episodes(root)
     by_phase: dict[str, set] = {"healthy": set(), "change": set(), "fault": set()}
-    for s in samples:
-        if "state" in s:
-            by_phase[s["phase"]].add(s["state"])
+    for sample in samples:
+        if "state" in sample:
+            by_phase[sample["phase"]].add(sample["state"])
     absorbed = [e for e in episodes if e["state"] == "change-not-fault"]
     rss = [s["rss_mb"] for s in samples if s.get("rss_mb", -1) > 0]
 
@@ -223,7 +227,7 @@ def run_soak(
         "change_declared": any(
             s.get("state") == "change-not-fault" for s in samples
         ),
-        "change_auto_absorbed": len(absorbed) >= 1,
+        "change_auto_absorbed": bool(absorbed),
         "post_absorb_healthy_seen": _healthy_after_change(samples),
         "fault_phase_alarms": any(
             s.get("state") in ("alarm", "escalating")
@@ -252,13 +256,13 @@ def run_soak(
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--root", required=True)
-    ap.add_argument("--minutes", type=float, default=90.0)
-    ap.add_argument("--rows-per-second", type=float, default=1.0)
-    ap.add_argument("--port", type=int, default=8901)
-    ap.add_argument("--tick-seconds", type=float, default=20.0)
-    args = ap.parse_args()
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--root", required=True)
+    parser.add_argument("--minutes", type=float, default=90.0)
+    parser.add_argument("--rows-per-second", type=float, default=1.0)
+    parser.add_argument("--port", type=int, default=8901)
+    parser.add_argument("--tick-seconds", type=float, default=20.0)
+    args = parser.parse_args()
     report = run_soak(
         Path(args.root).resolve(),
         args.minutes,

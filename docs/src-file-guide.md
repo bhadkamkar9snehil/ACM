@@ -1,229 +1,113 @@
 # src/ file guide
 
-One entry per file: what it does and what lives in it. Reading order for
-a newcomer: `constants.py` -> `decision/eprocess.py` ->
-`scoring/surprise.py` -> `monitor.py` -> `episodes.py` -> `runtime.py`.
-The full conceptual walkthrough is `docs/how-acm-works.md`.
+This is the current code map. Start with `constants.py`, then
+`decision/eprocess.py`, `scoring/surprise.py`, `monitor.py`, `episodes.py`,
+and `runtime.py`. For the conceptual walkthrough, read
+`docs/how-acm-works.md`.
 
-```mermaid
-flowchart TD
-    subgraph store_pkg [store/]
-        raw[raw.py]
-    end
-    subgraph ingest_pkg [ingest/]
-        csvs[csv_source.py]
-        buf[buffer_source.py]
-    end
-    subgraph scoring_pkg [scoring/]
-        sur[surprise.py]
-        wm[worldmodel.py]
-        av[availability.py]
-        hz[horizons.py]
-        tr[transients.py]
-        dy[dynamics.py]
-        bl[baseline.py]
-    end
-    subgraph decision_pkg [decision/]
-        ep[eprocess.py]
-    end
-    subgraph memory_pkg [memory/]
-        lb[baseline.py]
-        led[ledger.py]
-        sums[summaries.py]
-    end
-    subgraph immune_pkg [immune/]
-        har[harness.py]
-        inj[inject.py]
-        reh[rehearsal.py]
-    end
-    mon[monitor.py]
-    epi[episodes.py]
-    rt[runtime.py]
-    svc[service.py]
-    ui[ui.html]
+## Runtime spine
 
-    csvs --> raw
-    buf --> raw
-    raw --> rt
-    sur --> mon
-    wm --> mon
-    av --> mon
-    hz --> mon
-    tr --> mon
-    dy --> mon
-    ep --> mon
-    mon --> epi --> rt
-    lb --> mon
-    sums --> lb
-    led --> epi
-    har --> rt
-    inj --> har
-    reh --> rt
-    rt --> svc --> ui
-```
+- **`constants.py`** - rationale-carrying structural constants plus the one
+  operator dial, `ALPHA_PER_ASSET_YEAR`.
+- **`verdict.py`** - frozen verdict contract and state vocabulary.
+- **`monitor.py`** - per-asset scorer and evidence banks. Owns cold-start and
+  lifetime calibration, alpha-share accounting, per-tick evidence updates,
+  attribution, and restartable bank wealth.
+- **`episodes.py`** - episode lifecycle around a monitor: onset, shape,
+  novelty, fault vs change classification, matching, re-anchoring,
+  absorption, and health trajectory.
+- **`runtime.py`** - fleet orchestration: asset registry, onboarding,
+  bootstrap, ingestion, ticks, rebuilds, immune passes, persistence, and
+  fleet summaries.
+- **`fleet_workers.py`** - process-worker entry points for expensive
+  onboarding/bootstrap. Workers use private per-asset bootstrap ledgers and
+  return diffs; the parent is the only writer of shared SQLite state. Uses
+  spawn plus BLAS thread caps to avoid inherited numerical-library locks.
+- **`service.py`** - FastAPI service, guarded self-tick loop, API/WebSocket
+  surface, UI/vendor serving, and `python -m service` entrypoint.
+- **`hardware.py`** - hardware probe, capability tier and resource governor.
+- **`ui.html`** - zero-build operator UI using vendored browser assets.
+- **`_version.py`** - source version used by runtime/cache compatibility.
 
-## Top level
+## Decision and scoring
 
-- **`constants.py`** - the config spine. `ALPHA_PER_ASSET_YEAR` (the one
-  dial) plus a registry of structural constants, each carrying a written
-  rationale. There is deliberately no config file anywhere else.
-- **`verdict.py`** - the frozen verdict contract: the `Verdict`
-  dataclass (state, evidence, confidence, attribution, evidence trail,
-  coverage, model epoch, falsifiable-by), the state vocabulary, and the
-  interim confidence formula. Fields never change; later layers enrich
-  values.
-- **`monitor.py`** - `AssetMonitor`, the per-asset spine: owns the
-  scorer plus one e-process bank per evidence domain, the alpha-share
-  split (shares sum to exactly 1.0, pinned by test), both calibration
-  paths (cold-start split and lifetime), and `process()` - the
-  tick-to-verdict function. Also `render_report()` (the markdown fleet
-  report).
-- **`episodes.py`** - `EpisodicMonitor`, wrapping `AssetMonitor` with
-  episode lifecycle: onset back-dating, shape/novelty/concentration
-  measurement, fault vs change-not-fault classification, signature and
-  trajectory matching against the ledger, re-anchor and governed
-  absorption, and the rolling health index.
-- **`novelty.py`** - the novelty engine: FFT-based matrix-profile-style
-  distance of the current surprise stream against the remembered life
-  (shape + amplitude components), and `classify_shape()` (drift / step /
-  noisy via rank-correlation trend).
-- **`anatomy.py`** - learned machine anatomy: stability-selected channel
-  dependency graph from the scorer's coefficients, connected-component
-  organs, per-organ surprise, and episode origin (which organ elevated
-  first).
-- **`prognosis.py`** - failure-time estimation: robust Wiener-process
-  drift fit on the health index, inverse-Gaussian first-passage
-  distribution, self-gating (no trend / thin data / negative drift =>
-  no horizon shown), critical level from the asset's own ledgered
-  onsets.
-- **`narrative.py`** - renders a verdict (plus its previous verdict and
-  immune status) into plain-language sections, ending with the
-  falsification clause.
-- **`runtime.py`** - the fleet host: N independent monitors, onboarding
-  with a fingerprinted monitor cache, the first-contact bootstrap
-  (detect -> mask -> re-detect), per-tick orchestration (live-buffer
-  drain, scoring, governed absorption, staggered weekly rebuilds and
-  immune passes), the activity stream, and the aggregate fleet summary
-  (including the alpha budget ledger). `fleet_worker_count` (#133, default
-  1/sequential everywhere except the live service) fans onboard/bootstrap
-  out across a ProcessPoolExecutor via `fleet_workers.py`.
-- **`fleet_workers.py`** (#133) - the parallel onboard/bootstrap
-  algorithm and its two ProcessPoolExecutor entry points. Shared
-  free-function versions of `run_onboard`/`run_bootstrap` (used by both
-  the sequential `Runtime` methods and the worker processes - one
-  algorithm, not two) plus the monitor-cache free functions. Workers
-  never write to the shared ledger/bootstrapped-marker files (each is a
-  single file for the whole fleet - concurrent writers would race and
-  lose updates); a worker's ledger changes are diffed and applied by the
-  parent, sequentially, as futures complete. `worker_init()` sets the
-  BLAS thread-count guard before a worker's first numpy import (spawn
-  context, never fork - the predecessor system's fork+BLAS deadlock,
-  CLAUDE.md mistake #44).
-- **`scheduler.py`** - thin async fleet scheduler used by the service
-  loop.
-- **`service.py`** - FastAPI app: JSON API, WebSocket push, the
-  self-ticking guarded loop, vendored-asset serving, and the CLI
-  entrypoint (`python -m service`).
-- **`hardware.py`** - hardware probe (CPU/RAM/GPU) -> tier selection
-  (T0/T1/T2-S/T2) -> resource governor (worker and BLAS-thread caps);
-  per-asset tick cost telemetry.
-- **`ui.html`** - the entire front end: one file, zero build. Preact +
-  htm (vendored) for rendering, ECharts (vendored) for charts,
-  WebSocket-live with polling fallback.
-- **`_version.py`** - the package version (also part of the monitor
-  cache fingerprint: a monitor pickled by different code is never
-  trusted).
+- **`decision/eprocess.py`** - validity keystone: conformal p-values,
+  betting e-processes, block sizing for serial dependence, exchangeability
+  audit, multi-timescale banks, union-bound budgeting, and latched alarms.
+- **`scoring/surprise.py`** - default conditional surprise scorer. Reconstructs
+  each channel from the others, then exposes aggregate surprise,
+  channel-local surprise, PIT diagnostics, attribution, familiarity, and
+  concentration.
+- **`scoring/worldmodel.py`** - optional Tier-2 learned nonlinear dynamics
+  scorers behind the same scoring contract. The masked model remains
+  evidence-lane/override-only until its promotion gate is satisfied.
+- **`scoring/availability.py`** - standstill and telemetry-gap evidence.
+- **`scoring/horizons.py`** - horizon-gap and bilateral predictability streams.
+- **`scoring/transients.py`** - recurring transient-response catalogue.
+- **`scoring/dynamics.py`** - operator/dynamics drift evidence.
 
-## decision/
+The old S1 marginal robust-z scorer is not a production capability. Its only
+remaining implementation is `tests/marginal_scorer.py`, where it acts as the
+negative control proving why the conditional scorer is required.
 
-- **`eprocess.py`** - the validity keystone. Conformal p-values against
-  a healthy calibration sample; the betting-martingale e-process;
-  Ville's inequality as the alarm rule; block sizes derived from the
-  measured decorrelation length; the exchangeability audit (refuse the
-  indefensible, disclose the marginal); the multi-timescale
-  `EProcessBank` with union-bound budget split; latching alarms.
+## Memory
 
-## scoring/
+- **`memory/baseline.py`** - lifetime definition of normal from the full
+  ledger-masked history with bounded recency influence; cached period
+  summaries and consecutive-chunk calibration sampling.
+- **`memory/ledger.py`** - episode ledger abstraction. Production uses the
+  relational state store; process workers may use a private throwaway file
+  ledger while computing a bootstrap diff.
+- **`memory/summaries.py`** - mergeable per-period statistics and quantile
+  sketches.
 
-- **`surprise.py`** - `ConditionalSurpriseScorer` (Tier 0): robust
-  standardization, per-channel ridge reconstruction from the other
-  channels, residual z-scores, the mean lens (`score`) and the top-3
-  channel-local lens (`score_topk`), PIT values + distortion
-  classification, attribution with magnitudes, operating-point
-  familiarity, concentration.
-- **`worldmodel.py`** - the Tier 2 world models, two architectures
-  behind one contract-identical interface (shared `_ResidualLenses`
-  base so score/PIT/attribution/concentration cannot drift between
-  them). `TorchWorldModel`: one small MLP per channel with quantile
-  heads (pinball loss), self-history excluded by design, grouped-batch
-  GPU training with per-channel early stop - O(d^2) compute in channel
-  count. `MaskedWorldModel` (#100): ONE shared trunk trained
-  masked-reconstruction style - a fixed seeded channel partition is
-  masked group by group (all lags plus a mask-indicator input) and each
-  channel's prediction is only read from the pass where it was masked,
-  so own-history exclusion holds by construction and compute/memory are
-  O(d). Override-only (not governor-selected) until CARE evidence-lane
-  parity on the GPU box lands.
-- **`availability.py`** - the standstill lens: fraction of channels
-  whose rolling variance collapsed against their CALIBRATED live scale,
-  plus cadence-gap detection.
-- **`horizons.py`** - `MultiHorizonScorer`: per-horizon ridge maps; the
-  horizon-gap stream (long minus short horizon surprise - early warning
-  for slow drift) and the bilateral predictability band (too erratic or
-  too regular).
-- **`transients.py`** - transient-response catalogue: how the machine
-  responds to its own recurring excitations, scored for response-shape
-  change.
-- **`dynamics.py`** - dynamics-drift: DMD-style one-step operator
-  re-identification over non-overlapping windows; relative Frobenius
-  distance from the healthy reference operator.
-- **`baseline.py`** - `RobustZScorer`: the simple per-channel robust
-  z scorer (auxiliary / fallback recipe).
+## Store and ingestion
 
-## memory/
+- **`store/raw.py`** - append-only Parquet history partitioned by asset and
+  calendar month. UTC, idempotence, atomic writes and column-order
+  independence are enforced here.
+- **`store/state.py`** - durable SQLite state: asset registry, runtime journal,
+  episodes, verdict history, activity, immune results and e-process wealth.
+  Also contains the one-time migration from the pre-SQLite JSON files.
+- **`ingest/csv_source.py`** - canonical normalization for tabular input.
+- **`ingest/buffer_source.py`** - live `(timestamp, payload_json)` SQLite
+  bridge source.
+- **`ingest/sources.py`** - pull sources for files, SQLite historian tables
+  and JSON HTTP endpoints. All expose `drain(store)` and use the same
+  normalization/store path.
 
-- **`baseline.py`** - `LifetimeBaseline`: definition of normal from the
-  entire ledger-masked life with the recency cap; cached per-month
-  summaries; the calibration sample built from consecutive chunks
-  (never row-striding).
-- **`ledger.py`** - the episode ledger: append-only episode records
-  (fault AND absorbed change), window queries, and frame masking.
-- **`summaries.py`** - mergeable per-period channel summaries
-  (count/mean/variance/quantile sketch): exact moment merging, bounded
-  quantile error.
+## Interpretation and prognosis
 
-## immune/
+- **`novelty.py`** - shape/amplitude novelty and trend-shape classification.
+- **`anatomy.py`** - stability-selected functional channel graph, organ
+  grouping and origin attribution.
+- **`prognosis.py`** - self-gated failure-time distribution from health-index
+  drift; refuses to show a horizon when evidence is insufficient.
+- **`narrative.py`** - plain-language rendering of verdict, change and immune
+  context.
 
-- **`harness.py`** - the sensitivity profile: canonical fault classes
-  injected at a magnitude ladder into held-out healthy data; detection
-  floors; conformance and degeneracy checks; `run_immune_check`.
-- **`inject.py`** - the injectors: drift, step, variance, and
-  correlation-break (marginals preserved exactly, relationships
-  destroyed).
-- **`rehearsal.py`** - counterfactual rehearsal: coherent fault
-  synthesis through the learned coupling structure; per-channel
-  detection floors on the live pipeline; honest skip when a valid bank
-  cannot be built.
+## Immune system
 
-## store/ and ingest/
+- **`immune/harness.py`** - canonical synthetic fault sensitivity,
+  conformance and degeneracy checks.
+- **`immune/inject.py`** - drift, step, variance and correlation-break
+  injectors.
+- **`immune/rehearsal.py`** - counterfactual rehearsal through learned asset
+  relationships.
 
-- **`store/raw.py`** - the raw store: append-only parquet, one
-  directory per asset, calendar-month partitions, timezone-aware UTC
-  timestamps enforced at the door, column-order-insensitive reads.
-- **`ingest/csv_source.py`** - CSV adapter into the store (delimiter
-  sniffing, timestamp declaration).
-- **`ingest/buffer_source.py`** - live SQLite buffer source: any bridge
-  that writes `(ts, payload_json)` rows feeds the asset on every tick.
+## Evidence
 
-## evidence/
+- **`evidence/download_care.py`** - partial CARE-to-Compare archive downloader.
+- **`evidence/care_replay.py`** - labelled CARE regression/evidence replay
+  through the production runtime. Labels are evaluation-only.
+- **`evidence/seed_demo.py`** - seed CARE-shaped data into a live data root for
+  operator/demo use.
+- **`evidence/soak.py`** - real-service compressed-time operational soak.
 
-- **`evidence/care_replay.py`** - the evidence lane: replays CARE-shaped
-  farm datasets through the full production path and scores the verdicts
-  against ground-truth labels (see `docs/testing-and-datasets.md`).
-- **`evidence/seed_demo.py`** (#131) - seeds a CARE-shaped farm into a
-  LIVE data root as one continuous asset per event (no train/prediction
-  split, unlike care_replay's isolated scoring runs) - the "watch it
-  work in the UI" path for a running `python -m service`.
-- **`evidence/soak.py`** - the operational soak: runs the real service
-  against a time-compressed live feed through healthy -> change ->
-  fault phases and checks eight pass/fail criteria.
+## Tests
+
+The tests are part of the product's validity envelope, not disposable scaffolding.
+Important lanes include e-process alpha conformance, serial-dependence tests,
+lifetime/frog tests, immune sensitivity, restart wealth continuity,
+parallel-vs-sequential equivalence, service/API behavior, and optional Tier-2
+contract tests. See `docs/testing-and-datasets.md`.

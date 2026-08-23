@@ -18,6 +18,7 @@ from scoring.surprise import (
     ks_uniform,
 )
 from store.raw import TIMESTAMP_COL
+from tests.marginal_scorer import MarginalRobustZScorer
 
 UTC = timezone.utc
 pytestmark = pytest.mark.statistical
@@ -39,7 +40,6 @@ def correlated_frame(n=8000, seed=1, break_from=None, fault_channel="vib"):
     data = {"temp": temp, "vib": vib, "load": load, "press": press, "flow": flow}
     if break_from is not None:
         x = data[fault_channel].copy()
-        # marginal preserved exactly, coupling destroyed
         x[break_from:] = rng.permutation(x[break_from:])
         data[fault_channel] = x
     return pl.DataFrame(
@@ -49,12 +49,11 @@ def correlated_frame(n=8000, seed=1, break_from=None, fault_channel="vib"):
 
 # ------------------------------------------------------------ THE FLIP
 def test_s4_flip_correlation_break_detected():
-    """The S2-pinned blindness is gone: the default monitor's sensitivity
-    profile now has a finite floor for correlation_break."""
+    """The S2-pinned blindness is gone under the production scorer."""
     report = sensitivity_profile("synt/flip", correlated_frame())
     assert report.conformance_ok
     assert report.floors["correlation_break"] is not None, (
-        "S4 acceptance: conditional scorer must detect correlation breaks"
+        "conditional scorer must detect correlation breaks"
     )
 
 
@@ -91,11 +90,9 @@ def test_pit_classifies_channel_fault():
 
 
 def test_pit_classifies_sick_model():
-    """A model fit on the WRONG asset distorts most channels at once ->
-    immune event, not detection event."""
+    """A model fit on the wrong asset distorts most channels at once."""
     scorer = ConditionalSurpriseScorer().fit(correlated_frame(seed=1).head(5000))
     other_machine = correlated_frame(seed=99)
-    # different coupling structure entirely
     other_machine = other_machine.with_columns(
         (pl.col("vib") * 0.1 + 3.0).alias("vib"),
         (pl.col("load") * 5.0 - 2.0).alias("load"),
@@ -114,21 +111,15 @@ def test_ks_uniform_sane():
 
 # ------------------------------------------------- power vs the marginal
 def test_conditional_beats_marginal_on_coupled_drift():
-    """A drift in one coupled channel is visible in residual space at a
-    magnitude where the raw marginal barely moves: the conditional model
-    subtracts the explained variance, so the same absolute deviation is
-    more sigmas of surprise."""
-    from scoring import RobustZScorer
-
+    """Conditional surprise gains power by subtracting explained variance."""
     frame = correlated_frame(n=12000, seed=3)
     fit, rest = frame.head(6000), frame.slice(6000)
-    drift = np.linspace(0, 1.2, rest.height)  # modest coupled-channel drift
+    drift = np.linspace(0, 1.2, rest.height)
     drifted = rest.with_columns(
         (pl.col("vib") + pl.Series(drift)).alias("vib")
     )
     cond = ConditionalSurpriseScorer().fit(fit)
-    marg = RobustZScorer().fit(fit)
-    # signal-to-baseline ratio: mean score on drifted tail / healthy mean
+    marg = MarginalRobustZScorer().fit(fit)
     tail = drifted.tail(2000)
     cond_ratio = float(
         np.mean(cond.score(tail)) / np.mean(cond.score(rest.head(2000)))
@@ -140,13 +131,8 @@ def test_conditional_beats_marginal_on_coupled_drift():
 
 
 def test_fit_survives_null_rows():
-    """Fit-side NaN imputation must match score-side: a handful of null
-    rows in an otherwise-healthy history previously turned the gram
-    matrix (and thus every beta and every score) NaN - a permanently
-    dead monitor. Found on real CARE data: 3 null rows in 52k rows
-    killed event 10's calibration entirely."""
+    """Fit-side NaN handling must match score-side."""
     frame = correlated_frame(n=4000, seed=7)
-    # poison 3 scattered rows in one channel, CARE-style
     vib = frame.get_column("vib").to_numpy().copy()
     vib[100] = np.nan
     vib[2000] = np.nan

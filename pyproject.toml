@@ -1,7 +1,7 @@
 [project]
 name = "acm"
 version = "2.0.0a0"
-description = "ACM - unsupervised, self-validating asset condition monitoring (the gem architecture spine)"
+description = "Unsupervised, self-validating asset condition monitoring"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.139.0",
@@ -13,10 +13,7 @@ dependencies = [
     "uvicorn>=0.50.0",
     # WebSocket protocol support for the real-time UI stream (/api/ws)
     "websockets>=13.0",
-    # partial-zip streaming download of the CARE-to-Compare demo dataset
-    # (lab/scripts/download_care_benchmark.py, evidence.seed_demo) - a
-    # declared dependency so a fresh 'uv sync' just works; uv-managed
-    # venvs ship no pip, so a runtime pip-install fallback is not viable
+    # Range-read selected CARE files without downloading the full archive.
     "remotezip>=0.12",
 ]
 

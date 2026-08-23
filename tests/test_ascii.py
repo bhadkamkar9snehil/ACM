@@ -1,9 +1,4 @@
-"""ASCII-only rule, CI-enforced for the ACM-owned trees (standing rule).
-
-Scope after the #94 promotion (repo root IS the project): src/, tests/,
-and the root pyproject - NOT lab/ (legacy, has its own history), docs/,
-or paper/ (prose, em-dashes allowed there by their own conventions).
-"""
+"""ASCII-only rule for ACM source, tests and the project manifest."""
 
 from pathlib import Path
 
@@ -22,12 +17,12 @@ def test_acm_tree_is_ascii():
     for path in _iter_checked():
         if path.suffix not in CHECKED_SUFFIXES or not path.is_file():
             continue
-        if ".venv" in path.parts or "uv.lock" in path.name:
-            continue
         data = path.read_bytes()
         for lineno, line in enumerate(data.splitlines(), start=1):
-            bad = [b for b in line if b > 127]
+            bad = [byte for byte in line if byte > 127]
             if bad:
-                offenders.append(f"{path}:{lineno} non-ASCII bytes {bad[:5]}")
+                offenders.append(
+                    f"{path}:{lineno} non-ASCII bytes {bad[:5]}"
+                )
                 break
     assert not offenders, "\n".join(offenders)

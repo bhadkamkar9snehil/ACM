@@ -2,17 +2,15 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "acm2",
+      "name": "ACM",
       "runtimeExecutable": "uv",
       "runtimeArgs": [
         "run",
-        "--project",
-        "acm2",
         "python",
         "-m",
-        "acm2.service",
+        "service",
         "--root",
-        "acm2_data",
+        "acm_data",
         "--port",
         "8899",
         "--tick-seconds",

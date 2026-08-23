@@ -1,10 +1,9 @@
-"""Per-asset monitor: scorer + e-process bank -> verdicts (S1 spine).
+"""Per-asset monitor: scorer + e-process bank -> verdicts.
 
-Calibration split discipline (the OMR in-sample-bias lesson, made law):
-the scorer is FIT on the first part of the calibration frame and the
-e-process calibration distribution comes from scoring the HELD-OUT second
-part. In-sample residuals understate healthy spread; the split is not
-optional.
+Calibration split discipline: the scorer is fit on the first part of the
+calibration frame and the e-process calibration distribution comes from
+scoring the held-out second part. In-sample residuals understate healthy
+spread; the split is not optional.
 """
 
 from __future__ import annotations
@@ -16,18 +15,12 @@ import polars as pl
 import verdict as V
 from constants import get as const
 from decision.eprocess import EProcessBank
-from scoring import RobustZScorer
 from scoring.surprise import ConditionalSurpriseScorer
 from store.raw import TIMESTAMP_COL
 
 FIT_FRACTION = 0.6
 MODEL_EPOCH_FMT = "{tag}-{fit_rows}r-{calib_rows}c"
-# alpha split across the evidence domains - the union bound keeps the
-# total budget exactly ALPHA_PER_ASSET_YEAR. Shares MUST sum to 1.0
-# (pinned by test). Magnitude (diffuse/coordinated deviations) carries
-# the largest share; channel-local is its counterpart lens for faults
-# the mean aggregation dilutes on wide assets (#115); the rest are
-# rarer, structurally distinct failure geometries.
+# The union bound keeps the total alpha budget exactly ALPHA_PER_ASSET_YEAR.
 MAGNITUDE_ALPHA_SHARE = 0.4
 CHANNEL_LOCAL_ALPHA_SHARE = 0.1
 AVAILABILITY_ALPHA_SHARE = 0.15
@@ -35,23 +28,21 @@ HORIZON_GAP_ALPHA_SHARE = 0.1
 BAND_ALPHA_SHARE = 0.05
 TRANSIENT_ALPHA_SHARE = 0.1
 DYNAMICS_ALPHA_SHARE = 0.1
-# Below this channel count the mean's dilution factor (sqrt(d) <= ~2.8)
-# does not warrant a separately funded stream - the two lenses would be
-# near-duplicates spending budget twice on the same geometry (#115).
+# Below this channel count the mean's dilution factor is small enough that
+# funding a separate channel-local stream would mostly duplicate evidence.
 CHANNEL_LOCAL_MIN_CHANNELS = 8
 
 
 def _scorer_tag(scorer_cls) -> str:
-    return {
-        RobustZScorer: "s1-robustz",
-        ConditionalSurpriseScorer: "s4-condsurprise",
-    }.get(scorer_cls, scorer_cls.__name__.lower())
+    if scorer_cls is ConditionalSurpriseScorer:
+        return "s4-condsurprise"
+    return scorer_cls.__name__.lower()
 
 
 @dataclass
 class AssetMonitor:
     asset_key: str
-    scorer_cls: type = ConditionalSurpriseScorer  # S4 primary; robust-z auxiliary
+    scorer_cls: type = ConditionalSurpriseScorer
     scorer: object | None = None
     bank: EProcessBank | None = None
     chan_bank: EProcessBank | None = None
@@ -72,16 +63,13 @@ class AssetMonitor:
     insufficient_reason: str = ""
 
     def calibrate(self, calib_frame: pl.DataFrame, seed: int = 0) -> bool:
-        """Returns False (-> insufficient-history verdicts) when the asset
-        cannot support a valid calibration yet; never raises for thin data."""
+        """Calibrate from a cold-start frame; thin data returns False."""
         n = calib_frame.height
         split = int(n * FIT_FRACTION)
         fit, held_out = calib_frame.head(split), calib_frame.slice(split)
         try:
             self.scorer = self.scorer_cls().fit(fit)
             calib_scores = self.scorer.score(held_out)
-            # Rate dial -> per-anchor Ville probability (see
-            # REANCHORS_PER_YEAR rationale in the constants registry).
             alpha = float(const("ALPHA_PER_ASSET_YEAR")) / float(
                 const("REANCHORS_PER_YEAR")
             )
@@ -114,19 +102,12 @@ class AssetMonitor:
         include_recent: bool = False,
         audit: bool = True,
     ) -> bool:
-        """S3 calibration path: the scorer's reference comes from the
-        recency-capped, ledger-masked LIFETIME baseline; the e-process
-        calibration scores come from a healthy sample of the OLDER life
-        (recent periods excluded - a developing fault can never sit inside
-        its own calibration reference).
+        """Calibrate against ledger-masked lifetime memory.
 
-        include_recent=True is the governed exception for absorbing a
-        change-not-fault episode (#89): the just-adjudicated plateau IS
-        the new normal and must enter the reference, or absorption would
-        re-open the same episode forever. Safe because the window was
-        explicitly judged not-fault, fault windows stay ledger-masked,
-        and a wrong judgment is caught by the post-absorb falsifiability
-        net (surprise resumes -> fresh episode)."""
+        Recent periods are excluded from e-process calibration so developing
+        faults cannot calibrate themselves away. include_recent=True is the
+        governed exception after a change-not-fault episode is absorbed.
+        """
         from memory.baseline import LifetimeBaseline
 
         try:
@@ -138,18 +119,10 @@ class AssetMonitor:
                 ledger=ledger,
                 exclude_recent=0 if include_recent else None,
             )
-            if self.scorer_cls is RobustZScorer:
-                scorer = RobustZScorer()
-                scorer.medians, scorer.scales = base.medians, base.scales
-                calib_scores = scorer.score(sample)
-                held_out = sample
-            else:
-                # conditional scorer: FIT on the older 60% of the lifetime
-                # sample, calibrate on the held-out rest (in-sample-bias law)
-                split = int(sample.height * FIT_FRACTION)
-                scorer = self.scorer_cls().fit(sample.head(split))
-                held_out = sample.slice(split)
-                calib_scores = scorer.score(held_out)
+            split = int(sample.height * FIT_FRACTION)
+            scorer = self.scorer_cls().fit(sample.head(split))
+            held_out = sample.slice(split)
+            calib_scores = scorer.score(held_out)
             alpha = float(const("ALPHA_PER_ASSET_YEAR")) / float(
                 const("REANCHORS_PER_YEAR")
             )
@@ -157,22 +130,18 @@ class AssetMonitor:
                 calib_scores,
                 alpha=alpha * MAGNITUDE_ALPHA_SHARE,
                 seed=seed,
-                # audit=False only on bootstrap contamination-scan passes
-                # (see EProcessBank.__init__); production always audits
                 audit=audit,
             )
             self.chan_bank = self._build_channel_bank(
                 held_out, alpha, seed, scorer=scorer
             )
             self.avail_bank = self._build_avail_bank(sample, alpha, seed)
-            split_mh = int(sample.height * FIT_FRACTION)
             self._build_horizon_banks(
-                sample.head(split_mh), sample.slice(split_mh), alpha, seed
+                sample.head(split), sample.slice(split), alpha, seed
             )
             self._build_transient_bank(sample, alpha, seed)
-            split_dd = int(sample.height * FIT_FRACTION)
             self._build_dynamics_bank(
-                sample.head(split_dd), sample.slice(split_dd), alpha, seed
+                sample.head(split), sample.slice(split), alpha, seed
             )
             self._learn_anatomy(sample, seed)
             self.scorer = scorer
@@ -190,14 +159,7 @@ class AssetMonitor:
     def _build_channel_bank(
         self, held_out: pl.DataFrame, alpha: float, seed: int, scorer=None
     ):
-        """Channel-local evidence stream (#115): a top-3 aggregation of the
-        SAME scorer's per-channel residuals, with its own bank and budget
-        share. The mean stream dilutes a single faulty channel by ~1/d
-        (measured 15x separation loss at 957 channels); this lens keeps it
-        visible. Only funded on assets wide enough for the two lenses to
-        genuinely differ (CHANNEL_LOCAL_MIN_CHANNELS); narrow assets leave
-        the share unspent, which under-runs the promised budget - honest
-        in the conservative direction."""
+        """Build the channel-local top-k evidence stream when it is distinct."""
         scorer = scorer if scorer is not None else self.scorer
         if (
             scorer is None
@@ -217,10 +179,7 @@ class AssetMonitor:
     def _build_avail_bank(
         self, calib_frame: pl.DataFrame, alpha: float, seed: int
     ):
-        """Availability stream gets its own fitted scorer (live scales come
-        from calibration, NEVER from the frame being scored), its own bank
-        and budget share; a thin calibration disables it rather than
-        guessing."""
+        """Build the calibrated availability evidence stream."""
         from scoring.availability import AvailabilityScorer
 
         try:
@@ -236,9 +195,7 @@ class AssetMonitor:
             return None
 
     def _build_horizon_banks(self, fit_frame, held_out, alpha, seed):
-        """C9: multi-horizon gap + two-sided predictability band, each with
-        its own bank and budget share. Thin data disables (None), never
-        guesses. Fit/calibration split preserved (in-sample-bias law)."""
+        """Build horizon-gap and two-sided predictability evidence streams."""
         from scoring.horizons import MultiHorizonScorer
 
         try:
@@ -246,11 +203,14 @@ class AssetMonitor:
             gap_calib = self.mh_scorer.gap_stream(held_out)
             band_calib = self.mh_scorer.bilateral_stream(held_out)
             self.gap_bank = EProcessBank(
-                gap_calib, alpha=alpha * HORIZON_GAP_ALPHA_SHARE,
+                gap_calib,
+                alpha=alpha * HORIZON_GAP_ALPHA_SHARE,
                 seed=seed + 2000,
             )
             self.band_bank = EProcessBank(
-                band_calib, alpha=alpha * BAND_ALPHA_SHARE, seed=seed + 3000,
+                band_calib,
+                alpha=alpha * BAND_ALPHA_SHARE,
+                seed=seed + 3000,
             )
         except ValueError:
             self.mh_scorer = None
@@ -258,9 +218,7 @@ class AssetMonitor:
             self.band_bank = None
 
     def _build_transient_bank(self, calib_frame, alpha, seed):
-        """C7: the lifetime transient catalogue; leave-one-out distances of
-        healthy transients from their nearest sibling ARE the calibration.
-        Too few healthy transients disables the stream, never guesses."""
+        """Build the transient-response catalogue evidence stream."""
         from scoring.transients import TransientCatalogue
 
         try:
@@ -275,25 +233,23 @@ class AssetMonitor:
             self.trans_bank = None
 
     def _build_dynamics_bank(self, fit_frame, held_out, alpha, seed):
-        """Koopman-flavored dynamics drift (spike passed GO): the operator
-        the machine forces us to learn, re-identified per window; drift
-        from the healthy reference is its own evidence stream. Thin data
-        disables, never guesses."""
+        """Build the dynamics-drift evidence stream."""
         from scoring.dynamics import DynamicsDrift
 
         try:
             self.dyn_drift = DynamicsDrift().fit(fit_frame)
             calib = self.dyn_drift.calibration_stream(held_out)
             self.dyn_bank = EProcessBank(
-                calib, alpha=alpha * DYNAMICS_ALPHA_SHARE, seed=seed + 5000
+                calib,
+                alpha=alpha * DYNAMICS_ALPHA_SHARE,
+                seed=seed + 5000,
             )
         except ValueError:
             self.dyn_drift = None
             self.dyn_bank = None
 
     def _learn_anatomy(self, calib_frame, seed):
-        """C6: the machine's functional anatomy, stability-selected; a thin
-        or unstable calibration leaves it None (no anatomical claims)."""
+        """Learn machine anatomy when calibration supports a stable graph."""
         from anatomy import Anatomy
 
         try:
@@ -333,13 +289,10 @@ class AssetMonitor:
             avail_alarmed = avail_state.alarmed
             avail_evidence = avail_state.evidence
 
-        # EVERY bank ingests EVERY frame - evidence must never be lost to
-        # attribution ordering (found by test: a dynamics alarm was
-        # starving the band bank of the very data that proved the fault).
-        # Only the DOMAIN LABEL is chosen by priority afterwards.
+        # Every bank ingests every frame. Domain priority is applied only
+        # after updating them, so one domain cannot starve another of data.
         aux_states: list[tuple[str, object]] = []
-        # getattr: monitors unpickled from a cache written before the
-        # channel-local bank existed have no chan_bank attribute
+        # Caches written before the channel-local bank existed lack the field.
         chan_bank = getattr(self, "chan_bank", None)
         if chan_bank is not None and not frame.is_empty():
             aux_states.append(
@@ -382,10 +335,6 @@ class AssetMonitor:
                 aux_domain, aux_evidence = name, st.evidence
 
         if aux_domain is not None and not state_now.alarmed and not avail_alarmed:
-            # channel-local is the one aux domain whose alarm points at
-            # specific CHANNELS, not just a stream - carry the scorer's
-            # attribution and per-channel magnitudes so the verdict (and
-            # the UI's channel chart) names the culprit (#115)
             aux_trail: dict = {"domain": aux_domain}
             aux_attr: tuple = (aux_domain,)
             if aux_domain == "channel-local" and not frame.is_empty():
@@ -453,9 +402,6 @@ class AssetMonitor:
             if hasattr(self.scorer, "coverage") and not frame.is_empty()
             else 1.0
         )
-        # per-channel surprise magnitudes: display telemetry only (the UI's
-        # surprise-by-channel chart) - attribution names alone can only
-        # ever render as text. hasattr-guarded like coverage above.
         channel_surprise = (
             self.scorer.channel_surprise(frame)
             if hasattr(self.scorer, "channel_surprise")
@@ -493,44 +439,43 @@ class AssetMonitor:
             falsifiable_by=falsifiable,
         )
 
-    # ---- durable runtime wealth (exact restart continuity) ------------
-    # The seven evidence-domain banks are the ONLY per-tick mutable state
-    # that carries the guarantee forward (every scorer is stateless across
-    # ticks - it scores the frame against fixed calibration references).
-    # Persisting every bank's wealth per tick and restoring it on onboard
-    # makes a restart resume the exact evidence trajectory, instead of
-    # reverting to the last monitor-cache checkpoint (which is only saved
-    # on absorption / weekly rebuild, and never during an open alarm).
     _WEALTH_BANKS = (
-        "bank", "chan_bank", "avail_bank", "gap_bank", "band_bank",
-        "trans_bank", "dyn_bank",
+        "bank",
+        "chan_bank",
+        "avail_bank",
+        "gap_bank",
+        "band_bank",
+        "trans_bank",
+        "dyn_bank",
     )
 
     def runtime_state(self) -> dict:
         out = {}
         for name in self._WEALTH_BANKS:
-            b = getattr(self, name, None)
-            if b is not None:
-                out[name] = b.runtime_state()
+            bank = getattr(self, name, None)
+            if bank is not None:
+                out[name] = bank.runtime_state()
         return out
 
     def load_runtime_state(self, state: dict) -> list[str]:
-        """Overlay persisted per-bank wealth. Returns the banks restored
-        (a bank whose calibration signature no longer matches is skipped -
-        the conservative fresh start)."""
+        """Overlay persisted bank wealth when calibration signatures match."""
         restored = []
         for name in self._WEALTH_BANKS:
-            b = getattr(self, name, None)
-            bs = (state or {}).get(name)
-            if b is not None and bs is not None and b.load_runtime_state(bs):
+            bank = getattr(self, name, None)
+            bank_state = (state or {}).get(name)
+            if (
+                bank is not None
+                and bank_state is not None
+                and bank.load_runtime_state(bank_state)
+            ):
                 restored.append(name)
         return restored
 
 
 def render_report(verdicts: list[V.Verdict]) -> str:
-    """Minimal S1 fleet report (markdown). The UI shell arrives at S6."""
+    """Render a compact markdown fleet report."""
     lines = [
-        "# ACM Fleet Report (S1 minimal)",
+        "# ACM Fleet Report",
         "",
         "| asset | state | evidence | confidence | top attribution | model epoch |",
         "|---|---|---|---|---|---|",

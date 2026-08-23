@@ -13,6 +13,7 @@ import pytest
 from immune import degeneracy_check, inject, sensitivity_profile
 from monitor import AssetMonitor
 from store.raw import TIMESTAMP_COL
+from tests.marginal_scorer import MarginalRobustZScorer
 
 UTC = timezone.utc
 pytestmark = pytest.mark.statistical
@@ -53,26 +54,23 @@ def test_profile_detects_canonical_faults():
     assert report.conformance_ok, "clean holdout must not alarm"
     assert not report.degenerate
     assert not report.scorer_dead
-    # marginal-shift classes must be detectable at some magnitude
     for fc in ("drift", "step", "variance"):
         assert report.floors[fc] is not None, f"{fc} never detected"
-    # floors are ordered sanely: step is easiest, detected at <= 2 sigma
     assert report.floors["step"] <= 2.0
 
 
 def test_marginal_scorer_is_blind_to_correlation_break():
-    """HONEST FINDING, pinned: a per-channel MARGINAL scorer cannot see a
-    correlation break (marginal preserved by construction). Kept as the
-    permanent record of why S4's conditional substrate exists. The flip -
-    the DEFAULT (conditional) monitor detecting the break - is asserted in
-    test_surprise.py::test_s4_flip_correlation_break_detected."""
-    from scoring import RobustZScorer
+    """A per-channel marginal scorer cannot see a correlation break.
 
-    def robustz_monitor(key):
-        return AssetMonitor(key, scorer_cls=RobustZScorer)
+    This negative control is the permanent reason the production scorer is
+    conditional. The production flip is pinned in test_surprise.py.
+    """
+
+    def marginal_monitor(key):
+        return AssetMonitor(key, scorer_cls=MarginalRobustZScorer)
 
     report = sensitivity_profile(
-        "synt/blind", healthy_frame(), monitor_cls=robustz_monitor
+        "synt/blind", healthy_frame(), monitor_cls=marginal_monitor
     )
     assert report.floors["correlation_break"] is None
 
