@@ -6,7 +6,7 @@ from pathlib import Path
 
 from evidence.seed_demo import seed_farm
 from store.raw import RawStore
-from test_care_replay import _make_farm  # reuse the synthetic farm fixture
+from tests.test_care_replay import _make_farm  # reuse the synthetic farm fixture
 
 
 def test_seed_farm_appends_one_asset_per_event_no_meta_columns(tmp_path):
