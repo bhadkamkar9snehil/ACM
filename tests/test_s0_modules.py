@@ -1,14 +1,12 @@
-"""Acceptance tests for S0.3 (ingestion), S0.4 (hardware), S0.5 (constants),
-S0.6 (scheduler stub)."""
+"""Acceptance tests for S0.3 ingestion, S0.4 hardware, and S0.5 constants."""
 
-import asyncio
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 import polars as pl
 import pytest
 
 import constants
+import verdict as V
 from hardware import (
     TIER_T0,
     TIER_T1,
@@ -20,7 +18,6 @@ from hardware import (
     set_thread_caps,
 )
 from ingest import ingest_csv
-from scheduler import FleetScheduler
 from store.raw import TIMESTAMP_COL, RawStore
 
 UTC = timezone.utc
@@ -93,79 +90,9 @@ def test_ingest_naive_timestamps_rejected(tmp_path):
         ingest_csv(store, "bad", csv)
 
 
-# ---------------------------------------------------------------- S0.6
-def test_scheduler_staggers_and_sees_only_new_rows(tmp_path):
-    store = RawStore(tmp_path / "raw")
-    base = datetime(2026, 1, 1, tzinfo=UTC)
-
-    def rows(n, start_offset=0):
-        ts = [base + timedelta(minutes=10 * (start_offset + i)) for i in range(n)]
-        return pl.DataFrame(
-            {
-                TIMESTAMP_COL: pl.Series(ts, dtype=pl.Datetime("us", "UTC")),
-                "v": [float(i) for i in range(n)],
-            }
-        )
-
-    assets = ["a1", "a2", "a3"]
-    for a in assets:
-        store.append(a, rows(5))
-
-    seen: dict[str, int] = {}
-
-    async def hook(asset_key: str, frame: pl.DataFrame) -> None:
-        seen[asset_key] = seen.get(asset_key, 0) + frame.height
-
-    async def scenario():
-        sched = FleetScheduler(store, assets, hook, interval_s=0.05)
-        run = asyncio.create_task(sched.run())
-        await asyncio.sleep(0.30)  # several rounds
-        store.append("a1", rows(3, start_offset=5))  # new data arrives
-        await asyncio.sleep(0.30)
-        sched.stop()
-        await run
-
-    asyncio.run(scenario())
-
-    assert seen["a1"] == 8 and seen["a2"] == 5 and seen["a3"] == 5
-    ticked = {t.asset_key for t in []}  # placate linters
-    del ticked
-
-
-def test_scheduler_records_costs(tmp_path):
-    from hardware import MEASURED_COSTS
-
-    store = RawStore(tmp_path / "raw")
-    base = datetime(2026, 1, 1, tzinfo=UTC)
-    store.append(
-        "c1",
-        pl.DataFrame(
-            {
-                TIMESTAMP_COL: pl.Series([base], dtype=pl.Datetime("us", "UTC")),
-                "v": [1.0],
-            }
-        ),
-    )
-
-    async def hook(asset_key, frame):
-        return None
-
-    async def scenario():
-        sched = FleetScheduler(store, ["c1"], hook, interval_s=0.05)
-        run = asyncio.create_task(sched.run())
-        await asyncio.sleep(0.15)
-        sched.stop()
-        await run
-
-    asyncio.run(scenario())
-    assert "c1" in MEASURED_COSTS
-
-
 # ------------------------------------------- availability stream (R4 job)
 def test_availability_standstill_alarms():
-    """A parked machine (flat telemetry) must alarm via the availability
-    stream with attribution 'availability' - even though its magnitude
-    surprise is quiet."""
+    """A parked machine must alarm via availability even if magnitude is quiet."""
     import numpy as np
 
     from monitor import AssetMonitor
@@ -189,9 +116,8 @@ def test_availability_standstill_alarms():
     mon = AssetMonitor("av/1")
     assert mon.calibrate(live(5000))
     v = mon.process(live(1200, off=6000))
-    assert v.state != "alarm"
+    assert v.state != V.STATE_ALARM
 
-    # standstill: every channel freezes at its last value
     frozen = live(1, off=8000)
     n = 1500
     ts = [base + timedelta(minutes=10 * (8001 + i)) for i in range(n)]
@@ -205,6 +131,6 @@ def test_availability_standstill_alarms():
         }
     )
     v = mon.process(flat)
-    assert v.state == "alarm", v.state
+    assert v.state == V.STATE_ALARM, v.state
     assert v.attribution == ("availability",)
     assert v.evidence_trail.get("domain") == "availability"

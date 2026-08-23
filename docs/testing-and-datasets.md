@@ -1,73 +1,44 @@
 # Testing ACM and feeding it datasets
 
-Three layers of testing, in increasing order of realism and cost:
+ACM uses three validation layers, in increasing order of realism and cost:
 
 ```mermaid
 flowchart LR
-    A[Local suite\nseconds-minutes\nevery change] --> B[Evidence lane\nreal labeled datasets\nbefore claims]
-    B --> C[Operational soak\nreal service, live feed\nbefore releases]
+    A[Local suite] --> B[Evidence lane]
+    B --> C[Operational soak]
 ```
 
----
-
-## 1. The local suite
+## Local suite
 
 ```bash
-uv run pytest tests/ -q                      # everything (~3-4 min)
-uv run pytest tests/ -q -m "not statistical" # skip the heavier statistical tests
-uv run pytest tests/test_eprocess.py -q      # one layer at a time
+uv run pytest tests/ -q
+uv run pytest tests/ -q -m "not statistical"
 ```
 
-What each file pins down:
+The suite covers the e-process guarantee, surprise models, episode lifecycle,
+lifetime memory, immune/rehearsal behavior, runtime/service continuity, raw
+storage, Tier-2 scorer parity, CARE replay machinery and repository hygiene.
 
-| File | What it proves |
-|---|---|
-| `test_eprocess.py` | the false-alarm bound actually holds (empirical Ville conformance on autocorrelated data), block derivation, the exchangeability audit (refusal + disclosure), budget union bound, latching |
-| `test_surprise.py` | the conditional scorer: correlation-break detection, PIT uniformity, robustness |
-| `test_monitor_e2e.py` | tick-to-verdict end to end; alpha shares sum to 1.0; the channel-local lens catches what the mean dilutes |
-| `test_novelty_episodes.py` | episode lifecycle, shape classification, change-not-fault, absorption |
-| `test_memory.py` | lifetime baseline, recency cap (the boiling-frog test), ledger masking, consecutive-chunk calibration sampling |
-| `test_anatomy.py` / `test_prognosis.py` / `test_horizons.py` / `test_transients.py` / `test_dynamics.py` | each explanation/evidence module against synthetic ground truth |
-| `test_immune.py` / `test_rehearsal.py` | the self-test: injected faults get caught, clean data conforms, dead scorers are flagged |
-| `test_runtime_service.py` | fleet runtime + API + WebSocket + bootstrap convergence + immune passes, at fleet scale |
-| `test_raw_store.py` | store contract: UTC enforcement, month partitions, column-order insensitivity |
-| `test_worldmodel.py` | Tier 2 (skipped automatically when torch is absent): PIT calibration, the nonlinear go/no-go separation criterion, cross-tier contract parity |
-| `test_care_replay.py` | the evidence-lane machinery itself, on a tiny synthetic CARE-shaped farm |
-| `test_seed_demo.py` | the live-seeding path (#131): one asset per event, no meta/label columns, no train/prediction split |
-| `test_ascii.py` / `test_import_boundary.py` | repo hygiene |
+Tests marked `statistical` run repeated-trial acceptance checks. Fixed seeds make
+them reproducible; torch-dependent tests skip when torch is unavailable.
 
-Conventions: tests marked `statistical` run repeated-trial probability
-checks (slower, seeds fixed - not flaky). Torch-dependent tests skip
-cleanly on CPU-only machines.
+## Input contract
 
----
+An ACM asset is a stream of rows with:
 
-## 2. What shape does ACM want?
+- one timezone-aware UTC timestamp column;
+- at least two numeric sensor channels;
+- no labels, status flags or fault annotations in the raw store.
 
-ACM's entire input contract is small. An asset is a stream of rows:
+Adapters may use labels for evaluation, but labels never enter model input.
+Naive timestamps are rejected at the storage boundary; an adapter that knows a
+dataset's documented timezone must declare it explicitly.
 
-- **one timestamp column** - timezone-aware UTC (`datetime[us, UTC]`).
-  Naive timestamps are REJECTED at the store door, never guessed: the
-  adapter that knows the dataset's documented timezone must declare it.
-- **numeric channel columns** - any names, any count >= 2. Channels may
-  appear or disappear between rows (matched by name, never by column
-  order).
-- **nothing else.** No labels, no status flags, no fault annotations -
-  labels must never enter the raw store. Keep them outside for
-  evaluation only.
+Cadence is not configured. ACM measures cadence, decorrelation and evidence
+block sizes from the data itself. Assets stay `insufficient-history` until the
+history can support the declared statistical guarantee.
 
-Cadence can be anything from seconds to hours; ACM measures what it
-needs (decorrelation lengths, cadence gaps) from the data itself.
-
-How much history before it speaks: the monitor arms when the healthy
-calibration supports a valid guarantee - as a rule of thumb, a few
-thousand rows spanning at least a few weeks. Until then the asset
-reports `insufficient-history`, which is a working state, not an error.
-Assets whose history cannot support the guarantee (too short, or
-correlation the history cannot decompose) stay in that state and say
-why.
-
-### Seeding a dataset programmatically
+### Programmatic seeding
 
 ```python
 import polars as pl
@@ -77,190 +48,116 @@ store = RawStore("acm_data/raw")
 frame = pl.DataFrame({
     TIMESTAMP_COL: pl.Series(timestamps, dtype=pl.Datetime("us", "UTC")),
     "temp": temp_values,
-    "vib": vib_values,
-    # ... any numeric channels
+    "vib": vibration_values,
 })
-store.append("plant/asset-01", frame)   # slash-namespaced asset keys
+store.append("plant/asset-01", frame)
 ```
 
-Then either start the service (`uv run python -m service --root
-acm_data`) - it discovers every asset in the store, onboards, and
-bootstraps automatically - or drive it in-process (see
-`tests/test_runtime_service.py` for the pattern).
+Start the service against the same data root and it discovers, onboards and
+bootstraps the asset.
 
-### Live feeds
+### Other ingestion paths
 
-Any bridge that writes rows into a SQLite buffer table with columns
-`(ts, payload_json)` - where `payload_json` is
-`{"published_at": ..., "channel": value, ...}` - can feed an asset:
+The same normalization/store boundary is used by:
+
+- CSV/parquet files;
+- configured SQLite tables;
+- JSON HTTP sources;
+- live SQLite `(ts, payload_json)` buffers;
+- manual/API ingestion;
+- the `<data_root>/incoming/` drop folder.
+
+## CARE evidence lane
+
+Download selected farms/events without downloading the full ZIP first:
 
 ```bash
-uv run python -m service --root acm_data \
-  --live "plant/asset-01=bridge_buffer.db"
+uv run python -m evidence.download_care --dest care_data --farms A
+# optional partial farm:
+uv run python -m evidence.download_care --dest care_data --farms A --count 5
 ```
 
-The buffer is drained into the store on every tick.
+The downloader creates:
 
----
-
-## 3. The evidence lane: real labeled datasets
-
-The evidence lane exists to answer "does ACM actually detect real
-faults on real machines?" with ground truth - and its results are
-regression evidence, never tuning targets. The standing rule: no
-parameter is ever adjusted to improve a benchmark number.
-
-### The CARE-shaped farm layout
-
-The replay runner consumes datasets in this on-disk shape (the shape of
-the public CARE-to-Compare wind-farm dataset):
-
-```
-<farm_dir>/
-  event_info.csv            # one row per event (see columns below)
-  datasets/
-    <event_id>.csv          # one file per event
+```text
+care_data/
+  Wind Farm A/
+    event_info.csv
+    datasets/
+      <event_id>.csv
 ```
 
-`event_info.csv` columns: `event_id`, `event_label` ("anomaly" or
-"normal"), `event_start` (timestamp - when the labeled fault begins),
-`event_description` (free text).
-
-Each `datasets/<event_id>.csv`: a `time_stamp` column, a `train_test`
-column ("train" rows = the healthy history ACM onboards on;
-"prediction" rows = the scored window), and numeric sensor columns.
-Semicolon OR comma delimited (sniffed). Meta/label columns
-(`status_type_id`, `train_test`, `id`, `asset_id`) are stripped before
-anything reaches the store.
-
-### Running a replay
+Replay labeled events through the production runtime:
 
 ```bash
-# real CARE data (Zenodo, farms A/B/C):
 uv run python -m evidence.care_replay \
     --farm-dir "care_data/Wind Farm A" \
     --out results/care_A \
-    --scorer tier0            # or: worldmodel (GPU), auto (probed tier)
-
-# a subset of events:
-uv run python -m evidence.care_replay \
-    --farm-dir "care_data/Wind Farm A" --events 40 68 --out results/subset
+    --scorer tier0
 ```
 
-Each event runs the FULL production path - store ingest, onboarding,
-first-contact bootstrap, chunked ticks - and is scored: anomaly events
-as hit/miss with detection lag in hours; normal events as
-clean/false-alarm. `summary.json` aggregates; per-event JSON keeps the
-whole tick trace for diagnosis.
+A subset can be selected with `--events 40 68`. Scorer choices are `tier0`,
+`worldmodel`, `masked` and `auto`.
 
-### Watching it live in the UI instead (`evidence.seed_demo`)
+Each event uses the real store -> onboard -> first-contact bootstrap -> chunked
+tick path. Labels are held outside ACM and are used only to classify the replay
+result as hit/miss or clean/false-alarm. Results are regression evidence, never
+parameter-tuning targets.
 
-`care_replay` above answers "did ACM detect the labeled fault" with a
-results file - it runs each event in its own private, throwaway store
-and never touches a running service. To instead just WATCH ACM work
-against real data in the browser, seed events into a live data root:
+### Live CARE demo
+
+To watch those same event histories through a running fleet instead of an
+isolated evaluation replay:
 
 ```bash
-uv run python lab/scripts/download_care_benchmark.py --dest care_data --farms A
 uv run python -m evidence.seed_demo \
     --farm-dir "care_data/Wind Farm A" --root acm_data
 uv run python -m service --root acm_data --port 8899
 ```
 
-Each event becomes one continuous asset (`wind-farm-a/<event_id>`) - the
-full CSV span in chronological order, no train/prediction split (a live
-asset's raw history is simply its whole life). The running service
-auto-discovers, onboards, and bootstraps every seeded asset on startup,
-same as any other asset. Re-run `seed_demo` with `--prefix` to namespace
-a second batch, or `--farm-dir "care_data/Wind Farm B"` for another farm.
+`seed_demo` stores the full event chronologically as one asset. It deliberately
+does not use CARE's train/prediction split because a live machine simply has a
+continuous lifetime history.
 
-### Adapting any other dataset
+## Adapting another labeled dataset
 
-Transform once into the farm layout above and the replay runner works
-unmodified. The checklist that decides whether a dataset is a FAIR test
-of ACM (rather than a protocol mismatch):
+A fair degradation benchmark needs:
 
-1. **Enough healthy history per event** - ideally weeks; ACM refuses to
-   promise guarantees on days.
-2. **Faults that develop over hours to days** - ACM's domain is
-   industrial degradation. Datasets whose anomalies last seconds to
-   minutes (most ICS-security/attack benchmarks) test a different
-   problem and will read as misses; that is a dataset-selection
-   mismatch, not a detection failure.
-3. **Continuous multivariate telemetry** - not isolated snapshots or
-   event logs.
-4. **Labels with onset times** - "something was wrong in this window"
-   is enough; per-row labels are not needed.
+1. enough healthy history to arm ACM;
+2. continuous multivariate telemetry;
+3. fault onset timestamps;
+4. faults that evolve on the industrial condition-monitoring timescale.
 
-Adapter skeleton:
+Convert the dataset into the CARE-shaped layout above. `tests/test_care_replay.py`
+builds a minimal synthetic example and is the executable reference.
 
-```python
-import polars as pl
-from pathlib import Path
+Do not interpret short security-attack bursts or snapshot classification sets as
+condition-monitoring failures: they test a different problem and evidence
+runway.
 
-farm = Path("adapted/My Farm"); (farm / "datasets").mkdir(parents=True)
-events = []
-for event_id, raw in my_dataset():          # your iteration
-    frame = pl.DataFrame({
-        "time_stamp": raw.timestamps,       # strings are fine; UTC by
-                                            # YOUR declaration of the
-                                            # dataset's documented zone
-        "train_test": raw.split_labels,     # "train" / "prediction"
-        **{c: raw[c] for c in raw.sensor_columns},
-    })
-    frame.write_csv(farm / "datasets" / f"{event_id}.csv", separator=";")
-    events.append({
-        "event_id": event_id,
-        "event_label": "anomaly" if raw.is_fault else "normal",
-        "event_start": raw.fault_onset,     # any timestamp for normals
-        "event_description": raw.description,
-    })
-pl.DataFrame(events).write_csv(farm / "event_info.csv", separator=";")
-```
+## Reading evidence honestly
 
-`tests/test_care_replay.py` builds exactly such a synthetic farm in a
-few lines - use it as the working reference.
+- Normal events matter as much as anomalies because they exercise the
+  false-alarm promise.
+- Detection-lag resolution is bounded by replay chunk size.
+- A pre-onset alarm is recorded separately; on a normal event it is a false
+  alarm.
+- `insufficient-history` is an outcome with an explicit reason, not a hidden
+  failure.
 
-### Reading the results honestly
+## Operational soak
 
-- Normal events are as important as anomalies: the false-alarm count is
-  the direct empirical check of the alpha promise.
-- Detection lag resolution is bounded by the chunk size (default 288
-  rows = 2 days at 10-minute cadence); a lag equal to one chunk means
-  "caught within the first chunk", not "took two days".
-- An early alarm before the labeled onset is recorded separately
-  (`early_alarm_pre_event`) - on anomaly events it may be genuine early
-  detection of conservative labels; on normal events it is a false
-  alarm, full stop.
-- `insufficient` replays are diagnosable: the record carries the
-  monitor's own stated reason.
-
----
-
-## 4. The operational soak
+The soak drives the real service through compressed healthy, legitimate-change
+and fault phases and reads its final episode state from the same SQLite store as
+production:
 
 ```bash
-uv run python -m evidence.soak --out results/soak
+uv run python -m evidence.soak --root results/soak --minutes 90
 ```
 
-Runs the REAL `python -m service` entrypoint against a continuously-fed
-live buffer on a time-compressed asset clock, through three phases:
-healthy operation, a coordinated setpoint change (must be declared
-change-not-fault and auto-absorbed), then a genuine local fault (must
-alarm on the absorbed baseline). Eight pass/fail criteria - service
-liveness, API reachability, no false alarms while healthy, change
-declared, absorption at the anchor period, post-absorb health, fault
-detection, flat memory - and a nonzero exit on any failure. This is the
-"implement and forget" gate: if the soak passes, the unattended loop
-works.
+The target root must be empty. This prevents a previous run's state from making
+a release check pass for the wrong reason.
 
-## 5. The immune system as a test instrument
-
-Per asset, on demand (UI button or `POST /api/immune-pass/{asset}`):
-fault classes injected at a magnitude ladder into the asset's own
-held-out data give the measured detection floor ("will see 1-sigma
-drift, will not see 0.5-sigma"), a clean-holdout conformance check, a
-dead-scorer check, and the rehearsal map (coherent faults through the
-learned couplings - the honest detection boundary). If you want to know
-"would ACM catch X on MY asset", the immune pass answers it with
-measurements, not claims.
+Use the soak as the release-level lifecycle check after the local suite and
+evidence lane. It validates unattended orchestration, durable state and state
+transitions; it is not a parameter-tuning tool.

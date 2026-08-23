@@ -1,7 +1,6 @@
 """S1 end-to-end acceptance: synthetic pilot through the full spine
-(store -> scorer -> e-process bank -> verdict), CI-hermetic."""
+(scorer -> e-process bank -> verdict), CI-hermetic."""
 
-import asyncio
 from datetime import datetime, timedelta, timezone
 
 import numpy as np
@@ -9,8 +8,7 @@ import polars as pl
 
 import verdict as V
 from monitor import AssetMonitor, render_report
-from scheduler import FleetScheduler
-from store.raw import TIMESTAMP_COL, RawStore
+from store.raw import TIMESTAMP_COL
 
 UTC = timezone.utc
 
@@ -74,36 +72,6 @@ def test_insufficient_history_verdict():
     v = mon.process(synth_frame(10, start + timedelta(days=1), rng))
     assert v.state == V.STATE_INSUFFICIENT
     assert v.confidence == 0.0
-
-
-def test_spine_through_scheduler(tmp_path):
-    """Store -> scheduler -> monitor hook -> verdicts, as deployed."""
-    rng = np.random.default_rng(14)
-    start = datetime(2026, 1, 1, tzinfo=UTC)
-    store = RawStore(tmp_path / "raw")
-    store.append("s/1", synth_frame(4000, start, rng))
-
-    mon = AssetMonitor("s/1")
-    assert mon.calibrate(store.read("s/1"))
-    verdicts = []
-
-    async def hook(asset_key, frame):
-        verdicts.append(mon.process(frame))
-
-    async def scenario():
-        sched = FleetScheduler(store, ["s/1"], hook, interval_s=0.05)
-        run = asyncio.create_task(sched.run())
-        await asyncio.sleep(0.15)
-        store.append(
-            "s/1", synth_frame(2500, start + timedelta(days=40), rng, shift=3.0)
-        )
-        await asyncio.sleep(0.25)
-        sched.stop()
-        await run
-
-    asyncio.run(scenario())
-    states = [v.state for v in verdicts]
-    assert states[-1] == V.STATE_ALARM, states
 
 
 def test_report_renders():

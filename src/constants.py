@@ -55,20 +55,6 @@ REGISTRY: dict[str, Constant] = {
             "arithmetically while allowing legitimate aging.",
         ),
         Constant(
-            "RAW_STORE_PARTITION",
-            "month",
-            "Calendar-month parquet partitions: large enough for columnar "
-            "efficiency at SCADA cadence, small enough that rewrite-on-"
-            "append stays cheap (S0.2).",
-        ),
-        Constant(
-            "EVIDENCE_WORKERS_MAX_LOW_RAM",
-            2,
-            "On hosts below 24GB RAM, evidence/benchmark runs cap at 2 "
-            "workers with BLAS caps: the lab's measured OOM/fork-deadlock "
-            "envelope on 15-16GB machines (CLAUDE.md mistakes #42/#44).",
-        ),
-        Constant(
             "CHANGE_ABSORB_ANCHOR_PERIODS",
             1.0,
             "A change-not-fault plateau that has held for this many ANCHOR "
