@@ -25,9 +25,10 @@ uv run python -m acm.service --root acm_data --port 8899 --tick-seconds 300
 # self-ticking fleet service + zero-build UI: open http://127.0.0.1:8899
 ```
 
-Design docs: `docs/acm-gem-plan.md` (the architecture),
-`docs/acm-rethink-plan.md` (why the rewrite), and
-`docs/acm-implementation-plan.md` (the build guide). The pre-rewrite
+The goal and its fixed constraints are in
+`docs/acm-goals-and-routes.md`; the proposed design is in
+`docs/acm-design.md`. The plans the current code was built from are in
+`docs/archive/`. The pre-rewrite
 system lives under [`lab/`](lab/README.md) as reference and tooling.
 
 ---
@@ -258,8 +259,8 @@ uv run pytest tests -m statistical        # acceptance lane (immune, conformance
   earned each one.
 - `acm` never imports the legacy lab (CI-enforced import boundary);
   ASCII-only in `src/` and `tests/` (CI-enforced).
-- `CLAUDE.md` is the knowledge base - the durable memory of every
-  lesson, kept current by rule.
+- `AGENTS.md` holds the standing agent rules and `MEMORY.md` the
+  current state; `docs/archive/kb-lab-history.md` is the lab-era archive.
 
 ## Repository layout
 
@@ -268,12 +269,13 @@ src/acm/        the product (src-layout; import name acm)
 tests/           unit + statistical + evidence-machinery tests
 install.sh|ps1   one-command install (uv-based)
 pyproject.toml   uv-locked project; the ONLY tunable is the alpha dial
-docs/            design plans, build guide, ml-book, legacy docs
+docs/            goal and constraints, proposed design, archive/
 paper/           research paper draft (Markdown)
 lab/             the pre-rewrite ACM1 system: six-detector pipeline,
                  simulator, CARE/public-dataset benchmark harnesses -
                  reference + tooling, not the product (lab/README.md)
-CLAUDE.md        the knowledge base
+AGENTS.md        standing rules for agents (CLAUDE.md imports it)
+MEMORY.md        current project state
 ```
 
 ## The legacy lab

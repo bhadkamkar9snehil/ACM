@@ -1,6 +1,6 @@
 """Immortal raw history store: per-asset, per-month, append-only parquet.
 
-Design contract (docs/acm-implementation-plan.md, S0.2):
+Design contract (docs/archive/plans-2026-07/acm-implementation-plan.md, S0.2):
 
 - APPEND-ONLY. There is no trim, no retention window, no delete API. The
   definition of an asset's normal behavior is anchored in its entire life;

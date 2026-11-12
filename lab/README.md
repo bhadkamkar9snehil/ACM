@@ -339,7 +339,7 @@ exactly which `ml_defaults` keys were patched for that run, and the "Scoring Ope
 table shows it per-run too. Runs without `--override` show no such box - there's nothing to
 distinguish a normal run from an ablation run except this label, by design, so you can mix
 baseline and ablation runs in the same report/database and still tell them apart later. See
-`../docs/report-flow-testing.md` (repo root) for the full report-flow walkthrough.
+`docs/report-flow-testing.md` for the full report-flow walkthrough.
 
 **Comparing several configs side-by-side in one report - give each one its own `--asset` key.**
 `acm_run.py` ingests with `keep_history=False` (it's a one-shot batch runner, not the live
@@ -410,7 +410,7 @@ ACM/
 +-- configs/
 |   `-- config_table.csv     human-editable runtime config (categories: data, sql, runtime)
 |
-+-- ../docs/                 (repo root) ml-book.html + screenshots live there
++-- docs/                    ml-book.html, screenshots, lab user docs
 |
 +-- tests/                   pytest suite (68 tests across 4 files)
 +-- sim_data/
@@ -452,4 +452,4 @@ python scripts/acm_service.py \
 
 ## Documentation
 
-`../docs/ml-book.html` (repo root; also served at /docs/ml-book.html by the running service) - a self-contained interactive book covering every part of the ACM ML core: rolling features, all six detectors, calibration, fusion, and alarm rules, with working Chart.js demos and print-optimised layout. Open it in any browser.
+`docs/ml-book.html` (also served at /docs/ml-book.html by the running service) - a self-contained interactive book covering every part of the ACM ML core: rolling features, all six detectors, calibration, fusion, and alarm rules, with working Chart.js demos and print-optimised layout. Open it in any browser.
