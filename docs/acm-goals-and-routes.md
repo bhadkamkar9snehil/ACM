@@ -9,6 +9,17 @@ Status: the goal and constraints (sections 1 and 2) are fixed. The
 routes in sections 4 to 9 were the options considered. The decision
 is in `acm-design.md`.
 
+Review scope: the original review inspected ff7ed51 (July build), not the
+35 newer commits ending at aa55d12. During merge recovery on 2026-11-12,
+implementation claims were checked against that newer source. Historical
+CARE results and timings below were not rerun and do not measure this build.
+The proposed architecture has not passed its judging-data gates.
+
+Current verification limitation: the merged suite has 170 passing tests
+and one auto-absorption failure, also reproduced on untouched aa55d12.
+Rejected recalibration can leave the monitor uncalibrated after closing
+the episode. See `merge-recovery-2026-11-12.md` for evidence and repair scope.
+
 ## 1. The goal
 
 ACM is a self-learning, unsupervised condition monitor for industrial
@@ -64,19 +75,23 @@ assumes history exists:
   calibrates on the rest. At t=0 there is no sample.
 - Its evidence process needs at least 30 calibration blocks before it
   can run at all. Until then the verdict is "insufficient history".
-- Its world model needed about a year of data per CARE event.
+- Historical CARE experiments used about a year of data per event. This
+  is an experiment setup, not a demonstrated minimum history requirement
+  of the newer world model (which now also has an experimental masked variant).
 
 So the present design is a monitor for an asset with a past. C2 asks
 for a monitor that grows up with the asset.
 
-C1 also has a consequence the current build does not meet. A fault
-episode stays open until someone presses Re-anchor. With no human, ACM
+C1 also has a consequence the current build does not meet. Fault episodes
+still close through explicit re-anchor; legitimate change-not-fault episodes
+can be absorbed automatically after the governed anchor period. With no human, ACM
 has to detect the repair itself.
 
 C4 rules out anything that retrains a large model per asset on a
-schedule. The world model took about 19 minutes per calibration on CPU.
-At 300 assets and weekly rebuilds that is about 95 CPU-hours a week
-for one model type.
+schedule. The historical world-model timing was about 19 minutes per calibration on
+CPU. At 300 assets and weekly rebuilds that extrapolates to about 95
+CPU-hours a week. This is not a measurement of the newer build, its GPU
+path, masked model or governed process-worker implementation.
 
 ## 4. The routes
 
@@ -86,11 +101,13 @@ what "normal" is. They are scored against the constraints.
 ### Route A. Harden the current build
 
 Batch ridge regression of each channel on the others, a fixed
-calibration sample, six evidence streams.
+calibration sample, seven budgeted evidence domains (including channel-local evidence).
 
 - Cold start: poor. It abstains until history exists.
 - Scale: acceptable.
-- Data faults: none handled.
+- Data faults: input validation and calibrated availability evidence already
+  detect some gaps and flat channels. General sensor-fault isolation and
+  baseline-free first-sample data-quality verdicts are not implemented.
 - Verdict: keep the plumbing (store, service, ledger, UI). Replace the
   learner and the decision layer.
 
@@ -235,7 +252,7 @@ checking before use.
 
 | Source | Kind | Why it fits | Caveat |
 |---|---|---|---|
-| `lab/sim` generators (11 domains) | synthetic | Raw, any cadence, any length, faults and sensor faults placed exactly, starts at t=0 | ACM must not be shaped to its own simulator |
+| Historical `lab/sim` generators (Git history before the lab removal) | synthetic | Raw, any cadence, any length, faults and sensor faults placed exactly, starts at t=0 | ACM must not be shaped to its own simulator |
 | MetroPT-3 | real, compressor on a metro train | Raw analogue and digital sensors, months long, failures known from maintenance reports | Sources disagree on sampling rate and dates |
 | 3W 2.0 (Petrobras) | real and simulated oil wells | 1 Hz, 27 variables, 2,228 labelled instances from 42 wells | Short instances, weak for lifetime behaviour |
 | Tennessee Eastman | simulated chemical plant | Raw process variables, 20 fault types, sustained faults | Simulated, short healthy history |
@@ -308,38 +325,25 @@ not done, whatever a single benchmark says.
 
 Added 2026-11-12 after the owner asked whether a right answer exists.
 
-### There is a right structure
+### Conditional mathematical goals
 
-Two results from statistics fix the shape of the answer.
+Sequential tests can have optimality results under specified change models,
+criteria and distributional assumptions. Consistency results for learners
+also require explicit assumptions; they do not prove universal correctness
+for arbitrary assets, nonstationarity or unobserved faults.
 
-- **The decision layer has a provably best form.** For a given
-  false-advisory rate there is a lower limit on how fast any detector
-  can react to a given change, and known sequential tests reach that
-  limit. Nothing can do better, so this part has a right answer.
-- **The learner has a provably safe form.** Some learners are
-  guaranteed to converge to the true normal behaviour of any asset as
-  data grows, whatever the asset is. No learner is fastest on every
-  asset, but one of this kind is never wrong in the long run.
-
-A learner of the second kind feeding a test of the first kind is the
-right combination. What differs from asset to asset is how long the
-learner takes, and ACM can measure and report that per channel.
-
-### Certain by construction
-
-1. The false-advisory rate holds, on one condition: healthy behaviour
-   in the future resembles healthy behaviour already seen, in the same
-   operating state. ACM checks this condition continuously and says so
-   when it fails.
-2. For that rate, detection is as fast as the data allows.
-3. The model approaches the asset's true normal as data accumulates.
-4. A dead or blind part of ACM is noticed, because ACM keeps computing
-   the smallest change it could detect on each channel.
+The proposed learner and decision layer aim to use such results, but no
+proof here establishes optimal detection or universal convergence for ACM.
+A valid e-process controls crossing probability only under its null-validity
+assumptions and alpha accounting. Similarity to past healthy behavior alone
+is not a proof. Conformance checks and sensitivity measurements are useful
+evidence, not guarantees that every blind or failed component is detected.
+The judging-data gates remain required.
 
 ### Never certain, for any method
 
 1. A fault that leaves no trace in the measured channels is invisible.
-2. The condition in point 1 above cannot be removed. Without it
+2. The healthy-reference validity assumptions cannot be removed. Without it
    nothing can be learned from the past at all.
 3. How long an asset takes to learn cannot be known before seeing it.
 

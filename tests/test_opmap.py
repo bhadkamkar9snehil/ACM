@@ -1,13 +1,13 @@
 """Operating map (prototype): the properties the design depends on.
 
-Synthetic assets with exact ground truth; see acm.evidence.opmap_eval
+Synthetic assets with exact ground truth; see evidence.opmap_eval
 for the wider evaluation including a real turbine.
 """
 
 import numpy as np
 
-from acm.evidence.opmap_eval import make_batch, make_motor, nmi, replay
-from acm.opmap import OperatingMap
+from evidence.opmap_eval import make_batch, make_motor, nmi, replay
+from opmap import OperatingMap
 
 
 def _fit(x):

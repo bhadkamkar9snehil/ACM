@@ -7,6 +7,18 @@ by the rules of evidence in section 10 of that document.
 Status of each part is given in section 12. Most of it is not built. A
 part becomes "done" only when it passes its gate on judging data.
 
+Implementation review: the original review used ff7ed51. The merged
+implementation includes aa55d12 and its preceding 34 commits: flat `src/`
+modules, SQLite runtime/episode/evidence/wealth persistence, asset registry,
+ingestion adapters, governed workers and the newer UI. These are retained.
+The parts below describe the replacement design, not all existing product
+features. Historical prototype results in section 10 were not rerun here.
+
+Current verification limitation: the merged suite has 170 passing tests
+and one auto-absorption failure, also reproduced on untouched aa55d12.
+Rejected recalibration can leave the monitor uncalibrated after closing
+the episode. See `merge-recovery-2026-11-12.md` for evidence and repair scope.
+
 ## 1. What ACM does
 
 For any asset, given only a timestamp and numeric channels, ACM learns
@@ -103,9 +115,8 @@ sudden changes on raw high-rate data.
   ranking it against clean residuals from the same state. This makes
   no assumption about the shape of the noise.
 - A sequential test per channel adds evidence over time and restarts
-  itself, so it stays fast after a long healthy life. This family of
-  tests reaches the theoretical limit on detection speed for a given
-  false-advisory rate.
+  itself, so it stays fast after a long healthy life. Optimality depends on the specified change model and
+  assumptions; no such result has been established for this ACM design.
 - Channels in one asset are combined by averaging their evidence,
   which keeps the budget valid however the channels depend on each
   other.
@@ -229,7 +240,7 @@ from a benchmark; operator confirmation as a requirement.
 ## 10. Evidence so far
 
 Only the map exists, as a prototype without memory coordinates,
-channel typing or the residual graph (`src/acm/opmap.py`). On single
+channel typing or the residual graph (`src/opmap.py`). On single
 runs:
 
 | Asset | Result |
@@ -272,11 +283,11 @@ The gate is not moved.
 
 | Part | Status |
 |---|---|
-| Harness | not built |
-| Intake | not built |
+| Cross-asset judging harness | not built; existing tests and soak are regression evidence |
+| Proposed intake and sensor isolation | not built; validation and availability scoring already exist |
 | Operating map | prototype, three known failures |
 | Memory coordinates, channel typing | designed, not built |
 | Residual graph | designed, not built |
-| Evidence, episodes | designed, not built |
-| Advisory | not built |
-| Plumbing | exists |
+| Replacement evidence, autonomous fault-repair closure | designed, not built; current banks, episodes and change absorption retained |
+| Proposed advisory and maturity stages | not built; current verdicts and UI retained |
+| Plumbing | retained: SQLite continuity, raw store, registry, ingestion, workers, service and UI |

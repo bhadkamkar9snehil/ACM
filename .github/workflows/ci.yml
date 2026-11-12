@@ -2,12 +2,13 @@ name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
     branches: [main]
 
 jobs:
-  acm2-fast:
-    name: ACM2 fast lane (${{ matrix.os }})
+  fast:
+    name: ACM fast lane (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -20,13 +21,13 @@ jobs:
         with:
           enable-cache: true
           cache-dependency-glob: "uv.lock"
-      - name: Sync environment
-        run: uv sync
-      - name: Run acm2 tests (unit + import boundary + ASCII scan)
+      - name: Sync locked environment
+        run: uv sync --locked
+      - name: Run fast tests
         run: uv run pytest tests -m "not statistical" --tb=short
 
-  acm2-statistical:
-    name: ACM2 statistical acceptance lane
+  statistical:
+    name: ACM statistical acceptance lane
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -35,50 +36,8 @@ jobs:
         with:
           enable-cache: true
           cache-dependency-glob: "uv.lock"
-      - name: Sync environment
-        run: uv sync
-      - name: Statistical acceptance (immune harness, conformance gates)
+      - name: Sync locked environment
+        run: uv sync --locked
+      - name: Statistical acceptance
         run: uv run pytest tests -m statistical --tb=short
         timeout-minutes: 15
-
-  lab-fast-tests:
-    name: Legacy lab tests (fast)
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: lab
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: pip
-      - name: Install dependencies
-        run: |
-          pip install pandas numpy polars pyarrow scikit-learn scipy structlog \
-            matplotlib remotezip pytest httpx fastapi uvicorn python-multipart \
-            pydantic asyncua paho-mqtt openpyxl
-      - name: Run fast tests
-        run: python -m pytest tests/ -m "not slow" -v --tb=short
-
-  lab-slow-tests:
-    name: Legacy lab tests (slow)
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    defaults:
-      run:
-        working-directory: lab
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: pip
-      - name: Install dependencies
-        run: |
-          pip install pandas numpy polars pyarrow scikit-learn scipy structlog \
-            matplotlib remotezip pytest httpx fastapi uvicorn python-multipart \
-            pydantic asyncua paho-mqtt openpyxl
-      - name: Run slow tests
-        run: python -m pytest tests/ -m slow -v --tb=short
-        timeout-minutes: 20

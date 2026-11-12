@@ -24,5 +24,5 @@ fi
 echo ""
 echo "ACM ready. Start the service:"
 echo "  cd $here"
-echo "  uv run python -m acm.service --root acm_data --port 8899"
+echo "  uv run python -m service --root acm_data --port 8899"
 echo "  -> http://127.0.0.1:8899"

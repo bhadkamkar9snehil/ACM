@@ -1,13 +1,14 @@
-# docs/archive
+# Historical material
 
-Retired 2026-11-12. These files are history. None of them is a current
-instruction or a current design.
+These documents are history, not current instructions or capability claims.
 
-- `plans-2026-07/` - the rethink plan, gem plan, implementation plan
-  and factory contract that the present `src/acm/` code was built from.
-  Superseded by `../acm-goals-and-routes.md` and `../acm-design.md`.
-- `kb-lab-history.md` - the lab-era knowledge base that was the
-  repo-root CLAUDE.md until 2026-11-12.
+- `plans-2026-07/`: superseded plans and factory contract.
+- `kb-lab-history.md`: the local pre-review knowledge base.
+- `lab-docs/`: user docs/screenshots moved by ee9540f, retained here because
+  newer main removed the lab runtime. Commands and links may be obsolete.
+- `review-ee9540f/`: local review-era MEMORY.md and lab instructions/README,
+  preserved verbatim; their state and instructions are not current.
 
-User docs for the lab system (ML book, Simulate tab, troubleshooting)
-moved to `lab/docs/`, where the lab service serves them.
+The active product and its newer guide are in `src/` and root `CLAUDE.md`.
+The proposed replacement design is `../acm-design.md`. Full prior code and
+removed material remain in the merge parents and Git history.

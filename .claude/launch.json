@@ -2,13 +2,13 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "acm",
+      "name": "ACM",
       "runtimeExecutable": "uv",
       "runtimeArgs": [
         "run",
         "python",
         "-m",
-        "acm.service",
+        "service",
         "--root",
         "acm_data",
         "--port",

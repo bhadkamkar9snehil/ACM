@@ -9,9 +9,9 @@ import polars as pl
 import pytest
 from fastapi.testclient import TestClient
 
-from acm.runtime import Runtime
-from acm.service import create_app
-from acm.store.raw import TIMESTAMP_COL, RawStore
+from runtime import Runtime
+from service import create_app
+from store.raw import TIMESTAMP_COL, RawStore
 
 UTC = timezone.utc
 
@@ -82,6 +82,205 @@ def test_service_endpoints_carry_the_contract(runtime):
     ):
         assert field in detail, f"contract field {field} missing on the wire"
     assert client.get("/api/asset/nope").status_code == 404
+
+
+def test_restart_does_not_double_count_evidence(tmp_path):
+    """#120 / #136 reproduction: the durable runtime journal means a
+    fresh Runtime over the same data root does NOT re-read the whole life
+    on its first tick. Before the fix, _last_seen was RAM-only, so a
+    restart re-ingested all history into the cached-wealth banks -
+    double-counting evidence and violating the alpha guarantee.
+
+    This test fails against pre-#136 main (the first post-restart tick
+    reports rows moved and bank wealth changes with no new data)."""
+    store = RawStore(tmp_path / "raw")
+    seed_asset(store, "r/1", seed=1)
+
+    rt = Runtime(store=store, data_root=tmp_path)
+    rt.onboard_all()
+    rt.tick_all()  # scores the whole history, sets verdict + last_seen
+    seen_before = rt.state.get_last_seen("r/1")
+    assert seen_before is not None  # journal is durable, not RAM-only
+    ev_before = rt.verdicts["r/1"].evidence
+
+    # simulate a service restart: brand-new Runtime, same data root, NO
+    # new data appended
+    rt2 = Runtime(store=store, data_root=tmp_path)
+    # verdict + evidence history hydrate from the store immediately, before
+    # any tick (restart continuity - the UI is not blank on restart)
+    assert "r/1" in rt2.verdicts, "verdict not hydrated after restart"
+    assert rt2.verdicts["r/1"].evidence == pytest.approx(ev_before, abs=1e-9)
+    assert rt2.evidence_series("r/1")
+
+    rt2.onboard_all()  # restores the cached monitor + resumes the journal
+    moved = rt2.tick_all()  # no new rows since the durable last_seen
+    assert moved == 0, "restart re-read history that was already scored"
+    assert rt2.state.get_last_seen("r/1") == seen_before
+
+
+def test_live_asset_lifecycle_no_restart(tmp_path):
+    """#137: register -> onboard+bootstrap live -> retire -> re-register
+    -> purge, all on a running Runtime with no restart."""
+    store = RawStore(tmp_path / "raw")
+    seed_asset(store, "live/1", seed=1)
+
+    rt = Runtime(store=store, data_root=tmp_path)
+    # nothing discovered yet (asset seeded but not onboarded)
+    rt.register_asset("live/1", display_name="Live One", group="test")
+    assert rt.state.get_asset("live/1").display_name == "Live One"
+
+    out = rt.onboard_and_bootstrap("live/1")
+    assert out["onboarded"] is True
+    assert "live/1" in rt.monitors
+    assert "live/1" in rt._bootstrapped  # first contact ran + marked
+    assert rt.state.get_last_seen("live/1") is not None
+
+    # retire (keep history): stops monitoring, registry retired, raw kept
+    rt.retire_asset("live/1", purge=False)
+    assert "live/1" not in rt.monitors
+    assert rt.state.get_asset("live/1").retired_at is not None
+    assert (tmp_path / "raw").exists()
+    assert store.row_count("live/1") > 0  # history intact
+
+    # a restart-equivalent onboard_all must SKIP the retired asset
+    rt2 = Runtime(store=store, data_root=tmp_path)
+    rt2.onboard_all()
+    assert "live/1" not in rt2.monitors
+
+    # re-register un-retires; then purge removes registry + raw + cache
+    rt2.register_asset("live/1")
+    assert rt2.state.get_asset("live/1").retired_at is None
+    rt2.onboard_and_bootstrap("live/1")
+    rt2.retire_asset("live/1", purge=True)
+    assert rt2.state.get_asset("live/1") is None
+    from store.raw import _safe_key
+    assert not (tmp_path / "raw" / _safe_key("live/1")).exists()
+
+
+def test_asset_lifecycle_endpoints(runtime):
+    """#137 API surface: add (409 on dup), delete, reonboard, wired and
+    returning the right shapes. Onboarding itself runs in the background;
+    the registry write is synchronous so it is assertable immediately."""
+    client = TestClient(create_app(runtime))
+    # f/ok1 already exists in the fixture fleet
+    r = client.post("/api/assets", json={"asset_key": "f/ok1"})
+    assert r.status_code == 409
+    # a brand-new key registers and reports onboarding
+    r = client.post("/api/assets", json={
+        "asset_key": "new/x", "display_name": "New X", "group": "g"})
+    assert r.status_code == 200 and r.json()["status"] == "onboarding"
+    assert runtime.state.get_asset("new/x").display_name == "New X"
+    # missing key -> 400
+    assert client.post("/api/assets", json={}).status_code == 400
+    # delete unknown -> 404; delete known -> ok
+    assert client.request("DELETE", "/api/assets/nope/nope").status_code == 404
+    assert client.request("DELETE", "/api/assets/new/x").status_code == 200
+    assert runtime.state.get_asset("new/x").retired_at is not None
+    # reonboard unknown -> 404
+    assert client.post("/api/assets/nope/reonboard").status_code == 404
+
+
+def test_control_console_endpoints(runtime):
+    """#138/#139: the endpoints the control console reads and writes -
+    registry, storage, service-info, sources, and manual ingest."""
+    client = TestClient(create_app(runtime))
+
+    reg = client.get("/api/registry").json()["assets"]
+    assert {a["asset_key"] for a in reg} >= {"f/ok1", "f/ok2", "f/bad"}
+
+    storage = client.get("/api/storage").json()
+    assert storage["backend"] == "sqlite"
+    assert "assets" in storage["tables"] and "verdict_history" in storage["tables"]
+
+    info = client.get("/api/service-info").json()
+    assert "tier" in info and info["alpha_per_asset_year"] is not None
+
+    assert "sources" in client.get("/api/sources").json()
+
+    # manual row ingest into an existing asset
+    from datetime import datetime, timedelta, timezone as _tz
+    base = datetime(2026, 1, 1, tzinfo=_tz.utc)
+    rows = [
+        {"timestamp": (base + timedelta(minutes=10 * i)).isoformat(),
+         "temp": 0.1 * i, "vib": 0.2 * i, "press": 0.0, "flow": 0.0}
+        for i in range(20)
+    ]
+    r = client.post("/api/ingest/f/ok1", json={"rows": rows})
+    assert r.status_code == 200 and r.json()["rows_stored"] == 20
+
+    # CSV ingest via raw body; label column dropped at the door
+    csv = "timestamp,temp,vib,label\n2026-02-01T00:00:00Z,1.0,2.0,RUN\n"
+    r = client.post("/api/ingest/f/ok1/csv", content=csv,
+                    headers={"content-type": "text/csv"})
+    assert r.status_code == 200
+    assert "label" in r.json()["dropped_columns"]
+
+
+def test_restart_resumes_exact_eprocess_wealth(tmp_path):
+    """End-to-end: the durable wealth snapshot means a restart resumes the
+    monitor's accumulated e-process wealth exactly, not the last cache
+    checkpoint. Feeding identical new data to a restarted Runtime and a
+    never-restarted control must yield identical evidence."""
+    def evidence_after(rt, key):
+        v = rt.verdicts.get(key)
+        return None if v is None else v.evidence
+
+    # a data root the control keeps ticking; a copy the restart uses
+    store = RawStore(tmp_path / "raw")
+    seed_asset(store, "w/1", seed=1)
+    rt = Runtime(store=store, data_root=tmp_path)
+    rt.onboard_all()
+    rt.tick_all()  # scores the seeded history, sets + persists wealth
+
+    pre_wealth = rt.monitors["w/1"].monitor.bank.members[0].max_log_wealth
+
+    # simulate a restart mid-life: brand-new Runtime over the SAME root
+    rt2 = Runtime(store=store, data_root=tmp_path)
+    rt2.onboard_all()  # recalibrates deterministically + restores wealth
+    post_wealth = rt2.monitors["w/1"].monitor.bank.members[0].max_log_wealth
+    assert post_wealth == pytest.approx(pre_wealth, abs=1e-9), (
+        "restart did not resume the accumulated e-process wealth"
+    )
+
+    # append the SAME new batch to both and tick; evidence must match
+    extra = _extra_batch()
+    store.append("w/1", extra)
+    v_ctrl = rt.tick("w/1")
+    v_restart = rt2.tick("w/1")
+    assert v_ctrl is not None and v_restart is not None
+    assert v_restart.evidence == pytest.approx(v_ctrl.evidence, abs=1e-9)
+
+
+def _extra_batch():
+    rng = np.random.default_rng(99)
+    start = datetime(2025, 7, 1, tzinfo=UTC)
+    n = 300
+    ts = [start + timedelta(minutes=10 * i) for i in range(n)]
+    return pl.DataFrame({
+        TIMESTAMP_COL: pl.Series(ts, dtype=pl.Datetime("us", "UTC")),
+        "temp": rng.normal(size=n), "vib": rng.normal(size=n),
+        "press": rng.normal(size=n), "flow": rng.normal(size=n),
+    })
+
+
+def test_stage_cost_summary_and_endpoint(runtime):
+    """#132: onboard/bootstrap/tick durations, worst-first - the
+    performance-KPI gap cost_summary() (tick-only) can't fill, since it
+    reads empty for the whole time a fleet is bootstrapping. The
+    `runtime` fixture's onboard_all()+tick_all() already exercised both
+    stages for every asset."""
+    summary = runtime.stage_cost_summary()
+    stages_seen = {r["stage"] for r in summary["rows"]}
+    assert "onboard" in stages_seen and "tick" in stages_seen
+    keys_seen = {r["asset_key"] for r in summary["rows"]}
+    assert keys_seen <= {"f/ok1", "f/ok2", "f/bad"}
+    wall_s = [r["wall_s"] for r in summary["rows"]]
+    assert wall_s == sorted(wall_s, reverse=True)  # worst-first
+    assert summary["total_wall_s"] == round(sum(wall_s), 4)
+
+    client = TestClient(create_app(runtime))
+    body = client.get("/api/stage-cost").json()
+    assert body["rows"] and {r["stage"] for r in body["rows"]} == stages_seen
 
 
 def test_tick_endpoint_and_incremental(runtime):
@@ -162,6 +361,91 @@ def test_self_ticking_service(runtime):
     assert any(after[k] > before.get(k, 0) for k in after), (before, after)
 
 
+def _seed_bootstrap_fixture(store, key, seed, fault_month=None):
+    """Mirrors test_bootstrap_detect_mask_redetect_converges's fixture -
+    optionally one contaminated month mid-history, so the parity check
+    below exercises the actual ledger-write path (episodes.add/remove),
+    not just a clean no-op bootstrap."""
+    rng = np.random.default_rng(seed)
+    start = datetime(2025, 1, 1, tzinfo=UTC)
+    for m in range(10):
+        n = 1200
+        fault = 5.0 if m == fault_month else 0.0
+        ts0 = start + timedelta(days=30 * m)
+        ts = [ts0 + timedelta(minutes=10 * i) for i in range(n)]
+        temp = rng.normal(size=n)
+        vib = 0.8 * temp + 0.3 * rng.normal(size=n)
+        if fault:
+            vib = vib + fault * np.concatenate(
+                [np.linspace(0, 1, n // 2), np.ones(n - n // 2)]
+            )
+        store.append(
+            key,
+            pl.DataFrame({
+                TIMESTAMP_COL: pl.Series(ts, dtype=pl.Datetime("us", "UTC")),
+                "temp": temp, "vib": vib,
+                "press": rng.normal(size=n), "flow": rng.normal(size=n),
+            }),
+        )
+
+
+@pytest.mark.statistical  # spawns real OS processes - slower than the fast lane
+def test_parallel_fleet_ops_match_sequential(tmp_path):
+    """#133: fleet_worker_count>1 fans onboard/bootstrap out across a
+    ProcessPoolExecutor. This is the load-bearing regression test - a
+    parallel run over the SAME seeded data must produce IDENTICAL
+    outcomes to the sequential run: same ledger episodes (the lost-
+    update race this design exists to avoid), same bootstrapped
+    markers, same verdict states/evidence after a subsequent tick."""
+    seq_root, par_root = tmp_path / "seq", tmp_path / "par"
+    seq_store, par_store = RawStore(seq_root / "raw"), RawStore(par_root / "raw")
+    for store in (seq_store, par_store):
+        _seed_bootstrap_fixture(store, "p/clean", seed=1)
+        _seed_bootstrap_fixture(store, "p/fault", seed=2, fault_month=6)
+
+    rt_seq = Runtime(store=seq_store, data_root=seq_root, fleet_worker_count=1)
+    rt_seq.onboard_all()
+    rt_seq.bootstrap_virgin()
+
+    rt_par = Runtime(store=par_store, data_root=par_root, fleet_worker_count=2)
+    rt_par.onboard_all()
+    rt_par.bootstrap_virgin()
+
+    assert set(rt_seq._bootstrapped) == set(rt_par._bootstrapped) == {
+        "p/clean", "p/fault",
+    }
+    for key in ("p/clean", "p/fault"):
+        seq_eps = sorted(
+            (e.start, e.end, e.state)
+            for e in rt_seq.ledger.episodes if e.asset_key == key
+        )
+        par_eps = sorted(
+            (e.start, e.end, e.state)
+            for e in rt_par.ledger.episodes if e.asset_key == key
+        )
+        assert seq_eps == par_eps, (key, seq_eps, par_eps)
+        assert rt_seq.monitors[key].monitor.bank is not None
+        assert rt_par.monitors[key].monitor.bank is not None
+
+    # a subsequent tick must behave identically too - not just the
+    # bootstrap artifacts, but the calibrated monitor's actual verdicts
+    extra = pl.DataFrame({
+        TIMESTAMP_COL: pl.Series(
+            [datetime(2025, 11, 1, tzinfo=UTC) + timedelta(minutes=10 * i)
+             for i in range(300)],
+            dtype=pl.Datetime("us", "UTC"),
+        ),
+        "temp": np.zeros(300), "vib": np.zeros(300),
+        "press": np.zeros(300), "flow": np.zeros(300),
+    })
+    seq_store.append("p/clean", extra)
+    par_store.append("p/clean", extra)
+    v_seq, v_par = rt_seq.tick("p/clean"), rt_par.tick("p/clean")
+    assert v_seq is not None and v_par is not None
+    assert v_seq.state == v_par.state
+    assert v_seq.evidence == pytest.approx(v_par.evidence, abs=1e-9)
+
+
 def test_bootstrap_virgin_runs_once_per_asset_lifetime(tmp_path):
     """First contact happens exactly once: bootstrap_virgin marks the
     asset durably and never re-runs - including across a service restart
@@ -183,7 +467,7 @@ def test_bootstrap_virgin_runs_once_per_asset_lifetime(tmp_path):
 
     # pre-marker data roots: existing ledger windows count as evidence of
     # a prior first contact and are back-filled into the marker
-    from acm.memory.ledger import Episode
+    from memory.ledger import Episode
 
     seed_asset(store, "v/old", seed=12)
     rt3 = Runtime(store=store, data_root=tmp_path)
@@ -211,7 +495,7 @@ def test_bootstrap_detect_mask_redetect_converges(tmp_path):
     import numpy as np
     import polars as pl
 
-    from acm.store.raw import TIMESTAMP_COL
+    from store.raw import TIMESTAMP_COL
 
     UTC = timezone.utc
     store = RawStore(tmp_path / "raw")
@@ -350,7 +634,7 @@ def test_ui_and_control_endpoints(runtime):
     d = client.get("/api/domains/f/ok1").json()
     assert d["magnitude"]["enabled"] and "evidence" in d["magnitude"]
     assert set(d) == {
-        "magnitude", "availability", "horizon-gap",
+        "magnitude", "channel-local", "availability", "horizon-gap",
         "predictability-band", "transient-response", "dynamics-drift",
     }
     h = client.get("/api/health/f/ok1").json()
@@ -365,7 +649,7 @@ def test_attach_live_sources_cli_wiring(runtime, tmp_path):
     """#90: the live path must be reachable from the service CLI, and an
     unknown asset key must fail LOUDLY at startup - a silently
     unattached buffer looks exactly like a healthy quiet asset."""
-    from acm.service import attach_live_sources
+    from service import attach_live_sources
 
     db = tmp_path / "buf.db"
     attach_live_sources(runtime, [f"f/ok1={db}"])
@@ -411,7 +695,7 @@ def test_bootstrap_drops_self_refuting_fault_mask(tmp_path):
     store = RawStore(tmp_path / "raw")
     seed_asset(store, "sr/1", seed=13)
     rt = Runtime(store=store, data_root=tmp_path)
-    from acm.memory.ledger import Episode
+    from memory.ledger import Episode
 
     rt.ledger.add(
         Episode(
@@ -441,7 +725,7 @@ def test_episodes_report_and_live_flag_endpoints(runtime, tmp_path):
     """UI contract completeness: the episode ledger (absorbed changes
     included) is queryable, the S6 fleet report is exposed, and
     live-fed assets are flagged in the fleet summary."""
-    from acm.memory.ledger import Episode
+    from memory.ledger import Episode
 
     runtime.ledger.add(
         Episode(
@@ -472,7 +756,10 @@ def test_episodes_report_and_live_flag_endpoints(runtime, tmp_path):
 
     page = client.get("/").text
     assert "Episode history" in page and "/api/report" in page
-    assert "Evidence trail" in page
+    # the evidence-trail surface is chart-first now: the Signals card
+    # (gauges + episode-state pills) and the surprise-by-channel chart
+    # replaced the old "Evidence trail" kv text block
+    assert "Signals" in page and "Surprise by channel" in page
 
 
 def test_websocket_stream_and_vendored_echarts(runtime):
@@ -491,3 +778,34 @@ def test_websocket_stream_and_vendored_echarts(runtime):
     assert client.get("/vendor/../pyproject.toml").status_code in (404, 400)
     page = client.get("/").text
     assert "/vendor/echarts.min.js" in page and "/api/ws" in page
+
+
+def test_telemetry_evidence_history_and_cases_endpoints(runtime):
+    """The time-series surfaces: raw telemetry windows (attribution
+    channels by default), the decision layer's own evidence trajectory,
+    and the fleet-wide case list."""
+    client = TestClient(create_app(runtime))
+
+    t = client.get("/api/telemetry/f/bad").json()
+    assert t["ts"] and t["channels"], "telemetry window must not be empty"
+    assert len(t["ts"]) == len(next(iter(t["channels"].values())))
+    # the faulted channel (vib carries the seeded fault) is attributed
+    # and therefore selected by default
+    assert "vib" in t["channels"]
+
+    t2 = client.get("/api/telemetry/f/ok1?channels=temp&rows=500").json()
+    assert list(t2["channels"]) == ["temp"]
+    assert len(t2["ts"]) <= 500
+
+    eh = client.get("/api/evidence-history/f/bad").json()["points"]
+    assert eh, "a scored asset must have at least one evidence point"
+    assert {"at", "state", "domains"} <= set(eh[-1])
+    assert "magnitude" in eh[-1]["domains"]
+
+    cases = client.get("/api/cases").json()["cases"]
+    # f/bad alarmed during the fixture tick -> an open episode exists
+    open_cases = [c for c in cases if c["end"] is None]
+    assert any(c["asset_key"] == "f/bad" for c in open_cases)
+
+    assert client.get("/api/telemetry/nope").status_code == 404
+    assert client.get("/api/evidence-history/nope").status_code == 404

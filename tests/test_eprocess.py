@@ -8,7 +8,7 @@ with block aggregation - this is the one gate nothing may pass in parallel
 import numpy as np
 import pytest
 
-from acm.decision import EProcess, EProcessBank
+from decision import EProcess, EProcessBank
 
 RNG = np.random.default_rng(42)
 
@@ -136,3 +136,119 @@ def test_derived_bank_holds_ville_bound_on_ar1():
 def test_calibration_too_small_rejected():
     with pytest.raises(ValueError, match="calibration"):
         EProcess(np.arange(10.0), alpha=0.05)
+
+
+# ------------------------------------------------- #114 exchangeability audit
+def test_bank_refuses_underblocked_short_calibration():
+    """A calibration too short to find its own decorrelation length must
+    REFUSE to arm (-> insufficient-history at the monitor), never silently
+    under-block: the silent version realized 4x the promised false-alarm
+    rate (measured, #114)."""
+    rng = np.random.default_rng(41)
+    with pytest.raises(ValueError, match="autocorrelated"):
+        EProcessBank(ar1(360, phi=0.95, rng=rng), alpha=0.05, seed=1)
+    # the SAME process with enough history derives a real block and arms
+    bank = EProcessBank(ar1(6000, phi=0.95, rng=rng), alpha=0.05, seed=2)
+    assert bank.block_sizes[0] >= 20
+    assert bank.exchangeability_acf < 0.2
+
+
+def test_bank_discloses_qualified_exchangeability():
+    """Non-decaying regime-level correlation below the refusal floor arms
+    but records the residual acf - a qualified guarantee is disclosed,
+    never a silent fiction (#114)."""
+    rng = np.random.default_rng(8)
+    n, month = 8000, 400
+    levels = np.repeat(
+        rng.normal(scale=0.45, size=n // month + 1), month
+    )[:n]
+    x = rng.normal(size=n) + levels  # plateau acf ~ 0.15 at every lag
+    bank = EProcessBank(x, alpha=0.05, seed=3)
+    assert bank.exchangeability_acf >= 0.1  # recorded, visible
+    # iid calibration reads clean
+    clean = EProcessBank(rng.normal(size=8000), alpha=0.05, seed=4)
+    assert clean.exchangeability_acf < 0.1
+
+
+def test_chunked_calibration_holds_ville_on_consecutive_stream():
+    """Regression pin for #114 door 2: calibration built from CONSECUTIVE
+    chunks of a long autocorrelated life must hold the bound against the
+    consecutive live stream. The broken behavior (row-striding, which
+    whitens the calibration) realized 0.39 vs promised 0.05 here."""
+    alpha, runs, chunk, alarms = 0.05, 60, 512, 0
+    for r in range(runs):
+        rng = np.random.default_rng(50_000 + r)
+        life = ar1(40_000, phi=0.95, rng=rng)
+        n_chunks = 20_000 // chunk
+        spacing = life.size / n_chunks
+        calib = np.concatenate(
+            [life[int(i * spacing): int(i * spacing) + chunk]
+             for i in range(n_chunks)]
+        )
+        bank = EProcessBank(calib, alpha=alpha, seed=r)
+        bank.update(ar1(4000, phi=0.95, rng=rng))
+        alarms += bank.state().alarmed
+    assert alarms / runs <= 0.15, (
+        f"{alarms}/{runs} false alarms - stride-whitening regression"
+    )
+
+
+def test_wealth_persistence_is_bit_exact_across_restart():
+    """Restart continuity: a bank restored from its persisted runtime
+    state (JSON round-tripped, as it would be through the store) resumes
+    the EXACT evidence trajectory of a bank that never restarted - and a
+    fresh bank (the pre-fix behaviour) provably diverges. This is the
+    guarantee-bearing state, so continuity must be exact, not merely
+    conservative."""
+    import json
+
+    rng = np.random.default_rng(7)
+    calib = rng.normal(size=2000)
+    scores = np.concatenate([rng.normal(size=500), rng.normal(1.5, 1, size=500)])
+    chunks = [scores[i:i + 37] for i in range(0, len(scores), 37)]
+    cut = 8
+
+    # control: one bank, no restart
+    control = EProcessBank(calib, alpha=0.02, seed=0)
+    ctrl_ev = []
+    for ch in chunks:
+        control.update(ch)
+        ctrl_ev.append(control.state().evidence)
+
+    # restart: run to `cut`, snapshot through JSON, load into a fresh bank
+    pre = EProcessBank(calib, alpha=0.02, seed=0)
+    for ch in chunks[:cut]:
+        pre.update(ch)
+    snap = json.loads(json.dumps(pre.runtime_state()))
+
+    resumed = EProcessBank(calib, alpha=0.02, seed=0)
+    assert resumed.load_runtime_state(snap) is True  # signature matched
+    res_ev = []
+    for ch in chunks[cut:]:
+        resumed.update(ch)
+        res_ev.append(resumed.state().evidence)
+    assert res_ev == ctrl_ev[cut:], "restart broke the evidence trajectory"
+
+    # the gap was real: a fresh bank (wealth reset) diverges
+    fresh = EProcessBank(calib, alpha=0.02, seed=0)
+    fresh_ev = []
+    for ch in chunks[cut:]:
+        fresh.update(ch)
+        fresh_ev.append(fresh.state().evidence)
+    assert fresh_ev != ctrl_ev[cut:]
+
+
+def test_wealth_restore_rejects_a_different_reference():
+    """Signature gate: wealth is only overlaid onto the SAME calibration
+    reference. A bank calibrated on different data refuses the snapshot
+    (returns False) and starts fresh, never grafting wealth onto a
+    different block structure."""
+    import json
+
+    rng = np.random.default_rng(1)
+    a = EProcessBank(rng.normal(size=1500), alpha=0.02, seed=0)
+    a.update(rng.normal(2.0, 1, size=400))
+    snap = json.loads(json.dumps(a.runtime_state()))
+
+    b = EProcessBank(rng.normal(size=1500), alpha=0.02, seed=0)  # different calib
+    assert b.load_runtime_state(snap) is False

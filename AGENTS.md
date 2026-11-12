@@ -1,8 +1,9 @@
 # ACM - agent instructions
 
 This file holds the standing rules for any agent working in this repo.
-It is the single source: `CLAUDE.md` imports it. Current project state
-(evidence, open items) is in `MEMORY.md`. The pre-rewrite history is in
+It is the single source: `CLAUDE.md` imports it. Current implementation guidance is in `CLAUDE.md` and the three
+current guides under `docs/`. Historical review notes are archived in
+`docs/archive/review-ee9540f/`. The pre-rewrite history is in
 `docs/archive/kb-lab-history.md` and is not loaded by default.
 
 ## What this repo is
@@ -37,26 +38,22 @@ not tuning targets. CARE data is pre-aggregated, so it cannot stand in
 for raw-data evaluation.
 
 ```
-src/acm/         the product (import name acm; python -m acm.service)
+src/             the product; flat modules (python -m service)
 tests/           unit + statistical lanes
-docs/            acm-goals-and-routes.md (goal, constraints, routes),
-                 acm-design.md (the design, with build order and gates), archive/ (superseded
-                 plans and lab-era docs; history, not instructions)
-paper/           research paper draft (lab-era)
-lab/             the pre-rewrite ACM1 system (six-detector pipeline,
-                 simulator, benchmark harnesses). Reference and tooling,
-                 not the product. Run its commands from inside lab/.
+docs/            goal, proposed design, current implementation guides
+                 and archive/ (historical material, not instructions)
 ```
 
-Older docs say "ACM2" or `acm2.*`. That is this product; the package is
-now `acm`.
+The distribution is named `acm`; imports are top-level modules such as
+`runtime`, `monitor` and `service`. The lab and paper were removed by the
+newer main history. Historical lab user docs are in `docs/archive/lab-docs/`.
 
 ## Commands
 
 ```
 uv sync                      install (drops torch, see below)
 uv run pytest tests          full suite: the merge gate
-uv run python -m acm.service start the service
+uv run python -m service start the service
 uv pip install torch --index-url https://download.pytorch.org/whl/cu126
 ```
 
@@ -93,7 +90,7 @@ once the suite is green and the user asked for the change.
 - Deleting data directories (`acm_data/`, `care_data/`, `results/`,
   `*.db`) or remote branches.
 - Changing a frozen contract or an invariant listed below.
-- Changing a rationale-carrying constant in `src/acm/constants.py` in
+- Changing a rationale-carrying constant in `src/constants.py` in
   response to one dataset's result.
 
 ## Finishing work
@@ -105,8 +102,8 @@ the "confirm first" list or the task cannot move without their answer.
 The user expects results that work end to end, verified by running
 them, not changes that are correct on paper.
 
-Do the work yourself in the session. Start a subagent only for
-independent parallel work that is large enough to repay a cold start.
+Do all work serially in this chat. Never spawn or delegate to agents,
+worker chats or external model workers. The user explicitly forbids them.
 
 ## Invariants
 
@@ -116,11 +113,11 @@ before you act; the user decides, and has said results matter more than
 precedent.
 
 - **One dial.** Everything other than `ALPHA_PER_ASSET_YEAR` is derived
-  from the asset's own data or is a constant in `src/acm/constants.py`
+  from the asset's own data or is a constant in `src/constants.py`
   with its rationale. There are no config files and no per-site tuning.
   Reason: a tuning surface is how the lab system drifted into
   dataset-specific fixes.
-- **Verdict contract v1 fields are frozen** (`src/acm/verdict.py`).
+- **Verdict contract v1 fields are frozen** (`src/verdict.py`).
   Reason: the UI and downstream consumers depend on them.
 - **`acm` does not import the lab** (`tests/test_import_boundary.py`).
 - **Not built, on purpose:** trailing or trim retention windows,
@@ -153,8 +150,8 @@ precedent.
 - Fault episodes mask the baseline. Change-not-fault episodes are
   absorbed into it. A mask that leaves no baseline is invalid, and
   bootstrap repairs it.
-- The UI is one zero-build file (`src/acm/ui.html`) with ECharts
-  vendored at `src/acm/vendor/`. It has to work air-gapped, so do not
+- The UI is one zero-build file (`src/ui.html`) with vendored browser libraries
+  vendored at `src/vendor/`. It has to work air-gapped, so do not
   add a CDN reference or a build step.
 - `TestClient` accepts WebSocket connections even when uvicorn has no
   WebSocket library. Check live-stream changes in a real browser.
@@ -164,11 +161,14 @@ precedent.
 The user has asked for a fundamental re-evaluation of the analysis done
 so far. Until that is complete, treat earlier conclusions as hypotheses
 to re-test, not as settled facts. This covers the lab-era diagnoses in
-`docs/archive/kb-lab-history.md`, the evidence summary in `MEMORY.md`, the
+`docs/archive/kb-lab-history.md`, the historical evidence summary in
+`docs/archive/review-ee9540f/MEMORY.md`, the
 invariants above, and the method choices in `docs/archive/plans-2026-07/acm-gem-plan.md` and
-`docs/archive/plans-2026-07/acm-rethink-plan.md`. The 2026-11-12 review found that the current
-build assumes history exists, does not handle data faults, and needs a
-person to close a fault episode. When you rely on an earlier
+`docs/archive/plans-2026-07/acm-rethink-plan.md`. The original 2026-11-12 review inspected ff7ed51, before 35 newer main
+commits were integrated. The merged build still needs calibration history;
+it has availability evidence and input validation, not the proposed complete
+sensor-isolation layer. Legitimate changes absorb automatically; fault repair
+closure still uses re-anchor. Old benchmark timings are not current measurements. When you rely on an earlier
 conclusion, re-measure it or say that you did not.
 
 ## Writing reports and notes
@@ -178,7 +178,7 @@ first. Use plain words and full sentences, and use one term for one
 thing. Report what you ran and what it showed, including failures and
 anything you did not verify.
 
-Keep these files short. Put a durable, current fact in `MEMORY.md` and
-remove the fact it replaces. Put a standing rule here, with its reason
-and its scope. Do not append session logs to either file; git history
-and the issue tracker hold those.
+Keep these files short. Put current implementation facts in the matching
+canonical guide under `docs/`; put standing rules here, with their reason
+and scope. Do not revive the archived MEMORY.md as current state. Git
+history and the issue tracker hold session history.

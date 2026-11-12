@@ -1,0 +1,655 @@
+"""ACM service: verdict-first assets UI + JSON API.
+
+Zero-build vanilla UI by decision (Section 7 of the implementation plan):
+one HTML page, no bundler, no framework - a genuine virtue for air-gapped
+industrial deployment. The assets view is the ONLY view; one asset is
+simply a list of one. Every verdict field of the frozen contract is shown on
+drill-down; nothing is a bare number.
+
+Run: uv run python -m service [--root <data_root>] [--port 8899]
+"""
+
+from __future__ import annotations
+
+# BLAS thread-count guard: MUST run before numpy is imported ANYWHERE in
+# this process - the lab's hard-won, documented deadlock (CLAUDE.md
+# mistake #44): unconstrained BLAS thread pools forking under
+# ProcessPoolExecutor load, silently, permanently. hardware.py itself
+# imports no numpy, so this is safe to run before every other import
+# here. Previously this call was made further down, inside main(), AFTER
+# `from runtime import Runtime` below had already pulled numpy in
+# uncapped - found and fixed while wiring #133's parallel fleet workers,
+# which made this guard load-bearing for the first time (no
+# ProcessPoolExecutor existed in this codebase before #133).
+from hardware import set_thread_caps
+
+set_thread_caps(1)
+
+import asyncio
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    PlainTextResponse,
+)
+
+from runtime import Runtime
+
+DEFAULT_TICK_SECONDS = 300.0
+UI_PATH = Path(__file__).with_name("ui.html")
+VENDOR_DIR = Path(__file__).with_name("vendor")
+
+
+class _WsHub:
+    """Fan-out of fleet snapshots to connected UI clients. Push happens
+    after every tick (loop or API-triggered) so the UI is real-time
+    without polling; a dead socket is dropped silently (the client
+    reconnects with backoff and falls back to polling)."""
+
+    def __init__(self) -> None:
+        self.clients: set[WebSocket] = set()
+
+    async def broadcast(self, payload: dict) -> None:
+        dead = []
+        for ws in self.clients:
+            try:
+                await ws.send_json(payload)
+            except Exception:  # noqa: BLE001 - any send failure = gone
+                dead.append(ws)
+        for ws in dead:
+            self.clients.discard(ws)
+
+
+
+
+def create_app(
+    runtime: Runtime, tick_seconds: float | None = None,
+    deferred_setup=None,
+) -> FastAPI:
+    """tick_seconds=None disables the built-in loop (tests drive ticks
+    explicitly); any positive value makes the service self-ticking -
+    implement and forget.
+
+    deferred_setup: optional callable run in the loop BEFORE bootstrap -
+    onboarding deep histories takes minutes and must never keep the
+    port unbound (the browser sees connection-refused, which looks like
+    a dead service, not a busy one)."""
+
+    hub = _WsHub()
+    # retain references to fire-and-forget background jobs (live onboarding,
+    # #137) so they are not garbage-collected mid-run
+    background_tasks: set = set()
+
+    async def push_fleet() -> None:
+        if hub.clients:
+            await hub.broadcast({"type": "fleet", "data": runtime.summary()})
+
+    def _spawn_bg(coro) -> None:
+        t = asyncio.create_task(coro)
+        background_tasks.add(t)
+        t.add_done_callback(background_tasks.discard)
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        task = None
+        if tick_seconds:
+            async def loop() -> None:
+                # first-contact cleaning runs IN the loop, not before the
+                # server binds: a multi-pass bootstrap over deep histories
+                # must never block the UI from coming up (found by review -
+                # the page was black for minutes on a fresh data root)
+                #
+                # every step is guarded: an unhandled exception in an
+                # unsupervised create_task dies SILENTLY while the API
+                # keeps serving - monitoring stops and nothing says so
+                # (found by the #90 soak: one bad tick killed the loop
+                # for the whole run). Log, wait, try again - a repeating
+                # failure is visible in the log and in staleness, a dead
+                # loop is visible nowhere.
+                import traceback
+
+                # background work runs in worker threads; progress pushes
+                # hop back to the event loop so the UI always shows WHICH
+                # asset is being worked on instead of an empty fleet
+                ev_loop = asyncio.get_running_loop()
+
+                def _progress() -> None:
+                    asyncio.run_coroutine_threadsafe(push_fleet(), ev_loop)
+
+                # live activity stream: every runtime.log() event lands in
+                # connected UIs immediately, whatever thread produced it
+                def _push_activity(event: dict) -> None:
+                    if hub.clients:
+                        asyncio.run_coroutine_threadsafe(
+                            hub.broadcast(
+                                {"type": "activity", "data": event}
+                            ),
+                            ev_loop,
+                        )
+
+                runtime.on_activity = _push_activity
+
+                if deferred_setup is not None:
+                    try:
+                        await asyncio.to_thread(deferred_setup, _progress)
+                        await push_fleet()
+                    except Exception:  # noqa: BLE001
+                        print(
+                            "[acm] deferred setup failed:\n"
+                            + traceback.format_exc()
+                        )
+                try:
+                    await asyncio.to_thread(
+                        runtime.bootstrap_virgin, on_progress=_progress
+                    )
+                except Exception:  # noqa: BLE001
+                    print("[acm] bootstrap failed:\n" + traceback.format_exc())
+                await push_fleet()
+                while True:
+                    try:
+                        await asyncio.to_thread(runtime.tick_all)
+                        await push_fleet()  # real-time UI: push, not poll
+                    except Exception:  # noqa: BLE001
+                        print("[acm] tick failed:\n" + traceback.format_exc())
+                    await asyncio.sleep(tick_seconds)
+
+            task = asyncio.create_task(loop())
+        yield
+        if task is not None:
+            task.cancel()
+
+    app = FastAPI(title="ACM", version="2.0.0a0", lifespan=lifespan)
+
+    @app.get("/", response_class=HTMLResponse)
+    def index() -> str:
+        return UI_PATH.read_text(encoding="utf-8")
+
+    @app.get("/api/assets")
+    def assets_view() -> JSONResponse:
+        return JSONResponse(runtime.summary())
+
+    @app.get("/api/activity")
+    def activity_view() -> JSONResponse:
+        """Rolling activity stream (last 500 events) - everything the
+        service is doing or has done, newest last. The WS pushes the
+        same events live; this endpoint backfills on page load."""
+        return JSONResponse({"events": list(runtime.activity)})
+
+    @app.get("/api/asset/{asset_key:path}")
+    def asset(asset_key: str) -> JSONResponse:
+        v = runtime.verdicts.get(asset_key)
+        if v is None:
+            return JSONResponse({"error": "unknown asset"}, status_code=404)
+        return JSONResponse(v.to_dict())
+
+    @app.get("/api/narrative/{asset_key:path}")
+    def narrative(asset_key: str) -> JSONResponse:
+        sections = runtime.narrative_sections(asset_key)
+        if sections is None:
+            return JSONResponse({"error": "unknown asset"}, status_code=404)
+        text = "\n".join(s["text"] for s in sections)
+        return JSONResponse(
+            {"asset_key": asset_key, "sections": sections, "narrative": text}
+        )
+
+    @app.post("/api/tick")
+    async def tick() -> JSONResponse:
+        moved = await asyncio.to_thread(runtime.tick_all)
+        await push_fleet()
+        return JSONResponse({"assets_moved": moved})
+
+    @app.post("/api/tick/{asset_key:path}")
+    async def tick_one(asset_key: str) -> JSONResponse:
+        if asset_key not in runtime.monitors:
+            return JSONResponse({"error": "unknown asset"}, status_code=404)
+        v = await asyncio.to_thread(runtime.tick, asset_key)
+        await push_fleet()
+        return JSONResponse({"moved": v is not None,
+                             "state": v.state if v else None})
+
+    @app.post("/api/reanchor/{asset_key:path}")
+    async def reanchor(asset_key: str) -> JSONResponse:
+        if asset_key not in runtime.monitors:
+            return JSONResponse({"error": "unknown asset"}, status_code=404)
+        ok = await asyncio.to_thread(runtime.reanchor, asset_key)
+        await push_fleet()
+        return JSONResponse({"ok": ok})
+
+    @app.post("/api/bootstrap/{asset_key:path}")
+    async def bootstrap(asset_key: str) -> JSONResponse:
+        if asset_key not in runtime.monitors:
+            return JSONResponse({"error": "unknown asset"}, status_code=404)
+        out = await asyncio.to_thread(runtime.bootstrap, asset_key)
+        await push_fleet()
+        return JSONResponse(out)
+
+    # -------------------------------------------- live asset lifecycle (#137)
+    @app.post("/api/assets")
+    async def add_asset(req: Request) -> JSONResponse:
+        """Register an asset and bring it live with no restart. Onboarding
+        runs in the background; the UI watches it via the activity stream
+        and the busy map (queued -> onboarding -> bootstrapping -> live)."""
+        body = await req.json()
+        key = (body.get("asset_key") or "").strip()
+        if not key:
+            return JSONResponse(
+                {"error": "asset_key is required"}, status_code=400
+            )
+        if key in runtime.monitors or runtime.state.get_asset(key) is not None:
+            existing = runtime.state.get_asset(key)
+            if existing is not None and existing.retired_at is None:
+                return JSONResponse(
+                    {"error": f"asset {key!r} already exists"},
+                    status_code=409,
+                )
+        runtime.register_asset(
+            key, source_config=body.get("source_config"),
+            display_name=body.get("display_name"), group=body.get("group"),
+        )
+        runtime.busy[key] = "queued"
+
+        async def _bg() -> None:
+            await asyncio.to_thread(runtime.onboard_and_bootstrap, key)
+            await push_fleet()
+
+        _spawn_bg(_bg())
+        await push_fleet()
+        return JSONResponse({"asset_key": key, "status": "onboarding"})
+
+    @app.delete("/api/assets/{asset_key:path}")
+    async def del_asset(asset_key: str, purge: bool = False) -> JSONResponse:
+        known = (asset_key in runtime.monitors
+                 or runtime.state.get_asset(asset_key) is not None)
+        if not known:
+            return JSONResponse({"error": "unknown asset"}, status_code=404)
+        out = await asyncio.to_thread(runtime.retire_asset, asset_key, purge)
+        await push_fleet()
+        return JSONResponse(out)
+
+    @app.post("/api/assets/{asset_key:path}/reonboard")
+    async def reonboard_asset(asset_key: str) -> JSONResponse:
+        known = (asset_key in runtime.monitors
+                 or runtime.state.get_asset(asset_key) is not None)
+        if not known:
+            return JSONResponse({"error": "unknown asset"}, status_code=404)
+
+        async def _bg() -> None:
+            await asyncio.to_thread(runtime.reonboard, asset_key)
+            await push_fleet()
+
+        _spawn_bg(_bg())
+        return JSONResponse({"asset_key": asset_key, "status": "reonboarding"})
+
+    # ------------------------------------------------- manual ingest (#138)
+    # NOTE: the /csv route MUST be declared before the greedy
+    # {asset_key:path} rows route below - a :path converter matches
+    # trailing segments too, so if the rows route came first it would
+    # swallow ".../csv" requests (found by test: CSV body hit the JSON
+    # handler). FastAPI matches routes in definition order.
+    @app.post("/api/ingest/{asset_key:path}/csv")
+    async def ingest_csv_ep(asset_key: str, req: Request) -> JSONResponse:
+        """Upload a CSV as multipart or raw body; appended to the asset's
+        history. The fastest 'add data from the browser' path."""
+        import io
+        import tempfile
+
+        from ingest.csv_source import ingest_csv
+
+        ctype = req.headers.get("content-type", "")
+        if ctype.startswith("multipart/form-data"):
+            form = await req.form()
+            upload = form.get("file")
+            if upload is None:
+                return JSONResponse(
+                    {"error": "no file field"}, status_code=400
+                )
+            data = await upload.read()
+        else:
+            data = await req.body()
+        if not data:
+            return JSONResponse({"error": "empty upload"}, status_code=400)
+
+        def _do() -> object:
+            with tempfile.NamedTemporaryFile(
+                suffix=".csv", delete=True
+            ) as tf:
+                tf.write(data)
+                tf.flush()
+                return ingest_csv(runtime.store, asset_key, tf.name)
+
+        try:
+            rep = await asyncio.to_thread(_do)
+        except Exception as exc:  # noqa: BLE001
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        await push_fleet()
+        return JSONResponse({
+            "asset_key": asset_key, "rows_read": rep.rows_read,
+            "rows_stored": rep.rows_stored, "channels": rep.channels,
+            "dropped_columns": list(rep.dropped_columns),
+        })
+
+    @app.post("/api/ingest/{asset_key:path}")
+    async def ingest_rows_ep(asset_key: str, req: Request) -> JSONResponse:
+        """Append rows to an asset's history: body {rows:[{ts, ch...}]}.
+        Same normalize()/append() law as every other source. Declared
+        AFTER the /csv route above (greedy :path ordering)."""
+        from ingest.csv_source import ingest_rows
+
+        body = await req.json()
+        rows = body.get("rows") or []
+        try:
+            rep = await asyncio.to_thread(
+                ingest_rows, runtime.store, asset_key, rows, body.get("ts_col")
+            )
+        except Exception as exc:  # noqa: BLE001 - bad payload is a 400
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        await push_fleet()
+        return JSONResponse({
+            "asset_key": asset_key, "rows_read": rep.rows_read,
+            "rows_stored": rep.rows_stored, "channels": rep.channels,
+            "dropped_columns": list(rep.dropped_columns),
+        })
+
+    @app.get("/api/registry")
+    def registry() -> JSONResponse:
+        """The asset registry for the control console: every registered
+        asset (incl. retired) with its display name, group, source kind,
+        enabled/retired state, bootstrap marker, and durable journal."""
+        from dataclasses import asdict as _asdict
+
+        rows = [
+            _asdict(a)
+            for a in runtime.state.list_assets(include_retired=True)
+        ]
+        # also surface raw-store assets not yet registered (legacy roots)
+        registered = {r["asset_key"] for r in rows}
+        for key in runtime.store.assets():
+            if key not in registered:
+                rows.append({
+                    "asset_key": key, "display_name": None, "grp": None,
+                    "enabled": True, "added_at": None, "retired_at": None,
+                    "source_kind": None, "source_config": None,
+                    "last_seen": None, "tick_count": 0,
+                    "bootstrapped_at": None,
+                })
+        return JSONResponse({"assets": sorted(rows, key=lambda r: r["asset_key"])})
+
+    @app.get("/api/storage")
+    def storage() -> JSONResponse:
+        """Storage panel: table row counts + where the data lives."""
+        return JSONResponse({
+            "backend": "sqlite",
+            "state_db": str(runtime.state.path),
+            "raw_root": str(runtime.store.root),
+            "incoming_dir": str(runtime.incoming_dir)
+            if runtime.incoming_dir else None,
+            "tables": runtime.state.table_counts(),
+        })
+
+    @app.get("/api/service-info")
+    def service_info() -> JSONResponse:
+        """Service-operations panel: tier, scorer, workers, cadence, the
+        one dial (read-only - ML config is not editable from the UI)."""
+        from constants import get as _const
+
+        return JSONResponse({
+            "tier": runtime.governor.tier,
+            "scorer": runtime._select_scorer_cls().__name__,
+            "fleet_worker_count": runtime.fleet_worker_count,
+            "tick_seconds": tick_seconds,
+            "alpha_per_asset_year": _const("ALPHA_PER_ASSET_YEAR"),
+            "assets": len(runtime.monitors),
+        })
+
+    @app.get("/api/sources")
+    def sources() -> JSONResponse:
+        """Per-asset ingestion source status for the control console:
+        kind, last drain rows, last error, config (secrets omitted)."""
+        out = []
+        for key, src in runtime.live_sources.items():
+            out.append({
+                "asset_key": key,
+                "kind": type(src).__name__,
+                "last_drain_rows": getattr(src, "last_drain_rows", None),
+                "last_error": getattr(src, "last_error", ""),
+            })
+        return JSONResponse({
+            "sources": out,
+            "incoming_dir": str(runtime.incoming_dir)
+            if runtime.incoming_dir else None,
+        })
+
+    @app.get("/api/episodes/{asset_key:path}")
+    def episodes(asset_key: str) -> JSONResponse:
+        """The asset's case history: every ledgered episode - faults AND
+        absorbed changes (#89 absorptions must be visible, not silent) -
+        plus the currently open episode, if any."""
+        import json as _json
+
+        em = runtime.monitors.get(asset_key)
+        if em is None:
+            return JSONResponse({"error": "unknown asset"}, status_code=404)
+        eps = []
+        for e in runtime.ledger.episodes:
+            if e.asset_key != asset_key:
+                continue
+            note = {}
+            if e.note:
+                try:
+                    note = _json.loads(e.note)
+                except _json.JSONDecodeError:
+                    pass
+            eps.append(
+                {
+                    "start": e.start,
+                    "end": e.end,
+                    "state": e.state,
+                    "channels": note.get("channels"),
+                    "shape": note.get("shape"),
+                    "peak_evidence": note.get("peak_evidence"),
+                    "source": note.get("source"),
+                }
+            )
+        return JSONResponse(
+            {"episodes": eps, "open_since": em.open_episode_start}
+        )
+
+    @app.get("/vendor/{name}")
+    def vendor(name: str):
+        """Vendored assets (Apache ECharts) - served locally, never a
+        CDN: the zero-build UI must work air-gapped."""
+        path = VENDOR_DIR / name
+        if not path.is_file() or path.suffix != ".js":
+            return JSONResponse({"error": "not found"}, status_code=404)
+        return FileResponse(path, media_type="application/javascript")
+
+    @app.websocket("/api/ws")
+    async def ws(websocket: WebSocket) -> None:
+        """Real-time fleet stream: a snapshot on connect, then a push
+        after every tick or action."""
+        await websocket.accept()
+        hub.clients.add(websocket)
+        try:
+            await websocket.send_json(
+                {"type": "fleet", "data": runtime.summary()}
+            )
+            while True:
+                await websocket.receive_text()  # keepalive pings
+        except WebSocketDisconnect:
+            pass
+        finally:
+            hub.clients.discard(websocket)
+
+    @app.get("/api/report")
+    def report() -> PlainTextResponse:
+        """Fleet report (markdown), worst-first - the S6 report flow;
+        render_report existed since S1 but was never exposed."""
+        from monitor import render_report
+
+        rows = runtime.summary()["rows"]
+        ordered = [
+            runtime.verdicts[r["asset_key"]]
+            for r in rows
+            if r["asset_key"] in runtime.verdicts
+        ]
+        return PlainTextResponse(
+            render_report(ordered), media_type="text/markdown; charset=utf-8"
+        )
+
+    @app.get("/api/health/{asset_key:path}")
+    def health(asset_key: str) -> JSONResponse:
+        if asset_key not in runtime.monitors:
+            return JSONResponse({"error": "unknown asset"}, status_code=404)
+        return JSONResponse({"series": runtime.health_series(asset_key)})
+
+    @app.get("/api/domains/{asset_key:path}")
+    def domains(asset_key: str) -> JSONResponse:
+        if asset_key not in runtime.monitors:
+            return JSONResponse({"error": "unknown asset"}, status_code=404)
+        return JSONResponse(runtime.domains(asset_key))
+
+    @app.get("/api/cost")
+    def cost() -> JSONResponse:
+        """Fleet-wide last-tick wall-clock cost, worst-first (#113)."""
+        return JSONResponse(runtime.cost_summary())
+
+    @app.get("/api/stage-cost")
+    def stage_cost() -> JSONResponse:
+        """Fleet-wide onboard/bootstrap/tick wall-clock cost, worst-first
+        (#132) - the performance KPI visibility cost_summary() above
+        doesn't have: bootstrap dominates a fleet's first minutes and
+        was previously invisible entirely."""
+        return JSONResponse(runtime.stage_cost_summary())
+
+    @app.get("/api/telemetry/{asset_key:path}")
+    def telemetry(
+        asset_key: str, channels: str = "", rows: int = 20000
+    ) -> JSONResponse:
+        """A recent raw-telemetry window, downsampled for display.
+        channels: comma-separated names; empty = the verdict's
+        attribution channels (the ones carrying the surprise)."""
+        if asset_key not in runtime.monitors:
+            return JSONResponse({"error": "unknown asset"}, status_code=404)
+        wanted = [c for c in channels.split(",") if c] or None
+        return JSONResponse(
+            runtime.telemetry(
+                asset_key, channels=wanted, rows=max(100, min(rows, 100_000))
+            )
+        )
+
+    @app.get("/api/evidence-history/{asset_key:path}")
+    def evidence_history(asset_key: str) -> JSONResponse:
+        """The decision layer's own trajectory: per-domain evidence at
+        every scoring event since service start (rolling window)."""
+        if asset_key not in runtime.monitors:
+            return JSONResponse({"error": "unknown asset"}, status_code=404)
+        return JSONResponse({"points": runtime.evidence_series(asset_key)})
+
+    @app.get("/api/cases")
+    def cases() -> JSONResponse:
+        """Every episode across the fleet - closed and open - for the
+        fleet case timeline."""
+        return JSONResponse({"cases": runtime.fleet_cases()})
+
+    @app.get("/api/immune/{asset_key:path}")
+    def immune(asset_key: str) -> JSONResponse:
+        r = runtime.immune_results.get(asset_key)
+        if r is None:
+            return JSONResponse(
+                {"status": "not yet checked"}, status_code=404
+            )
+        return JSONResponse(r)
+
+    @app.post("/api/immune-pass/{asset_key:path}")
+    def immune_now(asset_key: str) -> JSONResponse:
+        if asset_key not in runtime.monitors:
+            return JSONResponse({"error": "unknown asset"}, status_code=404)
+        return JSONResponse(runtime.immune_pass(asset_key))
+
+    return app
+
+
+def attach_live_sources(runtime: Runtime, specs: list[str]) -> None:
+    """Wire `--live ASSET_KEY=BUFFER_DB` specs into the runtime (#90: the
+    live path was Python-only and unreachable from the CLI). An unknown
+    asset key fails loudly at startup - a silently unattached buffer
+    would look exactly like a healthy quiet asset."""
+    for spec in specs:
+        key, sep, db = spec.partition("=")
+        if not sep or not key or not db:
+            raise SystemExit(f"--live expects ASSET_KEY=BUFFER_DB, got: {spec}")
+        if key not in runtime.monitors:
+            raise SystemExit(
+                f"--live: unknown asset key {key!r} (onboarded: "
+                f"{sorted(runtime.monitors)})"
+            )
+        runtime.attach_live_source(key, Path(db).resolve())
+
+
+def main() -> None:  # pragma: no cover - manual entrypoint
+    import argparse
+
+    import uvicorn
+
+    from hardware import Governor, probe
+    from store.raw import RawStore
+
+    # (set_thread_caps already ran at module import time, above - see
+    # the comment there)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--root", default="acm_data")
+    parser.add_argument("--port", type=int, default=8899)
+    parser.add_argument(
+        "--tick-seconds", type=float, default=DEFAULT_TICK_SECONDS
+    )
+    parser.add_argument(
+        "--live",
+        action="append",
+        default=[],
+        metavar="ASSET_KEY=BUFFER_DB",
+        help="attach a live SQLite buffer to an asset (repeatable); "
+        "drained into the store on every tick",
+    )
+    args = parser.parse_args()
+    root = Path(args.root).resolve()
+    # #133: the live service is the one Runtime construction site that
+    # opts into parallel fleet onboard/bootstrap - tests, the evidence
+    # lane, and the soak all get the dataclass default (1, sequential),
+    # deliberately unaffected.
+    governor = Governor.from_probe(probe())
+    incoming = root / "incoming"
+    incoming.mkdir(parents=True, exist_ok=True)
+    runtime = Runtime(
+        store=RawStore(root / "raw"), data_root=root, governor=governor,
+        fleet_worker_count=governor.evidence_workers,
+        # drop-folder ingestion (#138): copy a CSV/parquet into
+        # <root>/incoming and it becomes a monitored asset within a tick
+        incoming_dir=incoming,
+    )
+
+    def deferred_setup(on_progress=None) -> None:
+        # onboarding calibrates every asset from its lifetime history -
+        # minutes on deep histories - so it runs in the tick loop, after
+        # the port binds. The UI comes up instantly and watches assets
+        # appear instead of staring at connection-refused.
+        runtime.onboard_all(on_progress=on_progress)
+        attach_live_sources(runtime, args.live)
+
+    if args.tick_seconds:
+        app = create_app(
+            runtime,
+            tick_seconds=args.tick_seconds,
+            deferred_setup=deferred_setup,
+        )
+    else:  # no loop to defer into - set up synchronously
+        deferred_setup()
+        app = create_app(runtime, tick_seconds=args.tick_seconds)
+    uvicorn.run(app, host="127.0.0.1", port=args.port)
+
+
+if __name__ == "__main__":  # pragma: no cover
+    main()

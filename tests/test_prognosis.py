@@ -7,12 +7,12 @@ import numpy as np
 import polars as pl
 import pytest
 
-from acm import verdict as V
-from acm.episodes import EpisodicMonitor
-from acm.memory.ledger import EpisodeLedger
-from acm.monitor import AssetMonitor
-from acm.prognosis import horizon
-from acm.store.raw import TIMESTAMP_COL
+import verdict as V
+from episodes import EpisodicMonitor
+from memory.ledger import EpisodeLedger
+from monitor import AssetMonitor
+from prognosis import horizon
+from store.raw import TIMESTAMP_COL
 
 UTC = timezone.utc
 pytestmark = pytest.mark.statistical
@@ -117,10 +117,10 @@ def test_trajectory_match_recognizes_the_path(tmp_path):
     v1 = em.process(f1)
     em.reanchor(store=None, last_verdict=v1) if False else None
     # reanchor needs a store; close manually via ledger-equivalent path:
-    from acm.memory.ledger import Episode
+    from memory.ledger import Episode
     import json as _json
     seg = np.concatenate(em._episode_scores)
-    from acm.episodes import HEALTH_INDEX_CHUNK as HC
+    from episodes import HEALTH_INDEX_CHUNK as HC
     curve = [
         float(np.mean(seg[i : i + HC]))
         for i in range(0, seg.size, HC)
