@@ -283,7 +283,8 @@ The gate is not moved.
 
 | Part | Status |
 |---|---|
-| Cross-asset judging harness | not built; existing tests and soak are regression evidence |
+| Cross-asset judging harness | built (`src/bench/`), synthetic assets only; see section 14 |
+| Online monitor (`src/online.py`) | built as a harness method, not wired into the runtime; gate 5 failed on detection, see section 14 |
 | Proposed intake and sensor isolation | not built; validation and availability scoring already exist |
 | Operating map | prototype, three known failures |
 | Memory coordinates, channel typing | designed, not built |
@@ -291,3 +292,160 @@ The gate is not moved.
 | Replacement evidence, autonomous fault-repair closure | designed, not built; current banks, episodes and change absorption retained |
 | Proposed advisory and maturity stages | not built; current verdicts and UI retained |
 | Plumbing | retained: SQLite continuity, raw store, registry, ingestion, workers, service and UI |
+
+## 13. Refinements proposed 2026-11-13
+
+Proposed, not yet gated. Items 1 and 2 have a synthetic check behind
+them; items 3 to 5 are argument only.
+
+1. **Evidence needs no calibration set.** Rank each score against all
+   earlier clean scores from the same state, bet on the resulting
+   probabilities, and use a detector that restarts. Under
+   exchangeable scores this is valid from the second score, so the
+   "at least 30 calibration blocks" gate goes away. Maturity is then
+   automatic: with n earlier scores the smallest probability is about
+   1/(n+1), so a young asset cannot alarm and gains power as it ages.
+2. **The unit of evidence is a block, not a row.** Block length is at
+   least the correlation time of the residual, estimated from running
+   lagged sums. Row-level evidence on strongly correlated residuals
+   breaks the budget.
+3. **State the budget as mean time between false advisories.** That is
+   what a restarting detector controls, and it is what the owner sets
+   (advisories per asset-year). It would replace the probability per
+   anchor and `REANCHORS_PER_YEAR`. This changes a listed invariant
+   and needs the owner's decision.
+4. **A channel must not help define the place it is judged at.** The
+   map places a row using all channels, including the faulty one, so
+   part of a fault is absorbed into its own expectation. On assets
+   with few channels this may be large. Gate 3 gains a measurement:
+   the fraction of an injected single-channel offset that the
+   expectation absorbs. If it is material, the expectation for a
+   channel is formed without that channel.
+5. **The map gets a challenger.** The prototype map carries ten
+   written-in constants and is a clustering method. Route B with
+   fixed nonlinear features of the operating coordinates gives an
+   expectation, a spread and familiarity in closed form from running
+   sums, with no codebook. Both run at gate 3; the one that passes
+   stays. States shown to operators can be derived from either.
+
+Synthetic check for items 1 and 2 (Gaussian scores, budget 0.05,
+horizon 1000 scores from t=0, 1000 trials, two seeds; standard error
+0.007). The number is the share of healthy runs that ever alarmed.
+
+| Scores | Seed 0 | Seed 1 |
+|---|---|---|
+| independent rows | 0.001 | 0.002 |
+| independent rows, reference delayed by 50 | 0.000 | 0.000 |
+| AR(1) 0.5, rows | 0.004 | 0.007 |
+| AR(1) 0.9, rows | 0.079 | 0.104 |
+| AR(1) 0.9, block means of 1 correlation time | 0.004 | 0.003 |
+| AR(1) 0.9, block means of 3 and 10 correlation times | 0.002 to 0.004 | 0.003 |
+
+Detection of a mean shift by the restarting detector (threshold 1000,
+seed 1, 400 trials, 500 scores allowed after onset):
+
+| Age at onset (scores) | 2 sd shift: detected, median delay | 4 sd shift: detected, median delay |
+|---|---|---|
+| 10 | 0.17, 52 | 0.24, 16 |
+| 30 | 0.66, 14 | 0.96, 6 |
+| 100 | 1.00, 8 | 1.00, 3 |
+| 300 | 1.00, 6 | 1.00, 2 |
+| 1000 | 1.00, 5 | 1.00, 1 |
+| 3000 | 1.00, 5 | 1.00, 1 |
+
+Not covered by this check: scores from a model that is still
+learning (early scores are larger, so scores are not exchangeable),
+non-Gaussian or seasonal residuals, per-state ranking with few scores
+per state, and real data. The test is conservative by a factor of
+ten or more on independent scores, which costs detection delay.
+
+## 14. First build and gate results, 2026-11-13
+
+The harness (step 1) and a first online monitor covering parts 1 to 7
+(`src/online.py`) were built. The monitor is not wired into the
+runtime. Commands and scoring rules are in `testing-and-datasets.md`.
+
+### Results
+
+All runs: 1-minute data, lives of 30 days (healthy) or onset plus 5
+days, onset at 6 hours, 3 days and 14 days, one seed per asset type.
+The judging split was run once, after the method was frozen.
+
+| Method, split | Cases | Healthy asset-years | False fault advisories | Machine faults found | Sensor offset or drift found | Stuck sensor, missing, frozen found | Spikes found | Cost per row |
+|---|---|---|---|---|---|---|---|---|
+| Plain baseline, development (4 onset ages) | 111 | 5.55 | 97 | chance level | chance level | 1 of 36 | 1 of 12 | 0.9 us |
+| Current build, pump only, onset 14 days, 20-day lives | 10 | 0.44 | 57 | 0 of 2 | 0 of 2 | 0 of 3 | 0 of 1 | 2400 us |
+| Online monitor, development | 84 | 1.86 | 0 | 1 of 18 | 0 of 18 | 27 of 27 | 0 of 9 | 480 us |
+| Plain baseline, judging | 56 | 1.24 | 56 | 0 of 12 | 0 of 12 | 0 of 18 | 0 of 6 | 1.0 us |
+| Online monitor, judging | 56 | 1.24 | 0 | 1 of 12 | 1 of 12 | 18 of 18 | 0 of 6 | 530 us |
+
+New operating level reported as a new state: 5 of 9 (development) and
+2 of 6 (judging), never misread as a fault. The monitor also raised
+176 and 116 new-state notices on unlabelled data; most fall in an
+asset's first days, when most states are new. That is too many to
+show an operator as they are.
+
+### What passed and what failed
+
+- Gate 1 (harness, current numbers recorded): passed, with the limit
+  that every asset is synthetic and written by the same hand as the
+  method. The current build was measured on a reduced suite only.
+- Gate 2 (intake): stuck, missing and frozen data found in every case
+  within an hour and named correctly. Spikes are not found. Channel
+  typing and timestamp checks are not built.
+- Gate 5 (evidence and episodes): the budget held on both splits, with
+  no false fault advisory in 3.1 asset-years. Detection failed: 2 of
+  30 machine faults and 1 of 30 sensor offsets or drifts were found.
+  By the rule in section 11 the design is wrong at this point and has
+  to change; the gate is not moved.
+
+### What was learned
+
+1. The reference has to be scored the way a live row is scored. A
+   reference scored by a model that had seen the data around it gave
+   64 false advisories per asset-year, nearly all in the first week.
+   Scoring each reference period by a model as far behind it as the
+   live model is behind the present removed them. This replaces
+   refinement 1 of section 13: ranking against all earlier scores is
+   not enough while the model itself is still changing.
+2. The learning delay of part 7 is a tuning knob. With delays of a
+   quarter, an eighth and a sixteenth of the asset's age, false
+   advisories stayed at zero on nine development cases while faults
+   found went from 0 to 1 to 3 of 6. It fails the halve-and-double
+   test. It was replaced: rows are learned at once and taken back out
+   of the running sums exactly when an episode opens. A fault slower
+   than about a tenth of the asset's age is still partly learned.
+3. Serial dependence decides the power (refinement 2). Evidence at a
+   scale is discounted by how long disturbances of that residual last,
+   measured across block scales. On the development assets this
+   discount is 50 to 100 fold at short scales for most channels,
+   because one linear model per channel leaves errors that persist
+   while the asset sits in one operating state. That is why detection
+   fails. Subtracting the habitual error of similar states did not
+   recover it.
+4. A channel must not help define its own expectation (refinement 4).
+   Built in: each channel is predicted from the others only, and a
+   suspect sensor is named by replacing each candidate with its
+   expectation and keeping the one that leaves the least behind.
+5. A young asset cannot tell a fault from its own ignorance. Three
+   rules now grade this by counts, not by a calendar gate: the rank
+   cannot fall below 1/(n+1); a run is called a fault only if clean
+   life holds enough blocks of that run's length; and an episode may
+   block learning for at most a quarter of the life before it.
+6. A rank cannot certify a few isolated spikes. Ten single-row spikes
+   in a day stay within what ranks allow by chance. A spike rule needs
+   a stated assumption about tails; none is built.
+
+### Next change to the design
+
+The expectation model is the weak part, not the test. The challenger
+of refinement 5 (the operating map, or fixed nonlinear features of the
+operating coordinates) is now needed for a measured reason: to remove
+the state-dependent errors that make the residuals persistent. The
+measure of success is the dependence discount at short scales, then
+gate 5 detection, with the budget still held.
+
+Also open: real raw labelled datasets for the judging split; the
+structural constants in `online.py` have not been through the
+halve-and-double run; cost per row is about 0.5 ms and has to fall;
+new-state notices need grouping before they reach an operator.

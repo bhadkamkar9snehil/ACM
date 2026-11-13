@@ -145,6 +145,31 @@ runway.
 - `insufficient-history` is an outcome with an explicit reason, not a hidden
   failure.
 
+## Judging harness
+
+`src/bench/` is design step 1 (`acm-design.md` section 11). It replays
+raw-rate cases from the first sample, so it tests cold start, data
+faults and sensor isolation, which the pre-aggregated CARE data cannot.
+
+- `bench/cases.py`: synthetic assets with exact truth. Each case is one
+  life, healthy or with one event: a machine fault (wear acting through
+  the asset's physics on several channels), a sensor fault (offset,
+  drift, stuck), a data fault (missing block, spikes, all channels
+  frozen) or a legitimate new operating level. Events start at four
+  ages: 6 hours, 3 days, 14 days, 45 days.
+- Development types (pump, motor, batch furnace) and judging types
+  (compressor, heat exchanger) use different generators and seeds.
+  Judging types are run only at a gate. All five are written by the
+  same hand as the methods, so they are weaker evidence than real
+  labelled raw data, which the harness does not have yet.
+- `bench/methods.py`: the plain baseline, the current build through
+  its runtime, and the online monitor.
+- `bench/score.py`: an advisory inside an event window (plus one day)
+  counts for that event; any other fault advisory is false. A "new
+  operating state" notice on unlabelled data is counted separately.
+  A false advisory that happens to fall inside an event window is
+  scored as a detection, so low detection counts are not reliable.
+
 ## Operational soak
 
 The soak drives the real service through compressed healthy, legitimate-change

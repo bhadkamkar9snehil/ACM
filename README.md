@@ -115,6 +115,25 @@ uv run python -m evidence.soak --root results/soak --minutes 90
 The soak root must be empty so previous state cannot make a release check pass
 for the wrong reason.
 
+### Judging harness
+
+The harness replays an asset's life from its first sample through a
+method and scores it: false advisories per asset-year on healthy data,
+detection and delay for machine, sensor and data faults, the kind each
+advisory reported, results per age at fault onset, and cost per row.
+
+```bash
+uv run python -m bench.run --methods running-z online --split dev --out results/bench
+uv run python -m bench.run --methods online --split dev --sensitivity
+```
+
+Methods: `running-z` (plain baseline), `current-tier0` (the build's
+runtime path) and `online` (`src/online.py`, the design being built).
+`--split judge` runs asset types that are never looked at while a
+method is developed; use it only at a gate. `--sensitivity` reruns a
+method with each structural constant halved and doubled. Options:
+`--types`, `--seeds`, `--stages`, `--healthy-days`.
+
 ## Hardware tiers
 
 Verdict semantics do not change with hardware.

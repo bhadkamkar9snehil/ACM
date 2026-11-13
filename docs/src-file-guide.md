@@ -109,6 +109,15 @@ negative control proving why the conditional scorer is required.
   operator/demo use.
 - **`evidence/soak.py`** - real-service compressed-time operational soak.
 
+## Online monitor and judging harness
+
+- `online.py` - the monitor of `acm-design.md`: learns one asset from
+  its first sample from running sums. Intake, expectation of each
+  channel from the others, familiarity, rank-based evidence over
+  block scales, episodes with sensor isolation, delayed learning. Not
+  yet wired into `runtime.py`.
+- `bench/` - cold-start replay harness: cases, methods, scoring, CLI.
+
 ## Tests
 
 The tests are part of the product's validity envelope, not disposable scaffolding.
